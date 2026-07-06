@@ -250,9 +250,9 @@ pub fn ensure_unique_profile_id(
     }
 }
 
-/// `~/.claurst/`.
+/// The canonical claurst home directory.
 pub fn claurst_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".claurst")
+    crate::config::Settings::config_dir()
 }
 
 /// `~/.claurst/accounts/<provider>/<id>/`.

@@ -191,7 +191,7 @@ pub struct TipHistory {
 impl TipHistory {
     /// Path to the persisted history file: `~/.claurst/tip_history.json`.
     fn history_path() -> Option<std::path::PathBuf> {
-        dirs::home_dir().map(|h| h.join(".claurst").join("tip_history.json"))
+        Some(crate::config::Settings::config_dir().join("tip_history.json"))
     }
 
     /// Load history from `~/.claurst/tip_history.json`.

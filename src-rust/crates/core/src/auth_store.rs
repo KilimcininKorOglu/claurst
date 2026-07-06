@@ -30,10 +30,7 @@ pub struct AuthStore {
 impl AuthStore {
     /// Path to the auth store file.
     pub fn path() -> PathBuf {
-        let dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".claurst");
-        dir.join("auth.json")
+        crate::config::Settings::config_dir().join("auth.json")
     }
 
     /// Load the store from disk (returns default if missing or invalid).

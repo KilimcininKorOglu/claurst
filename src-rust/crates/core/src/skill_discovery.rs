@@ -172,10 +172,10 @@ pub fn discover_skills(
         }
     }
 
-    // ---- 2. Global skills: ~/.claurst/skills/ --------------------------------
-    if let Some(home) = dirs::home_dir() {
-        add(scan_dir(&home.join(".claurst").join("skills")));
-    }
+    // ---- 2. Global skills: <claurst home>/skills/ ---------------------------
+    add(scan_dir(
+        &crate::config::Settings::config_dir().join("skills"),
+    ));
 
     // ---- 3. Configured extra paths ------------------------------------------
     for path_str in &config_skills.paths {

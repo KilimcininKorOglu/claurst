@@ -419,7 +419,7 @@ pub struct CodexTokens {
 /// Legacy single-file path: `~/.claurst/codex_tokens.json`. Kept for
 /// backward-compat reads when no account registry exists.
 fn codex_tokens_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claurst").join("codex_tokens.json"))
+    Some(crate::config::Settings::config_dir().join("codex_tokens.json"))
 }
 
 /// Save Codex OAuth tokens for a named profile under

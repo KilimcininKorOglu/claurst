@@ -2214,10 +2214,10 @@ pub mod context {
         async fn find_and_read_claude_md(&self) -> Option<String> {
             let mut claude_mds = vec![];
 
-            // Global ~/.claurst/AGENTS.md
-            if let Some(home) = dirs::home_dir() {
-                let global_claude_md =
-                    home.join(".claurst").join(crate::constants::CLAUDE_MD_FILENAME);
+            // Global <claurst home>/AGENTS.md
+            {
+                let global_claude_md = crate::config::Settings::config_dir()
+                    .join(crate::constants::CLAUDE_MD_FILENAME);
                 if global_claude_md.exists() {
                     if let Ok(content) = tokio::fs::read_to_string(&global_claude_md).await {
                         claude_mds.push(format!(
@@ -3890,10 +3890,7 @@ pub mod oauth {
         /// Legacy token file path — kept for backward-compat reads when no
         /// account registry exists yet. New writes go to per-account dirs.
         pub fn token_file_path() -> std::path::PathBuf {
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".claurst")
-                .join("oauth_tokens.json")
+            crate::config::Settings::config_dir().join("oauth_tokens.json")
         }
 
         /// Save tokens for a specific account profile under

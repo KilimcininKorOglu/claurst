@@ -163,7 +163,7 @@ impl GoalStore {
 
     /// Default path: `~/.claurst/goals.sqlite`.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".claurst").join("goals.sqlite"))
+        Some(crate::config::Settings::config_dir().join("goals.sqlite"))
     }
 
     /// Open using the default path (best-effort; returns None on failure).

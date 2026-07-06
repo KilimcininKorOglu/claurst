@@ -70,8 +70,7 @@ impl FeatureFlagManager {
 
     /// Get the cache file path (~/.claurst/feature_flags.json)
     fn get_cache_path() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(".claurst").join("feature_flags.json")
+        crate::config::Settings::config_dir().join("feature_flags.json")
     }
 
     /// Check if a feature flag is enabled

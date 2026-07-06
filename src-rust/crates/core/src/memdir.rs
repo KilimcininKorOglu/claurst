@@ -346,11 +346,7 @@ pub fn auto_memory_path(project_root: &Path) -> PathBuf {
     // 2. Determine the memory base directory.
     let memory_base = std::env::var("CLAURST_REMOTE_MEMORY_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".claurst")
-        });
+        .unwrap_or_else(|_| crate::config::Settings::config_dir());
 
     // 3. Sanitize the project root into a safe directory name.
     let sanitized = sanitize_path_component(&project_root.to_string_lossy());

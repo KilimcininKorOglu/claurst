@@ -137,9 +137,7 @@ static STATE: once_cell::sync::Lazy<Mutex<HistoryState>> =
 // ---------------------------------------------------------------------------
 
 fn claude_home() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claurst")
+    crate::config::Settings::config_dir()
 }
 
 fn history_path() -> PathBuf {
