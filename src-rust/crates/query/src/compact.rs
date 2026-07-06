@@ -566,6 +566,26 @@ pub fn resolve_context_window(
     context_window_for_model(model)
 }
 
+/// Best-effort estimate of the CURRENT context size in tokens.
+///
+/// Prefers the REAL context-token count the provider reported for the last
+/// assistant turn (`last_real_usage`, typically `UsageInfo::total_input()` =
+/// input + cache-read + cache-creation), because that is what the model
+/// actually saw. The chars/4 heuristic can be off by a wide margin, and with
+/// prompt caching the bare `input_tokens` field massively *undercounts* — the
+/// bulk of the context is billed as cache reads. We fall back to the chars/4
+/// estimate ([`estimate_tokens_for_messages`]) only before the first response,
+/// or when the provider reported no usage (`None` / `0`).
+///
+/// Mirrors pi's `estimateContextTokens`, which likewise prefers the last
+/// assistant usage and only estimates when it is absent.
+pub fn estimate_context_tokens(messages: &[Message], last_real_usage: Option<u64>) -> u64 {
+    match last_real_usage {
+        Some(tokens) if tokens > 0 => tokens,
+        _ => estimate_tokens_for_messages(messages) as u64,
+    }
+}
+
 /// Determine token-warning state given current input token count and model.
 ///
 /// Convenience wrapper that derives the window from the model-name heuristic.

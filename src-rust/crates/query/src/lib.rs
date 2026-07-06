@@ -40,7 +40,7 @@ pub use compact::{
     AutoCompactState, CompactResult, CompactTrigger, MicroCompactConfig, MessageGroup, TokenWarningState,
     auto_compact_if_needed, calculate_messages_to_keep_index, calculate_token_warning_state,
     calculate_token_warning_state_for_window, compact_conversation, context_collapse,
-    context_window_for_model, format_compact_summary, get_compact_prompt,
+    context_window_for_model, estimate_context_tokens, format_compact_summary, get_compact_prompt,
     group_messages_for_compact, micro_compact_if_needed, reactive_compact,
     resolve_context_window, should_auto_compact, should_auto_compact_for_window, should_compact,
     should_context_collapse, snip_compact,
@@ -1930,16 +1930,27 @@ pub async fn run_query_loop(
             &config.model,
         );
 
+        // Numerator for every threshold below: prefer the REAL context-token
+        // count the provider just reported (input + cache-read + cache-creation
+        // = what the model actually saw) over the chars/4 estimate. With prompt
+        // caching the bare `input_tokens` field undercounts badly. Fall back to
+        // the estimate only before the first response / when usage is absent. (#231)
+        let real_usage = usage.total_input();
+        let context_tokens = compact::estimate_context_tokens(
+            messages,
+            (real_usage > 0).then_some(real_usage),
+        );
+
         // Emit token warning events when approaching context limits.
         // Thresholds mirror TypeScript autoCompact.ts: 80% → Warning, 95% → Critical.
         {
             let warning_state = compact::calculate_token_warning_state_for_window(
-                usage.input_tokens,
+                context_tokens,
                 context_window,
             );
             if warning_state != compact::TokenWarningState::Ok {
                 if let Some(ref tx) = event_tx {
-                    let pct_used = usage.input_tokens as f64 / context_window as f64;
+                    let pct_used = context_tokens as f64 / context_window as f64;
                     let _ = tx.send(QueryEvent::TokenWarning {
                         state: warning_state,
                         pct_used,
@@ -1963,7 +1974,7 @@ pub async fn run_query_loop(
         if reactive_compact_enabled {
             // Reactive path: emergency collapse takes priority over normal compact.
             let context_limit = context_window;
-            if compact::should_context_collapse(usage.input_tokens, context_limit) {
+            if compact::should_context_collapse(context_tokens, context_limit) {
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(QueryEvent::Status(
                         "Compacting context... (emergency collapse)".to_string(),
@@ -1982,7 +1993,7 @@ pub async fn run_query_loop(
                         warn!(error = %e, "Context-collapse failed; conversation preserved");
                     }
                 }
-            } else if compact::should_compact(usage.input_tokens, context_limit) {
+            } else if compact::should_compact(context_tokens, context_limit) {
                 if let Some(ref tx) = event_tx {
                     let _ = tx.send(QueryEvent::Status("Compacting context...".to_string()));
                 }
@@ -2014,7 +2025,7 @@ pub async fn run_query_loop(
             if let Some(new_msgs) = compact::auto_compact_if_needed(
                 client,
                 messages,
-                usage.input_tokens,
+                context_tokens,
                 &config.model,
                 context_window,
                 &mut compact_state,
