@@ -33,10 +33,7 @@ impl SlashCommand for MemoryCommand {
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let project_claude_dir = ctx.working_dir.join(".claurst").join("AGENTS.md");
         let project_root = ctx.working_dir.join("AGENTS.md");
-        let global_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".claurst")
-            .join("AGENTS.md");
+        let global_path = claurst_core::config::Settings::config_dir().join("AGENTS.md");
 
         let locations = [
             ("project (.claurst/AGENTS.md)", project_claude_dir.clone()),

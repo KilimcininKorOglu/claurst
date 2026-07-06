@@ -26,10 +26,7 @@ impl SlashCommand for SkillsCommand {
         let mut found: Vec<String> = Vec::new();
         let dirs = [
             ctx.working_dir.join(".claurst").join("commands"),
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".claurst")
-                .join("commands"),
+            claurst_core::config::Settings::config_dir().join("commands"),
         ];
 
         for dir in &dirs {

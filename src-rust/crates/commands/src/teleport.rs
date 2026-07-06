@@ -114,10 +114,8 @@ impl SlashCommand for TeleportCommand {
                     if let Some(p) = explicit {
                         p
                     } else {
-                        // Default: ~/.claurst/teleport_<session_id>.json
-                        let base = dirs::home_dir()
-                            .unwrap_or_else(|| std::path::PathBuf::from("."))
-                            .join(".claurst");
+                        // Default: <claurst home>/teleport_<session_id>.json
+                        let base = claurst_core::config::Settings::config_dir();
                         let _ = std::fs::create_dir_all(&base);
                         base.join(format!("teleport_{}.json", ctx.session_id))
                     }

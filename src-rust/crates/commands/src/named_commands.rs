@@ -511,9 +511,7 @@ impl NamedCommand for IdeCommand {
         };
 
         // ---- Lockfile-based connection status --------------------------------
-        let lockfile_dir = dirs::home_dir()
-            .map(|h| h.join(".claurst").join("ide"))
-            .unwrap_or_default();
+        let lockfile_dir = claurst_core::config::Settings::config_dir().join("ide");
 
         let mut ides = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&lockfile_dir) {
