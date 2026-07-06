@@ -8,3 +8,5 @@ pub(crate) mod tools;
 pub(crate) use tools::*;
 pub(crate) mod prompt;
 pub(crate) use prompt::*;
+pub(crate) mod stream;
+pub(crate) use stream::*;
