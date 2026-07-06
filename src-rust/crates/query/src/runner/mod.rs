@@ -12,3 +12,5 @@ pub(crate) mod stream;
 pub(crate) use stream::*;
 pub(crate) mod hooks;
 pub use hooks::*;
+pub(crate) mod single;
+pub use single::*;
