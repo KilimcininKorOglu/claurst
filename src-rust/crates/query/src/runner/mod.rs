@@ -4,3 +4,5 @@ pub(crate) mod provider_options;
 pub(crate) use provider_options::*;
 pub(crate) mod tool_budget;
 pub(crate) use tool_budget::*;
+pub(crate) mod tools;
+pub(crate) use tools::*;
