@@ -1641,9 +1641,9 @@ pub async fn run_query_loop(
                 // the spawn doesn't call run_query_loop recursively from within
                 // its own future (which would make the future !Send).
                 {
-                    let memory_dir = dirs::home_dir().map(|h| h.join(".claurst").join("memory"));
-                    let conversations_dir =
-                        dirs::home_dir().map(|h| h.join(".claurst").join("conversations"));
+                    let claurst_home = claurst_core::config::Settings::config_dir();
+                    let memory_dir = Some(claurst_home.join("memory"));
+                    let conversations_dir = Some(claurst_home.join("conversations"));
                     if let (Some(mem), Some(conv)) = (memory_dir, conversations_dir) {
                         let dreamer = crate::auto_dream::AutoDream::new(mem, conv);
                         if let Ok(Some(task)) = dreamer.maybe_trigger().await {
