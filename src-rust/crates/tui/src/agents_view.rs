@@ -423,10 +423,10 @@ fn parse_agent_def(path: &std::path::Path) -> Option<AgentDefinition> {
     let content = std::fs::read_to_string(path).ok()?;
     let stem = path.file_stem()?.to_string_lossy().to_string();
 
-    let (name, model, memory, description, tools, instructions) = if content.starts_with("---") {
-        let end = content[3..].find("\n---")? + 3;
-        let front = &content[3..end];
-        let body = content[end + 4..].trim().to_string();
+    let (name, model, memory, description, tools, instructions) = if let Some(after) = content.strip_prefix("---") {
+        let end = after.find("\n---")?;
+        let front = &after[..end];
+        let body = after[end + 4..].trim().to_string();
         let name = extract_yaml_str(front, "name").unwrap_or_else(|| stem.clone());
         let model = extract_yaml_str(front, "model");
         let memory = extract_yaml_str(front, "memory_scope")

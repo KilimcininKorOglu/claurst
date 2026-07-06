@@ -3,6 +3,14 @@
 //
 // All sub-modules are defined inline below.
 
+// too_many_arguments: several config-import and permission-resolution helpers
+// legitimately thread many parameters; grouping them into structs is a larger
+// refactor out of scope for this cleanup.
+#![allow(clippy::too_many_arguments)]
+// should_implement_trait: intentional inherent `from_str` constructors that
+// return domain-specific types, not the std `FromStr` trait.
+#![allow(clippy::should_implement_trait)]
+
 // Branded provider / model identifier newtypes.
 pub mod provider_id;
 pub use provider_id::{ProviderId, ModelId};
@@ -1449,6 +1457,7 @@ pub mod config {
         /// Returns `(credential, use_bearer_auth)`.
         /// - For Console OAuth flow: credential is the stored API key, bearer=false.
         /// - For Claude.ai OAuth flow: credential is the access token, bearer=true.
+        ///
         /// Silently attempts token refresh when the access token is expired.
         pub async fn resolve_auth_async(&self) -> Option<(String, bool)> {
             if self.selected_provider_id() != "anthropic" {
@@ -1961,8 +1970,7 @@ pub mod config {
 
         #[test]
         fn global_request_timeout_serde_roundtrips_with_camelcase_key() {
-            let mut config = Config::default();
-            config.request_timeout_secs = Some(1800);
+            let config = Config { request_timeout_secs: Some(1800), ..Default::default() };
             // Serialises with the documented camelCase key.
             let json = serde_json::to_string(&config).expect("serialise");
             assert!(
@@ -1994,10 +2002,8 @@ pub mod config {
 
         #[test]
         fn per_provider_override_wins_over_global() {
-            let mut config = Config::default();
-            config.request_timeout_secs = Some(1200);
-            let mut provider = ProviderConfig::default();
-            provider.request_timeout_secs = Some(3600);
+            let mut config = Config { request_timeout_secs: Some(1200), ..Default::default() };
+            let provider = ProviderConfig { request_timeout_secs: Some(3600), ..Default::default() };
             config
                 .provider_configs
                 .insert("ollama".to_string(), provider);
@@ -2011,8 +2017,7 @@ pub mod config {
         fn effective_config_merges_top_level_provider_timeout() {
             let mut settings = Settings::default();
             settings.config.request_timeout_secs = Some(1200);
-            let mut provider = ProviderConfig::default();
-            provider.request_timeout_secs = Some(3600);
+            let provider = ProviderConfig { request_timeout_secs: Some(3600), ..Default::default() };
             settings.providers.insert("ollama".to_string(), provider);
             let config = settings.effective_config();
             assert_eq!(config.resolve_request_timeout_secs("ollama"), 3600);
@@ -2021,8 +2026,7 @@ pub mod config {
 
         #[test]
         fn zero_is_treated_as_unset() {
-            let mut config = Config::default();
-            config.request_timeout_secs = Some(0);
+            let config = Config { request_timeout_secs: Some(0), ..Default::default() };
             assert_eq!(
                 config.resolve_request_timeout_secs("openai"),
                 DEFAULT_REQUEST_TIMEOUT_SECS
@@ -2801,9 +2805,7 @@ pub mod permissions {
             match self.mode {
                 PermissionMode::BypassPermissions => PermissionDecision::Allow,
                     PermissionMode::AcceptEdits => {
-                        if request.tool_name == "Edit" {
-                            PermissionDecision::Allow
-                        } else if request.is_read_only {
+                        if request.tool_name == "Edit" || request.is_read_only {
                             PermissionDecision::Allow
                         } else {
                             PermissionDecision::Deny
@@ -3346,7 +3348,7 @@ pub mod history {
             }
         }
 
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         sessions
     }
 
@@ -3537,9 +3539,7 @@ pub mod cost {
         /// Pick pricing based on model name substring matching.
         pub fn for_model(model: &str) -> Self {
             // Check for free models first (those with "-free" suffix, "free/" prefix, or upstream-prefixed free model)
-            if model.ends_with("-free") || model.starts_with("free/") {
-                Self::FREE
-            } else if is_free_upstream_model(model) {
+            if model.ends_with("-free") || model.starts_with("free/") || is_free_upstream_model(model) {
                 Self::FREE
             } else if model.contains("opus") {
                 Self::OPUS
@@ -4441,8 +4441,7 @@ mod tests {
 
     #[test]
     fn test_config_mouse_capture_explicit_off() {
-        let mut cfg = crate::config::Config::default();
-        cfg.mouse_capture = Some(false);
+        let mut cfg = crate::config::Config { mouse_capture: Some(false), ..Default::default() };
         assert!(!cfg.mouse_capture_enabled());
         cfg.mouse_capture = Some(true);
         assert!(cfg.mouse_capture_enabled());
@@ -4460,8 +4459,7 @@ mod tests {
         assert!(back.mouse_capture_enabled());
 
         // Explicit off serializes the key and round-trips as disabled.
-        let mut cfg = crate::config::Config::default();
-        cfg.mouse_capture = Some(false);
+        let cfg = crate::config::Config { mouse_capture: Some(false), ..Default::default() };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains("\"mouseCapture\":false"));
         let back: crate::config::Config = serde_json::from_str(&json).unwrap();
@@ -4477,8 +4475,7 @@ mod tests {
 
     #[test]
     fn test_config_effective_model_override() {
-        let mut cfg = crate::config::Config::default();
-        cfg.model = Some("claude-haiku-4-5-20251001".to_string());
+        let cfg = crate::config::Config { model: Some("claude-haiku-4-5-20251001".to_string()), ..Default::default() };
         assert_eq!(cfg.effective_model(), "claude-haiku-4-5-20251001");
     }
 
@@ -4490,8 +4487,7 @@ mod tests {
 
     #[test]
     fn test_config_effective_max_tokens_override() {
-        let mut cfg = crate::config::Config::default();
-        cfg.max_tokens = Some(8192);
+        let cfg = crate::config::Config { max_tokens: Some(8192), ..Default::default() };
         assert_eq!(cfg.effective_max_tokens(), 8192);
     }
 
@@ -4502,8 +4498,7 @@ mod tests {
         let orig = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::remove_var("ANTHROPIC_API_KEY");
 
-        let mut cfg = crate::config::Config::default();
-        cfg.api_key = Some("sk-ant-config-key".to_string());
+        let cfg = crate::config::Config { api_key: Some("sk-ant-config-key".to_string()), ..Default::default() };
         assert_eq!(cfg.resolve_api_key(), Some("sk-ant-config-key".to_string()));
 
         if let Some(k) = orig {

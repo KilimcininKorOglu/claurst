@@ -299,7 +299,7 @@ fn extract_code_blocks_from_text(text: &str, blocks: &mut Vec<String>) {
     let lines = text.lines().peekable();
 
     for line in lines {
-        if line.starts_with("```") {
+        if let Some(after_fence) = line.strip_prefix("```") {
             if in_block {
                 // End of code block
                 if !current_block.trim().is_empty() {
@@ -311,7 +311,7 @@ fn extract_code_blocks_from_text(text: &str, blocks: &mut Vec<String>) {
             } else {
                 // Start of code block
                 in_block = true;
-                language = line[3..].trim().to_string();
+                language = after_fence.trim().to_string();
             }
         } else if in_block {
             current_block.push_str(line);

@@ -151,6 +151,10 @@ impl Default for ScratchpadGate {
 ///   full set including Agent/SendMessage/TaskStop).
 /// - `AgentMode::Worker`: COORDINATOR_ONLY_TOOLS are removed.
 /// - `AgentMode::Normal`: no filtering.
+// borrowed_box: the returned `&Box<dyn Tool>` references are handed straight back
+// to callers that already operate on `&Box<dyn Tool>`; switching to `&dyn Tool`
+// would ripple through those call sites for no functional gain.
+#[allow(clippy::borrowed_box)]
 pub fn filter_tools_for_mode(
     tools: &[Box<dyn claurst_tools::Tool>],
     mode: AgentMode,

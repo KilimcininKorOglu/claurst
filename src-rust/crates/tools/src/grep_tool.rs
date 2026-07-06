@@ -287,13 +287,13 @@ impl Tool for GrepTool {
                         let start = line_idx.saturating_sub(context_lines);
                         let end = (*line_idx + context_lines + 1).min(lines.len());
 
-                        for ci in start..end {
+                        for (ci, line) in lines.iter().enumerate().take(end).skip(start) {
                             let prefix = if show_line_numbers {
                                 format!("{}:{}:", path.display(), ci + 1)
                             } else {
                                 format!("{}:", path.display())
                             };
-                            results.push(format!("{}{}", prefix, lines[ci]));
+                            results.push(format!("{}{}", prefix, line));
                         }
 
                         if context_lines > 0 {
@@ -369,11 +369,11 @@ impl GrepTool {
                 for line_idx in &matching_lines {
                     let start = line_idx.saturating_sub(context_lines);
                     let end = (*line_idx + context_lines + 1).min(lines.len());
-                    for ci in start..end {
+                    for (ci, line) in lines.iter().enumerate().take(end).skip(start) {
                         if show_line_numbers {
-                            results.push(format!("{}:{}", ci + 1, lines[ci]));
+                            results.push(format!("{}:{}", ci + 1, line));
                         } else {
-                            results.push(lines[ci].to_string());
+                            results.push(line.to_string());
                         }
                     }
                     if context_lines > 0 {

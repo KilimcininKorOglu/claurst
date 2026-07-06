@@ -342,6 +342,10 @@ impl BedrockProvider {
         }
     }
 
+    // `role` is threaded through to the recursive calls for tool-result blocks
+    // to keep the Converse mapping symmetric; keep the parameter rather than
+    // dropping it and changing the recursion's shape.
+    #[allow(clippy::only_used_in_recursion)]
     fn content_block_to_converse(block: &ContentBlock, role: &Role) -> Option<Value> {
         match block {
             ContentBlock::Text { text } => Some(json!({ "text": text })),
@@ -1138,6 +1142,11 @@ fn drain_event_stream_frames(
 ) -> Vec<Result<StreamEvent, ProviderError>> {
     let mut out = Vec::new();
 
+    // Kept as an explicit `loop`: each frame's payload is parsed into an owned
+    // value inside the match arm to release the `buf` borrow before we drain the
+    // consumed frame below — a `while let` binding on `buf` would hold that
+    // borrow across the mutation and fail to compile.
+    #[allow(clippy::while_let_loop)]
     loop {
         // Parse the payload into an owned value inside the match arm so the
         // borrow on `buf` is released before we drain the consumed frame below.

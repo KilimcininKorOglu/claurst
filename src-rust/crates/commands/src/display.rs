@@ -25,18 +25,9 @@ impl SlashCommand for ContextCommand {
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
         let model = ctx.config.effective_model();
 
-        // Determine context window size from known model names
-        let context_window: u64 = if model.contains("claude-3-5") || model.contains("claude-3.5") {
-            200_000
-        } else if model.contains("opus") {
-            200_000
-        } else if model.contains("sonnet") {
-            200_000
-        } else if model.contains("haiku") {
-            200_000
-        } else {
-            200_000 // safe default for any Claude model
-        };
+        // Every currently-supported Claude model family (3.5, opus, sonnet,
+        // haiku) shares a 200k-token context window, so this is constant for now.
+        let context_window: u64 = 200_000;
 
         let used_tokens = ctx.cost_tracker.total_tokens();
         let pct = if context_window > 0 {

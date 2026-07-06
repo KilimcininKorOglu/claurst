@@ -269,12 +269,10 @@ async fn run_callback_server(listener: TcpListener, expected_state: &str) -> any
         .find(|(k, _)| k == "state")
         .map(|(_, v)| v.to_string());
 
-    // Send success redirect to the browser before validating, so the browser shows a page
-    let location = if received_state.as_deref() == Some(expected_state) && code.is_some() {
-        oauth::CLAUDEAI_SUCCESS_URL
-    } else {
-        oauth::CLAUDEAI_SUCCESS_URL // Show same page on error (browser UX)
-    };
+    // Send success redirect to the browser before validating. The same success
+    // page is shown on both the valid and error paths (browser UX); request
+    // validation happens after this redirect is written.
+    let location = oauth::CLAUDEAI_SUCCESS_URL;
 
     let response = format!(
         "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",

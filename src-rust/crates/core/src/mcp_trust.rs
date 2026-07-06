@@ -278,7 +278,7 @@ mod tests {
         session.insert(server_fingerprint(&p));
         let store = McpTrustStore::default();
         // Same identity: allowed.
-        let d = partition_mcp_servers(&[p.clone()], None, false, &session, &store);
+        let d = partition_mcp_servers(std::slice::from_ref(&p), None, false, &session, &store);
         assert_eq!(d.allowed.len(), 1);
         assert!(d.pending.is_empty());
         // Different command under the same name: re-prompted (not allowed).
@@ -337,7 +337,7 @@ mod tests {
 
         // A persisted approval clears the gate even with no session trust.
         let d = partition_mcp_servers(
-            &[server.clone()],
+            std::slice::from_ref(&server),
             Some(root.as_path()),
             false,
             &HashSet::new(),

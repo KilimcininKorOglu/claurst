@@ -55,9 +55,9 @@ pub fn parse_at_refs(text: &str, cwd: &Path, max_size_kb: usize) -> (Vec<AtFileR
         }
 
         // Expand ~ to home directory
-        let expanded_path = if path_part.starts_with("~/") {
+        let expanded_path = if let Some(rest) = path_part.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                home.join(&path_part[2..])
+                home.join(rest)
             } else {
                 cwd.join(path_part)
             }

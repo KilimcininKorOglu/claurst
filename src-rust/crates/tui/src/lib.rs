@@ -12,6 +12,11 @@
 // - Bridge connection status badge
 // - Plugin hint banners
 
+// too_many_arguments: a handful of render/context helpers take many parameters
+// (layout rects, styles, state slices); grouping them is a larger refactor out
+// of scope for this cleanup.
+#![allow(clippy::too_many_arguments)]
+
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,

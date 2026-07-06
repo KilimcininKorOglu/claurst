@@ -806,9 +806,12 @@ pub fn format_compact_summary(raw: &str) -> String {
 /// [`resolve_context_window`], which consults the models.dev-backed registry
 /// first and only falls back to this heuristic.
 pub fn context_window_for_model(model: &str) -> u64 {
-    if model.contains("opus-4") || model.contains("sonnet-4") || model.contains("haiku-4") {
-        200_000
-    } else if model.contains("claude-3-5") || model.contains("claude-3.5") {
+    if model.contains("opus-4")
+        || model.contains("sonnet-4")
+        || model.contains("haiku-4")
+        || model.contains("claude-3-5")
+        || model.contains("claude-3.5")
+    {
         200_000
     } else {
         100_000
@@ -1784,8 +1787,7 @@ mod tests {
 
     #[test]
     fn test_should_not_compact_when_disabled() {
-        let mut state = AutoCompactState::default();
-        state.disabled = true;
+        let state = AutoCompactState { disabled: true, ..Default::default() };
         assert!(!should_auto_compact(195_000, "claude-sonnet-4-6", &state));
     }
 

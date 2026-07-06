@@ -1163,10 +1163,9 @@ pub struct App {
 
 // Spinner verbs are now imported from claurst_core::spinner
 
-/// Format a duration in milliseconds to a human-readable string.
-///
-/// Matches OpenCode's behaviour: rounds to whole seconds, shows "Xs" for
-/// durations under a minute, "Xm Ys" for longer ones.
+// Format a duration in milliseconds to a human-readable string.
+// Matches OpenCode's behaviour: rounds to whole seconds, shows "Xs" for
+// durations under a minute, "Xm Ys" for longer ones.
 // ---------------------------------------------------------------------------
 // Speech mode prompts (caveman / rocky)
 // ---------------------------------------------------------------------------
@@ -1272,7 +1271,6 @@ fn format_turn_time_label() -> String {
 
 impl App {
     pub fn new(config: Config, cost_tracker: Arc<CostTracker>) -> Self {
-        let config = config;
         let model_name = config.effective_model().to_string();
         let user_keybindings = UserKeybindings::load(&Settings::config_dir());
         Self {
@@ -3631,9 +3629,7 @@ impl App {
                         // so re-prefixing would produce nonsense like
                         // `free/free/auto`.
                         let provider = self.config.provider.as_deref().unwrap_or("anthropic");
-                        let full_model = if provider == "anthropic" {
-                            model_id.clone()
-                        } else if provider == "free" {
+                        let full_model = if provider == "anthropic" || provider == "free" {
                             model_id.clone()
                         } else {
                             format!("{}/{}", provider, model_id)
@@ -5642,6 +5638,7 @@ impl App {
     /// If the pasted text resolves to an existing filesystem path:
     ///   - image files (png/jpg/gif/webp/bmp) → added as an image attachment pill
     ///   - other files → inserted as `@path` mention text
+    ///
     /// Otherwise the text goes through the normal `prompt_input.paste()` path
     /// which applies the multi-line summary placeholder for large pastes.
     fn handle_paste_data(&mut self, data: String) {
@@ -5732,28 +5729,23 @@ impl App {
         let mut buf = String::new();
         buf.push(first);
 
-        loop {
-            match crossterm::event::poll(std::time::Duration::ZERO) {
-                Ok(true) => {
-                    match crossterm::event::read() {
-                        Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
-                            match k.code {
-                                KeyCode::Char(c) => buf.push(c),
-                                KeyCode::Enter => buf.push('\n'),
-                                _ => {
-                                    // Non-character key — save it for replay.
-                                    self.pending_key = Some(k);
-                                    break;
-                                }
-                            }
+        while let Ok(true) = crossterm::event::poll(std::time::Duration::ZERO) {
+            match crossterm::event::read() {
+                Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
+                    match k.code {
+                        KeyCode::Char(c) => buf.push(c),
+                        KeyCode::Enter => buf.push('\n'),
+                        _ => {
+                            // Non-character key — save it for replay.
+                            self.pending_key = Some(k);
+                            break;
                         }
-                        // Non-key event (mouse, resize, …) — leave in queue by
-                        // not reading it; we already checked poll() so it will
-                        // be re-read next iteration. But we already read it, so
-                        // we just break (the event is consumed but benign).
-                        _ => break,
                     }
                 }
+                // Non-key event (mouse, resize, …) — leave in queue by
+                // not reading it; we already checked poll() so it will
+                // be re-read next iteration. But we already read it, so
+                // we just break (the event is consumed but benign).
                 _ => break,
             }
         }

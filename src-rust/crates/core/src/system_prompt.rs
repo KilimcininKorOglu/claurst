@@ -260,29 +260,23 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
             )
         });
 
-    let mut parts: Vec<String> = Vec::new();
-
     // ------------------------------------------------------------------ //
     // CACHEABLE sections (before the dynamic boundary)                   //
     // ------------------------------------------------------------------ //
-
-    // 1. Attribution header
-    parts.push(prefix.attribution_text().to_string());
-
-    // 2. Core capabilities
-    parts.push(CORE_CAPABILITIES.to_string());
-
-    // 3. Tool use guidelines (per-tool blocks are conditional on the enabled set)
-    parts.push(build_tool_use_guidelines(opts.enabled_tools.as_deref()));
-
-    // 4. Executing actions with care
-    parts.push(ACTIONS_SECTION.to_string());
-
-    // 5. Safety guidelines
-    parts.push(SAFETY_GUIDELINES.to_string());
-
-    // 6. Cyber-risk instruction (owned by safeguards — do not edit)
-    parts.push(CYBER_RISK_INSTRUCTION.to_string());
+    let mut parts: Vec<String> = vec![
+        // 1. Attribution header
+        prefix.attribution_text().to_string(),
+        // 2. Core capabilities
+        CORE_CAPABILITIES.to_string(),
+        // 3. Tool use guidelines (per-tool blocks are conditional on the enabled set)
+        build_tool_use_guidelines(opts.enabled_tools.as_deref()),
+        // 4. Executing actions with care
+        ACTIONS_SECTION.to_string(),
+        // 5. Safety guidelines
+        SAFETY_GUIDELINES.to_string(),
+        // 6. Cyber-risk instruction (owned by safeguards — do not edit)
+        CYBER_RISK_INSTRUCTION.to_string(),
+    ];
 
     // 7. Output style (cacheable when non-Default; its content is stable)
     if let Some(style_text) = opts
@@ -549,9 +543,8 @@ fn tool_specific_guideline(tool: &str) -> Option<&'static str> {
 /// Build the "Tool use guidelines" section.
 ///
 /// `enabled` is the set of tool names active for the session:
-///   * `Some(names)` → emit per-tool blocks only for tools in `names`.
-///   * `None`        → enabled set unknown; emit every per-tool block
-///                     (backwards-compatible behaviour).
+/// * `Some(names)` → emit per-tool blocks only for tools in `names`.
+/// * `None` → enabled set unknown; emit every per-tool block (backwards-compatible behaviour).
 ///
 /// The general, tool-agnostic guidance is always emitted unchanged.
 fn build_tool_use_guidelines(enabled: Option<&[String]>) -> String {

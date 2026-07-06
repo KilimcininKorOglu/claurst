@@ -150,25 +150,23 @@ async fn list_skills(dirs: &[PathBuf]) -> ToolResult {
     // Then add disk skills, skipping any that shadow a bundled name.
     let mut disk_skills: Vec<(String, PathBuf)> = Vec::new();
     for dir in dirs {
-        match tokio::fs::read_dir(dir).await {
-            Ok(mut entries) => {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "md") {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            let name = stem.to_string();
-                            // Deduplicate — project-level shadows user-level;
-                            // bundled skills shadow everything.
-                            if !disk_skills.iter().any(|(n, _)| n == &name)
-                                && !bundled_names.contains(&name.as_str())
-                            {
-                                disk_skills.push((name, path));
-                            }
+        // Missing/unreadable directory: skip silently.
+        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "md") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        let name = stem.to_string();
+                        // Deduplicate — project-level shadows user-level;
+                        // bundled skills shadow everything.
+                        if !disk_skills.iter().any(|(n, _)| n == &name)
+                            && !bundled_names.contains(&name.as_str())
+                        {
+                            disk_skills.push((name, path));
                         }
                     }
                 }
             }
-            Err(_) => {} // directory doesn't exist, skip
         }
     }
 

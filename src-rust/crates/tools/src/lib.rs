@@ -3,6 +3,10 @@
 // Each tool maps to a capability the LLM can invoke: running shell commands,
 // reading/writing/editing files, searching codebases, fetching web pages, etc.
 
+// type_complexity: the REPL tool holds a boxed session-callback map whose full
+// type is unwieldy; a type alias would not meaningfully improve readability.
+#![allow(clippy::type_complexity)]
+
 use async_trait::async_trait;
 use claurst_core::config::PermissionMode;
 use claurst_core::cost::CostTracker;

@@ -195,7 +195,7 @@ impl OpenAiCompatProvider {
 
     /// Apply `scrub_tool_id` to every tool-call id/tool_call_id in a messages
     /// array that was already built by `OpenAiProvider::to_openai_messages`.
-    fn apply_tool_id_quirks(&self, messages: &mut Vec<Value>) {
+    fn apply_tool_id_quirks(&self, messages: &mut [Value]) {
         if self.quirks.tool_id_max_len.is_none() && !self.quirks.tool_id_alphanumeric_only {
             return;
         }
@@ -291,7 +291,7 @@ impl OpenAiCompatProvider {
     /// on turns where tool calls occurred. Turns without tool calls omit it —
     /// the API ignores it anyway and skipping saves tokens.
     fn inject_reasoning_for_tool_turns(
-        json_messages: &mut Vec<Value>,
+        json_messages: &mut [Value],
         original_messages: &[claurst_core::types::Message],
         field: &str,
     ) {
@@ -366,7 +366,7 @@ impl OpenAiCompatProvider {
     /// (it treats null as absent and then complains that neither content nor
     /// tool_calls is set).  Replacing with an empty string satisfies the
     /// validation while preserving semantics.
-    fn ensure_content_not_null(messages: &mut Vec<Value>) {
+    fn ensure_content_not_null(messages: &mut [Value]) {
         for msg in messages.iter_mut() {
             let is_assistant =
                 msg.get("role").and_then(|r| r.as_str()) == Some("assistant");

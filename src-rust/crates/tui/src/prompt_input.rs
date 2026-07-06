@@ -780,7 +780,7 @@ fn vim_normal(
 }
 
 fn vim_g(
-    text: &mut String,
+    text: &mut str,
     cursor: &mut usize,
     key: &str,
     pending: &mut VimPendingState,
@@ -1136,6 +1136,7 @@ pub(crate) fn compute_file_suggestions(
 /// - `"/"` → files in root with full paths (e.g., ["/Users", "/Applications"])
 /// - `"~"` → suggest "~/" if it exists
 /// - `"~/"` → files in home with names only
+///
 /// Note: calls `fs::read_dir` synchronously on every invocation; may stall on slow/network
 /// filesystems. Consider debouncing at the call site if this becomes a problem.
 fn suggest_files(prefix: &str, max_suggestions: usize, show_hidden: bool) -> Vec<TypeaheadSuggestion> {
@@ -3222,6 +3223,10 @@ pub fn render_prompt_input(
 
 #[cfg(test)]
 mod tests {
+    // Several tests are named after the vim key they exercise (e.g. `W`, `G`,
+    // `N`); the uppercase letters are meaningful, matching the motion helpers
+    // above that already carry `#[allow(non_snake_case)]`.
+    #![allow(non_snake_case)]
     use super::*;
 
     // ---- VimMode --------------------------------------------------------

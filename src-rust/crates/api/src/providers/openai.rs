@@ -612,7 +612,11 @@ impl OpenAiProvider {
     }
 }
 
+// The `LlmProvider` impl and capability helpers below are declared after this
+// module; keeping these wire-format tests next to the helpers they exercise is
+// intentional, so allow the item-ordering lint here.
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use claurst_core::types::Message;

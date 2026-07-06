@@ -84,9 +84,9 @@ pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
             continue;
         }
 
-        if raw.starts_with("### ") {
+        if let Some(rest) = raw.strip_prefix("### ") {
             lines.push(Line::from(vec![Span::styled(
-                format!("  {}", &raw[4..]),
+                format!("  {}", rest),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -94,9 +94,9 @@ pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
             idx += 1;
             continue;
         }
-        if raw.starts_with("## ") {
+        if let Some(rest) = raw.strip_prefix("## ") {
             lines.push(Line::from(vec![Span::styled(
-                format!("  {}", &raw[3..]),
+                format!("  {}", rest),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -104,9 +104,9 @@ pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
             idx += 1;
             continue;
         }
-        if raw.starts_with("# ") {
+        if let Some(rest) = raw.strip_prefix("# ") {
             lines.push(Line::from(vec![Span::styled(
-                format!("  {}", &raw[2..]),
+                format!("  {}", rest),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED),

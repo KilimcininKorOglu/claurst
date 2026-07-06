@@ -354,10 +354,8 @@ pub async fn load_transcript(path: &Path) -> crate::Result<Vec<TranscriptEntry>>
         }
         // Cheap structural check before full parse.
         if trimmed.contains("\"type\":\"tombstone\"") || trimmed.contains("\"type\": \"tombstone\"") {
-            if let Ok(entry) = serde_json::from_str::<TranscriptEntry>(trimmed) {
-                if let TranscriptEntry::Tombstone(t) = entry {
-                    tombstoned.insert(t.deleted_uuid);
-                }
+            if let Ok(TranscriptEntry::Tombstone(t)) = serde_json::from_str::<TranscriptEntry>(trimmed) {
+                tombstoned.insert(t.deleted_uuid);
             }
         }
     }
@@ -454,7 +452,7 @@ pub async fn list_sessions_in(
     }
 
     // Sort newest-first.
-    sessions.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.mtime));
     Ok(sessions)
 }
 
@@ -631,10 +629,8 @@ async fn read_session_tail_metadata(path: &Path) -> (Option<String>, Option<Stri
             && (trimmed.contains("\"type\":\"last-prompt\"")
                 || trimmed.contains("\"type\": \"last-prompt\""))
         {
-            if let Ok(e) = serde_json::from_str::<TranscriptEntry>(trimmed) {
-                if let TranscriptEntry::LastPrompt(lp) = e {
-                    last_prompt = Some(lp.last_prompt);
-                }
+            if let Ok(TranscriptEntry::LastPrompt(lp)) = serde_json::from_str::<TranscriptEntry>(trimmed) {
+                last_prompt = Some(lp.last_prompt);
             }
         }
 
@@ -642,10 +638,8 @@ async fn read_session_tail_metadata(path: &Path) -> (Option<String>, Option<Stri
             && (trimmed.contains("\"type\":\"custom-title\"")
                 || trimmed.contains("\"type\": \"custom-title\""))
         {
-            if let Ok(e) = serde_json::from_str::<TranscriptEntry>(trimmed) {
-                if let TranscriptEntry::CustomTitle(ct) = e {
-                    title = Some(ct.custom_title);
-                }
+            if let Ok(TranscriptEntry::CustomTitle(ct)) = serde_json::from_str::<TranscriptEntry>(trimmed) {
+                title = Some(ct.custom_title);
             }
         }
 

@@ -8,6 +8,10 @@
 // 5. Handles auto-compact when the context window fills up
 // 6. Manages stop conditions (end_turn, max_turns, cancellation)
 
+// too_many_arguments: `run_query_loop` and related orchestration entrypoints
+// thread many parameters by design; splitting would obscure the control flow.
+#![allow(clippy::too_many_arguments)]
+
 pub mod agent_tool;
 pub mod auto_dream;
 pub mod away_summary;
@@ -953,10 +957,11 @@ pub async fn run_query_loop(
                                                 usage.cache_read_input_tokens = u.cache_read_input_tokens;
                                                 usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
                                             }
-                                            claurst_api::StreamEvent::ContentBlockStart { index, content_block } => {
-                                                if let ContentBlock::ToolUse { id, name, .. } = content_block {
-                                                    tool_call_blocks.insert(*index, (id.clone(), name.clone(), String::new()));
-                                                }
+                                            claurst_api::StreamEvent::ContentBlockStart {
+                                                index,
+                                                content_block: ContentBlock::ToolUse { id, name, .. },
+                                            } => {
+                                                tool_call_blocks.insert(*index, (id.clone(), name.clone(), String::new()));
                                             }
                                             claurst_api::StreamEvent::TextDelta { text, .. } => {
                                                 text_chunks.push(text.clone());

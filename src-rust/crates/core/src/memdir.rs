@@ -113,7 +113,7 @@ pub fn scan_memory_dir(dir: &Path) -> Vec<MemoryFileMeta> {
     collect_md_files(dir, dir, &mut files);
 
     // Sort newest-first.
-    files.sort_by(|a, b| b.modified_secs.cmp(&a.modified_secs));
+    files.sort_by_key(|b| std::cmp::Reverse(b.modified_secs));
     files.truncate(MAX_MEMORY_FILES);
     files
 }

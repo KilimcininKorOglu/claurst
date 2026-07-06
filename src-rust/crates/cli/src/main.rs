@@ -8,6 +8,10 @@
 //    - Headless (--print / -p) mode: single query, output to stdout
 //    - Interactive REPL mode: full TUI with ratatui
 
+// too_many_arguments: the top-level interactive/headless runners thread many
+// parameters; grouping them into structs is a larger refactor out of scope here.
+#![allow(clippy::too_many_arguments)]
+
 mod oauth_flow;
 mod codex_oauth_flow;
 mod upgrade;
@@ -979,14 +983,10 @@ fn models_dev_cache_path() -> PathBuf {
 /// Implementation of the `claurst models` subcommand.
 ///
 /// Flags:
-///   * `--refresh`   — force-fetch from models.dev (ignoring the 5-minute
-///                     freshness window), then list.
-///   * `--verbose`   — also print release date, status, modalities,
-///                     cache pricing, and capability flags.
-///   * `--json`      — emit the registry as a JSON object keyed by
-///                     `provider/model` (suitable for piping into `jq`).
-///   * `<provider>`  — first non-flag arg filters by provider id
-///                     (e.g. `claurst models openai`).
+/// * `--refresh` — force-fetch from models.dev (ignoring the 5-minute freshness window), then list.
+/// * `--verbose` — also print release date, status, modalities, cache pricing, and capability flags.
+/// * `--json` — emit the registry as a JSON object keyed by `provider/model` (suitable for piping into `jq`).
+/// * `<provider>` — first non-flag arg filters by provider id (e.g. `claurst models openai`).
 async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
     let mut refresh = false;
     let mut verbose = false;
@@ -3412,13 +3412,8 @@ async fn run_interactive(
 
         // Drain CLAUDE_STATUS_COMMAND results (most recent wins)
         if status_cmd_str.is_some() {
-            loop {
-                match status_cmd_rx.try_recv() {
-                    Ok(text) => {
-                        app.status_line_override = if text.is_empty() { None } else { Some(text) };
-                    }
-                    Err(_) => break,
-                }
+            while let Ok(text) = status_cmd_rx.try_recv() {
+                app.status_line_override = if text.is_empty() { None } else { Some(text) };
             }
         }
 

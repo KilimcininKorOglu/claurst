@@ -86,12 +86,12 @@ fn parse_unified_diff(patch: &str) -> Result<Vec<FilePatch>, String> {
                 lines: Vec::new(),
             });
         } else if let Some(ref mut hunk) = current_hunk {
-            if line.starts_with('+') {
-                hunk.lines.push(('+', line[1..].to_string()));
-            } else if line.starts_with('-') {
-                hunk.lines.push(('-', line[1..].to_string()));
-            } else if line.starts_with(' ') {
-                hunk.lines.push((' ', line[1..].to_string()));
+            if let Some(rest) = line.strip_prefix('+') {
+                hunk.lines.push(('+', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix('-') {
+                hunk.lines.push(('-', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix(' ') {
+                hunk.lines.push((' ', rest.to_string()));
             } else if line.starts_with('\\') {
                 // "\ No newline at end of file" — ignore.
             }

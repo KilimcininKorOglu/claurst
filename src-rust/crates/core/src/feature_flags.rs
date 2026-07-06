@@ -50,6 +50,12 @@ pub struct FeatureFlagManager {
     http_client: reqwest::Client,
 }
 
+impl Default for FeatureFlagManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FeatureFlagManager {
     /// Create a new feature flag manager
     ///

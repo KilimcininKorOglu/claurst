@@ -850,6 +850,9 @@ impl ModelRegistry {
     /// List all known providers (sorted by id for stable output).
     pub fn list_providers(&self) -> Vec<&ProviderEntry> {
         let mut v: Vec<&ProviderEntry> = self.providers.values().collect();
+        // ProviderId sorts by its `&str` deref; a sort_by_key would need an
+        // owned key, so keep the explicit comparator.
+        #[allow(clippy::unnecessary_sort_by)]
         v.sort_by(|a, b| (*a.id).cmp(&*b.id));
         v
     }
@@ -1422,9 +1425,11 @@ mod tests {
         );
 
         // The single resolver agrees when only the provider (no model) is set.
-        let mut cfg = claurst_core::config::Config::default();
-        cfg.provider = Some("qwen".to_string());
-        cfg.model = None;
+        let cfg = claurst_core::config::Config {
+            provider: Some("qwen".to_string()),
+            model: None,
+            ..Default::default()
+        };
         let resolved = effective_model_for_config(&cfg, &reg);
         assert!(
             !resolved.contains("claude"),

@@ -508,7 +508,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
             // instead of overflowing the input area.  Cap at 3 lines.
             let usable_width = size.width.max(1) as usize;
             let char_count = text.chars().count();
-            char_count.div_ceil(usable_width).max(1).min(3) as u16
+            char_count.div_ceil(usable_width).clamp(1, 3) as u16
         } else {
             1
         }
@@ -1617,7 +1617,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
 
     // Split inner into left | divider(1) | right
     // Left width: ~28 chars or half the inner width, whichever is smaller
-    let left_w = (inner.width / 2).max(22).min(32).min(inner.width.saturating_sub(3));
+    let left_w = (inner.width / 2).clamp(22, 32).min(inner.width.saturating_sub(3));
     let right_w = inner.width.saturating_sub(left_w + 1);
     let h_chunks = Layout::default()
         .direction(Direction::Horizontal)
