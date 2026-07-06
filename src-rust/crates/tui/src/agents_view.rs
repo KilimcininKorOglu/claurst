@@ -394,7 +394,7 @@ impl Default for AgentsMenuState {
 pub fn load_agent_definitions(project_root: &std::path::Path) -> Vec<AgentDefinition> {
     let mut defs = Vec::new();
     let dirs = [
-        dirs::home_dir().map(|h| h.join(".claurst").join("agents")),
+        Some(claurst_core::config::Settings::config_dir().join("agents")),
         Some(project_root.join(".claurst").join("agents")),
     ];
 

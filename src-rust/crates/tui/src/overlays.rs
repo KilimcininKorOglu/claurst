@@ -586,10 +586,7 @@ impl HistoryEntry {
 // ---------------------------------------------------------------------------
 
 fn pins_path() -> std::path::PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".claurst")
-        .join("history_pins.json")
+    claurst_core::config::Settings::config_dir().join("history_pins.json")
 }
 
 /// Load the set of pinned entry texts from `~/.claurst/history_pins.json`.

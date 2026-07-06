@@ -76,9 +76,7 @@ pub struct ModelBreakdown {
 
 /// Load and aggregate stats from ~/.claurst/stats.jsonl
 pub fn load_stats() -> AggregatedStats {
-    let path = dirs::home_dir()
-        .map(|h| h.join(".claurst").join("stats.jsonl"))
-        .unwrap_or_default();
+    let path = claurst_core::config::Settings::config_dir().join("stats.jsonl");
 
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
