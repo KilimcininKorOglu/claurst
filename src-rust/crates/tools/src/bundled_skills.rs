@@ -406,6 +406,124 @@ $ARGUMENTS"#,
         allowed_tools: Some(&["CronCreate", "CronList"]),
         user_invocable: true,
     },
+
+    // -----------------------------------------------------------------------
+    // ultracode
+    // -----------------------------------------------------------------------
+    BundledSkill {
+        name: "ultracode",
+        description: "Run a disciplined ultracode workflow for serious coding work: classify the task, pick a mode (Direct / Workflow / Delegated), and when useful delegate bounded sidecar packets across claurst's native primitives (Agent subagents, TeamCreate swarms, TaskCreate background tasks), then integrate in the parent and verify.",
+        aliases: &["ultra code"],
+        when_to_use: Some("When the user invokes ultracode / ultra code, or wants a planned, multi-agent, delegated workflow with integration and an independent verification pass for a non-trivial coding task."),
+        argument_hint: Some("[task to run in ultracode mode]"),
+        prompt_template: r#"# Ultracode
+
+You are operating in **ultracode** mode: a disciplined, supervised workflow for
+serious coding work. Plan, split, delegate when it genuinely helps, integrate in
+the parent session, and verify. Use the smallest workflow that can prove the
+result -- do not manufacture ceremony for small tasks.
+
+## Contract
+
+- Ultracode is a claurst operating procedure, not a separate runtime. System,
+  developer, and user rules always win over this text.
+- Do NOT commit, push, publish, deploy, or delete anything unless the user
+  explicitly asks. Ask one clear approval question before any destructive or
+  irreversible action (mass rename/delete, force-push, migrations, production
+  data, credentials/secrets/billing, broad codemods, or large agent fan-out).
+  If approval is missing, continue only with safe read-only or draft work.
+- Never use delegation to avoid understanding the integration path. The parent
+  session owns integration, verification, and the final answer.
+
+## 1. Classify the task
+
+Before acting, state briefly:
+
+- **type**: research | code change | bug fix | migration | audit | docs | design | QA | release
+- **risk**: low | medium | high
+- **blast radius**: single file | module | repo-wide | external system
+- **verification**: none | command | tests | build | manual checklist
+- **delegation**: useful | not useful (do bounded, independent packets exist?)
+
+Then pick ONE mode.
+
+## 2. Pick a mode
+
+### Direct
+Small, clear, tightly-coupled tasks with no useful independent packets (one file,
+one command, a small function, a typo). Just do it, then run the narrowest useful
+check. No artifacts.
+
+### Workflow
+Multi-phase or risky work that benefits from separated packets, but delegation is
+not useful or not available. Keep a concrete plan (goal, success criteria,
+constraints, risk, packets, verification), execute packets as isolated passes in
+this session, integrate, then verify. Write scratch notes under
+`.workflow/ultracode/<slug>/` only when they reduce risk.
+
+### Delegated (default for non-trivial ultracode work)
+When the work has bounded, non-overlapping, independent packets and delegation is
+allowed, use claurst's native delegation primitives. Keep the blocking critical
+path in the parent; delegate only useful sidecar work.
+
+## 3. Delegated mode -- claurst native primitives
+
+- **`Agent`** -- spawn a subagent for one bounded packet (read-only exploration,
+  test writing, triage, or a disjoint write scope). Use `isolation: "worktree"`
+  for write-heavy packets that must not collide, and `run_in_background: true` to
+  fan several out at once, then integrate their final messages in the parent.
+- **`TeamCreate`** (+ `TeamDelete`) -- stand up a named swarm/coordinator when
+  several agents should work a shared task in parallel with restricted tool lists
+  and aggregated output. Good for parallel audits or multi-track implementation.
+- **`TaskCreate`** (+ `TaskGet` / `TaskUpdate` / `TaskList` / `TaskStop`) --
+  track and run background work items; poll or stop them from the parent.
+
+Rules:
+
+- Plan first, then split into bounded, non-overlapping packets before spawning.
+- Default to **2-4** subagents for useful independent work; do not exceed **~5**
+  total without explicit user approval. Run at most one broad implementation wave
+  and one review/verification wave unless the user approves more.
+- Prefer delegation for read-heavy exploration, test writing, triage, and
+  summarization. Use write-capable agents only when file ownership is disjoint.
+- Tell every write-capable agent: "You are not alone in the codebase. Do not
+  revert edits made by others; adapt to nearby changes." Give each a concrete
+  objective, explicit ownership, and an expected-output shape.
+- Only wait on an agent when its result blocks the next parent step.
+- If native agents are unavailable or not useful, fall back to Workflow mode and
+  say so briefly with the concrete reason.
+
+## 4. Integrate (parent-owned)
+
+Read each result, check claimed edits against the actual files, resolve
+disagreements with source/tests/docs, and reject outputs that lack evidence.
+Never paste raw agent logs as the final answer.
+
+## 5. Verify (scaled by risk)
+
+- **low**: inspect the diff + a targeted test.
+- **medium**: targeted tests + typecheck/lint + affected build.
+- **high**: full tests (if practical) + build + smoke + an independent review pass.
+
+Mark each check pass | fail | skipped (with reason). Report skipped checks
+honestly. Finish with a short summary: outcome, key files changed, verification
+run, and remaining risk.
+
+## Composing with /goal (multi-turn)
+
+Ultracode is compatible with claurst's continuation/goal mode: a large task can
+span multiple turns. For a long, autonomous objective, combine ultracode with
+`/goal <objective>` -- the goal loop keeps working across turns while ultracode
+governs *how* each turn plans, delegates, integrates, and verifies. Ultracode
+mode itself is scoped to the current turn; re-invoke it (or run it under a goal)
+for sustained multi-turn work.
+
+## Your task
+
+$ARGUMENTS"#,
+        allowed_tools: None,
+        user_invocable: true,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -445,6 +563,71 @@ pub fn expand_prompt(skill: &BundledSkill, args: &str) -> String {
         .prompt_template
         .replace("$ARGUMENTS_SUFFIX", &suffix)
         .replace("$ARGUMENTS", args)
+}
+
+// ---------------------------------------------------------------------------
+// Ultracode keyword detection + system-prompt addendum
+// ---------------------------------------------------------------------------
+
+/// Keywords that activate ultracode mode, longest-first so a spaced match wins.
+pub const ULTRACODE_KEYWORDS: &[&str] = &["ultra code", "ultracode"];
+
+/// Find every whole-word-ish, case-insensitive occurrence of an ultracode
+/// keyword in `text`, returned as non-overlapping `(start, end)` byte ranges
+/// into `text`.
+///
+/// The keywords are ASCII, so an ASCII-lowercased copy preserves byte length
+/// and offsets exactly; every match therefore maps back onto `text` at valid
+/// char boundaries. "Whole-word-ish" means the byte immediately before/after a
+/// match must not be ASCII alphanumeric (so `ultracoder` does not match).
+pub fn ultracode_match_ranges(text: &str) -> Vec<(usize, usize)> {
+    let hay = text.as_bytes().to_ascii_lowercase();
+    let bytes = text.as_bytes();
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0usize;
+    'scan: while i < hay.len() {
+        for kw in ULTRACODE_KEYWORDS {
+            let k = kw.as_bytes();
+            if i + k.len() <= hay.len() && &hay[i..i + k.len()] == k {
+                let end = i + k.len();
+                let left_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+                let right_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+                if left_ok && right_ok {
+                    ranges.push((i, end));
+                    i = end;
+                    continue 'scan;
+                }
+            }
+        }
+        i += 1;
+    }
+    ranges
+}
+
+/// Whether `text` contains an ultracode keyword (whole-word-ish, case-insensitive).
+pub fn text_triggers_ultracode(text: &str) -> bool {
+    !ultracode_match_ranges(text).is_empty()
+}
+
+/// Build the per-turn system-prompt addendum for ultracode mode.
+///
+/// This is the *single source of truth* for ultracode's operating procedure:
+/// it expands the bundled `ultracode` skill's `prompt_template` (the same text
+/// the `/ultracode` skill runs) and wraps it with a short activation framing.
+/// Returns `None` only if the skill is somehow missing from `BUNDLED_SKILLS`.
+pub fn ultracode_system_prompt_addendum() -> Option<String> {
+    let skill = find_bundled_skill("ultracode")?;
+    let body = expand_prompt(
+        skill,
+        "(the task is the user's latest message in this conversation)",
+    );
+    Some(format!(
+        "\n## Ultracode Mode (activated by keyword)\n\
+         The user's message invoked **ultracode**. Operate in ultracode mode for \
+         this turn using the procedure below (the same procedure as the bundled \
+         `ultracode` skill).\n\n{}\n",
+        body
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -570,5 +753,73 @@ mod tests {
                 name
             );
         }
+    }
+
+    // ---- ultracode -------------------------------------------------------
+
+    #[test]
+    fn ultracode_skill_present_and_user_invocable() {
+        let skill = find_bundled_skill("ultracode").expect("ultracode skill missing");
+        assert_eq!(skill.name, "ultracode");
+        assert!(skill.user_invocable);
+        assert!(skill.allowed_tools.is_none(), "ultracode should expose the full toolset");
+    }
+
+    #[test]
+    fn ultracode_resolvable_by_alias_and_case() {
+        assert_eq!(find_bundled_skill("ultra code").unwrap().name, "ultracode");
+        assert_eq!(find_bundled_skill("UltraCode").unwrap().name, "ultracode");
+        assert_eq!(find_bundled_skill("ULTRA CODE").unwrap().name, "ultracode");
+    }
+
+    #[test]
+    fn ultracode_template_names_native_primitives() {
+        let skill = find_bundled_skill("ultracode").unwrap();
+        for needle in ["Agent", "TeamCreate", "TaskCreate", "/goal", "Delegated"] {
+            assert!(
+                skill.prompt_template.contains(needle),
+                "ultracode template missing `{needle}`"
+            );
+        }
+    }
+
+    #[test]
+    fn ultracode_match_ranges_finds_keyword() {
+        let text = "please ultracode this";
+        let r = ultracode_match_ranges(text);
+        assert_eq!(r.len(), 1);
+        let (s, e) = r[0];
+        assert_eq!(&text[s..e], "ultracode");
+    }
+
+    #[test]
+    fn ultracode_match_ranges_case_insensitive_and_spaced() {
+        assert_eq!(ultracode_match_ranges("UltraCode now").len(), 1);
+        let text = "do ULTRA CODE it";
+        let r = ultracode_match_ranges(text);
+        assert_eq!(r.len(), 1);
+        let (s, e) = r[0];
+        // Offsets map onto the original bytes (ASCII), case aside.
+        assert_eq!(&text[s..e].to_ascii_lowercase(), "ultra code");
+    }
+
+    #[test]
+    fn ultracode_match_ranges_respects_word_boundaries() {
+        assert!(ultracode_match_ranges("ultracoder").is_empty());
+        assert!(ultracode_match_ranges("supraultracode1").is_empty());
+        assert!(text_triggers_ultracode("(ultracode)"));
+        assert!(text_triggers_ultracode("ultracode."));
+        assert!(!text_triggers_ultracode("this is a normal prompt"));
+    }
+
+    #[test]
+    fn ultracode_addendum_reuses_skill_body() {
+        let add = ultracode_system_prompt_addendum().expect("addendum present");
+        assert!(add.contains("Ultracode Mode"));
+        assert!(add.contains("## Your task"));
+        // Sourced from the skill template, not a duplicate literal.
+        assert!(add.contains("Agent"));
+        assert!(add.contains("TeamCreate"));
+        assert!(!add.contains("$ARGUMENTS"), "template placeholder must be expanded");
     }
 }
