@@ -1712,7 +1712,7 @@ pub fn collapse_search_results(messages: Vec<claurst_core::types::Message>) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::{Message, Role};
+    use claurst_core::types::{Message, ToolResultContent};
 
     fn make_user(text: &str) -> Message {
         Message::user(text)
@@ -1721,6 +1721,29 @@ mod tests {
     fn make_assistant(text: &str) -> Message {
         // No UUID set — relies on the no-UUID grouping path in group_messages_for_compact.
         Message::assistant(text)
+    }
+
+    /// `n` bytes of filler text (≈ `n/4 * 4/3` tokens under the chars/4 estimate).
+    fn filler(n: usize) -> String {
+        "x".repeat(n)
+    }
+
+    /// An assistant message carrying a single `tool_use` block.
+    fn assistant_tool_use(id: &str, name: &str, input: serde_json::Value) -> Message {
+        Message::assistant_blocks(vec![ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input,
+        }])
+    }
+
+    /// A user message carrying a single `tool_result` block answering `id`.
+    fn user_tool_result(id: &str, text: &str) -> Message {
+        Message::user_blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: id.to_string(),
+            content: ToolResultContent::Text(text.to_string()),
+            is_error: None,
+        }])
     }
 
     // ---- TokenWarningState --------------------------------------------------
@@ -2012,5 +2035,232 @@ mod tests {
         let est = estimate_tokens_for_messages(&msgs);
         // "Hello, world!" = 13 chars → 13/4 = 3 rough tokens → 3*4/3 = 4 padded
         assert!(est > 0);
+    }
+
+    // ---- (1) token-budget keep (#231) --------------------------------------
+
+    fn plain_convo(n: usize, size: usize) -> Vec<Message> {
+        (0..n)
+            .map(|i| {
+                if i % 2 == 0 {
+                    Message::user(filler(size))
+                } else {
+                    Message::assistant(filler(size))
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn keep_split_keeps_more_as_budget_grows() {
+        // Eight plain messages, each filler(4000) ≈ 1333 tokens.
+        let msgs = plain_convo(8, 4000);
+
+        // Small budget keeps ~1 message; larger budget keeps ~3.
+        let split_small = compute_keep_split_index(&msgs, 2000);
+        let split_large = compute_keep_split_index(&msgs, 5000);
+
+        // A larger budget keeps MORE messages ⇒ a smaller split index.
+        assert!(
+            split_large < split_small,
+            "bigger budget must keep more (split_large={split_large}, split_small={split_small})"
+        );
+        assert_eq!(msgs.len() - split_small, 1, "2k budget keeps 1 message");
+        assert_eq!(msgs.len() - split_large, 3, "5k budget keeps 3 messages");
+
+        // Neither cut lands on a tool_result (trivially true for plain text).
+        assert!(!message_has_tool_result(&msgs[split_small]));
+        assert!(!message_has_tool_result(&msgs[split_large]));
+    }
+
+    #[test]
+    fn keep_split_snaps_off_tool_result_boundary() {
+        // A round whose tool_use is huge, so the raw budget cut lands right on
+        // the tool_result — which would orphan it from its call.
+        let msgs = vec![
+            Message::user(filler(400)),                                       // 0
+            assistant_tool_use("t1", "Bash", serde_json::json!({ "command": filler(8000) })), // 1 (BIG)
+            user_tool_result("t1", &filler(400)),                            // 2 (tool_result)
+            Message::assistant(filler(400)),                                 // 3
+        ];
+
+        // Raw token-budget index lands ON the tool_result (index 2).
+        let raw = calculate_messages_to_keep_index(&msgs, 500);
+        assert_eq!(raw, 2, "raw cut should land on the tool_result message");
+        assert!(message_has_tool_result(&msgs[raw]));
+
+        // The pairing-safe keep snaps back to the assistant tool_use boundary,
+        // so the kept tail contains BOTH the tool_use and its result.
+        let split = compute_keep_split_index(&msgs, 500);
+        assert_eq!(split, 1);
+        assert!(!message_has_tool_result(&msgs[split]));
+        // tail = msgs[1..] carries tool_use(t1) AND its tool_result(t1).
+        let tail = &msgs[split..];
+        assert!(tail.iter().any(|m| !m.get_tool_use_blocks().is_empty()));
+        assert!(tail.iter().any(message_has_tool_result));
+    }
+
+    #[test]
+    fn snap_to_pairing_boundary_handles_keep_nothing() {
+        let msgs = plain_convo(3, 100);
+        // idx == len (keep nothing) is left as-is — the tail is empty, nothing to orphan.
+        assert_eq!(snap_to_pairing_boundary(&msgs, msgs.len()), msgs.len());
+    }
+
+    // ---- (2) real-usage trigger (#231) -------------------------------------
+
+    #[test]
+    fn context_tokens_prefer_real_usage_over_estimate() {
+        let msgs = vec![Message::user(filler(4000))]; // ≈ 1333 estimated tokens
+        let estimate = estimate_tokens_for_messages(&msgs) as u64;
+
+        // Real usage present ⇒ used verbatim, ignoring the (much smaller) estimate.
+        assert_eq!(estimate_context_tokens(&msgs, Some(150_000)), 150_000);
+        assert_ne!(estimate_context_tokens(&msgs, Some(150_000)), estimate);
+
+        // No usage / zero usage ⇒ fall back to the chars/4 estimate.
+        assert_eq!(estimate_context_tokens(&msgs, None), estimate);
+        assert_eq!(estimate_context_tokens(&msgs, Some(0)), estimate);
+    }
+
+    // ---- (3) iterative UPDATE prompt (#231) --------------------------------
+
+    #[test]
+    fn extract_previous_summary_finds_compact_summary_block() {
+        let notice = Message::user(
+            "This session is being continued from a previous conversation.\n\n\
+             <compact-summary>\nSummary:\n1. Primary Request: build X\n</compact-summary>",
+        );
+        let msgs = vec![notice, make_assistant("ok"), make_user("next")];
+        let prev = extract_previous_summary(&msgs).expect("should detect prior summary");
+        assert!(prev.contains("Primary Request: build X"));
+        assert!(!prev.contains("<compact-summary>"));
+
+        // No summary block ⇒ None.
+        assert!(extract_previous_summary(&[make_user("hello"), make_assistant("hi")]).is_none());
+    }
+
+    #[test]
+    fn update_prompt_selected_only_with_previous_summary() {
+        let base = get_compact_prompt(None, None);
+        let update = get_compact_prompt(None, Some("Summary:\n1. Primary Request: build X"));
+
+        // UPDATE variant is distinct and references the previous summary.
+        assert!(update.contains("UPDATE an existing conversation summary"));
+        assert!(update.contains("<previous-summary>"));
+        assert!(!base.contains("UPDATE an existing conversation summary"));
+
+        // A blank previous summary is treated as "no previous summary".
+        let blank = get_compact_prompt(None, Some("   "));
+        assert_eq!(blank, base);
+
+        // Both variants preserve the structured sections.
+        for p in [&base, &update] {
+            assert!(p.contains("Primary Request and Intent"));
+            assert!(p.contains("Files and Code Sections"));
+            assert!(p.contains("Pending Tasks"));
+            assert!(p.contains("Optional Next Step"));
+        }
+    }
+
+    // ---- (4) files-touched manifest (#231) ---------------------------------
+
+    fn read_use(id: &str, path: &str) -> Message {
+        assistant_tool_use(id, "Read", serde_json::json!({ "file_path": path }))
+    }
+    fn edit_use(id: &str, path: &str) -> Message {
+        assistant_tool_use(id, "Edit", serde_json::json!({ "file_path": path }))
+    }
+    fn write_use(id: &str, path: &str) -> Message {
+        assistant_tool_use(id, "Write", serde_json::json!({ "file_path": path }))
+    }
+
+    #[test]
+    fn manifest_lists_read_write_edit_files() {
+        let msgs = vec![
+            read_use("1", "/repo/a.rs"),
+            edit_use("2", "/repo/b.rs"),
+            write_use("3", "/repo/c.rs"),
+            read_use("4", "/repo/a.rs"), // duplicate read — deduped
+        ];
+        let ops = extract_file_operations(&msgs);
+        let manifest = format_files_touched(&ops);
+
+        assert!(manifest.contains(FILES_TOUCHED_HEADER));
+        // b.rs (edit) and c.rs (write) are "Modified"; a.rs is "Read".
+        assert!(manifest.contains("Modified:"));
+        assert!(manifest.contains("/repo/b.rs"));
+        assert!(manifest.contains("/repo/c.rs"));
+        assert!(manifest.contains("Read:"));
+        assert!(manifest.contains("/repo/a.rs"));
+    }
+
+    #[test]
+    fn manifest_edit_wins_over_read_for_same_file() {
+        // A file that was both read and edited is reported only as Modified.
+        let msgs = vec![read_use("1", "/repo/x.rs"), edit_use("2", "/repo/x.rs")];
+        let (read_only, modified) = extract_file_operations(&msgs).computed_lists();
+        assert_eq!(modified, vec!["/repo/x.rs".to_string()]);
+        assert!(read_only.is_empty());
+    }
+
+    #[test]
+    fn manifest_unions_with_prior_and_roundtrips() {
+        // New batch touches new.rs (edit) and read_new.rs (read).
+        let msgs = vec![
+            edit_use("1", "/repo/new.rs"),
+            read_use("2", "/repo/read_new.rs"),
+        ];
+        let mut ops = extract_file_operations(&msgs);
+
+        // Prior manifest, as it would appear inside a previous <compact-summary>.
+        let prior = "Summary:\n1. Primary Request: ...\n\nFiles touched:\n\
+                     Modified: /repo/old.rs\nRead: /repo/read_old.rs";
+        let parsed = parse_files_touched(prior);
+        assert!(parsed.edited.contains("/repo/old.rs"));
+        assert!(parsed.read.contains("/repo/read_old.rs"));
+
+        ops.union(&parsed);
+        let manifest = format_files_touched(&ops);
+
+        // Both prior and new files survive the carry-forward.
+        for f in [
+            "/repo/new.rs",
+            "/repo/old.rs",
+            "/repo/read_new.rs",
+            "/repo/read_old.rs",
+        ] {
+            assert!(manifest.contains(f), "manifest missing {f}:\n{manifest}");
+        }
+
+        // strip_files_touched_section removes the manifest for the UPDATE prompt.
+        let stripped = strip_files_touched_section(prior);
+        assert!(!stripped.contains(FILES_TOUCHED_HEADER));
+        assert!(stripped.contains("Primary Request"));
+    }
+
+    #[test]
+    fn manifest_is_bounded_with_overflow_marker() {
+        // 25 edited files ⇒ list is capped at MAX_MANIFEST_FILES (20) with "+5 more".
+        let msgs: Vec<Message> = (0..(MAX_MANIFEST_FILES + 5))
+            .map(|i| edit_use(&format!("id{i}"), &format!("/repo/file_{i:02}.rs")))
+            .collect();
+        let manifest = format_files_touched(&extract_file_operations(&msgs));
+
+        assert!(manifest.contains("(+5 more)"), "expected overflow marker:\n{manifest}");
+        // Exactly MAX_MANIFEST_FILES paths are shown before the marker.
+        let modified_line = manifest
+            .lines()
+            .find(|l| l.starts_with("Modified:"))
+            .expect("Modified line");
+        let listed = modified_line
+            .trim_start_matches("Modified:")
+            .split(" (+")
+            .next()
+            .unwrap()
+            .matches(MANIFEST_SEP)
+            .count()
+            + 1;
+        assert_eq!(listed, MAX_MANIFEST_FILES);
     }
 }
