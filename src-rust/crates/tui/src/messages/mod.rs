@@ -289,7 +289,7 @@ fn normalize_at_tokens(
         if trimmed.starts_with('@') && trimmed.len() > 1 {
             let mut path_part = trimmed[1..].to_string();
             // Strip trailing punctuation (same logic as parse_at_refs)
-            while path_part.len() > 0 && path_part.ends_with(|c: char| c.is_ascii_punctuation()) && !path_part.ends_with('/') {
+            while !path_part.is_empty() && path_part.ends_with(|c: char| c.is_ascii_punctuation()) && !path_part.ends_with('/') {
                 path_part.pop();
             }
             let punct_suffix = &trimmed[1 + path_part.len()..];
@@ -1817,9 +1817,7 @@ fn extract_goal_objective_from_args(args: &str) -> Option<String> {
     // doesn't include the budget flag.
     let rest = if let Some(after_flag) = trimmed.strip_prefix("--tokens") {
         let after_flag = after_flag.trim_start();
-        after_flag
-            .splitn(2, char::is_whitespace)
-            .nth(1)
+        after_flag.split_once(char::is_whitespace).map(|x| x.1)
             .unwrap_or("")
             .trim()
     } else {

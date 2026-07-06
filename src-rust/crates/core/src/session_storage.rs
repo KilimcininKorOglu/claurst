@@ -484,12 +484,11 @@ pub async fn truncate_after(path: &Path, from_uuid: &str) -> crate::Result<()> {
     for entry in entries {
         if found { continue; }
         match &entry {
-            TranscriptEntry::User(m) | TranscriptEntry::Assistant(m) => {
-                if m.message.uuid.as_deref() == Some(from_uuid) {
+            TranscriptEntry::User(m) | TranscriptEntry::Assistant(m)
+                if m.message.uuid.as_deref() == Some(from_uuid) => {
                     found = true;
                     continue; // drop this entry and everything after
                 }
-            }
             _ => {}
         }
         keep.push(entry);
@@ -607,13 +606,13 @@ async fn read_session_tail_metadata(path: &Path) -> (Option<String>, Option<Stri
 
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let mut file = file;
-    if let Err(_) = file
+    if file
         .seek(std::io::SeekFrom::Start(offset))
-        .await
+        .await.is_err()
     {
         return (None, None);
     }
-    if let Err(_) = file.read_exact(&mut buf).await {
+    if file.read_exact(&mut buf).await.is_err() {
         return (None, None);
     }
 

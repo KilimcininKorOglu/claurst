@@ -143,20 +143,17 @@ fn extract_topic_hint(messages: &[Message]) -> Option<String> {
             _ => continue,
         };
         for block in blocks {
-            match block {
-                ContentBlock::ToolUse { name, input, .. } => {
-                    // Try to get a file_path from input, else use tool name
-                    if let Some(fp) = input.get("file_path").and_then(|v| v.as_str()) {
-                        return Some(fp.to_string());
-                    }
-                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                        // Use first word of command as hint
-                        let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
-                        return Some(first_word.to_string());
-                    }
-                    return Some(name.clone());
+            if let ContentBlock::ToolUse { name, input, .. } = block {
+                // Try to get a file_path from input, else use tool name
+                if let Some(fp) = input.get("file_path").and_then(|v| v.as_str()) {
+                    return Some(fp.to_string());
                 }
-                _ => {}
+                if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                    // Use first word of command as hint
+                    let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
+                    return Some(first_word.to_string());
+                }
+                return Some(name.clone());
             }
         }
     }
@@ -171,7 +168,7 @@ fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
             MessageContent::Text(t) => t.len(),
             MessageContent::Blocks(blocks) => blocks
                 .iter()
-                .map(|b| estimate_block_chars(b))
+                .map(estimate_block_chars)
                 .sum(),
         })
         .sum();
@@ -188,7 +185,7 @@ fn estimate_block_chars(block: &ContentBlock) -> usize {
         ContentBlock::ToolResult { content, .. } => match content {
             claurst_core::types::ToolResultContent::Text(t) => t.len(),
             claurst_core::types::ToolResultContent::Blocks(blocks) => {
-                blocks.iter().map(|b| estimate_block_chars(b)).sum()
+                blocks.iter().map(estimate_block_chars).sum()
             }
         },
         ContentBlock::Thinking { thinking, .. } => thinking.len(),

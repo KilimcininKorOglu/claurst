@@ -139,7 +139,7 @@ impl McpTrustStore {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         // Write-then-rename so a concurrent reader never sees a half-written
         // (corrupt) trust file. Rename is atomic within the same directory.
         let tmp = path.with_extension("json.tmp");

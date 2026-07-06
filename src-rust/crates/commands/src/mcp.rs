@@ -112,16 +112,11 @@ impl SlashCommand for McpCommand {
         if sub == "status" {
             let mut output = String::from("MCP Server Status\n─────────────────\n");
             for srv in &ctx.config.mcp_servers {
-                let kind = match srv.server_type.as_str() {
-                    "stdio" => "stdio",
-                    "sse" => "sse",
-                    "http" => "http",
-                    other => other,
-                };
+                let kind = srv.server_type.as_str();
                 let endpoint = srv
                     .url
                     .as_deref()
-                    .or_else(|| srv.command.as_deref())
+                    .or(srv.command.as_deref())
                     .unwrap_or("(unknown)");
 
                 // Fetch live status from the manager if available.

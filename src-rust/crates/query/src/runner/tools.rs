@@ -112,7 +112,7 @@ pub(crate) fn build_todo_nudge(session_id: &str) -> String {
     let todos = claurst_tools::todo_write::load_todos(session_id);
     let incomplete_count = todos
         .iter()
-        .filter(|t| t["status"].as_str().map_or(true, |s| s != "completed"))
+        .filter(|t| t["status"].as_str() != Some("completed"))
         .count();
     if incomplete_count == 0 {
         String::new()

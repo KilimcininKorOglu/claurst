@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn search_filters_entries_correctly() {
-        let mut screen = SettingsScreen::new();
+        let screen = SettingsScreen::new();
         let all = all_entries(&screen);
         let filtered: Vec<_> = all
             .iter()
@@ -874,7 +874,7 @@ mod tests {
         screen.output_style = "default".to_string();
 
         // Simulate cycling through all options
-        let options = vec!["default", "concise", "explanatory", "learning"];
+        let options = ["default", "concise", "explanatory", "learning"];
         let mut idx = options.iter().position(|&o| o == "default").unwrap();
 
         idx = (idx + 1) % options.len();

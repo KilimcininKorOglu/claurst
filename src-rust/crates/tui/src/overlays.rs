@@ -843,8 +843,8 @@ impl HistorySearchOverlay {
         // Sort: pinned entries always first, then by score descending.
         // Stable sort preserves insertion order for ties within each group.
         scored.sort_by(|a, b| {
-            let a_pinned = self.snapshot.get(a.snapshot_idx).map_or(false, |e| e.pinned);
-            let b_pinned = self.snapshot.get(b.snapshot_idx).map_or(false, |e| e.pinned);
+            let a_pinned = self.snapshot.get(a.snapshot_idx).is_some_and(|e| e.pinned);
+            let b_pinned = self.snapshot.get(b.snapshot_idx).is_some_and(|e| e.pinned);
             match (b_pinned, a_pinned) {
                 (true, false) => std::cmp::Ordering::Greater,
                 (false, true) => std::cmp::Ordering::Less,
@@ -1005,7 +1005,7 @@ pub fn render_history_search_overlay(
                 })
                 .unwrap_or("");
 
-            let is_pinned = snap_entry.map_or(false, |e| e.pinned);
+            let is_pinned = snap_entry.is_some_and(|e| e.pinned);
 
             // Relative timestamp (right-aligned suffix)
             let time_suffix: String = snap_entry
@@ -1273,12 +1273,12 @@ fn case_insensitive_find(haystack: &str, needle_lc: &str) -> Option<(usize, usiz
     }
     for (start, _) in haystack.char_indices() {
         let mut hay_chars = haystack[start..].chars();
-        let mut need_chars = needle_lc.chars();
+        let need_chars = needle_lc.chars();
         // Lowercase expansion of one haystack char may yield several chars.
         let mut pending: std::collections::VecDeque<char> = std::collections::VecDeque::new();
         let mut end = start;
         let mut matched = true;
-        'need: while let Some(nc) = need_chars.next() {
+        'need: for nc in need_chars {
             while pending.is_empty() {
                 match hay_chars.next() {
                     Some(hc) => {
@@ -1653,25 +1653,22 @@ impl GlobalSearchState {
         if let Ok(out) = output {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-                    match val["type"].as_str() {
-                        Some("match") => {
-                            let data = &val["data"];
-                            let file = data["path"]["text"].as_str().unwrap_or("").to_string();
-                            let line_no = data["line_number"].as_u64().unwrap_or(0) as u32;
-                            let text = data["lines"]["text"].as_str().unwrap_or("").trim_end_matches('\n').to_string();
-                            let col = data["submatches"][0]["start"].as_u64().unwrap_or(0) as u32;
-                            self.results.push(SearchResult {
-                                file,
-                                line: line_no,
-                                col,
-                                text,
-                                context_before: Vec::new(),
-                                context_after: Vec::new(),
-                            });
-                            self.total_matches += 1;
-                            if self.results.len() >= 500 { break; }
-                        }
-                        _ => {}
+                    if let Some("match") = val["type"].as_str() {
+                        let data = &val["data"];
+                        let file = data["path"]["text"].as_str().unwrap_or("").to_string();
+                        let line_no = data["line_number"].as_u64().unwrap_or(0) as u32;
+                        let text = data["lines"]["text"].as_str().unwrap_or("").trim_end_matches('\n').to_string();
+                        let col = data["submatches"][0]["start"].as_u64().unwrap_or(0) as u32;
+                        self.results.push(SearchResult {
+                            file,
+                            line: line_no,
+                            col,
+                            text,
+                            context_before: Vec::new(),
+                            context_after: Vec::new(),
+                        });
+                        self.total_matches += 1;
+                        if self.results.len() >= 500 { break; }
                     }
                 }
             }

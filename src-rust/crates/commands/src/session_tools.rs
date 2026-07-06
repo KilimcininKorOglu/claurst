@@ -33,7 +33,7 @@ impl SlashCommand for SkillsCommand {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let p = entry.path();
-                    if p.extension().map_or(false, |e| e == "md") {
+                    if p.extension().is_some_and(|e| e == "md") {
                         if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
                             let name = stem.to_string();
                             if !found.contains(&name) {
@@ -61,7 +61,7 @@ impl SlashCommand for SkillsCommand {
                                     }
                                 }
                             }
-                        } else if p.extension().map_or(false, |e| e == "md") {
+                        } else if p.extension().is_some_and(|e| e == "md") {
                             if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
                                 let name = stem.to_string();
                                 if !found.contains(&name) {
@@ -389,9 +389,7 @@ impl SlashCommand for EffortCommand {
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         match args.trim() {
-            "" => CommandResult::Message(format!(
-                "Current effort: normal\nUse /effort [low|normal|high] to change."
-            )),
+            "" => CommandResult::Message("Current effort: normal\nUse /effort [low|normal|high] to change.".to_string()),
             "low" => {
                 // Low effort: smaller max_tokens
                 ctx.config.max_tokens = Some(4096);

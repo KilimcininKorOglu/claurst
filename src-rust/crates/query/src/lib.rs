@@ -791,10 +791,10 @@ pub async fn run_query_loop(
 
                 // Rebuild providers using the unified base resolver so overrides
                 // from settings/env/defaults are applied consistently.
-                if let Some(_) = claurst_api::registry::resolve_provider_api_base(
+                if claurst_api::registry::resolve_provider_api_base(
                     &tool_ctx.config,
                     &provider_id_str,
-                ) {
+                ).is_some() {
                     if let Some(overridden) = claurst_api::registry::provider_from_config(
                         &tool_ctx.config,
                         &provider_id_str,
@@ -808,7 +808,7 @@ pub async fn run_query_loop(
                     // Notify TUI that we're calling the provider using a random spinner verb
                     if let Some(ref tx) = event_tx {
                         use claurst_core::sample_spinner_verb;
-                        let seed = (provider_id_str.len() ^ model_id_str.len()) as usize;
+                        let seed = provider_id_str.len() ^ model_id_str.len();
                         let verb = sample_spinner_verb(seed);
                         let _ = tx.send(QueryEvent::Status(format!("✳ {}…", verb)));
                     }
@@ -873,7 +873,7 @@ pub async fn run_query_loop(
                         stop_sequences: vec![],
                         thinking: if caps.thinking {
                             effective_thinking_budget
-                                .map(|b| claurst_api::ThinkingConfig::enabled(b))
+                                .map(claurst_api::ThinkingConfig::enabled)
                         } else {
                             None
                         },
@@ -1148,7 +1148,7 @@ pub async fn run_query_loop(
                                     tool_name
                                 ))
                             } else {
-                                execute_tool(&*tool_name, &tool_input, tools, &tool_ctx).await
+                                execute_tool(&tool_name, &tool_input, tools, tool_ctx).await
                             };
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.send(QueryEvent::ToolEnd {
@@ -1853,7 +1853,7 @@ pub async fn run_query_loop(
                 // block so the conversation and TUI stay consistent.
                 let mut result_blocks: Vec<ContentBlock> =
                     Vec::with_capacity(prepared.len());
-                for (p, result) in prepared.iter().zip(exec_results.into_iter()) {
+                for (p, result) in prepared.iter().zip(exec_results) {
                     if !batch_cancelled {
                         let hooks = &tool_ctx.config.hooks;
                         let post_ctx = claurst_core::hooks::HookContext {
@@ -1941,6 +1941,17 @@ pub async fn run_query_loop(
                 continue_or_end!(assistant_msg, usage);
             }
         }
+    }
+}
+
+/// Stream handler that forwards events to an unbounded channel.
+struct ChannelStreamHandler {
+    tx: mpsc::UnboundedSender<QueryEvent>,
+}
+
+impl StreamHandler for ChannelStreamHandler {
+    fn on_event(&self, event: &AnthropicStreamEvent) {
+        let _ = self.tx.send(QueryEvent::Stream(event.clone()));
     }
 }
 
@@ -2908,16 +2919,5 @@ mod tests {
             claurst_core::GoalStatus::Paused,
             "runaway goal must be persisted as paused"
         );
-    }
-}
-
-/// Stream handler that forwards events to an unbounded channel.
-struct ChannelStreamHandler {
-    tx: mpsc::UnboundedSender<QueryEvent>,
-}
-
-impl StreamHandler for ChannelStreamHandler {
-    fn on_event(&self, event: &AnthropicStreamEvent) {
-        let _ = self.tx.send(QueryEvent::Stream(event.clone()));
     }
 }

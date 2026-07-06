@@ -144,16 +144,12 @@ impl GoogleProvider {
                             "mimeType": mime
                         }
                     }))
-                } else if let Some(url) = &source.url {
-                    Some(json!({
+                } else { source.url.as_ref().map(|url| json!({
                         "fileData": {
                             "fileUri": url,
                             "mimeType": source.media_type.as_deref().unwrap_or("image/jpeg")
                         }
-                    }))
-                } else {
-                    None
-                }
+                    })) }
             }
 
             ContentBlock::ToolUse { name, input, .. } => Some(json!({
@@ -176,16 +172,12 @@ impl GoogleProvider {
                             "mimeType": mime
                         }
                     }))
-                } else if let Some(url) = &source.url {
-                    Some(json!({
+                } else { source.url.as_ref().map(|url| json!({
                         "fileData": {
                             "fileUri": url,
                             "mimeType": source.media_type.as_deref().unwrap_or("application/pdf")
                         }
-                    }))
-                } else {
-                    None
-                }
+                    })) }
             }
 
             // Render UI-only / metadata blocks as text so context is not lost.

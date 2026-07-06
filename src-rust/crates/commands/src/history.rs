@@ -82,7 +82,7 @@ impl SlashCommand for RevertCommand {
             Some(checkpoints[checkpoints.len() - n])
         } else {
             checkpoints.iter().copied()
-                .find(|m| m.uuid.as_deref().map_or(false, |u| u.starts_with(args)))
+                .find(|m| m.uuid.as_deref().is_some_and(|u| u.starts_with(args)))
         };
 
         let target = match target {

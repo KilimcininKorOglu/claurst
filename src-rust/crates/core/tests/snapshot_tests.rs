@@ -168,7 +168,7 @@ async fn binary_file_tracked_and_reverted() {
     let snap = snap_or_skip(p);
 
     let before = snap.track().await.expect("track");
-    fs::write(p.join("image.png"), &[0x89u8, 0x50, 0x4e, 0x47]).unwrap();
+    fs::write(p.join("image.png"), [0x89u8, 0x50, 0x4e, 0x47]).unwrap();
 
     let patch = snap.patch(&before).await;
     assert!(patch.files.contains(&fwd(p, "image.png")), "binary file in patch");

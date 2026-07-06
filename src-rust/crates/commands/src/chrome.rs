@@ -60,7 +60,7 @@ mod chrome_cdp {
     ) -> anyhow::Result<Value> {
         let id = next_id();
         let request = json!({ "id": id, "method": method, "params": params });
-        ws.send(WsMessage::Text(request.to_string().into())).await?;
+        ws.send(WsMessage::Text(request.to_string())).await?;
 
         // Drain messages until we get the one with our id (ignore events).
         loop {

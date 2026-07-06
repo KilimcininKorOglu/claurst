@@ -25,8 +25,8 @@ impl SlashCommand for LoginCommand {
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
         let tokens: Vec<&str> = args.split_whitespace().collect();
-        let use_codex = tokens.iter().any(|t| *t == "--codex");
-        let login_with_claude_ai = !tokens.iter().any(|t| *t == "--console");
+        let use_codex = tokens.contains(&"--codex");
+        let login_with_claude_ai = !tokens.contains(&"--console");
         let label = parse_label_arg(&tokens);
 
         let provider = if use_codex {
@@ -71,8 +71,8 @@ impl SlashCommand for LogoutCommand {
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let tokens: Vec<&str> = args.split_whitespace().collect();
-        let use_codex = tokens.iter().any(|t| *t == "--codex");
-        let purge_all = tokens.iter().any(|t| *t == "--all");
+        let use_codex = tokens.contains(&"--codex");
+        let purge_all = tokens.contains(&"--all");
 
         if use_codex {
             if purge_all {
@@ -194,7 +194,7 @@ impl SlashCommand for SwitchCommand {
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
         let tokens: Vec<&str> = args.split_whitespace().collect();
-        let use_codex = tokens.iter().any(|t| *t == "--codex");
+        let use_codex = tokens.contains(&"--codex");
         let provider = if use_codex {
             claurst_core::accounts::PROVIDER_CODEX
         } else {
