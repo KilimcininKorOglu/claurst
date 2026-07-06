@@ -2,3 +2,5 @@
 // enclosing file (issue #232). Behavior-preserving moves.
 pub(crate) mod provider_options;
 pub(crate) use provider_options::*;
+pub(crate) mod tool_budget;
+pub(crate) use tool_budget::*;
