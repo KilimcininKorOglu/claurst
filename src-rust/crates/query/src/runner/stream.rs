@@ -1,8 +1,6 @@
 // Provider stream-event mapping to the Anthropic event shape.
 // Extracted from lib.rs (issue #232). Behavior-preserving move.
 
-use crate::*;
-
 /// Map a unified `StreamEvent` (from a non-Anthropic provider) onto the
 /// equivalent `AnthropicStreamEvent` so that the TUI stream consumer sees a
 /// single, consistent event type regardless of which provider produced it.

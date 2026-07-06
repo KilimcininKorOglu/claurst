@@ -2,8 +2,6 @@
 //
 // Extracted from lib.rs (issue #232). Behavior-preserving move.
 
-use crate::*;
-
 /// Result returned by `fire_post_sampling_hooks`.
 #[derive(Debug, Default)]
 pub struct PostSamplingHookResult {
