@@ -16,12 +16,9 @@ pub fn todos_path(session_id: &str) -> PathBuf {
     todos_dir().join(format!("{}.json", session_id))
 }
 
-/// Directory holding persisted todo lists (`~/.claurst/todos`).
+/// Directory holding persisted todo lists (`<claurst home>/todos`).
 fn todos_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claurst")
-        .join("todos")
+    claurst_core::config::Settings::config_dir().join("todos")
 }
 
 /// Load the persisted todo list for `session_id`. Returns an empty vec if the
@@ -365,9 +362,13 @@ mod tests {
             path_str.contains("my-session-123"),
             "todos_path should embed the session id"
         );
+        // Route the assertion through the same canonical resolver instead of
+        // hardcoding `.claurst`: the todos file must live under the resolved
+        // claurst home (which may be ~/.claurst, $CLAURST_HOME, or the XDG dir).
+        let home = claurst_core::config::Settings::config_dir();
         assert!(
-            path_str.contains(".claurst"),
-            "todos_path should be under ~/.claurst"
+            path.starts_with(home.join("todos")),
+            "todos_path should be under the claurst home"
         );
         assert!(
             path_str.ends_with(".json"),

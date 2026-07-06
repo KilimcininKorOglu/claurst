@@ -58,7 +58,7 @@ static CRON_STORE: Lazy<Arc<RwLock<HashMap<String, CronTask>>>> =
 
 /// Path to `~/.claurst/scheduled_tasks.json`.
 fn scheduled_tasks_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claurst").join("scheduled_tasks.json"))
+    Some(claurst_core::config::Settings::config_dir().join("scheduled_tasks.json"))
 }
 
 /// Ensure the store has been loaded from disk (once per process).

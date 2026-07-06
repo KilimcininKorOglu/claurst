@@ -30,10 +30,7 @@ fn url_hash(url: &str) -> String {
 
 /// Get the cache directory for web_fetch content.
 fn get_cache_dir() -> PathBuf {
-    let mut dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    dir.push(".claurst");
-    dir.push("web_cache");
-    dir
+    claurst_core::config::Settings::config_dir().join("web_cache")
 }
 
 /// Attempt to load cached extracted content for a URL.
