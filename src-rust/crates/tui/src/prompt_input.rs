@@ -2897,6 +2897,62 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// Purple-gradient endpoints for the ultracode keyword, mirroring how Claude
+/// Code highlights "ultrathink": a light violet fading into a deeper purple.
+const ULTRACODE_GRADIENT_START: (u8, u8, u8) = (168, 85, 247);
+const ULTRACODE_GRADIENT_END: (u8, u8, u8) = (124, 58, 237);
+
+/// Linearly interpolate between two RGB colors at `t` in `[0, 1]`.
+fn ultracode_lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color::Rgb(mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+}
+
+/// Build the styled spans for a single display-line `text`, rendering any
+/// ultracode keyword occurrence ("ultracode" / "ultra code", case-insensitive,
+/// whole-word-ish) with a per-character purple gradient, bold.
+///
+/// VISUAL ONLY: the returned spans concatenate back to exactly `text`, in order,
+/// with identical characters and widths -- only the *style* differs on keyword
+/// characters. Text outside any keyword is emitted as a single span carrying
+/// `base_style`, so cursor positioning, wrapping, and editing are unaffected.
+pub(crate) fn styled_spans_with_ultracode_gradient(
+    text: &str,
+    base_style: Style,
+) -> Vec<Span<'static>> {
+    let ranges = claurst_tools::bundled_skills::ultracode_match_ranges(text);
+    if ranges.is_empty() {
+        return vec![Span::styled(text.to_string(), base_style)];
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut pos = 0usize;
+    for (start, end) in ranges {
+        if start > pos {
+            spans.push(Span::styled(text[pos..start].to_string(), base_style));
+        }
+        let keyword = &text[start..end];
+        let char_count = keyword.chars().count().max(1);
+        for (i, ch) in keyword.chars().enumerate() {
+            let t = if char_count == 1 {
+                0.0
+            } else {
+                i as f32 / (char_count - 1) as f32
+            };
+            let color = ultracode_lerp_rgb(ULTRACODE_GRADIENT_START, ULTRACODE_GRADIENT_END, t);
+            spans.push(Span::styled(
+                ch.to_string(),
+                base_style.fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+        pos = end;
+    }
+    if pos < text.len() {
+        spans.push(Span::styled(text[pos..].to_string(), base_style));
+    }
+    spans
+}
+
 /// Render the prompt input widget in the same low-chrome style as Claurst:
 /// multi-line input rows (one per logical line in the text) plus an accent
 /// underline. Suggestions are rendered by the footer, not as a boxed dropdown
@@ -3102,15 +3158,16 @@ pub fn render_prompt_input(
         let is_first_row_of_first_logical = display_idx == 0 && scroll_offset == 0;
 
         let spans: Vec<Span<'static>> = if is_first_row_of_first_logical {
-            vec![
-                Span::styled(prompt_prefix.clone(), Style::default().fg(accent).add_modifier(Modifier::BOLD)),
-                Span::styled(chunk.clone(), text_style),
-            ]
+            let mut v = vec![Span::styled(
+                prompt_prefix.clone(),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            )];
+            v.extend(styled_spans_with_ultracode_gradient(chunk, text_style));
+            v
         } else {
-            vec![
-                Span::raw(" ".repeat(prefix_width as usize)),
-                Span::styled(chunk.clone(), text_style),
-            ]
+            let mut v = vec![Span::raw(" ".repeat(prefix_width as usize))];
+            v.extend(styled_spans_with_ultracode_gradient(chunk, text_style));
+            v
         };
 
         Paragraph::new(Line::from(spans)).render(
@@ -4622,5 +4679,64 @@ mod tests {
         let mut buf = Buffer::empty(area);
         // Reaching the end of this call without panicking is the assertion.
         render_prompt_input(&s, area, &mut buf, true, InputMode::Default, Color::Blue, false);
+    }
+
+    // ---- ultracode gradient --------------------------------------------
+
+    #[test]
+    fn ultracode_gradient_highlights_keyword_visual_only() {
+        let base = Style::default().fg(Color::White);
+        let text = "please ultracode this";
+        let spans = styled_spans_with_ultracode_gradient(text, base);
+
+        // Visual only: reassembled text is byte-identical to the input.
+        let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(joined, text);
+        // Total display width is unchanged.
+        assert_eq!(
+            UnicodeWidthStr::width(joined.as_str()),
+            UnicodeWidthStr::width(text)
+        );
+
+        // Each keyword character gets its own bold Rgb purple span, and the
+        // per-char colors actually vary across the gradient.
+        let mut bold_rgb = 0usize;
+        let mut colors = std::collections::HashSet::new();
+        for s in &spans {
+            if let Some(Color::Rgb(r, g, b)) = s.style.fg {
+                if s.style.add_modifier.contains(Modifier::BOLD) {
+                    bold_rgb += 1;
+                    colors.insert((r, g, b));
+                }
+            }
+        }
+        assert_eq!(bold_rgb, "ultracode".len(), "one styled span per keyword char");
+        assert!(colors.len() > 1, "gradient should vary per character");
+    }
+
+    #[test]
+    fn ultracode_gradient_untouched_without_keyword() {
+        let base = Style::default().fg(Color::White);
+        let text = "just a normal prompt";
+        let spans = styled_spans_with_ultracode_gradient(text, base);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), text);
+        assert_eq!(spans[0].style.fg, Some(Color::White));
+        assert!(!spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn ultracode_gradient_handles_spaced_and_repeated() {
+        let base = Style::default().fg(Color::White);
+        let text = "ultra code then ultracode again";
+        let spans = styled_spans_with_ultracode_gradient(text, base);
+        let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(joined, text, "text preserved across multiple matches");
+        let bold = spans
+            .iter()
+            .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+            .count();
+        // "ultra code" (10) + "ultracode" (9) styled chars.
+        assert_eq!(bold, "ultra code".len() + "ultracode".len());
     }
 }
