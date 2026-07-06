@@ -37,7 +37,7 @@ Options:
     -Help                   Show this help
     -Version <version>      Install a specific version (e.g., 0.1.0)
     -Binary <path>          Install from a local binary instead of downloading
-    -InstallDir <path>      Override install location (default: %USERPROFILE%\.claurst\bin)
+    -InstallDir <path>      Override install location (default: %LOCALAPPDATA%\Programs\claurst)
     -NoModifyPath           Don't add the install dir to user PATH
 
 Examples:
@@ -68,8 +68,15 @@ function Get-Arch {
 }
 
 # ----- Resolve install directory -----
+# Binary location is independent of the claurst data dir. Default to the
+# per-user programs location (%LOCALAPPDATA%\Programs\claurst), falling back to
+# the user profile when LOCALAPPDATA is unavailable.
 if ([string]::IsNullOrEmpty($InstallDir)) {
-    $InstallDir = Join-Path $env:USERPROFILE ".claurst\bin"
+    if (-not [string]::IsNullOrEmpty($env:LOCALAPPDATA)) {
+        $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\claurst"
+    } else {
+        $InstallDir = Join-Path $env:USERPROFILE ".local\bin"
+    }
 }
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null

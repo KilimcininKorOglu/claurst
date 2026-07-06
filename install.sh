@@ -32,7 +32,7 @@ Options:
     -v, --version <version> Install a specific version (e.g., 0.1.0 or v0.1.0)
     -b, --binary <path>     Install from a local binary instead of downloading
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
-        --install-dir <dir> Override install location (default: ~/.claurst/bin)
+        --install-dir <dir> Override install location (default: ${XDG_BIN_HOME:-~/.local/bin})
 
 Examples:
     curl -fsSL https://github.com/Kuberwastaken/claurst/releases/latest/download/install.sh | bash
@@ -104,7 +104,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-INSTALL_DIR="${install_dir_override:-$HOME/.claurst/bin}"
+INSTALL_DIR="${install_dir_override:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
 mkdir -p "$INSTALL_DIR"
 
 # ----- Detect platform & arch -----
