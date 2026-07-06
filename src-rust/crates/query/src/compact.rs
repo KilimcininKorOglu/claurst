@@ -426,9 +426,101 @@ Format your output as:\n\
 Please provide your summary based on the conversation so far, following this structure and \
 ensuring precision and thoroughness in your response.";
 
+/// The iterative UPDATE compaction prompt (mirrors UPDATE_SUMMARIZATION_PROMPT
+/// from the TypeScript reference). Used when a prior `<compact-summary>` already
+/// exists in the history: instead of re-summarising everything from scratch, the
+/// model folds the NEW activity into the PREVIOUS summary (provided in
+/// `<previous-summary>` tags), preserving the exact same structured sections.
+const UPDATE_COMPACT_PROMPT: &str = "Your task is to UPDATE an existing conversation summary by folding in \
+the new activity since it was written. The previous summary is provided in <previous-summary> tags; the new \
+messages to incorporate are in the <conversation_to_summarize> block.\n\
+\n\
+Do NOT re-summarise from scratch. Instead:\n\
+- PRESERVE all still-relevant information from the previous summary verbatim (file names, code snippets, \
+function signatures, decisions, user messages, error fixes).\n\
+- ADD new progress, decisions, files, errors, and user messages from the new activity.\n\
+- UPDATE the state: move finished items out of Pending Tasks / Current Work; refresh Optional Next Step to \
+reflect what is happening NOW.\n\
+- You may drop something only if it is clearly no longer relevant.\n\
+- Preserve exact file paths, function names, and error messages.\n\
+\n\
+Before providing your final summary, wrap your reasoning in <analysis> tags: reconcile the previous summary \
+with the new messages, note what changed, what completed, and what is now pending.\n\
+\n\
+Your summary MUST use the SAME sections as before:\n\
+\n\
+1. Primary Request and Intent: Preserve existing intent; add new requests if the task expanded.\n\
+2. Key Technical Concepts: Preserve existing; add newly-introduced concepts.\n\
+3. Files and Code Sections: Preserve existing entries; add newly examined/modified/created files with full \
+code snippets where applicable and why each matters.\n\
+4. Errors and fixes: Preserve existing; add new errors and how they were fixed, plus any user feedback.\n\
+5. Problem Solving: Update with newly-solved problems and ongoing troubleshooting.\n\
+6. All user messages: Preserve the existing list AND append every new non-tool-result user message.\n\
+7. Pending Tasks: Update — remove completed tasks, add newly-requested ones.\n\
+8. Current Work: Replace with a precise description of what was being worked on immediately before this \
+summary request.\n\
+9. Optional Next Step: Update to the next step directly in line with the user's most recent explicit request. \
+Include verbatim quotes from the most recent conversation where applicable.\n\
+\n\
+Format your output as:\n\
+\n\
+<analysis>\n\
+[Reconciliation of the previous summary with the new activity]\n\
+</analysis>\n\
+\n\
+<summary>\n\
+1. Primary Request and Intent:\n\
+   [Detailed description]\n\
+\n\
+2. Key Technical Concepts:\n\
+   - [Concept 1]\n\
+\n\
+3. Files and Code Sections:\n\
+   - [File Name 1]\n\
+      - [Why important]\n\
+      - [Changes made, if any]\n\
+      - [Important Code Snippet]\n\
+\n\
+4. Errors and fixes:\n\
+    - [Error]: [How fixed]\n\
+\n\
+5. Problem Solving:\n\
+   [Solved problems and ongoing troubleshooting]\n\
+\n\
+6. All user messages:\n\
+    - [Non-tool-use user message]\n\
+\n\
+7. Pending Tasks:\n\
+   - [Task 1]\n\
+\n\
+8. Current Work:\n\
+   [Precise description of current work]\n\
+\n\
+9. Optional Next Step:\n\
+   [Optional next step]\n\
+</summary>\n\
+\n\
+Please provide the UPDATED summary now, following this structure and preserving the previous summary's content.";
+
 /// Build the compaction prompt, optionally with custom instructions appended.
-pub fn get_compact_prompt(custom_instructions: Option<&str>) -> String {
-    let mut prompt = format!("{}{}", NO_TOOLS_PREAMBLE, BASE_COMPACT_PROMPT);
+///
+/// When `previous_summary` is a non-empty prior summary, the iterative
+/// [`UPDATE_COMPACT_PROMPT`] variant is selected so the model folds the previous
+/// summary forward rather than re-summarising from scratch. Otherwise the
+/// from-scratch [`BASE_COMPACT_PROMPT`] is used.
+pub fn get_compact_prompt(
+    custom_instructions: Option<&str>,
+    previous_summary: Option<&str>,
+) -> String {
+    let is_update = previous_summary
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let base = if is_update {
+        UPDATE_COMPACT_PROMPT
+    } else {
+        BASE_COMPACT_PROMPT
+    };
+    let mut prompt = format!("{}{}", NO_TOOLS_PREAMBLE, base);
 
     if let Some(instructions) = custom_instructions {
         let trimmed = instructions.trim();
@@ -439,6 +531,29 @@ pub fn get_compact_prompt(custom_instructions: Option<&str>) -> String {
 
     prompt.push_str(NO_TOOLS_TRAILER);
     prompt
+}
+
+/// Scan a slice of messages for the most recent `<compact-summary>…</compact-summary>`
+/// block and return its inner text. This is how a compaction detects that a
+/// PRIOR summary already exists in the history (injected by an earlier
+/// compaction), so it can fold it forward via the UPDATE prompt instead of
+/// re-summarising from zero.
+fn extract_previous_summary(messages: &[Message]) -> Option<String> {
+    const OPEN: &str = "<compact-summary>";
+    const CLOSE: &str = "</compact-summary>";
+    // Search newest-first so the most recent summary wins.
+    for msg in messages.iter().rev() {
+        let text = msg.get_all_text();
+        if let (Some(start), Some(end)) = (text.find(OPEN), text.find(CLOSE)) {
+            if end > start {
+                let inner = text[start + OPEN.len()..end].trim();
+                if !inner.is_empty() {
+                    return Some(inner.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Format the raw compact summary by stripping `<analysis>` and cleaning up
@@ -657,6 +772,12 @@ async fn summarise_head(
 
     let head = &messages[..split_at];
 
+    // Iterative UPDATE mode: if a prior <compact-summary> already lives in the
+    // head, fold it forward instead of re-summarising from scratch. Keep the
+    // full previous summary (used later for the files-touched manifest) and a
+    // manifest-stripped copy for the prompt so the model doesn't echo it.
+    let previous_summary = extract_previous_summary(head);
+
     // Build a transcript string for the summarisation prompt.
     let mut transcript = String::new();
     let original_count = head.len();
@@ -668,7 +789,9 @@ async fn summarise_head(
             Role::Assistant => "Assistant",
         };
         let text = msg.get_all_text();
-        if !text.is_empty() {
+        // Skip the prior compact summary itself — it is fed separately in a
+        // <previous-summary> block, so rendering it here would duplicate it.
+        if !text.is_empty() && !text.contains("<compact-summary>") {
             transcript.push_str(&format!("{}: {}\n\n", role_label, text));
         }
         // Also render tool use/result blocks
@@ -698,15 +821,27 @@ async fn summarise_head(
         }
     }
 
-    let compact_prompt = get_compact_prompt(None);
+    // Select the UPDATE prompt variant when a prior summary is present.
+    let compact_prompt = get_compact_prompt(None, previous_summary.as_deref());
 
-    let user_content = format!(
-        "{}\n\n<conversation_to_summarize original_messages=\"{}\" estimated_tokens=\"{}\">\n{}\n</conversation_to_summarize>",
-        compact_prompt,
-        original_count,
-        original_token_estimate,
-        transcript
-    );
+    let user_content = if let Some(prev) = previous_summary.as_deref() {
+        format!(
+            "{}\n\n<previous-summary>\n{}\n</previous-summary>\n\n<conversation_to_summarize original_messages=\"{}\" estimated_tokens=\"{}\">\n{}\n</conversation_to_summarize>",
+            compact_prompt,
+            prev,
+            original_count,
+            original_token_estimate,
+            transcript
+        )
+    } else {
+        format!(
+            "{}\n\n<conversation_to_summarize original_messages=\"{}\" estimated_tokens=\"{}\">\n{}\n</conversation_to_summarize>",
+            compact_prompt,
+            original_count,
+            original_token_estimate,
+            transcript
+        )
+    };
 
     let api_msgs = vec![ApiMessage {
         role: "user".to_string(),
@@ -746,10 +881,13 @@ async fn summarise_head(
 
     // Build the new conversation:
     //   [user: compact summary preamble] [recent tail messages]
+    //
+    // The summary is wrapped in <compact-summary> tags so the NEXT compaction can
+    // detect it (via extract_previous_summary) and fold it forward in UPDATE mode.
     let compact_notice = Message::user(format!(
         "This session is being continued from a previous conversation that ran out of context. \
          The summary below covers the earlier portion of the conversation (originally {} messages, \
-         ~{} tokens).\n\n{}",
+         ~{} tokens).\n\n<compact-summary>\n{}\n</compact-summary>",
         original_count, original_token_estimate, formatted_summary
     ));
 
@@ -1519,14 +1657,14 @@ mod tests {
 
     #[test]
     fn test_compact_prompt_contains_no_tools_preamble() {
-        let prompt = get_compact_prompt(None);
+        let prompt = get_compact_prompt(None, None);
         assert!(prompt.contains("CRITICAL: Respond with TEXT ONLY"));
         assert!(prompt.contains("Do NOT call any tools"));
     }
 
     #[test]
     fn test_compact_prompt_contains_sections() {
-        let prompt = get_compact_prompt(None);
+        let prompt = get_compact_prompt(None, None);
         assert!(prompt.contains("Primary Request and Intent"));
         assert!(prompt.contains("Key Technical Concepts"));
         assert!(prompt.contains("Files and Code Sections"));
@@ -1537,15 +1675,15 @@ mod tests {
 
     #[test]
     fn test_compact_prompt_with_custom_instructions() {
-        let prompt = get_compact_prompt(Some("Focus on Rust type system changes."));
+        let prompt = get_compact_prompt(Some("Focus on Rust type system changes."), None);
         assert!(prompt.contains("Additional Instructions:"));
         assert!(prompt.contains("Focus on Rust type system changes."));
     }
 
     #[test]
     fn test_compact_prompt_empty_custom_instructions_ignored() {
-        let prompt_none = get_compact_prompt(None);
-        let prompt_empty = get_compact_prompt(Some("   "));
+        let prompt_none = get_compact_prompt(None, None);
+        let prompt_empty = get_compact_prompt(Some("   "), None);
         assert_eq!(prompt_none, prompt_empty);
     }
 
