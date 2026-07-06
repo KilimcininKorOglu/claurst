@@ -25,6 +25,7 @@ use claurst_api::{AnthropicStreamEvent, ApiMessage, CreateMessageRequest, Stream
 use claurst_core::error::ClaudeError;
 use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -556,6 +557,199 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
     None
 }
 
+// ---------------------------------------------------------------------------
+// Files-touched manifest (mirrors extractFileOperations / formatFileOperations)
+// ---------------------------------------------------------------------------
+
+/// Set of files the agent read / wrote / edited across a batch of history.
+///
+/// Sorted (`BTreeSet`) so the emitted manifest is deterministic, and unioned
+/// across successive compactions so the agent never forgets what it worked on.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct FileOps {
+    read: BTreeSet<String>,
+    written: BTreeSet<String>,
+    edited: BTreeSet<String>,
+}
+
+impl FileOps {
+    fn is_empty(&self) -> bool {
+        self.read.is_empty() && self.written.is_empty() && self.edited.is_empty()
+    }
+
+    /// Merge another manifest into this one (used to carry a prior manifest
+    /// forward across compactions).
+    fn union(&mut self, other: &FileOps) {
+        self.read.extend(other.read.iter().cloned());
+        self.written.extend(other.written.iter().cloned());
+        self.edited.extend(other.edited.iter().cloned());
+    }
+
+    /// Compute the final `(read_only, modified)` lists: a file that was written
+    /// or edited is "modified" (and dropped from the read-only list even if it
+    /// was also read). Mirrors pi's `computeFileLists`.
+    fn computed_lists(&self) -> (Vec<String>, Vec<String>) {
+        let mut modified: BTreeSet<String> = self.edited.clone();
+        modified.extend(self.written.iter().cloned());
+        let read_only: Vec<String> = self
+            .read
+            .iter()
+            .filter(|f| !modified.contains(*f))
+            .cloned()
+            .collect();
+        (read_only, modified.into_iter().collect())
+    }
+}
+
+/// Cap on how many files to list per bucket in the manifest; the overflow is
+/// summarised as "(+N more)" so the manifest stays bounded across compactions.
+const MAX_MANIFEST_FILES: usize = 20;
+
+/// Header line that introduces the files-touched manifest inside a summary.
+const FILES_TOUCHED_HEADER: &str = "Files touched:";
+
+/// Delimiter between file paths in a manifest line. A ` | ` separator keeps the
+/// manifest re-parseable (paths effectively never contain it).
+const MANIFEST_SEP: &str = " | ";
+
+/// Extract file read/write/edit operations from the tool calls in `messages`.
+///
+/// Classifies by tool name (`Read` → read, `Write` → written, `Edit` /
+/// `BatchEdit` / `NotebookEdit` / `ApplyPatch` → edited) and pulls the path from
+/// the tool input (`file_path`, falling back to `path` / `notebook_path`, and
+/// the per-edit `file_path`s inside a `BatchEdit`).
+fn extract_file_operations(messages: &[Message]) -> FileOps {
+    let mut ops = FileOps::default();
+    for msg in messages {
+        if let MessageContent::Blocks(blocks) = &msg.content {
+            for block in blocks {
+                if let ContentBlock::ToolUse { name, input, .. } = block {
+                    collect_file_op(name, input, &mut ops);
+                }
+            }
+        }
+    }
+    ops
+}
+
+/// Pull the file path(s) touched by a single tool call into `ops`.
+fn collect_file_op(name: &str, input: &Value, ops: &mut FileOps) {
+    use claurst_core::constants::{
+        TOOL_NAME_APPLY_PATCH, TOOL_NAME_BATCH_EDIT, TOOL_NAME_FILE_EDIT, TOOL_NAME_FILE_READ,
+        TOOL_NAME_FILE_WRITE, TOOL_NAME_NOTEBOOK_EDIT,
+    };
+
+    // BatchEdit carries an array of edits, each with its own file_path.
+    if name == TOOL_NAME_BATCH_EDIT {
+        if let Some(edits) = input.get("edits").and_then(|v| v.as_array()) {
+            for edit in edits {
+                if let Some(p) = edit.get("file_path").and_then(|v| v.as_str()) {
+                    ops.edited.insert(p.to_string());
+                }
+            }
+        }
+        return;
+    }
+
+    let path = input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .or_else(|| input.get("path").and_then(|v| v.as_str()))
+        .or_else(|| input.get("notebook_path").and_then(|v| v.as_str()));
+    let path = match path {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => return,
+    };
+
+    match name {
+        TOOL_NAME_FILE_READ => {
+            ops.read.insert(path);
+        }
+        TOOL_NAME_FILE_WRITE => {
+            ops.written.insert(path);
+        }
+        TOOL_NAME_FILE_EDIT | TOOL_NAME_NOTEBOOK_EDIT | TOOL_NAME_APPLY_PATCH => {
+            ops.edited.insert(path);
+        }
+        _ => {}
+    }
+}
+
+/// Render one bounded, capped manifest line from a sorted file list.
+fn format_manifest_line(files: &[String]) -> String {
+    if files.len() <= MAX_MANIFEST_FILES {
+        files.join(MANIFEST_SEP)
+    } else {
+        let shown = files[..MAX_MANIFEST_FILES].join(MANIFEST_SEP);
+        format!("{} (+{} more)", shown, files.len() - MAX_MANIFEST_FILES)
+    }
+}
+
+/// Format a compact "Files touched" manifest to append to a summary, or an
+/// empty string when no files were touched. Bounded via [`MAX_MANIFEST_FILES`].
+fn format_files_touched(ops: &FileOps) -> String {
+    let (read_only, modified) = ops.computed_lists();
+    if read_only.is_empty() && modified.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("\n\n{}\n", FILES_TOUCHED_HEADER);
+    if !modified.is_empty() {
+        out.push_str(&format!("Modified: {}\n", format_manifest_line(&modified)));
+    }
+    if !read_only.is_empty() {
+        out.push_str(&format!("Read: {}\n", format_manifest_line(&read_only)));
+    }
+    out.trim_end().to_string()
+}
+
+/// Split a manifest line's value back into paths, dropping any `(+N more)` tail.
+fn split_manifest_line(rest: &str) -> impl Iterator<Item = String> + '_ {
+    let core = match rest.rfind("(+") {
+        Some(idx) => rest[..idx].trim_end(),
+        None => rest.trim(),
+    };
+    core.split(MANIFEST_SEP)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Parse a previously-emitted "Files touched" manifest out of a summary so it
+/// can be carried forward and unioned with the current batch. Only the capped
+/// (visible) entries survive — that is what keeps the manifest bounded.
+fn parse_files_touched(summary: &str) -> FileOps {
+    let mut ops = FileOps::default();
+    let mut in_section = false;
+    for line in summary.lines() {
+        let trimmed = line.trim();
+        if trimmed == FILES_TOUCHED_HEADER {
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("Modified:") {
+            ops.edited.extend(split_manifest_line(rest));
+        } else if let Some(rest) = trimmed.strip_prefix("Read:") {
+            ops.read.extend(split_manifest_line(rest));
+        } else {
+            // Any other line (blank or the start of a new section) ends it.
+            in_section = false;
+        }
+    }
+    ops
+}
+
+/// Drop a trailing "Files touched" manifest from a summary. Used to keep the
+/// prior manifest out of the UPDATE prompt (it is re-appended deterministically
+/// from the parsed + unioned `FileOps`, so echoing it would only risk drift).
+fn strip_files_touched_section(summary: &str) -> String {
+    match summary.find(FILES_TOUCHED_HEADER) {
+        Some(idx) => summary[..idx].trim_end().to_string(),
+        None => summary.to_string(),
+    }
+}
+
 /// Format the raw compact summary by stripping `<analysis>` and cleaning up
 /// `<summary>` XML tags.  Mirrors `formatCompactSummary` from TypeScript
 /// prompt.ts.
@@ -821,10 +1015,17 @@ async fn summarise_head(
         }
     }
 
-    // Select the UPDATE prompt variant when a prior summary is present.
-    let compact_prompt = get_compact_prompt(None, previous_summary.as_deref());
+    // Feed the prior summary WITHOUT its files-touched manifest: the manifest is
+    // re-appended deterministically below (parsed + unioned), so echoing it in
+    // the prompt would only risk the model drifting the file list.
+    let previous_summary_for_prompt = previous_summary
+        .as_deref()
+        .map(strip_files_touched_section);
 
-    let user_content = if let Some(prev) = previous_summary.as_deref() {
+    // Select the UPDATE prompt variant when a prior summary is present.
+    let compact_prompt = get_compact_prompt(None, previous_summary_for_prompt.as_deref());
+
+    let user_content = if let Some(prev) = previous_summary_for_prompt.as_deref() {
         format!(
             "{}\n\n<previous-summary>\n{}\n</previous-summary>\n\n<conversation_to_summarize original_messages=\"{}\" estimated_tokens=\"{}\">\n{}\n</conversation_to_summarize>",
             compact_prompt,
@@ -878,6 +1079,20 @@ async fn summarise_head(
     }
 
     let formatted_summary = format_compact_summary(&raw_summary);
+
+    // Files-touched manifest: files this batch read/wrote/edited, unioned with
+    // any manifest carried in the prior summary so the agent doesn't forget what
+    // it worked on across successive compactions. Appended deterministically
+    // (bounded via MAX_MANIFEST_FILES) rather than trusting the model.
+    let mut file_ops = extract_file_operations(head);
+    if let Some(prev) = &previous_summary {
+        file_ops.union(&parse_files_touched(prev));
+    }
+    let formatted_summary = if file_ops.is_empty() {
+        formatted_summary
+    } else {
+        format!("{}{}", formatted_summary, format_files_touched(&file_ops))
+    };
 
     // Build the new conversation:
     //   [user: compact summary preamble] [recent tail messages]
