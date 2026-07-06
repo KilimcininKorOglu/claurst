@@ -10,3 +10,5 @@ pub(crate) mod prompt;
 pub(crate) use prompt::*;
 pub(crate) mod stream;
 pub(crate) use stream::*;
+pub(crate) mod hooks;
+pub use hooks::*;
