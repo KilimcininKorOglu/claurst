@@ -63,7 +63,7 @@ use claurst_api::{
 use claurst_core::config::Config;
 use claurst_core::cost::CostTracker;
 use claurst_core::error::ClaudeError;
-use claurst_core::types::{ContentBlock, Message, ToolResultContent, UsageInfo};
+use claurst_core::types::{ContentBlock, Message, Role, ToolResultContent, UsageInfo};
 use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde_json::Value;
 use std::sync::Arc;
@@ -293,6 +293,25 @@ const MAX_STEPS_DEGRADATION_MSG: &str =
 const TOOL_CANCELLED_MSG: &str = "Tool execution was cancelled by the user before it completed.";
 
 // Spinner verbs are imported from claurst_core::spinner
+
+/// Ultracode submit-time activation: if the most recent user message in
+/// `messages` contains the ultracode keyword (whole-word-ish, case-insensitive),
+/// return the per-turn system-prompt addendum that puts the agent into ultracode
+/// mode for this turn. Otherwise return `None`.
+///
+/// The addendum text is sourced from the single bundled `ultracode` skill
+/// definition (see `claurst_tools::bundled_skills`), so this never duplicates
+/// the operating procedure — it is the same source of truth as `/ultracode`.
+/// Checking only the *last* user message keeps the mode scoped to the turn that
+/// actually asked for it (a later plain turn deactivates it automatically).
+fn ultracode_addendum_for_messages(messages: &[Message]) -> Option<String> {
+    let last_user = messages.iter().rev().find(|m| m.role == Role::User)?;
+    if claurst_tools::bundled_skills::text_triggers_ultracode(&last_user.get_all_text()) {
+        claurst_tools::bundled_skills::ultracode_system_prompt_addendum()
+    } else {
+        None
+    }
+}
 
 /// Run the agentic query loop.
 ///
@@ -631,6 +650,19 @@ pub async fn run_query_loop(
                         None => addendum,
                     });
                 }
+            }
+
+            // Ultracode mode (keyword-activated). When the current turn's user
+            // message contains the ultracode keyword, inject the bundled
+            // `ultracode` skill's operating procedure as a per-turn addendum
+            // (same source of truth as `/ultracode`). Applied fresh each turn so
+            // it naturally deactivates once the keyword turn ends. Composes with
+            // goal mode: a keyword turn under an active goal gets both addenda.
+            if let Some(uc_addendum) = ultracode_addendum_for_messages(messages.as_slice()) {
+                patched.append_system_prompt = Some(match patched.append_system_prompt.take() {
+                    Some(existing) => format!("{}\n{}", existing, uc_addendum),
+                    None => uc_addendum,
+                });
             }
 
             build_system_prompt(&patched)
@@ -2924,5 +2956,58 @@ mod tests {
             claurst_core::GoalStatus::Paused,
             "runaway goal must be persisted as paused"
         );
+    }
+
+    // ---- ultracode activation -------------------------------------------
+
+    #[test]
+    fn ultracode_addendum_present_when_keyword_in_last_user_message() {
+        let msgs = vec![Message::user("please ultracode this refactor")];
+        let add = ultracode_addendum_for_messages(&msgs).expect("addendum expected");
+        assert!(add.contains("Ultracode Mode"));
+    }
+
+    #[test]
+    fn ultracode_addendum_absent_without_keyword() {
+        let msgs = vec![Message::user("please refactor this module")];
+        assert!(ultracode_addendum_for_messages(&msgs).is_none());
+    }
+
+    #[test]
+    fn ultracode_addendum_checks_only_the_last_user_message() {
+        // Keyword in an earlier turn does not keep ultracode active on a later
+        // plain turn.
+        let msgs = vec![
+            Message::user("ultracode: kick things off"),
+            Message::assistant("working on it"),
+            Message::user("now just tidy up the docs"),
+        ];
+        assert!(ultracode_addendum_for_messages(&msgs).is_none());
+    }
+
+    #[test]
+    fn ultracode_addendum_flows_into_built_system_prompt() {
+        // Mirrors the loop wiring: the addendum is threaded through
+        // `append_system_prompt` into the assembled system prompt.
+        let msgs = vec![Message::user("ultracode: audit the query loop")];
+        let addendum = ultracode_addendum_for_messages(&msgs).expect("addendum expected");
+        let opts = claurst_core::system_prompt::SystemPromptOptions {
+            append_system_prompt: Some(addendum),
+            skip_env_info: true,
+            ..Default::default()
+        };
+        let prompt = claurst_core::system_prompt::build_system_prompt(&opts);
+        assert!(prompt.contains("Ultracode Mode"));
+        assert!(prompt.contains("TeamCreate"));
+
+        // Absent path: no keyword -> no ultracode text in the built prompt.
+        assert!(ultracode_addendum_for_messages(&[Message::user("hi there")]).is_none());
+        let plain = claurst_core::system_prompt::build_system_prompt(
+            &claurst_core::system_prompt::SystemPromptOptions {
+                skip_env_info: true,
+                ..Default::default()
+            },
+        );
+        assert!(!plain.contains("Ultracode Mode"));
     }
 }
