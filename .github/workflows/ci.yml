@@ -63,12 +63,14 @@ jobs:
         # parallel execution, flaking non-deterministically across runners.
         run: cargo test --workspace --locked -- --test-threads=1
 
-      # Advisory for now: the codebase has pre-existing clippy warnings and
-      # rustfmt drift. Flip continue-on-error off once they are cleaned up.
-      - name: Clippy (advisory)
+      # Enforced (#227): clippy is clean under `-D warnings`, aside from a few
+      # documented crate-level / targeted `#[allow]`s for noisy or risky lints.
+      # rustfmt stays advisory below: the tree is intentionally not fmt-clean
+      # (CRLF-terminated files and pre-existing drift), so running fmt --check
+      # here is informational only.
+      - name: Clippy
         if: runner.os == 'Linux'
         working-directory: src-rust
-        continue-on-error: true
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: rustfmt (advisory)

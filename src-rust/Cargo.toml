@@ -34,6 +34,10 @@ async-stream = "0.3"
 # de symboles (openssl-sys ↔ boring-sys). aws-lc-rs préfixe ses symboles.
 reqwest = { version = "0.13", features = ["json", "stream", "rustls", "multipart", "form", "query"], default-features = false }
 # wreq = client BoringSSL avec impersonation TLS (profil Bun) — chemin Anthropic uniquement.
+# TODO(#227): pinned to the 6.x / 3.x release-candidate line. No stable (non-rc)
+# release exists yet — the latest stable is wreq 5.3.0 / wreq-util 2.2.6, a major
+# version behind that drops the TLS-impersonation API this crate relies on.
+# Revisit unpinning once wreq 6.0.0 / wreq-util 3.0.0 ship a stable release.
 wreq = { version = "=6.0.0-rc.29", features = ["json", "stream"] }
 wreq-util = "=3.0.0-rc.12"
 
