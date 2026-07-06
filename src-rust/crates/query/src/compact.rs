@@ -5,9 +5,10 @@
 // autoCompact / compact service behaviour.
 //
 // Strategy:
-//   1. Keep the last KEEP_RECENT_MESSAGES messages verbatim.
-//   2. Group messages by API round (same assistant message ID) and summarise
-//      all groups except the most recent KEEP_RECENT_MESSAGES worth.
+//   1. Keep as many recent messages as fit a `KEEP_RECENT_TOKENS` budget
+//      verbatim (mirrors pi's `keepRecentTokens`), rather than a fixed message
+//      COUNT. The cut is snapped to a tool_use↔tool_result-safe round boundary.
+//   2. Summarise everything older than that recent tail.
 //   3. Replace the head of the conversation with a single synthetic
 //      <compact-summary> user message, followed by the recent tail.
 //
@@ -41,8 +42,15 @@ const WARNING_THRESHOLD_BUFFER_TOKENS: u64 = 20_000;
 /// Fraction of the context window at which auto-compact triggers.
 const AUTOCOMPACT_TRIGGER_FRACTION: f64 = 0.90;
 
-/// How many recent messages to preserve verbatim after compaction.
-const KEEP_RECENT_MESSAGES: usize = 10;
+/// Token budget for the recent tail we preserve verbatim after compaction.
+///
+/// Instead of keeping a fixed COUNT of recent messages, we keep as many recent
+/// messages as fit within this many tokens (mirrors pi's `keepRecentTokens`,
+/// which defaults to 20k). Keeping the tail token-budgeted means a handful of
+/// huge tool results don't blow the kept context, and many tiny turns aren't
+/// prematurely summarised. The cut is always snapped to a
+/// tool_use↔tool_result-safe boundary via [`compute_keep_split_index`].
+const KEEP_RECENT_TOKENS: u64 = 16_000;
 
 /// Max consecutive auto-compact failures before giving up (circuit breaker).
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -731,6 +739,55 @@ async fn summarise_head(
     Ok(new_messages)
 }
 
+/// Does this message carry any `tool_result` blocks?
+///
+/// A `tool_result` always answers the `tool_use` in the message *immediately
+/// before* it, so a compaction cut must never land on such a message: doing so
+/// would orphan the result from its call in the kept tail (and, symmetrically,
+/// leave a dangling `tool_use` at the end of the summarised head).
+fn message_has_tool_result(msg: &Message) -> bool {
+    match &msg.content {
+        MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolResult { .. })),
+        _ => false,
+    }
+}
+
+/// Snap a raw keep-index back to a pairing-safe round boundary.
+///
+/// A cut at index `k` keeps `messages[k..]` verbatim. It is pairing-safe iff
+/// `messages[k]` carries no `tool_result` blocks (see [`message_has_tool_result`]).
+/// We walk *backwards* (keeping MORE — never less — than the raw budget asked
+/// for) until we land on a safe boundary. This preserves the round-aligned,
+/// tool_use↔tool_result-paired history compaction must emit, independent of the
+/// separate `sanitize_history` repair pass.
+fn snap_to_pairing_boundary(messages: &[Message], idx: usize) -> usize {
+    let len = messages.len();
+    // Keep-nothing (idx == len): the tail is empty, so there is no boundary
+    // message that could be orphaned — leave it as-is.
+    let mut idx = idx.min(len);
+    while idx > 0 && idx < len && message_has_tool_result(&messages[idx]) {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Decide how much of the recent tail to preserve verbatim, driven by a TOKEN
+/// budget rather than a fixed message count.
+///
+/// Returns the split index: everything before it is summarised, everything at or
+/// after it is kept verbatim. Larger `keep_recent_tokens` keeps more messages;
+/// smaller keeps fewer. The index is snapped to a tool_use↔tool_result-safe
+/// boundary so pairing is never broken.
+fn compute_keep_split_index(messages: &[Message], keep_recent_tokens: u64) -> usize {
+    if messages.is_empty() {
+        return 0;
+    }
+    let raw = calculate_messages_to_keep_index(messages, keep_recent_tokens);
+    snap_to_pairing_boundary(messages, raw)
+}
+
 /// Compact `messages` in-place, replacing the head with a summary.
 /// Returns the new messages vector on success.
 pub async fn compact_conversation(
@@ -740,22 +797,24 @@ pub async fn compact_conversation(
 ) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
 
-    if total <= KEEP_RECENT_MESSAGES + 1 {
+    // Token-budget keep: summarise everything older than the most recent
+    // ~KEEP_RECENT_TOKENS worth of messages, cut on a pairing-safe boundary.
+    let split_at = compute_keep_split_index(messages, KEEP_RECENT_TOKENS);
+
+    if split_at == 0 {
         debug!(
             total,
-            "Too few messages to compact – keeping everything"
+            keep_recent_tokens = KEEP_RECENT_TOKENS,
+            "Whole conversation fits the keep-recent budget – keeping everything"
         );
         return Ok(messages.to_vec());
     }
 
-    // Split: summarise everything except the most recent KEEP_RECENT_MESSAGES.
-    let split_at = total.saturating_sub(KEEP_RECENT_MESSAGES);
-
     info!(
         total,
         split_at,
-        keep = KEEP_RECENT_MESSAGES,
-        "Compacting conversation"
+        keep_recent_tokens = KEEP_RECENT_TOKENS,
+        "Compacting conversation (token-budget keep)"
     );
 
     // Use a generous token budget for the summary (20k mirrors TypeScript MAX_OUTPUT_TOKENS_FOR_SUMMARY)
@@ -985,9 +1044,10 @@ pub async fn reactive_compact(
     // Phase 2: strip images before the compact API call.
     let stripped = strip_images(messages.clone());
 
-    // Phase 1 + 3: summarise the head (all but the most recent KEEP_RECENT_MESSAGES),
-    // then replace the old head with the summary message.
-    let split_at = total.saturating_sub(KEEP_RECENT_MESSAGES);
+    // Phase 1 + 3: summarise the head (everything older than the ~KEEP_RECENT_TOKENS
+    // recent tail, cut on a pairing-safe boundary), then replace the old head with
+    // the summary message.
+    let split_at = compute_keep_split_index(&stripped, KEEP_RECENT_TOKENS);
     if split_at == 0 {
         // Too few messages; nothing to summarise.
         return Ok(CompactResult {
