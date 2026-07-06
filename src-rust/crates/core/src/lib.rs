@@ -90,6 +90,7 @@ pub use skill_discovery::{DiscoveredSkill, discover_skills, parse_skill_file};
 pub use cost::CostTracker;
 pub use history::ConversationSession;
 pub use feature_flags::FeatureFlagManager;
+pub use paths::claurst_home;
 pub use permissions::{
     AutoPermissionHandler, InteractivePermissionHandler,
     ManagedAutoPermissionHandler, ManagedInteractivePermissionHandler,
@@ -1572,11 +1573,45 @@ pub mod config {
     }
 
     impl Settings {
-        /// The per-user configuration directory (`~/.claurst`).
+        /// The canonical per-user claurst home directory — the single source of
+        /// truth for where claurst keeps everything (settings, sessions,
+        /// accounts, skills, …). Every subdirectory (`config_dir().join("sessions")`,
+        /// `.join("accounts")`, …) lives under this one root.
+        ///
+        /// Resolution precedence (see issue #207 — XDG Base Directory support,
+        /// kept fully back-compatible so existing installs are untouched):
+        ///
+        /// 1. **`$CLAURST_HOME`** — if set and non-empty, used verbatim.
+        /// 2. **Legacy `~/.claurst`** — if that directory already exists, it is
+        ///    reused so existing users need no migration.
+        /// 3. **XDG** — `$XDG_CONFIG_HOME/claurst` when `$XDG_CONFIG_HOME` is set
+        ///    (and absolute, per the spec), otherwise `~/.config/claurst`. Fresh
+        ///    installs land here.
         pub fn config_dir() -> PathBuf {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".claurst")
+            // 1. Explicit override wins, used verbatim.
+            if let Some(explicit) = std::env::var_os("CLAURST_HOME") {
+                if !explicit.is_empty() {
+                    return PathBuf::from(explicit);
+                }
+            }
+
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+
+            // 2. Back-compat: an existing legacy `~/.claurst` is used as-is.
+            let legacy = home.join(".claurst");
+            if legacy.is_dir() {
+                return legacy;
+            }
+
+            // 3. XDG config location for fresh installs.
+            if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+                let xdg = PathBuf::from(xdg);
+                // Per the XDG spec a relative $XDG_CONFIG_HOME must be ignored.
+                if xdg.is_absolute() {
+                    return xdg.join("claurst");
+                }
+            }
+            home.join(".config").join("claurst")
         }
 
         /// Full path to the global settings JSON file.
@@ -4129,6 +4164,7 @@ pub mod prompt_history;
 pub mod bash_classifier;
 pub mod ps_classifier;
 pub mod mcp_trust;
+pub mod paths;
 
 // ---------------------------------------------------------------------------
 // tasks module — background task registry
