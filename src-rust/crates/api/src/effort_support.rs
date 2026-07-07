@@ -107,16 +107,43 @@ impl ModelFacts {
     fn resolve(provider: &str, model: &str, registry: Option<&ModelRegistry>) -> Self {
         let bare = bare_model(model);
 
-        // The provider-level npm (from the provider entry), used when the model
-        // has no per-model override — resolves even for a model not in the
+        // The provider whose catalog entry we actually matched. Usually the
+        // connected provider, but the fallback below may resolve a model to a
+        // different provider that truly owns it in the catalog.
+        let mut matched_provider = provider.to_string();
+
+        // Try the id as given, then its bare (prefix-stripped) form, under the
+        // connected provider.
+        let mut entry =
+            registry.and_then(|r| r.get(provider, model).or_else(|| r.get(provider, bare)));
+
+        // Fallback: some providers surface a model whose canonical catalog entry
+        // lives under a DIFFERENT provider key. The clearest case is the
+        // `openai-codex` (ChatGPT-subscription) endpoint, which serves OpenAI's
+        // `gpt-5.5` — but the catalog lists that model only under `openai`, and
+        // there is no `codex`/`openai-codex` provider at all. A direct
+        // `get("openai-codex", "gpt-5.5")` therefore misses, so we resolve the
+        // model's canonical entry by its bare id. Without this the model's
+        // `release_date` was lost, the date-gated `none`/`xhigh` reasoning tiers
+        // silently vanished, and the ladder collapsed to Low/Medium/High.
+        if entry.is_none() {
+            if let Some(r) = registry {
+                if let Some(canon) = r.find_provider_for_model(bare) {
+                    let canon_str = canon.to_string();
+                    if let Some(e) = r.get(&canon_str, bare) {
+                        matched_provider = canon_str;
+                        entry = Some(e);
+                    }
+                }
+            }
+        }
+
+        // The provider-level npm (from the matched provider entry), used when the
+        // model has no per-model override — resolves even for a model not in the
         // catalog, as long as the provider is known.
         let provider_npm = registry
-            .and_then(|r| r.provider(canonical_snapshot_key(provider)))
+            .and_then(|r| r.provider(canonical_snapshot_key(&matched_provider)))
             .and_then(|p| p.npm.clone());
-
-        // Try the id as given, then its bare (prefix-stripped) form.
-        let entry =
-            registry.and_then(|r| r.get(provider, model).or_else(|| r.get(provider, bare)));
 
         if let Some(e) = entry {
             let npm = e
@@ -213,6 +240,32 @@ mod tests {
         assert_eq!(
             supported_efforts("google", "gemini-2.5-pro", Some(&reg)),
             vec![High, Max, Ultracode]
+        );
+    }
+
+    // Regression: a model connected under a provider ALIAS that isn't a catalog
+    // key (the `openai-codex` ChatGPT endpoint serves OpenAI's `gpt-5.5`) must
+    // still resolve the model's real catalog facts — otherwise its release_date
+    // is lost and the date-gated `none`/`xhigh` tiers collapse to Low/Medium/High.
+    #[test]
+    fn codex_provider_alias_resolves_full_openai_ladder() {
+        use EffortLevel::*;
+        let reg = ModelRegistry::new();
+        // openai-codex is not a catalog provider; gpt-5.5 lives under openai.
+        assert_eq!(
+            supported_efforts("openai-codex", "gpt-5.5", Some(&reg)),
+            vec![None, Low, Medium, High, XHigh, Ultracode],
+            "codex-connected gpt-5.5 must expose the same tiers as native openai"
+        );
+        // Prefixed form (openai-codex/gpt-5.5) must resolve identically.
+        assert_eq!(
+            supported_efforts("openai-codex", "openai-codex/gpt-5.5", Some(&reg)),
+            vec![None, Low, Medium, High, XHigh, Ultracode]
+        );
+        // The picker path (provider inferred from a prefixed id) too.
+        assert_eq!(
+            variant_ladder("openai-codex", "gpt-5.5", Some(&reg)),
+            vec![None, Low, Medium, High, XHigh]
         );
     }
 
