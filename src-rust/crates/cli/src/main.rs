@@ -2102,9 +2102,20 @@ async fn run_interactive(
             None
         };
 
+        // Repaint cadence. The loop already polls at ~60fps for the streaming
+        // spinner; the effort picker's animated ultracode spectrum can be open
+        // while idle, so cap the poll interval to at least ~30fps whenever it is
+        // showing (frame_count advances every draw, moving the spectrum). This is
+        // a no-op unless the base cadence is ever relaxed, and it does NOT tick
+        // faster when the picker is closed.
+        let poll_timeout = if app.effort_picker.wants_animation() {
+            Duration::from_millis(16).min(Duration::from_millis(33))
+        } else {
+            Duration::from_millis(16)
+        };
         let evt_opt: Option<Event> = if let Some(e) = synthetic_event {
             Some(e)
-        } else if crossterm::event::poll(Duration::from_millis(16))? {
+        } else if crossterm::event::poll(poll_timeout)? {
             Some(event::read()?)
         } else {
             None
