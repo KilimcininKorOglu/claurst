@@ -839,10 +839,10 @@ pub struct App {
     pub speech_mode: Option<String>,
     /// Speech mode intensity: "lite", "full", "ultra".
     pub speech_level: String,
-    /// Current agent mode name: "build", "plan", "explore", etc.
+    /// Current agent mode name: "build", "plan".
     pub agent_mode: Option<String>,
     /// Accent color derived from the current agent mode.
-    /// Build = pink, Plan = blue, Explore = amber.
+    /// Build = pink, Plan = blue.
     pub accent_color: Color,
     /// Set by `cycle_agent_mode` so the main loop can update the query config
     /// and tool list to match the newly-selected agent.
@@ -1292,14 +1292,11 @@ Move immutable borrow out of scope first, then take mutable. Good good good afte
 pub const ACCENT_BUILD: Color = Color::Rgb(233, 30, 99);
 /// Accent color for plan mode (blue).
 pub const ACCENT_PLAN: Color = Color::Rgb(66, 135, 245);
-/// Accent color for explore mode (amber).
-pub const ACCENT_EXPLORE: Color = Color::Rgb(245, 189, 66);
 
 /// Return the accent color for a given agent mode name.
 pub fn accent_for_mode(mode: Option<&str>) -> Color {
     match mode {
         Some("plan") => ACCENT_PLAN,
-        Some("explore") => ACCENT_EXPLORE,
         _ => ACCENT_BUILD,
     }
 }
@@ -1958,11 +1955,11 @@ impl App {
         );
     }
 
-    /// Cycle to the next agent mode: build → plan → explore → build.
+    /// Cycle to the next agent mode: build → plan → build.
     /// Sets `agent_mode_changed` so the main loop can update the query config
     /// and tool list accordingly.
     pub fn cycle_agent_mode(&mut self) {
-        const MODES: &[&str] = &["build", "plan", "explore"];
+        const MODES: &[&str] = &["build", "plan"];
         let current = self.agent_mode.as_deref().unwrap_or("build");
         let idx = MODES.iter().position(|&m| m == current).unwrap_or(0);
         let next = MODES[(idx + 1) % MODES.len()];
@@ -1976,7 +1973,6 @@ impl App {
         let label = match next {
             "build" => "Build",
             "plan" => "Plan",
-            "explore" => "Explore",
             other => other,
         };
         self.status_message = Some(format!("Switched to {} mode.", label));
@@ -4488,7 +4484,7 @@ impl App {
                     self.prompt_input.accept_suggestion();
                     self.refresh_prompt_input();
                 } else if !self.is_streaming && self.prompt_input.is_empty() {
-                    // Cycle agent mode: build → plan → explore → build
+                    // Cycle agent mode: build → plan → build
                     self.cycle_agent_mode();
                     self.rustle_look_down();
                 }

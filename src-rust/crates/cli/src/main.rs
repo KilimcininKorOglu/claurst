@@ -2893,7 +2893,7 @@ async fn run_interactive(
                     if !app.model_name.is_empty() {
                         session.model = app.model_name.clone();
                     }
-                    // Handle agent mode change (Tab key cycles build→plan→explore)
+                    // Handle agent mode change (Tab key cycles build→plan)
                     if app.agent_mode_changed {
                         app.agent_mode_changed = false;
                         let mode = app.agent_mode.as_deref().unwrap_or("build");

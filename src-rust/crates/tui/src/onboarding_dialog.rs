@@ -340,7 +340,7 @@ fn render_keybindings_page(frame: &mut Frame, area: Rect) {
         kb("Enter", "send message"),
         kb("Shift+Enter", "newline"),
         kb("Ctrl+C", "interrupt / cancel"),
-        kb("Tab", "cycle mode (build/plan/explore)"),
+        kb("Tab", "cycle mode (build/plan)"),
         kb("\u{2191}\u{2193}", "history"),
         Line::from(""),
         Line::from(Span::styled("  Navigation", Style::default().fg(pink).add_modifier(Modifier::BOLD))),
