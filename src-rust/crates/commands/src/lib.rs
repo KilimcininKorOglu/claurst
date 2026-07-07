@@ -1313,16 +1313,14 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(FastCommand),
         Box::new(ThinkBackCommand),
         Box::new(ThinkBackPlayCommand),
-        Box::new(FeedbackCommand),
         Box::new(ColorSetCommand),
         // New commands: teleport, btw, ctx-viz, sandbox-toggle
         Box::new(TeleportCommand),
         Box::new(BtwCommand),
         Box::new(CtxVizCommand),
         Box::new(SandboxToggleCommand),
-        // Advisor and Slack integration
+        // Advisor
         Box::new(AdvisorCommand),
-        Box::new(InstallSlackAppCommand),
         // Diagnostics / analysis
         Box::new(HeapdumpCommand),
         Box::new(InsightsCommand),

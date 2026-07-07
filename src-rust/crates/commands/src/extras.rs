@@ -1,4 +1,4 @@
-// Assorted commands: `/advisor`, `/install-slack-app`, `/fast`, `/feedback`, `/color` (full).
+// Assorted commands: `/advisor`, `/fast`, `/color` (full).
 //
 // Extracted from lib.rs (issue #232). Behavior-preserving move.
 
@@ -6,9 +6,7 @@ use super::*;
 use async_trait::async_trait;
 
 pub struct AdvisorCommand;
-pub struct InstallSlackAppCommand;
 pub struct FastCommand;
-pub struct FeedbackCommand;
 pub struct ColorSetCommand;
 
 // ---- /advisor ------------------------------------------------------------
@@ -72,37 +70,6 @@ impl SlashCommand for AdvisorCommand {
                 }
             }
         }
-    }
-}
-
-// ---- /install-slack-app --------------------------------------------------
-
-#[async_trait]
-impl SlashCommand for InstallSlackAppCommand {
-    fn name(&self) -> &str { "install-slack-app" }
-    fn description(&self) -> &str { "Install the Claurst Slack integration" }
-    fn help(&self) -> &str {
-        "Usage: /install-slack-app\n\n\
-         Opens instructions for installing the Claurst Slack app.\n\
-         Requires a Claurst for Enterprise subscription."
-    }
-
-    async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        CommandResult::Message(
-            "Claurst Slack Integration\n\
-             ─────────────────────────────\n\
-             To install Claurst in Slack:\n\n\
-             1. Ensure you have a Claurst for Enterprise subscription\n\
-             2. Visit your Anthropic Console → Integrations → Slack\n\
-             3. Click \"Add to Slack\" and authorize the app\n\
-             4. Invite @Claurst to any channel with: /invite @Claurst\n\n\
-             In Slack, you can then:\n\
-             • Mention @Claurst to ask questions in any channel\n\
-             • Use /claude for direct commands\n\
-             • Share code snippets for review\n\n\
-             See: https://docs.anthropic.com/claude-code/slack"
-                .to_string(),
-        )
     }
 }
 
@@ -175,44 +142,6 @@ impl SlashCommand for FastCommand {
                     restored_model
                 ),
             )
-        }
-    }
-}
-
-// ---- /feedback (standalone, supplements BugCommand alias) ----------------
-
-#[async_trait]
-impl SlashCommand for FeedbackCommand {
-    fn name(&self) -> &str { "report" }
-    fn aliases(&self) -> Vec<&str> { vec![] }
-    fn description(&self) -> &str { "Open the GitHub issues page to report a bug or request a feature" }
-    fn hidden(&self) -> bool { true } // surfaced via BugCommand alias; hidden to avoid duplicate
-    fn help(&self) -> &str {
-        "Usage: /report [description]\n\n\
-         Opens the GitHub issues tracker. If a description is provided,\n\
-         it is shown as a suggested pre-fill for the issue body."
-    }
-
-    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        let url = "https://github.com/anthropics/claude-code/issues/new";
-        let report = args.trim();
-        let display_url = if report.is_empty() {
-            url.to_string()
-        } else {
-            // Append as a body query param
-            format!(
-                "{}?body={}",
-                url,
-                urlencoding::encode(report)
-            )
-        };
-
-        match open_with_system(&display_url) {
-            Ok(_) => CommandResult::Message(format!("Opened issue tracker: {}", url)),
-            Err(_) => CommandResult::Message(format!(
-                "Please visit {} to submit a report.",
-                url
-            )),
         }
     }
 }
