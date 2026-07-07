@@ -22,10 +22,10 @@
 //
 // Selector-only visuals (never the prompt box): the selected label is bold and
 // highlighted; `xhigh` and `max` (the tiers above `high`, just below ultracode)
-// are per-character shimmering rainbows that ANIMATE with `frame_count`; and
-// `ultracode`, when selected, paints an animated claurst-red audio wave as a
-// background-color gradient (so text sits cleanly on top, no cut-out boxes) with
-// a shimmering, pulsing outline.
+// are per-character SOFT, DIFFUSED rainbows that gently animate with
+// `frame_count`; and `ultracode`, when selected, paints a slow, soothing
+// claurst-red audio wave as a background-color gradient (so text sits cleanly on
+// top, no cut-out boxes) framed by a gently breathing red outline.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -213,13 +213,13 @@ pub fn render_effort_picker(
 
     // A bottom-docked, full-width panel that occupies exactly `area`.
     frame.render_widget(Clear, area);
-    // Off the wave: a static bright-red outline. On the ultracode wave: a soft
-    // pastel that slowly drifts through the same rainbow as the flow — calm and
-    // cohesive, never a hard pulse.
+    // A brighter red outline; on the ultracode wave it breathes gently between
+    // bright red and pink — a calm glow, never a hard flash.
     let border_color = if on_spectrum {
-        let (hue, _s, _v) = rainbow_flow(0.5, 0.0, frame_count as f32);
-        let (r, g, b) = hsv_to_rgb(hue, 0.45, 0.88);
-        Color::Rgb(r, g, b)
+        let p = 0.5 + 0.5 * (frame_count as f32 * 0.05).sin();
+        let g = (60.0 + 55.0 * p) as u8;
+        let b = (120.0 + 45.0 * p) as u8;
+        Color::Rgb(255, g, b)
     } else {
         RED_BORDER
     };
@@ -403,23 +403,25 @@ fn styled_label(
     }
 }
 
-/// One bold span per character, each with a distinct hue cycled across the word,
-/// producing a rainbow gradient (selector-only visual for `xhigh`/`max`).
-/// `frame_count` shifts the hue phase so the rainbow ANIMATES, and a per-char
-/// brightness ripple makes it SHIMMER rather than merely scroll.
+/// One bold span per character forming a SOFT, DIFFUSED rainbow across the word:
+/// pastel saturation and only a narrow slice of the spectrum spread over the
+/// word, so neighbouring characters differ just slightly (they blend rather than
+/// jump — the blurry, Claude-Code-ish look). It drifts and breathes gently with
+/// `frame_count`. Used for the `xhigh`/`max` labels — the tiers just below
+/// ultracode.
 fn rainbow_spans(text: &str, frame_count: u64) -> Vec<Span<'static>> {
     let n = text.chars().count().max(1);
-    // Degrees of hue rotation per frame — a full cycle every ~51 frames.
-    let phase = frame_count as f32 * 7.0;
+    // Slow hue drift over time.
+    let phase = frame_count as f32 * 3.0;
     let t = frame_count as f32;
     text.chars()
         .enumerate()
         .map(|(i, ch)| {
-            let hue = 360.0 * i as f32 / n as f32 + phase;
-            // Brightness/value ripples across the characters and over time so the
-            // colors sparkle in place (the "shimmer").
-            let v = (0.80 + 0.20 * (t * 0.45 + i as f32 * 1.1).sin()).clamp(0.0, 1.0);
-            let (r, g, b) = hsv_to_rgb(hue, 0.92, v);
+            // Only ~150° of hue spread across the whole word → gentle transitions.
+            let hue = 150.0 * i as f32 / n as f32 + phase;
+            // Soft pastel: moderate saturation + a gentle brightness breathe.
+            let v = (0.86 + 0.10 * (t * 0.18 + i as f32 * 0.7).sin()).clamp(0.0, 1.0);
+            let (r, g, b) = hsv_to_rgb(hue, 0.55, v);
             Span::styled(
                 ch.to_string(),
                 Style::default()
@@ -552,29 +554,33 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Ultracode rainbow flow (background)
+// Ultracode red wave (background)
 // ---------------------------------------------------------------------------
 
-/// Paint a soft, slowly-drifting rainbow into `inner` as a BACKGROUND-color
-/// gradient (space glyphs), so text drawn on top sits cleanly on it with no
-/// cut-out boxes. The hue transitions smoothly cell-to-cell (a diffused, blurry
-/// wash rather than sharp bars) and drifts gently over time — soothing, not
-/// chaotic. `frame_count` is the animation phase.
+/// Paint claurst's red audio wave into `inner` as a BACKGROUND-color gradient
+/// (space glyphs whose bg brightens toward each column's crest), so text drawn on
+/// top sits cleanly on it with no dark cut-out boxes. The motion is deliberately
+/// slow and gentle — a soothing red swell, not a busy equalizer. `frame_count`
+/// is the animation phase.
 fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let w = (inner.width as f32).max(1.0);
-    let h = (inner.height as f32).max(1.0);
-    let t = frame_count as f32;
-    for gy in 0..inner.height {
-        let yf = gy as f32 / h;
-        for gx in 0..inner.width {
-            let xf = gx as f32 / w;
-            let (hue, sat, val) = rainbow_flow(xf, yf, t);
-            let (r, g, b) = hsv_to_rgb(hue, sat, val);
-            let shade = Color::Rgb(r, g, b);
-            if let Some(cell) = buf.cell_mut((inner.left() + gx, inner.top() + gy)) {
+    let height = inner.height as f32;
+    for gx in 0..inner.width {
+        let amp = spectrum_amp(gx, frame_count).clamp(0.0, 1.0);
+        let filled = amp * height; // crest height, in rows from the bottom
+        let x = inner.left() + gx;
+        for r in 0..inner.height {
+            // `r` counts rows up from the bottom (0 = bottom row).
+            let within = filled - r as f32; // >0 inside the swell; soft at the crest
+            let base = within.clamp(0.0, 1.0);
+            // A deep-red wash floor persists above the crest so the whole panel
+            // reads richly red; brightness rises smoothly toward the crest.
+            let lit = 0.18 + 0.82 * base;
+            let shade = red_shade(lit);
+            let y = inner.bottom() - 1 - r;
+            if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.set_char(' ');
                 cell.set_fg(shade);
                 cell.set_bg(shade);
@@ -583,27 +589,27 @@ fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     }
 }
 
-/// The soft rainbow color (HSV: hue°, saturation, value) at normalized panel
-/// position `(xf, yf)` in `[0, 1]` and time `t` (frames).
-///
-/// Design goals: DIFFUSED and SOOTHING. The hue sweeps smoothly across the panel
-/// and drifts slowly over time (a full cycle takes hundreds of frames, ~half the
-/// old speed), with only a gentle waviness. Saturation is moderate (pastel, not
-/// neon) and the value is a soft bottom-up glow that breathes slowly — so the
-/// wash stays calm and foreground text remains dominant.
-fn rainbow_flow(xf: f32, yf: f32, t: f32) -> (f32, f32, f32) {
-    // Hue: a smooth sweep across ~0.7 of the spectrum over the width, a slow
-    // time drift, and a soft low-frequency waviness (all continuous, so adjacent
-    // cells differ only slightly — the "blurry"/diffused look).
-    let hue = 360.0 * (xf * 0.7 + yf * 0.06)
-        + t * 0.9
-        + 28.0 * (xf * 2.2 + t * 0.04).sin();
-    // Value: a soft glow that is brighter toward the bottom, breathing slowly.
-    let glow = 0.30 + 0.20 * (1.0 - yf);
-    let breathe = 0.05 * (t * 0.045 + xf * 2.0).sin();
-    let val = (glow + breathe).clamp(0.14, 0.60);
-    // Moderate saturation → pastel/diffused rather than harsh neon.
-    (hue, 0.52, val)
+/// Per-column swell height in `[0, 1]` for a given column and frame. Two gentle,
+/// slow, out-of-phase sines make it read like a calm swell; `frame` moves the
+/// phase slowly so it drifts rather than flickers (about half the earlier speed).
+fn spectrum_amp(gx: u16, frame: u64) -> f32 {
+    let fx = gx as f32;
+    let t = frame as f32;
+    let a = 0.55 * (fx * 0.42 + t * 0.10).sin() + 0.45 * (fx * 0.20 - t * 0.06 + 1.7).sin();
+    0.5 + 0.5 * a
+}
+
+/// A claurst-red whose brightness scales with `lit` in `[0, 1]`: a deep-red wash
+/// at the base brightening to a vivid claurst red at the crest. Used as a
+/// BACKGROUND color for the wave (so it can be richly red while text stays
+/// readable on top). Always red-dominant (`r > g` and `r > b`) — never purple.
+fn red_shade(lit: f32) -> Color {
+    let lit = lit.clamp(0.0, 1.0);
+    // Deep-red wash (34, 8, 16) -> vivid claurst red (255, 42, 104).
+    let r = 34.0 + 221.0 * lit;
+    let g = 8.0 + 34.0 * lit;
+    let b = 16.0 + 88.0 * lit;
+    Color::Rgb(r as u8, g as u8, b as u8)
 }
 
 // ---------------------------------------------------------------------------
@@ -738,9 +744,8 @@ mod tests {
 
     #[test]
     fn ultracode_wave_is_a_background_gradient_under_text() {
-        // The description text sits ON the rainbow wave: its cells carry a
-        // concrete color background (not a dark cut-out box) while still showing
-        // the glyphs.
+        // The description text sits ON the red wave: its cells carry a red-ish
+        // background (not a dark cut-out box) while still showing the glyphs.
         let state = state_with(full_ladder(), 5); // ultracode
         let buf = render_to_buffer(&state, 3);
         let rows = buffer_rows(&buf);
@@ -753,7 +758,9 @@ mod tests {
             .expect("description row present");
         let cx = char_col_of(&drow, "workflows").unwrap() as u16;
         match buf.cell((cx, dy)).unwrap().bg {
-            Color::Rgb(..) => {} // a colored wave background, not a dark cut-out
+            Color::Rgb(r, _g, b) => {
+                assert!(r > b, "text must sit on the red wave bg, got r={r} b={b}")
+            }
             other => panic!("expected an Rgb wave background under text, got {other:?}"),
         }
     }
@@ -877,22 +884,18 @@ mod tests {
     }
 
     #[test]
-    fn rainbow_flow_is_soft_diffused_and_varied() {
-        // Diffused: the value (brightness) stays in a soft, soothing mid-range
-        // across the panel — never blindingly bright nor pitch black.
-        for &(xf, yf) in &[(0.0, 0.0), (0.5, 0.5), (1.0, 1.0), (0.25, 0.75)] {
-            let (_h, s, v) = rainbow_flow(xf, yf, 0.0);
-            assert!((0.10..=0.62).contains(&v), "value must be soft, got {v} @ ({xf},{yf})");
-            assert!((0.3..=0.7).contains(&s), "saturation must be pastel, got {s}");
+    fn wave_shades_are_red_not_purple() {
+        // The ultracode wave stays red-dominant across the whole brightness range
+        // (a purple would have blue >= red) and gets richly red at the crest.
+        for lit in [0.0f32, 0.35, 0.6, 1.0] {
+            match red_shade(lit) {
+                Color::Rgb(r, g, b) => {
+                    assert!(r > g && r > b, "shade must be red-dominant: {r},{g},{b} @ {lit}")
+                }
+                other => panic!("expected Rgb, got {other:?}"),
+            }
         }
-        // Varied: the hue sweeps across the width (a real rainbow, not one color).
-        let (h_left, ..) = rainbow_flow(0.0, 0.5, 0.0);
-        let (h_right, ..) = rainbow_flow(1.0, 0.5, 0.0);
-        assert!(
-            (h_left - h_right).abs() > 60.0,
-            "hue must sweep across the width: {h_left} vs {h_right}"
-        );
-        // The ultracode label / accent colors are all red-family.
+        // The ultracode label / accent colors are all red-family too.
         for c in [RED_BRIGHT, RED_DIM, RED_BORDER] {
             match c {
                 Color::Rgb(r, g, b) => {
