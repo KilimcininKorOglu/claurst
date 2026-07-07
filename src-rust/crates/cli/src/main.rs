@@ -1199,7 +1199,34 @@ fn spawn_models_cache_refresh() {
         tracing::debug!("CLAURST_DISABLE_MODELS_FETCH set — skipping models.dev refresh");
         return;
     }
+    tokio::spawn(async move {
+        refresh_models_cache_once().await;
+    });
+}
 
+/// TUI-startup analogue of opencode's `ModelsDev` background refresh
+/// (models-dev.ts:233-236): fire one refresh now (gated by the 5-minute TTL),
+/// then repeat spaced ~60 minutes so a long-running session keeps a fresh
+/// catalog on disk for the `/model` picker to reload. Non-blocking — the UI is
+/// never held on the network.
+fn spawn_models_cache_refresh_loop() {
+    if std::env::var("CLAURST_DISABLE_MODELS_FETCH").is_ok() {
+        tracing::debug!("CLAURST_DISABLE_MODELS_FETCH set — skipping models.dev refresh loop");
+        return;
+    }
+    tokio::spawn(async move {
+        loop {
+            refresh_models_cache_once().await;
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+        }
+    });
+}
+
+/// Fetch the models.dev catalog into the on-disk cache once, honoring the
+/// 5-minute mtime freshness check (mirrors opencode `ModelsDev.fresh()`). All
+/// network/parse failures are silent — the bundled snapshot is always
+/// sufficient.
+async fn refresh_models_cache_once() {
     let cache_path = models_cache_path();
     let legacy_cache_path = models_dev_cache_path();
     let ttl = std::time::Duration::from_secs(5 * 60);
@@ -1209,43 +1236,41 @@ fn spawn_models_cache_refresh() {
         return;
     }
 
-    tokio::spawn(async move {
-        let client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let url = models_source_url();
-        let resp = match client
-            .get(&url)
-            .header("User-Agent", concat!("Claurst/", env!("CARGO_PKG_VERSION")))
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(err) => {
-                tracing::debug!(?err, "models.dev refresh: network error");
-                return;
-            }
-        };
-        if !resp.status().is_success() {
-            tracing::debug!(status = ?resp.status(), "models.dev refresh: non-2xx");
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let url = models_source_url();
+    let resp = match client
+        .get(&url)
+        .header("User-Agent", concat!("Claurst/", env!("CARGO_PKG_VERSION")))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(err) => {
+            tracing::debug!(?err, "models.dev refresh: network error");
             return;
         }
-        let text = match resp.text().await {
-            Ok(t) => t,
-            Err(_) => return,
-        };
-        if let Some(parent) = cache_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        // Write canonical path + legacy path so older installs keep working.
-        let _ = std::fs::write(&cache_path, &text);
-        let _ = std::fs::write(&legacy_cache_path, &text);
-        tracing::info!(path = %cache_path.display(), "Models cache refreshed from {}", url);
-    });
+    };
+    if !resp.status().is_success() {
+        tracing::debug!(status = ?resp.status(), "models.dev refresh: non-2xx");
+        return;
+    }
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Write canonical path + legacy path so older installs keep working.
+    let _ = std::fs::write(&cache_path, &text);
+    let _ = std::fs::write(&legacy_cache_path, &text);
+    tracing::info!(path = %cache_path.display(), "Models cache refreshed from {}", url);
 }
 
 async fn remove_file_if_exists(path: &std::path::Path) -> anyhow::Result<()> {
@@ -1805,11 +1830,12 @@ async fn run_interactive(
     app.refresh_context_window_size();
     app.auto_compact_enabled = live_config.auto_compact;
 
-    // Background: refresh the model registry from models.dev.
-    // The fetched JSON is saved as a cache file; the App will reload it from
-    // disk whenever the /model picker opens.
+    // Background: keep the model registry fresh from models.dev for the whole
+    // TUI session (opencode-style: refresh now, then every ~60 min, gated by a
+    // 5-min TTL). The fetched JSON is saved as a cache file; the App reloads it
+    // from disk whenever the /model picker opens. Non-blocking.
     {
-        spawn_models_cache_refresh();
+        spawn_models_cache_refresh_loop();
     }
 
     // Wire the ask-user question channel into the app so the TUI can show
