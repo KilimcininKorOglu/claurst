@@ -76,6 +76,8 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("mcp", "Browse configured MCP servers"),
     ("memory", "Browse and open AGENTS.md memory files"),
     ("model", "Change the AI model"),
+    ("move", "Re-home this session to another worktree of the same project"),
+    ("new", "Start a fresh session (keeps model, provider & directory)"),
     ("output-style", "Toggle output style (auto/stream/verbose)"),
     ("plugin", "Manage plugins (list/info/enable/disable/reload)"),
     ("providers", "List available AI providers and their status"),
@@ -110,9 +112,8 @@ fn help_command_category(name: &str) -> &'static str {
             "Workspace"
         }
         "agent" | "agents" | "memory" | "plugin" | "survey" => "Tools",
-        "session" | "resume" | "rename" | "fork" | "clear" | "compact" | "quit" | "exit" => {
-            "Session"
-        }
+        "session" | "resume" | "rename" | "fork" | "clear" | "new" | "move" | "compact"
+        | "quit" | "exit" => "Session",
         _ => "Commands",
     }
 }
@@ -2186,7 +2187,10 @@ impl App {
                 self.session_list_pending = true;
                 true
             }
-            "clear" => {
+            // `/new` (opencode's lazy-home) resets the same visible transcript
+            // state as `/clear`; the CLI layer then swaps in a brand-new session
+            // and overrides the status line to "Started a new session.".
+            "clear" | "new" => {
                 self.messages.clear();
                 self.system_annotations.clear();
                 self.display_messages.clear();
