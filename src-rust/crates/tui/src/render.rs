@@ -183,6 +183,31 @@ fn render_error_modal(frame: &mut Frame, area: Rect, notification: &Notification
 // Text truncation helpers
 // -----------------------------------------------------------------------
 
+/// Short relative timestamp for the welcome screen's recent-activity list:
+/// "just now", "5m ago", "2h ago", "3d ago". Clock skew (mtime in the future)
+/// degrades gracefully to "just now".
+fn short_relative_time(mtime: std::time::SystemTime) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(mtime)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    short_relative_secs(secs)
+}
+
+/// Formatter split out from [`short_relative_time`] so it can be unit-tested
+/// without depending on the wall clock.
+fn short_relative_secs(secs: u64) -> String {
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3_600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h ago", secs / 3_600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    }
+}
+
 fn truncate_end(text: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -1701,10 +1726,25 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
         "Recent activity",
         Style::default().fg(accent).add_modifier(Modifier::BOLD),
     )));
-    right_lines.push(Line::from(Span::styled(
-        "No recent activity",
-        Style::default().fg(Color::DarkGray),
-    )));
+    if app.recent_sessions.is_empty() {
+        right_lines.push(Line::from(Span::styled(
+            "No recent activity",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for s in app.recent_sessions.iter().take(5) {
+            let when = short_relative_time(s.mtime);
+            // Reserve room for the trailing " <time>" so the label truncates
+            // instead of wrapping onto a second line.
+            let label_w = right_w_usize.saturating_sub(when.chars().count() + 1);
+            let label = truncate_end(&s.label, label_w.max(1));
+            right_lines.push(Line::from(vec![
+                Span::styled(label, Style::default().fg(Color::Gray)),
+                Span::raw(" "),
+                Span::styled(when, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
 
     frame.render_widget(Paragraph::new(right_lines).wrap(Wrap { trim: false }), h_chunks[2]);
 }

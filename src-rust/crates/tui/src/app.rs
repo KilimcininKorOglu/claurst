@@ -737,6 +737,49 @@ pub enum FocusTarget {
 }
 
 // ---------------------------------------------------------------------------
+// Recent activity
+// ---------------------------------------------------------------------------
+
+/// A lightweight record of a recent session, shown in the welcome screen's
+/// "Recent activity" list.
+///
+/// Loaded asynchronously from `session_storage` (see `recent_sessions_pending`
+/// in the run loop) so the render path never touches disk. Holds only what the
+/// welcome box needs: a display label plus the transcript's modification time,
+/// from which a relative timestamp ("2h ago") is computed at render time.
+#[derive(Debug, Clone)]
+pub struct RecentSession {
+    /// Display label: the custom title, else a truncated last prompt, else
+    /// `"(untitled)"`.
+    pub label: String,
+    /// Transcript modification time, used to derive a relative timestamp.
+    pub mtime: std::time::SystemTime,
+}
+
+/// Build the display label for a recent session: prefer the custom title, fall
+/// back to the first line of the last prompt (truncated), else `"(untitled)"`.
+pub fn recent_session_label(title: Option<String>, last_prompt: Option<String>) -> String {
+    /// Cap stored labels so a huge prompt never bloats `App` state; the render
+    /// path truncates further to the column width.
+    const MAX_LABEL: usize = 80;
+
+    let pick = |s: String| -> Option<String> {
+        // First non-empty line, trimmed.
+        let line = s.lines().find(|l| !l.trim().is_empty())?.trim();
+        if line.is_empty() {
+            return None;
+        }
+        let truncated: String = line.chars().take(MAX_LABEL).collect();
+        Some(truncated)
+    };
+
+    title
+        .and_then(pick)
+        .or_else(|| last_prompt.and_then(pick))
+        .unwrap_or_else(|| "(untitled)".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // App struct
 // ---------------------------------------------------------------------------
 
@@ -995,6 +1038,17 @@ pub struct App {
     /// Receiver for background session-list results.
     pub session_list_rx:
         Option<tokio::sync::mpsc::Receiver<Vec<crate::session_browser::SessionEntry>>>,
+    /// The most-recent sessions shown in the welcome screen's "Recent activity"
+    /// list. Populated once from disk via the background loader below; empty
+    /// until it resolves (or when there are genuinely no sessions).
+    pub recent_sessions: Vec<RecentSession>,
+    /// When `true`, the main event loop should spawn a one-shot async task to
+    /// load recent sessions from disk (mirrors `session_list_pending`). Set once
+    /// at startup and cleared when the load is kicked off, so we never re-list
+    /// every frame.
+    pub recent_sessions_pending: bool,
+    /// Receiver for the background recent-sessions load.
+    pub recent_sessions_rx: Option<tokio::sync::mpsc::Receiver<Vec<RecentSession>>>,
     /// Credential store for provider API keys and OAuth tokens.
     pub auth_store: claurst_core::AuthStore,
     /// Messages typed by the user while a query was streaming. They will be
@@ -1401,6 +1455,10 @@ impl App {
             model_picker_provider_id: None,
             session_list_pending: false,
             session_list_rx: None,
+            recent_sessions: Vec::new(),
+            // Load recent activity once, lazily, on the first run-loop iteration.
+            recent_sessions_pending: true,
+            recent_sessions_rx: None,
             auth_store: claurst_core::AuthStore::load(),
             queued_messages: std::collections::VecDeque::new(),
             pending_auto_submit: false,
@@ -6358,6 +6416,44 @@ impl App {
                         })
                         .collect();
                     let _ = tx.send(entries).await;
+                });
+            }
+
+            // Drain background recent-sessions results into the welcome screen.
+            if let Some(ref mut rx) = self.recent_sessions_rx {
+                match rx.try_recv() {
+                    Ok(sessions) => {
+                        self.recent_sessions = sessions;
+                        self.recent_sessions_rx = None;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        self.recent_sessions_rx = None;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                }
+            }
+
+            // Spawn the one-shot recent-sessions load when requested (startup).
+            if self.recent_sessions_pending {
+                self.recent_sessions_pending = false;
+                let root = self.project_root();
+                let (tx, rx) = tokio::sync::mpsc::channel(1);
+                self.recent_sessions_rx = Some(rx);
+                tokio::spawn(async move {
+                    // Show at most a handful; list_sessions is already newest-first.
+                    const MAX_RECENT: usize = 5;
+                    let summaries = claurst_core::session_storage::list_sessions(&root)
+                        .await
+                        .unwrap_or_default();
+                    let recent: Vec<RecentSession> = summaries
+                        .into_iter()
+                        .take(MAX_RECENT)
+                        .map(|s| RecentSession {
+                            label: recent_session_label(s.title, s.last_prompt),
+                            mtime: s.mtime,
+                        })
+                        .collect();
+                    let _ = tx.send(recent).await;
                 });
             }
 
