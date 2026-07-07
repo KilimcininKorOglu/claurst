@@ -2897,37 +2897,122 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     out
 }
 
-/// Claurst-red gradient endpoints for the ultracode keyword (matches the
-/// `/effort` selector's red theme): the signature red fading into a deeper red.
-const ULTRACODE_GRADIENT_START: (u8, u8, u8) = (233, 30, 99);
-const ULTRACODE_GRADIENT_END: (u8, u8, u8) = (140, 20, 45);
-
-/// Linearly interpolate between two RGB colors at `t` in `[0, 1]`.
-fn ultracode_lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-    Color::Rgb(mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+/// Themed per-character gradient for an inline keyword's prompt-box highlight.
+///
+/// Each keyword gets its own two-color fade painted one span per character
+/// (bold), matching the quality of the original ultracode highlight.
+#[derive(Clone, Copy)]
+struct KeywordGradient {
+    start: (u8, u8, u8),
+    end: (u8, u8, u8),
+    /// When true, apply a small deterministic per-character offset so the run
+    /// looks textured/dithered (stony) rather than a smooth fade — used by
+    /// `rocky` for a granite look.
+    dither: bool,
 }
 
-/// Build the styled spans for a single display-line `text`, rendering any
-/// `ultracode` keyword occurrence (the single word, case-insensitive,
-/// whole-word) with a per-character purple gradient, bold.
+/// Claurst-red gradient for `ultracode` (matches the `/effort` selector's red
+/// theme): the signature red fading into a deeper red. Unchanged.
+const ULTRACODE_GRADIENT: KeywordGradient = KeywordGradient {
+    start: (233, 30, 99),
+    end: (140, 20, 45),
+    dither: false,
+};
+
+/// Stony grey gradient for the `rocky` persona — light granite fading to dark
+/// stone, dithered per character for a textured rock face.
+const ROCKY_GRADIENT: KeywordGradient = KeywordGradient {
+    start: (176, 176, 182),
+    end: (92, 92, 100),
+    dither: true,
+};
+
+/// Earthy gradient for the `caveman` persona — tree-root brown fading to leaf
+/// green.
+const CAVEMAN_GRADIENT: KeywordGradient = KeywordGradient {
+    start: (120, 78, 42),
+    end: (74, 150, 58),
+    dither: false,
+};
+
+/// The themed gradient for a keyword, or `None` if it should not be painted
+/// (e.g. `normal`, which is a reset and gets the default no-gradient look).
+fn keyword_gradient_for(keyword: &str) -> Option<KeywordGradient> {
+    match keyword.to_ascii_lowercase().as_str() {
+        "ultracode" => Some(ULTRACODE_GRADIENT),
+        "rocky" => Some(ROCKY_GRADIENT),
+        "caveman" => Some(CAVEMAN_GRADIENT),
+        _ => None,
+    }
+}
+
+/// Linearly interpolate between two RGB colors at `t` in `[0, 1]`, returning the
+/// raw channels so callers can post-process (e.g. dither) before wrapping in a
+/// `Color`.
+fn keyword_lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    (mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+}
+
+/// The color for character index `i` of a keyword run at gradient position `t`.
+fn keyword_gradient_color(grad: &KeywordGradient, t: f32, i: usize) -> Color {
+    let (mut r, mut g, mut b) = keyword_lerp_rgb(grad.start, grad.end, t);
+    if grad.dither {
+        // Deterministic per-character speckle so adjacent stone glyphs differ
+        // slightly, giving a dithered granite texture instead of a smooth fade.
+        let d: i16 = match i % 3 {
+            0 => 20,
+            1 => -16,
+            _ => 8,
+        };
+        let jitter = |c: u8| (c as i16 + d).clamp(0, 255) as u8;
+        r = jitter(r);
+        g = jitter(g);
+        b = jitter(b);
+    }
+    Color::Rgb(r, g, b)
+}
+
+/// Build the styled spans for a single display-line `text`, painting every
+/// inline keyword occurrence (`ultracode`, `rocky`, `caveman` — the single
+/// word, case-insensitive, whole-word) with its own themed per-character
+/// gradient, bold. `normal` is a reset and is intentionally not painted.
 ///
 /// VISUAL ONLY: the returned spans concatenate back to exactly `text`, in order,
 /// with identical characters and widths -- only the *style* differs on keyword
 /// characters. Text outside any keyword is emitted as a single span carrying
 /// `base_style`, so cursor positioning, wrapping, and editing are unaffected.
-pub(crate) fn styled_spans_with_ultracode_gradient(
+pub(crate) fn styled_spans_with_keyword_gradient(
     text: &str,
     base_style: Style,
 ) -> Vec<Span<'static>> {
-    let ranges = claurst_core::effort::ultracode_match_ranges(text);
-    if ranges.is_empty() {
+    // Collect (start, end, gradient) for every gradient-bearing keyword.
+    let mut matches: Vec<(usize, usize, KeywordGradient)> = Vec::new();
+    for kw in claurst_core::keywords::INLINE_KEYWORDS {
+        if !kw.gradient {
+            continue;
+        }
+        let Some(grad) = keyword_gradient_for(kw.keyword) else {
+            continue;
+        };
+        for (start, end) in claurst_core::keywords::keyword_match_ranges(text, kw.keyword) {
+            matches.push((start, end, grad));
+        }
+    }
+    if matches.is_empty() {
         return vec![Span::styled(text.to_string(), base_style)];
     }
+    matches.sort_by_key(|(start, _, _)| *start);
+
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut pos = 0usize;
-    for (start, end) in ranges {
+    for (start, end, grad) in matches {
+        // Defensive: keywords are mutually non-overlapping, but skip any stray
+        // overlap so spans always reassemble to exactly `text`.
+        if start < pos {
+            continue;
+        }
         if start > pos {
             spans.push(Span::styled(text[pos..start].to_string(), base_style));
         }
@@ -2939,7 +3024,7 @@ pub(crate) fn styled_spans_with_ultracode_gradient(
             } else {
                 i as f32 / (char_count - 1) as f32
             };
-            let color = ultracode_lerp_rgb(ULTRACODE_GRADIENT_START, ULTRACODE_GRADIENT_END, t);
+            let color = keyword_gradient_color(&grad, t, i);
             spans.push(Span::styled(
                 ch.to_string(),
                 base_style.fg(color).add_modifier(Modifier::BOLD),
@@ -3162,11 +3247,11 @@ pub fn render_prompt_input(
                 prompt_prefix.clone(),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )];
-            v.extend(styled_spans_with_ultracode_gradient(chunk, text_style));
+            v.extend(styled_spans_with_keyword_gradient(chunk, text_style));
             v
         } else {
             let mut v = vec![Span::raw(" ".repeat(prefix_width as usize))];
-            v.extend(styled_spans_with_ultracode_gradient(chunk, text_style));
+            v.extend(styled_spans_with_keyword_gradient(chunk, text_style));
             v
         };
 
@@ -4681,13 +4766,28 @@ mod tests {
         render_prompt_input(&s, area, &mut buf, true, InputMode::Default, Color::Blue, false);
     }
 
-    // ---- ultracode gradient --------------------------------------------
+    // ---- keyword gradient (ultracode + personas) -----------------------
+
+    /// Count of bold Rgb spans and the distinct colors seen in `spans`.
+    fn bold_rgb_stats(spans: &[Span<'static>]) -> (usize, std::collections::HashSet<(u8, u8, u8)>) {
+        let mut bold_rgb = 0usize;
+        let mut colors = std::collections::HashSet::new();
+        for s in spans {
+            if let Some(Color::Rgb(r, g, b)) = s.style.fg {
+                if s.style.add_modifier.contains(Modifier::BOLD) {
+                    bold_rgb += 1;
+                    colors.insert((r, g, b));
+                }
+            }
+        }
+        (bold_rgb, colors)
+    }
 
     #[test]
     fn ultracode_gradient_highlights_keyword_visual_only() {
         let base = Style::default().fg(Color::White);
         let text = "please ultracode this";
-        let spans = styled_spans_with_ultracode_gradient(text, base);
+        let spans = styled_spans_with_keyword_gradient(text, base);
 
         // Visual only: reassembled text is byte-identical to the input.
         let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
@@ -4698,27 +4798,30 @@ mod tests {
             UnicodeWidthStr::width(text)
         );
 
-        // Each keyword character gets its own bold Rgb purple span, and the
-        // per-char colors actually vary across the gradient.
-        let mut bold_rgb = 0usize;
-        let mut colors = std::collections::HashSet::new();
-        for s in &spans {
-            if let Some(Color::Rgb(r, g, b)) = s.style.fg {
-                if s.style.add_modifier.contains(Modifier::BOLD) {
-                    bold_rgb += 1;
-                    colors.insert((r, g, b));
-                }
-            }
-        }
+        // Each keyword character gets its own bold Rgb span, and the per-char
+        // colors actually vary across the gradient.
+        let (bold_rgb, colors) = bold_rgb_stats(&spans);
         assert_eq!(bold_rgb, "ultracode".len(), "one styled span per keyword char");
         assert!(colors.len() > 1, "gradient should vary per character");
     }
 
     #[test]
-    fn ultracode_gradient_untouched_without_keyword() {
+    fn ultracode_gradient_colors_are_unchanged() {
+        // Regression guard: the ultracode red gradient must be byte-identical to
+        // the original implementation (start #E91E63 → end #8C142D).
+        let base = Style::default();
+        let spans = styled_spans_with_keyword_gradient("ultracode", base);
+        let first = spans.first().unwrap().style.fg;
+        let last = spans.last().unwrap().style.fg;
+        assert_eq!(first, Some(Color::Rgb(233, 30, 99)));
+        assert_eq!(last, Some(Color::Rgb(140, 20, 45)));
+    }
+
+    #[test]
+    fn gradient_untouched_without_keyword() {
         let base = Style::default().fg(Color::White);
-        let text = "just a normal prompt";
-        let spans = styled_spans_with_ultracode_gradient(text, base);
+        let text = "just a plain prompt here";
+        let spans = styled_spans_with_keyword_gradient(text, base);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].content.as_ref(), text);
         assert_eq!(spans[0].style.fg, Some(Color::White));
@@ -4726,19 +4829,63 @@ mod tests {
     }
 
     #[test]
-    fn ultracode_gradient_handles_repeated_single_word() {
+    fn normal_keyword_gets_no_gradient() {
+        // `normal` is a reset; it functions as an inline keyword for the turn
+        // logic but must NOT be painted in the prompt box.
         let base = Style::default().fg(Color::White);
-        // The two-word "ultra code" spelling is no longer highlighted; only the
-        // single word `ultracode` matches (twice here).
-        let text = "ultracode then ultracode again";
-        let spans = styled_spans_with_ultracode_gradient(text, base);
+        let text = "back to normal now";
+        let spans = styled_spans_with_keyword_gradient(text, base);
+        assert_eq!(spans.len(), 1, "normal must not produce gradient spans");
+        assert!(!spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn rocky_and_caveman_get_their_own_gradients() {
+        let base = Style::default().fg(Color::White);
+
+        // Rocky: grey/stone, dithered — one bold span per char, colors vary.
+        let rocky = styled_spans_with_keyword_gradient("go rocky mode", base);
+        let (bold, colors) = bold_rgb_stats(&rocky);
+        assert_eq!(bold, "rocky".len());
+        assert!(colors.len() > 1, "rocky gradient should vary per character");
+        // Greyish: for at least one painted char, the channels are close together.
+        assert!(
+            colors.iter().any(|(r, g, b)| {
+                let max = *r.max(g).max(b) as i16;
+                let min = *r.min(g).min(b) as i16;
+                (max - min) < 40
+            }),
+            "rocky should look grey/stony"
+        );
+
+        // Caveman: brown → green.
+        let caveman = styled_spans_with_keyword_gradient("caveman please", base);
+        let (bold, colors) = bold_rgb_stats(&caveman);
+        assert_eq!(bold, "caveman".len());
+        assert!(colors.len() > 1, "caveman gradient should vary per character");
+        // First painted char leans brown (red channel dominant); the run ends
+        // leaning green (green channel dominant).
+        let first_painted = caveman
+            .iter()
+            .find_map(|s| match s.style.fg {
+                Some(Color::Rgb(r, g, b)) if s.style.add_modifier.contains(Modifier::BOLD) => {
+                    Some((r, g, b))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(first_painted.0 > first_painted.1, "caveman starts brown");
+    }
+
+    #[test]
+    fn gradient_handles_multiple_keywords_and_preserves_text() {
+        let base = Style::default().fg(Color::White);
+        let text = "ultracode then rocky again";
+        let spans = styled_spans_with_keyword_gradient(text, base);
         let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(joined, text, "text preserved across multiple matches");
-        let bold = spans
-            .iter()
-            .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
-            .count();
-        // Two "ultracode" (9 chars each) styled runs.
-        assert_eq!(bold, "ultracode".len() * 2);
+        let (bold, _) = bold_rgb_stats(&spans);
+        // "ultracode" (9) + "rocky" (5) painted chars.
+        assert_eq!(bold, "ultracode".len() + "rocky".len());
     }
 }
