@@ -52,6 +52,9 @@ pub mod model_registry;
 // Model-adaptive effort ladders (#267).
 pub mod effort_support;
 
+// opencode variants() effort ladder port (Phase 2, #268).
+pub mod variants;
+
 // Provider-aware error handling (Phase 6).
 pub mod error_handling;
 
@@ -92,7 +95,10 @@ pub use model_registry::{
     CostBreakdown, ExperimentalMode, InterleavedReasoning, Modality, ModelEntry, ModelRegistry,
     ModelStatus, ProviderEntry, ProviderOverride, effective_model_for_config,
 };
-pub use effort_support::{model_is_reasoning, supported_efforts};
+pub use effort_support::{model_is_reasoning, supported_efforts, variant_ladder};
+pub use variants::{
+    variant_efforts, OPENAI_NONE_EFFORT_RELEASE_DATE, OPENAI_XHIGH_EFFORT_RELEASE_DATE,
+};
 
 // Phase 6 re-exports — provider-aware error handling.
 pub use error_handling::{is_context_overflow, parse_error_response, RetryConfig};
