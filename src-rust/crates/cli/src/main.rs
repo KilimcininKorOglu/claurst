@@ -2283,6 +2283,83 @@ async fn run_interactive(
                                     app.status_message =
                                         Some("Conversation cleared.".to_string());
                                 }
+                                Some(CommandResult::NewSession) => {
+                                    // Fresh lazy-home session (opencode /new):
+                                    // preserve the current model / provider / effort
+                                    // selection and working directory. The new
+                                    // session is only persisted once the first
+                                    // message completes a turn, matching opencode's
+                                    // lazy-session semantics.
+                                    let model = claurst_api::effective_model_for_config(
+                                        &cmd_ctx.config,
+                                        &model_registry,
+                                    );
+                                    session = claurst_commands::build_home_session(
+                                        model,
+                                        Some(tool_ctx.working_dir.display().to_string()),
+                                    );
+                                    messages.clear();
+                                    app.replace_messages(Vec::new());
+                                    tool_ctx.session_id = session.id.clone();
+                                    cmd_ctx.session_id = session.id.clone();
+                                    cmd_ctx.session_title = None;
+                                    // Reset per-turn diff/turn bookkeeping, as
+                                    // ResumeSession does when swapping sessions.
+                                    tool_ctx.file_history = Arc::new(ParkingMutex::new(
+                                        claurst_core::file_history::FileHistory::new(),
+                                    ));
+                                    tool_ctx.current_turn = Arc::new(
+                                        std::sync::atomic::AtomicUsize::new(0),
+                                    );
+                                    app.attach_turn_diff_state(
+                                        tool_ctx.file_history.clone(),
+                                        tool_ctx.current_turn.clone(),
+                                    );
+                                    claurst_tui::update_terminal_title(None);
+                                    app.status_message =
+                                        Some("Started a new session.".to_string());
+                                }
+                                Some(CommandResult::MoveSession {
+                                    destination,
+                                    moved_changes,
+                                }) => {
+                                    // Re-home the live session to the destination
+                                    // worktree (opencode /move). The working-tree
+                                    // changes were already relocated inside the
+                                    // command; here we repoint every cwd-aware
+                                    // surface so tools, the system prompt and the
+                                    // saved session all track the new location.
+                                    tool_ctx.working_dir = destination.clone();
+                                    cmd_ctx.working_dir = destination.clone();
+                                    cmd_ctx.config.project_dir = Some(destination.clone());
+                                    tool_ctx.config.project_dir = Some(destination.clone());
+                                    app.config.project_dir = Some(destination.clone());
+                                    base_query_config.working_directory =
+                                        Some(destination.display().to_string());
+                                    session.working_dir =
+                                        Some(destination.display().to_string());
+                                    session.updated_at = chrono::Utc::now();
+                                    let _ =
+                                        claurst_core::history::save_session(&session).await;
+                                    // NOTE: opencode appends a synthetic
+                                    // <system-reminder> prompt after a move. claurst
+                                    // re-derives working_directory into every turn's
+                                    // system prompt (qcfg.working_directory below),
+                                    // so repointing tool_ctx.working_dir already
+                                    // tells the model on its next turn — we skip the
+                                    // dangling user message that would otherwise
+                                    // break user/assistant role alternation.
+                                    let carried = if moved_changes {
+                                        " (carried over uncommitted changes)"
+                                    } else {
+                                        ""
+                                    };
+                                    app.status_message = Some(format!(
+                                        "Moved session to {}{}",
+                                        destination.display(),
+                                        carried
+                                    ));
+                                }
                                 Some(CommandResult::SetMessages(new_msgs)) => {
                                     let removed =
                                         messages.len().saturating_sub(new_msgs.len());

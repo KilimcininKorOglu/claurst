@@ -96,6 +96,19 @@ pub enum CommandResult {
     /// Activate a speech mode (caveman/rocky) with level, or deactivate (normal).
     /// (mode, level) — mode=None means deactivate.
     SpeechMode { mode: Option<String>, level: String },
+    /// Start a fresh session (opencode's `/new`): reset to a blank home,
+    /// preserving the current model/provider/effort selection and working
+    /// directory. Lazy — the new session is only persisted on the first message.
+    NewSession,
+    /// Re-home the current session to another worktree/directory of the same
+    /// project (opencode's `/move`). The git working-tree changes have already
+    /// been relocated by the command; the CLI just repoints the live session.
+    MoveSession {
+        /// Absolute destination directory the session now lives in.
+        destination: std::path::PathBuf,
+        /// Whether uncommitted changes were carried across (for the status line).
+        moved_changes: bool,
+    },
 }
 
 /// Every slash command implements this trait.
@@ -264,6 +277,8 @@ mod extras;
 pub use extras::*;
 mod ui_settings;
 use ui_settings::*;
+mod new_move;
+pub use new_move::*;
 
 // ---------------------------------------------------------------------------
 // Built-in commands
@@ -487,7 +502,7 @@ fn execute_named_command_from_slash(
 /// Category labels for help grouping.
 fn command_category(name: &str) -> &'static str {
     match name {
-        "clear" | "compact" | "rewind" | "summary" | "export" | "rename" | "branch" | "fork" => {
+        "clear" | "new" | "compact" | "rewind" | "summary" | "export" | "rename" | "branch" | "fork" => {
             "Conversation"
         }
         "model" | "config" | "theme" | "color" | "vim" | "fast" | "effort"
@@ -501,7 +516,7 @@ fn command_category(name: &str) -> &'static str {
         | "security-review" | "import-config" => "Project",
         "mcp" | "hooks" | "ide" | "chrome" => "Integrations",
         "session" | "resume" | "remote-control" | "remote-env"
-        | "teleport" => "Sessions & Remote",
+        | "teleport" | "move" => "Sessions & Remote",
         "help" | "exit" => "General",
         "think-back" | "thinkback-play" | "thinking" | "plan" | "tasks" => "AI & Thinking",
         "copy" | "skills" | "agents" | "plugin" | "reload-plugins"
@@ -602,7 +617,7 @@ impl SlashCommand for HelpCommand {
 #[async_trait]
 impl SlashCommand for ClearCommand {
     fn name(&self) -> &str { "clear" }
-    fn aliases(&self) -> Vec<&str> { vec!["c", "reset", "new"] }
+    fn aliases(&self) -> Vec<&str> { vec!["c", "reset"] }
     fn description(&self) -> &str { "Clear the conversation history" }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -1314,6 +1329,9 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(ManagedAgentsCommand),
         // Durable long-running goals
         Box::new(GoalCommand),
+        // Session navigation ported from opencode: /new (lazy home) + /move.
+        Box::new(NewCommand),
+        Box::new(MoveCommand),
     ]
 }
 
@@ -1602,6 +1620,47 @@ mod tests {
         let cmd = find_command("clear").unwrap();
         let result = cmd.execute("", &mut ctx).await;
         assert!(matches!(result, CommandResult::ClearConversation));
+    }
+
+    #[test]
+    fn test_new_and_move_commands_present() {
+        assert!(find_command("new").is_some());
+        assert!(find_command("move").is_some());
+    }
+
+    #[test]
+    fn test_clear_no_longer_aliases_new() {
+        // /new is now its own lazy-home command; /clear keeps its other aliases.
+        let clear = find_command("clear").unwrap();
+        assert!(!clear.aliases().contains(&"new"));
+        assert_eq!(find_command("new").unwrap().name(), "new");
+    }
+
+    #[tokio::test]
+    async fn test_new_command_returns_new_session() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("new").unwrap();
+        let result = cmd.execute("", &mut ctx).await;
+        assert!(matches!(result, CommandResult::NewSession));
+    }
+
+    #[tokio::test]
+    async fn test_move_command_without_dir_shows_usage() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("move").unwrap();
+        let result = cmd.execute("", &mut ctx).await;
+        // No target → usage message, never a MoveSession side effect.
+        assert!(matches!(result, CommandResult::Message(_)));
+    }
+
+    #[tokio::test]
+    async fn test_move_command_rejects_missing_directory() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("move").unwrap();
+        let result = cmd
+            .execute("/definitely/not/a/real/path/xyz123", &mut ctx)
+            .await;
+        assert!(matches!(result, CommandResult::Error(_)));
     }
 
     #[tokio::test]
