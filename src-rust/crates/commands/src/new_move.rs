@@ -497,6 +497,14 @@ mod tests {
         }
         git_ok(dir, &["config", "user.email", "test@example.com"]);
         git_ok(dir, &["config", "user.name", "Test"]);
+        // Pin line-ending handling so the round-trip is byte-exact regardless of
+        // the host's global git config. GitHub's Windows runners set
+        // core.autocrlf=true globally, which would rewrite the moved file's LF to
+        // CRLF on checkout into the destination worktree and break the content
+        // assertions below. This config lives in the shared common dir, so it
+        // also governs any worktree added off this repo.
+        git_ok(dir, &["config", "core.autocrlf", "false"]);
+        git_ok(dir, &["config", "core.eol", "lf"]);
         fs::write(dir.join("tracked.txt"), "original\n").ok()?;
         if !git_ok(dir, &["add", "-A"]) {
             return None;
