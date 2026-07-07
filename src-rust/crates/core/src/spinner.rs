@@ -32,12 +32,28 @@ pub const SPINNER_VERBS: &[&str] = &[
     "Unravelling", "Vibing", "Waddling", "Wandering", "Warping", "Whatchamacalliting",
     "Whirlpooling", "Whirring", "Whisking", "Wibbling", "Working", "Wrangling", "Zesting",
     "Zigzagging",
+    // Crab wordplay (Rustle) — cohesive with the completion verbs below.
+    "Carapacing", "Scuttling", "Molting", "Clawing", "Pinching", "Snipping",
+    "Sidling", "Skittering", "Chelating", "Crabwalking", "Clacking", "Scrabbling",
+    "Shelling", "Nipping", "Beachcombing", "Pincering", "Barnacling", "Reef-crawling",
+    "Tide-pooling",
 ];
 
 /// Past-tense verbs shown in the status row after a turn completes.
+///
+/// A mix of the neutral originals and a big pile of crab / crustacean wordplay,
+/// in honour of Rustle (claurst's crab mascot) — so "Carapaced for 2m 5s" and
+/// friends scuttle by when a turn finishes.
 pub const TURN_COMPLETION_VERBS: &[&str] = &[
+    // Neutral.
     "Baked", "Brewed", "Churned", "Cogitated", "Cooked", "Crunched",
     "Pondered", "Processed", "Worked",
+    // Crab wordplay (Rustle).
+    "Carapaced", "Scuttled", "Molted", "Clawed", "Pinched", "Snipped",
+    "Sidled", "Skittered", "Burrowed", "Chelated", "Crabwalked", "Clacked",
+    "Scrabbled", "Shelled", "Nipped", "Beachcombed", "Scurried", "Pincered",
+    "Barnacled", "Tide-pooled", "Crustaceated", "Molt-hopped", "Clam-baked",
+    "Shell-shocked", "Low-tided", "Reef-crawled",
 ];
 
 /// Select a random spinner verb.
