@@ -6756,6 +6756,48 @@ mod tests {
         }
     }
 
+    // ---- recent-activity label (issue #277) ----
+
+    #[test]
+    fn recent_session_label_prefers_title() {
+        let label = recent_session_label(
+            Some("My Title".to_string()),
+            Some("some prompt".to_string()),
+        );
+        assert_eq!(label, "My Title");
+    }
+
+    #[test]
+    fn recent_session_label_falls_back_to_first_prompt_line() {
+        let label = recent_session_label(
+            None,
+            Some("  fix the bug\nand more details".to_string()),
+        );
+        assert_eq!(label, "fix the bug");
+    }
+
+    #[test]
+    fn recent_session_label_skips_blank_title_and_untitled_default() {
+        // Blank/whitespace title is ignored in favour of the prompt.
+        assert_eq!(
+            recent_session_label(Some("   ".to_string()), Some("do it".to_string())),
+            "do it"
+        );
+        // Nothing usable → untitled.
+        assert_eq!(recent_session_label(None, None), "(untitled)");
+        assert_eq!(
+            recent_session_label(Some(String::new()), Some("\n\n".to_string())),
+            "(untitled)"
+        );
+    }
+
+    #[test]
+    fn recent_session_label_truncates_long_prompt() {
+        let long = "x".repeat(200);
+        let label = recent_session_label(None, Some(long));
+        assert_eq!(label.chars().count(), 80);
+    }
+
     // ---- mouse capture gate (issue #104) ----
 
     fn scroll_up_event() -> crossterm::event::MouseEvent {

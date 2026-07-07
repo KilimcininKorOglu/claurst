@@ -208,6 +208,38 @@ fn short_relative_secs(secs: u64) -> String {
     }
 }
 
+/// Build the body lines for the welcome box's "Recent activity" section.
+///
+/// Renders up to five recent sessions as `<label> <relative-time>` (the label
+/// truncated to fit `width`), or a single dimmed "No recent activity" line when
+/// there are none. Split out from [`render_welcome_box`] so it can be unit
+/// tested from controlled state without the surrounding layout.
+fn recent_activity_lines(recent: &[crate::app::RecentSession], width: usize) -> Vec<Line<'static>> {
+    if recent.is_empty() {
+        return vec![Line::from(Span::styled(
+            "No recent activity",
+            Style::default().fg(Color::DarkGray),
+        ))];
+    }
+
+    recent
+        .iter()
+        .take(5)
+        .map(|s| {
+            let when = short_relative_time(s.mtime);
+            // Reserve room for the trailing " <time>" so the label truncates
+            // instead of wrapping onto a second line.
+            let label_w = width.saturating_sub(when.chars().count() + 1);
+            let label = truncate_end(&s.label, label_w.max(1));
+            Line::from(vec![
+                Span::styled(label, Style::default().fg(Color::Gray)),
+                Span::raw(" "),
+                Span::styled(when, Style::default().fg(Color::DarkGray)),
+            ])
+        })
+        .collect()
+}
+
 fn truncate_end(text: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -1726,25 +1758,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
         "Recent activity",
         Style::default().fg(accent).add_modifier(Modifier::BOLD),
     )));
-    if app.recent_sessions.is_empty() {
-        right_lines.push(Line::from(Span::styled(
-            "No recent activity",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        for s in app.recent_sessions.iter().take(5) {
-            let when = short_relative_time(s.mtime);
-            // Reserve room for the trailing " <time>" so the label truncates
-            // instead of wrapping onto a second line.
-            let label_w = right_w_usize.saturating_sub(when.chars().count() + 1);
-            let label = truncate_end(&s.label, label_w.max(1));
-            right_lines.push(Line::from(vec![
-                Span::styled(label, Style::default().fg(Color::Gray)),
-                Span::raw(" "),
-                Span::styled(when, Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-    }
+    right_lines.extend(recent_activity_lines(&app.recent_sessions, right_w_usize));
 
     frame.render_widget(Paragraph::new(right_lines).wrap(Wrap { trim: false }), h_chunks[2]);
 }
@@ -3664,5 +3678,117 @@ mod effort_dock_tests {
             !open.contains(PROMPT_POINTER),
             "prompt input must NOT be drawn while the picker is open"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Welcome screen: recent activity (issue #277)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod recent_activity_tests {
+    use super::*;
+    use crate::app::{App, RecentSession};
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::time::{Duration, SystemTime};
+
+    fn recent(label: &str, secs_ago: u64) -> RecentSession {
+        RecentSession {
+            label: label.to_string(),
+            mtime: SystemTime::now() - Duration::from_secs(secs_ago),
+        }
+    }
+
+    fn lines_text(recent: &[RecentSession], width: usize) -> Vec<String> {
+        recent_activity_lines(recent, width)
+            .iter()
+            .map(flatten_line_text)
+            .collect()
+    }
+
+    // -- relative-time formatter ------------------------------------------
+
+    #[test]
+    fn short_relative_secs_buckets() {
+        assert_eq!(short_relative_secs(0), "just now");
+        assert_eq!(short_relative_secs(59), "just now");
+        assert_eq!(short_relative_secs(60), "1m ago");
+        assert_eq!(short_relative_secs(5 * 60), "5m ago");
+        assert_eq!(short_relative_secs(2 * 3_600), "2h ago");
+        assert_eq!(short_relative_secs(3 * 86_400), "3d ago");
+    }
+
+    #[test]
+    fn short_relative_time_handles_future_mtime() {
+        // Clock skew (mtime slightly in the future) must not panic.
+        let future = SystemTime::now() + Duration::from_secs(120);
+        assert_eq!(short_relative_time(future), "just now");
+    }
+
+    // -- render-from-state path -------------------------------------------
+
+    #[test]
+    fn empty_state_shows_placeholder() {
+        let out = lines_text(&[], 40);
+        assert_eq!(out, vec!["No recent activity".to_string()]);
+    }
+
+    #[test]
+    fn populated_state_shows_titles_and_relative_times() {
+        let sessions = vec![
+            recent("Fix the parser bug", 2 * 3_600),
+            recent("Wire up onboarding", 3 * 86_400),
+        ];
+        let out = lines_text(&sessions, 40).join("\n");
+        assert!(out.contains("Fix the parser bug"), "first title: {out:?}");
+        assert!(out.contains("2h ago"), "first time: {out:?}");
+        assert!(out.contains("Wire up onboarding"), "second title: {out:?}");
+        assert!(out.contains("3d ago"), "second time: {out:?}");
+        // The placeholder must NOT appear when there is real activity.
+        assert!(!out.contains("No recent activity"), "no placeholder: {out:?}");
+    }
+
+    #[test]
+    fn caps_at_five_entries() {
+        let sessions: Vec<RecentSession> =
+            (0..8).map(|i| recent(&format!("session {i}"), 60)).collect();
+        assert_eq!(recent_activity_lines(&sessions, 40).len(), 5);
+    }
+
+    #[test]
+    fn long_label_is_truncated_and_leaves_room_for_time() {
+        let sessions = vec![recent(
+            "an extremely long session title that should be truncated to fit",
+            60,
+        )];
+        let out = lines_text(&sessions, 20);
+        assert_eq!(out.len(), 1);
+        let line = &out[0];
+        assert!(line.contains('\u{2026}'), "should be ellipsised: {line:?}");
+        assert!(line.ends_with("1m ago"), "time preserved at end: {line:?}");
+    }
+
+    #[test]
+    fn welcome_box_renders_recent_activity_from_state() {
+        // Full-widget smoke test: the section header renders and, when state is
+        // populated, a session label reaches the screen buffer without panic.
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.recent_sessions = vec![recent("Sortable label ABCDEF", 2 * 3_600)];
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| render_welcome_box(frame, &app, frame.area()))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(screen.contains("Recent activity"), "header rendered: present");
+        assert!(screen.contains("Sortable label"), "session label rendered");
     }
 }
