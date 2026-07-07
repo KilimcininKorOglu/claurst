@@ -2224,9 +2224,21 @@ impl App {
                 true
             }
             "effort" => {
-                // Open the picker dialog so users can pick an effort level
-                // visually instead of cycling/typing the level (issue #149).
-                self.effort_picker.open(self.effort_level);
+                // Open the horizontal picker so users can pick an effort level
+                // visually instead of cycling/typing it (issues #149 / #268). The
+                // selectable ladder is model-adaptive: it comes from
+                // `supported_efforts` for the current provider + model.
+                let provider = self.config.provider.as_deref().unwrap_or("anthropic");
+                let model_id = self
+                    .model_name
+                    .strip_prefix(&format!("{}/", provider))
+                    .unwrap_or(&self.model_name);
+                let levels = claurst_api::supported_efforts(
+                    provider,
+                    model_id,
+                    Some(&self.model_registry),
+                );
+                self.effort_picker.open(self.effort_level, levels);
                 true
             }
             "voice" => {
@@ -3211,13 +3223,16 @@ impl App {
             return false;
         }
 
-        // Effort picker dialog (/effort).
+        // Effort picker dialog (/effort). The selector is horizontal
+        // (Faster ← → Smarter), so ←/→ (and vi h/l) move the selection.
         if self.effort_picker.visible {
             match key.code {
                 KeyCode::Esc => self.effort_picker.close(),
-                KeyCode::Up | KeyCode::Char('k') => self.effort_picker.select_prev(),
-                KeyCode::Down | KeyCode::Char('j') => self.effort_picker.select_next(),
+                KeyCode::Left | KeyCode::Char('h') => self.effort_picker.select_prev(),
+                KeyCode::Right | KeyCode::Char('l') => self.effort_picker.select_next(),
                 KeyCode::Enter => {
+                    // Applying `Ultracode` here is equivalent to typing the
+                    // `ultracode` keyword: it sets the effort to the top level.
                     let chosen = self.effort_picker.current();
                     self.effort_level = chosen;
                     self.effort_picker.close();

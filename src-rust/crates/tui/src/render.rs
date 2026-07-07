@@ -702,7 +702,12 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
     // /effort picker
     if app.effort_picker.visible {
-        crate::effort_picker::render_effort_picker(frame, &app.effort_picker, size);
+        crate::effort_picker::render_effort_picker(
+            frame,
+            &app.effort_picker,
+            size,
+            app.frame_count,
+        );
     }
 
     // Import-config source picker
