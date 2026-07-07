@@ -8,6 +8,11 @@ pub(crate) fn reasoning_effort_for_level(
 ) -> &'static str {
     use claurst_core::effort::EffortLevel;
     match effort_level {
+        // `none`/`minimal` are the two OpenAI reasoning_effort tiers below `low`;
+        // pass them through verbatim (the model's variants ladder only offers
+        // them where the API accepts them).
+        EffortLevel::None => "none",
+        EffortLevel::Minimal => "minimal",
         EffortLevel::Low => "low",
         EffortLevel::Medium => "medium",
         // XHigh/Max/Ultracode collapse to "high" for the generic OpenAI-family
@@ -25,6 +30,10 @@ pub(crate) fn google_thinking_level_for_effort(
 ) -> &'static str {
     use claurst_core::effort::EffortLevel;
     match effort_level.unwrap_or(EffortLevel::High) {
+        // Google's thinkingLevel has no "none"; floor it at "low". "minimal" is a
+        // real gemini-3 thinking level, so pass Minimal through.
+        EffortLevel::None => "low",
+        EffortLevel::Minimal => "minimal",
         EffortLevel::Low => "low",
         EffortLevel::Medium => "medium",
         // Gemini's top thinking level is "high"; XHigh/Max/Ultracode all map onto it.
@@ -229,6 +238,7 @@ pub(crate) fn build_provider_options(
             if provider_id == "deepseek" {
                 match effort_level {
                     None
+                    | Some(claurst_core::effort::EffortLevel::Minimal)
                     | Some(claurst_core::effort::EffortLevel::Medium)
                     | Some(claurst_core::effort::EffortLevel::High) => {
                         options.insert(
@@ -246,7 +256,9 @@ pub(crate) fn build_provider_options(
                         );
                         options.insert("reasoningEffort".to_string(), serde_json::json!("max"));
                     }
-                    Some(claurst_core::effort::EffortLevel::Low) => {
+                    // `none` and `low` both disable DeepSeek's thinking mode.
+                    Some(claurst_core::effort::EffortLevel::None)
+                    | Some(claurst_core::effort::EffortLevel::Low) => {
                         options.insert(
                             "thinking".to_string(),
                             serde_json::json!({"type": "disabled"}),

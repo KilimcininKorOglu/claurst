@@ -166,12 +166,14 @@ fn index_for(levels: &[EffortLevel], current: EffortLevel) -> usize {
 /// Ascending ordering rank used for nearest-level selection.
 fn rank(level: EffortLevel) -> u8 {
     match level {
-        EffortLevel::Low => 0,
-        EffortLevel::Medium => 1,
-        EffortLevel::High => 2,
-        EffortLevel::XHigh => 3,
-        EffortLevel::Max => 4,
-        EffortLevel::Ultracode => 5,
+        EffortLevel::None => 0,
+        EffortLevel::Minimal => 1,
+        EffortLevel::Low => 2,
+        EffortLevel::Medium => 3,
+        EffortLevel::High => 4,
+        EffortLevel::XHigh => 5,
+        EffortLevel::Max => 6,
+        EffortLevel::Ultracode => 7,
     }
 }
 
@@ -414,6 +416,13 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
 /// derived from the model's top native effort: "<top> + workflows".
 fn level_description(level: EffortLevel, levels: &[EffortLevel]) -> String {
     match level {
+        EffortLevel::None => {
+            "No reasoning \u{2014} the model answers directly with thinking disabled.".to_string()
+        }
+        EffortLevel::Minimal => {
+            "The smallest reasoning budget \u{2014} a touch of thinking for the quickest tasks."
+                .to_string()
+        }
         EffortLevel::Low => {
             "Fastest, most direct responses. Best for simple edits and quick questions.".to_string()
         }

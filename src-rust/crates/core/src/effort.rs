@@ -22,12 +22,26 @@ use serde::{Deserialize, Serialize};
 
 /// The named effort levels supported by Claurst.
 ///
-/// Ordered from least to most effort. `Ultracode` is the top level: it requests
-/// the model's maximum reasoning *and* activates the ultracode operating
-/// procedure (bounded delegation across native primitives + verification).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+/// Ordered from least to most effort (the enum's *declaration order* is the
+/// canonical ascending order — see the derived [`Ord`]). `None` and `Minimal`
+/// are the two rungs below `Low`, ported from opencode's OpenAI reasoning ladder
+/// (`reasoning_effort: "none" | "minimal"`); `Ultracode` is the top level: it
+/// requests the model's maximum reasoning *and* activates the ultracode
+/// operating procedure (bounded delegation across native primitives +
+/// verification).
+///
+/// IMPORTANT: keep the variants in ascending order — [`Ord`]/[`PartialOrd`] are
+/// derived from declaration order and the picker/effort ladders rely on it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum EffortLevel {
+    /// No reasoning at all (opencode `reasoning_effort: "none"`). The model
+    /// answers directly with thinking disabled.
+    None,
+    /// The smallest reasoning budget (opencode `reasoning_effort: "minimal"`).
+    Minimal,
     /// Quick, straightforward implementation with minimal overhead.
     Low,
     /// Balanced approach with standard implementation and testing.
@@ -51,10 +65,13 @@ pub enum EffortLevel {
 impl EffortLevel {
     /// Parse an effort level from its string representation (case-insensitive).
     ///
-    /// Accepts: `"low"`, `"medium"` (or `"normal"`), `"high"`, `"xhigh"`,
-    /// `"max"`, `"ultracode"`. Returns `None` for any other value.
+    /// Accepts: `"none"`, `"minimal"`, `"low"`, `"medium"` (or `"normal"`),
+    /// `"high"`, `"xhigh"`, `"max"`, `"ultracode"`. Returns `None` for any other
+    /// value.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "minimal" => Some(Self::Minimal),
             "low" => Some(Self::Low),
             "medium" | "normal" => Some(Self::Medium),
             "high" => Some(Self::High),
@@ -70,6 +87,8 @@ impl EffortLevel {
     /// Round-trips with `from_str`.
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -95,6 +114,8 @@ impl EffortLevel {
     /// `None` if thinking should be disabled.
     ///
     /// Values (ascending):
+    ///   None      → None  (reasoning disabled)
+    ///   Minimal   → 1 024 (the smallest valid Anthropic thinking budget)
     ///   Low       → None  (no thinking)
     ///   Medium    → 5 000
     ///   High      → 10 000
@@ -103,10 +124,15 @@ impl EffortLevel {
     ///   Ultracode → 20 000 (the model's top reasoning budget)
     ///
     /// Low/Medium/High/Max are unchanged from the original mapping and must stay
-    /// that way — they are sent verbatim to the Anthropic API.
+    /// that way — they are sent verbatim to the Anthropic API. `None` maps to no
+    /// thinking (opencode `reasoning_effort: "none"`); `Minimal` maps to the
+    /// smallest budget Anthropic accepts (`1024`). Note these two rungs only ever
+    /// appear on OpenAI-family ladders (where the effort *name* is sent, not the
+    /// budget); no Anthropic model's ladder exposes them.
     pub fn thinking_budget_tokens(&self) -> Option<u32> {
         match self {
-            Self::Low => None,
+            Self::None | Self::Low => None,
+            Self::Minimal => Some(1_024),
             Self::Medium => Some(5_000),
             Self::High => Some(10_000),
             Self::XHigh => Some(16_000),
@@ -122,15 +148,23 @@ impl EffortLevel {
     pub fn temperature(&self) -> Option<f32> {
         match self {
             Self::Low => Some(0.0),
-            Self::Medium | Self::High | Self::XHigh | Self::Max | Self::Ultracode => None,
+            Self::None
+            | Self::Minimal
+            | Self::Medium
+            | Self::High
+            | Self::XHigh
+            | Self::Max
+            | Self::Ultracode => None,
         }
     }
 
     /// A single Unicode glyph used to represent this effort level.
     ///
-    ///   Low ○  Medium ◐  High ●  XHigh ◍  Max ◉  Ultracode ✦
+    ///   None ∅  Minimal ◔  Low ○  Medium ◐  High ●  XHigh ◍  Max ◉  Ultracode ✦
     pub fn glyph(&self) -> &'static str {
         match self {
+            Self::None => "∅",
+            Self::Minimal => "◔",
             Self::Low => "○",
             Self::Medium => "◐",
             Self::High => "●",
@@ -142,9 +176,11 @@ impl EffortLevel {
 
     /// A quarter-circle "fill" symbol used in the TUI pickers/status bar.
     ///
-    ///   Low ○  Medium ◐  High ◕  XHigh ●  Max ◉  Ultracode ✦
+    ///   None ∅  Minimal ◔  Low ○  Medium ◐  High ◕  XHigh ●  Max ◉  Ultracode ✦
     pub fn symbol(&self) -> &'static str {
         match self {
+            Self::None => "\u{2205}",      // ∅  empty set
+            Self::Minimal => "\u{25d4}",   // ◔  quarter
             Self::Low => "\u{25cb}",       // ○  empty
             Self::Medium => "\u{25d0}",    // ◐  half
             Self::High => "\u{25d5}",      // ◕  three-quarter
@@ -157,6 +193,8 @@ impl EffortLevel {
     /// Human-readable description of this effort level.
     pub fn description(&self) -> &'static str {
         match self {
+            Self::None => "No reasoning — answer directly with thinking disabled",
+            Self::Minimal => "The smallest reasoning budget for the quickest thinking",
             Self::Low => "Quick, straightforward implementation with minimal overhead",
             Self::Medium => "Balanced approach with standard implementation and testing",
             Self::High => {
@@ -170,14 +208,19 @@ impl EffortLevel {
         }
     }
 
-    /// Cycle to the next level (used by the /model picker's ←/→ effort selector).
+    /// Cycle to the next level in the legacy fixed Low↔Medium↔High↔Max cycle.
     ///
-    /// Preserves the historical Low↔Medium↔High↔Max cycle: `Max` is only reached
-    /// when the model supports it (`supports_max`). `XHigh`/`Ultracode` are not
-    /// part of this cycle (they are surfaced via `supported_efforts` and the
-    /// ultracode keyword respectively); if somehow current, they wrap to `Low`.
+    /// Historically drove the /model picker's ←/→ effort selector; that selector
+    /// now cycles the model's actual variants ladder (see
+    /// `ModelPickerState::effort_next`). These helpers are retained for the
+    /// effort-picker tests and any caller that still wants the fixed cycle. `Max`
+    /// is only reached when the model supports it (`supports_max`). The
+    /// out-of-cycle rungs (`None`/`Minimal`/`XHigh`/`Ultracode`) fall back to the
+    /// nearest in-cycle level.
     pub fn next(self, supports_max: bool) -> Self {
         match self {
+            Self::None => Self::Minimal,
+            Self::Minimal => Self::Low,
             Self::Low => Self::Medium,
             Self::Medium => Self::High,
             Self::High => {
@@ -196,6 +239,7 @@ impl EffortLevel {
     /// [`next`]: Self::next
     pub fn prev(self, supports_max: bool) -> Self {
         match self {
+            Self::None | Self::Minimal => Self::Low,
             Self::Low => {
                 if supports_max {
                     Self::Max
@@ -396,23 +440,42 @@ pub fn ultracode_system_prompt_addendum() -> String {
 mod tests {
     use super::*;
 
+    /// Every effort level in canonical ascending order — the single list the
+    /// tests iterate so a new rung is covered everywhere at once.
+    const ALL_LEVELS: [EffortLevel; 8] = [
+        EffortLevel::None,
+        EffortLevel::Minimal,
+        EffortLevel::Low,
+        EffortLevel::Medium,
+        EffortLevel::High,
+        EffortLevel::XHigh,
+        EffortLevel::Max,
+        EffortLevel::Ultracode,
+    ];
+
     #[test]
     fn from_str_roundtrips() {
-        for level in [
-            EffortLevel::Low,
-            EffortLevel::Medium,
-            EffortLevel::High,
-            EffortLevel::XHigh,
-            EffortLevel::Max,
-            EffortLevel::Ultracode,
-        ] {
+        for level in ALL_LEVELS {
             let parsed = EffortLevel::from_str(level.as_str());
             assert_eq!(parsed, Some(level), "from_str({:?}) should round-trip", level);
         }
     }
 
     #[test]
+    fn declaration_order_is_ascending() {
+        // Ord is derived from declaration order; the ladders rely on it.
+        for pair in ALL_LEVELS.windows(2) {
+            assert!(pair[0] < pair[1], "{:?} must rank below {:?}", pair[0], pair[1]);
+        }
+        assert_eq!(*ALL_LEVELS.iter().min().unwrap(), EffortLevel::None);
+        assert_eq!(*ALL_LEVELS.iter().max().unwrap(), EffortLevel::Ultracode);
+    }
+
+    #[test]
     fn from_str_case_insensitive_and_aliases() {
+        assert_eq!(EffortLevel::from_str("none"), Some(EffortLevel::None));
+        assert_eq!(EffortLevel::from_str("NONE"), Some(EffortLevel::None));
+        assert_eq!(EffortLevel::from_str("Minimal"), Some(EffortLevel::Minimal));
         assert_eq!(EffortLevel::from_str("LOW"), Some(EffortLevel::Low));
         assert_eq!(EffortLevel::from_str("Medium"), Some(EffortLevel::Medium));
         // "normal" is the legacy TUI spelling for Medium.
@@ -444,12 +507,17 @@ mod tests {
         // XHigh slots between High and Max; Ultracode = top reasoning.
         assert_eq!(EffortLevel::XHigh.thinking_budget_tokens(), Some(16_000));
         assert_eq!(EffortLevel::Ultracode.thinking_budget_tokens(), Some(20_000));
+        // New rungs: None disables thinking, Minimal is the smallest budget.
+        assert_eq!(EffortLevel::None.thinking_budget_tokens(), None);
+        assert_eq!(EffortLevel::Minimal.thinking_budget_tokens(), Some(1_024));
     }
 
     #[test]
     fn temperature_matches_legacy() {
         assert_eq!(EffortLevel::Low.temperature(), Some(0.0));
         for level in [
+            EffortLevel::None,
+            EffortLevel::Minimal,
             EffortLevel::Medium,
             EffortLevel::High,
             EffortLevel::XHigh,
@@ -462,14 +530,7 @@ mod tests {
 
     #[test]
     fn glyph_and_symbol_are_distinct_per_variant() {
-        let levels = [
-            EffortLevel::Low,
-            EffortLevel::Medium,
-            EffortLevel::High,
-            EffortLevel::XHigh,
-            EffortLevel::Max,
-            EffortLevel::Ultracode,
-        ];
+        let levels = ALL_LEVELS;
         let glyphs: std::collections::HashSet<_> = levels.iter().map(|l| l.glyph()).collect();
         let symbols: std::collections::HashSet<_> = levels.iter().map(|l| l.symbol()).collect();
         assert_eq!(glyphs.len(), levels.len(), "glyphs must be unique");
@@ -490,6 +551,8 @@ mod tests {
     fn is_ultracode_only_for_top() {
         assert!(EffortLevel::Ultracode.is_ultracode());
         for level in [
+            EffortLevel::None,
+            EffortLevel::Minimal,
             EffortLevel::Low,
             EffortLevel::Medium,
             EffortLevel::High,
@@ -532,16 +595,22 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for level in [
-            EffortLevel::Low,
-            EffortLevel::Medium,
-            EffortLevel::High,
-            EffortLevel::XHigh,
-            EffortLevel::Max,
-            EffortLevel::Ultracode,
-        ] {
+        for level in ALL_LEVELS {
             assert_eq!(format!("{}", level), level.as_str());
         }
+    }
+
+    #[test]
+    fn serde_roundtrips_none_and_minimal() {
+        assert_eq!(serde_json::to_string(&EffortLevel::None).unwrap(), "\"none\"");
+        assert_eq!(
+            serde_json::to_string(&EffortLevel::Minimal).unwrap(),
+            "\"minimal\""
+        );
+        let n: EffortLevel = serde_json::from_str("\"none\"").unwrap();
+        assert_eq!(n, EffortLevel::None);
+        let m: EffortLevel = serde_json::from_str("\"minimal\"").unwrap();
+        assert_eq!(m, EffortLevel::Minimal);
     }
 
     // ---- ultracode keyword + procedure ----------------------------------
