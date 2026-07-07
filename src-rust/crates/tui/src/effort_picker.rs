@@ -242,8 +242,9 @@ pub fn render_effort_picker(
 
     let buf = frame.buffer_mut();
 
-    // When ultracode is the selected level, paint an animated translucent-red
-    // audio-spectrum behind everything; the labels/track/text are drawn on top.
+    // When ultracode is the selected level, paint the animated red waveform FIRST
+    // (a dim field + a glowing crest line) so the labels/track/text drawn after it
+    // sit clearly on top.
     if sel_level.is_ultracode() {
         paint_spectrum(buf, inner, frame_count);
     }
@@ -391,8 +392,13 @@ fn styled_label(
         return vec![Span::styled(text.to_string(), st)];
     }
     if !selected {
-        let fg = if on_spectrum { LABEL_ON_WAVE } else { DIM_FG };
-        return vec![Span::styled(text.to_string(), Style::default().fg(fg))];
+        // On the wave, bold + a light warm-gray keeps unselected labels clearly
+        // legible ON TOP of the animated background.
+        let mut st = Style::default().fg(if on_spectrum { LABEL_ON_WAVE } else { DIM_FG });
+        if on_spectrum {
+            st = st.add_modifier(Modifier::BOLD);
+        }
+        return vec![Span::styled(text.to_string(), st)];
     }
     match level {
         // The tiers above `high` (just below ultracode) shimmer rainbow.
@@ -559,38 +565,33 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Paint claurst's red audio wave into `inner` as a BACKGROUND-color gradient
-/// (space glyphs), so text drawn on top sits cleanly on it with no dark cut-out
-/// boxes. It reads like a rich spectrum analyzer: each column is a bar with a
-/// deep-red base, a body that brightens up toward the crest, and a hot, glowing
-/// tip that sparkles — bold and striking, but with smooth (not frantic) motion.
+/// (space glyphs). It reads like a glowing oscilloscope waveform: a bright,
+/// undulating crest LINE that flows slowly sideways over a dim deep-red field,
+/// with a dark wash above. Because the field stays dim and only the thin crest
+/// glows, foreground text clearly sits ON TOP (no washout) with no cut-out boxes.
 /// `frame_count` is the animation phase.
 fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     let height = inner.height as f32;
-    let t = frame_count as f32;
     for gx in 0..inner.width {
-        let amp = spectrum_amp(gx, frame_count).clamp(0.06, 1.0);
-        let filled = (amp * height).max(0.001); // crest height, in rows from bottom
+        let amp = spectrum_amp(gx, frame_count).clamp(0.0, 1.0);
+        let crest = amp * height; // the waveform line, in rows from the bottom
         let x = inner.left() + gx;
         for r in 0..inner.height {
             let rf = r as f32; // rows up from the bottom (0 = bottom)
-            let lit = if rf >= filled {
-                // Dark-red wash above the bar, fading toward the top so the panel
-                // still reads red without competing with the bar.
-                (0.15 - 0.028 * (rf - filled)).clamp(0.05, 0.15)
+            // The field: a dim red below the crest (a touch brighter near it) and
+            // a darker wash above — always low so text stays dominant.
+            let field = if rf <= crest {
+                let depth = (crest - rf) / crest.max(1.0); // 0 at crest -> 1 at base
+                0.30 - 0.12 * depth
             } else {
-                // Vertical body gradient: deep at the base, bright toward the crest.
-                let frac = rf / filled; // 0 base -> ~1 crest
-                // A hot, faintly-sparkling cap on the topmost cell of the bar.
-                let cap = if filled - rf <= 1.0 {
-                    0.26 + 0.06 * (gx as f32 * 0.8 + t * 0.3).sin()
-                } else {
-                    0.0
-                };
-                (0.40 + 0.46 * frac + cap).clamp(0.0, 1.0)
+                (0.14 - 0.04 * (rf - crest)).clamp(0.05, 0.14)
             };
+            // The glowing crest line: a soft bright band within ~2 rows of the crest.
+            let glow = (1.0 - (rf - crest).abs() / 2.0).clamp(0.0, 1.0);
+            let lit = (field + 0.7 * glow).clamp(0.0, 1.0);
             let shade = red_shade(lit);
             let y = inner.bottom() - 1 - r;
             if let Some(cell) = buf.cell_mut((x, y)) {
@@ -602,18 +603,18 @@ fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     }
 }
 
-/// Per-column bar height in `[0, 1]` for a given column and frame. A broad swell
-/// plus a medium ripple and a finer detail wave — three travelling sines at
-/// different spatial/temporal frequencies — give a rich, music-like equalizer
-/// whose bars clearly differ column-to-column and move with a lively (but not
-/// frantic) rhythm.
+/// Per-column crest height in `[0.25, 0.85]` for a given column and frame. A
+/// smooth travelling wave plus a broad second harmonic make an undulating
+/// waveform that flows slowly sideways; the range keeps the crest inside the
+/// panel with headroom above and a field below. `frame` moves the phase slowly —
+/// gentle, wavy motion, not a fast flicker.
 fn spectrum_amp(gx: u16, frame: u64) -> f32 {
     let fx = gx as f32;
     let t = frame as f32;
-    let a = 0.42 * (fx * 0.55 + t * 0.13).sin()
-        + 0.30 * (fx * 1.10 - t * 0.19 + 1.3).sin()
-        + 0.28 * (fx * 2.30 + t * 0.11 + 0.7).sin();
-    0.5 + 0.5 * a
+    let a = 0.60 * (fx * 0.28 - t * 0.055).sin()
+        + 0.40 * (fx * 0.13 + t * 0.035 + 1.1).sin();
+    // Map the [-1, 1] wave into [0.25, 0.85] of the panel height.
+    0.25 + 0.60 * (0.5 + 0.5 * a)
 }
 
 /// A claurst-red whose brightness scales with `lit` in `[0, 1]`: a deep-red wash
