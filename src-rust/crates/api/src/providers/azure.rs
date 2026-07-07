@@ -11,14 +11,14 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::{ModelId, ProviderId};
+use claurst_core::provider_id::ProviderId;
 use claurst_core::types::{ContentBlock, UsageInfo};
 use futures::Stream;
 use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::error_handling::parse_error_response;
-use crate::provider::{LlmProvider, ModelInfo};
+use crate::provider::LlmProvider;
 use crate::provider_error::ProviderError;
 use crate::provider_types::{
     ProviderCapabilities, ProviderRequest, ProviderResponse, ProviderStatus, StreamEvent,
@@ -432,43 +432,6 @@ impl LlmProvider for AzureProvider {
         };
 
         Ok(Box::pin(s))
-    }
-
-    async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        Ok(vec![
-            ModelInfo {
-                id: ModelId::new("gpt-4o"),
-                provider_id: self.id.clone(),
-                name: "GPT-4o (Azure)".to_string(),
-                context_window: 128_000,
-                max_output_tokens: 16_384,
-                ..Default::default()
-            },
-            ModelInfo {
-                id: ModelId::new("gpt-4o-mini"),
-                provider_id: self.id.clone(),
-                name: "GPT-4o Mini (Azure)".to_string(),
-                context_window: 128_000,
-                max_output_tokens: 16_384,
-                ..Default::default()
-            },
-            ModelInfo {
-                id: ModelId::new("gpt-4-turbo"),
-                provider_id: self.id.clone(),
-                name: "GPT-4 Turbo (Azure)".to_string(),
-                context_window: 128_000,
-                max_output_tokens: 4_096,
-                ..Default::default()
-            },
-            ModelInfo {
-                id: ModelId::new("gpt-35-turbo"),
-                provider_id: self.id.clone(),
-                name: "GPT-3.5 Turbo (Azure)".to_string(),
-                context_window: 16_385,
-                max_output_tokens: 4_096,
-                ..Default::default()
-            },
-        ])
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {

@@ -17,14 +17,14 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::{ModelId, ProviderId};
+use claurst_core::provider_id::ProviderId;
 use claurst_core::types::{ContentBlock, MessageContent, Role, ToolResultContent, UsageInfo};
 use futures::Stream;
 use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::error_handling::parse_error_response;
-use crate::provider::{LlmProvider, ModelInfo};
+use crate::provider::LlmProvider;
 use crate::provider_error::ProviderError;
 use crate::provider_types::{
     ProviderCapabilities, ProviderRequest, ProviderResponse, ProviderStatus, StopReason,
@@ -720,35 +720,6 @@ impl LlmProvider for BedrockProvider {
         };
 
         Ok(Box::pin(s))
-    }
-
-    async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        Ok(vec![
-            ModelInfo {
-                id: ModelId::new("anthropic.claude-opus-4-6"),
-                provider_id: self.id.clone(),
-                name: "Claude Opus 4.6 (Bedrock)".to_string(),
-                context_window: 200_000,
-                max_output_tokens: 32_000,
-                ..Default::default()
-            },
-            ModelInfo {
-                id: ModelId::new("anthropic.claude-sonnet-4-6"),
-                provider_id: self.id.clone(),
-                name: "Claude Sonnet 4.6 (Bedrock)".to_string(),
-                context_window: 200_000,
-                max_output_tokens: 16_000,
-                ..Default::default()
-            },
-            ModelInfo {
-                id: ModelId::new("anthropic.claude-haiku-4-5-20251001"),
-                provider_id: self.id.clone(),
-                name: "Claude Haiku 4.5 (Bedrock)".to_string(),
-                context_window: 200_000,
-                max_output_tokens: 8_192,
-                ..Default::default()
-            },
-        ])
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {
