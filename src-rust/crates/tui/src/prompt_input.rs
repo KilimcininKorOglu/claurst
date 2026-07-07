@@ -2910,8 +2910,8 @@ fn ultracode_lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
 }
 
 /// Build the styled spans for a single display-line `text`, rendering any
-/// ultracode keyword occurrence ("ultracode" / "ultra code", case-insensitive,
-/// whole-word-ish) with a per-character purple gradient, bold.
+/// `ultracode` keyword occurrence (the single word, case-insensitive,
+/// whole-word) with a per-character purple gradient, bold.
 ///
 /// VISUAL ONLY: the returned spans concatenate back to exactly `text`, in order,
 /// with identical characters and widths -- only the *style* differs on keyword
@@ -2921,7 +2921,7 @@ pub(crate) fn styled_spans_with_ultracode_gradient(
     text: &str,
     base_style: Style,
 ) -> Vec<Span<'static>> {
-    let ranges = claurst_tools::bundled_skills::ultracode_match_ranges(text);
+    let ranges = claurst_core::effort::ultracode_match_ranges(text);
     if ranges.is_empty() {
         return vec![Span::styled(text.to_string(), base_style)];
     }
@@ -4726,9 +4726,11 @@ mod tests {
     }
 
     #[test]
-    fn ultracode_gradient_handles_spaced_and_repeated() {
+    fn ultracode_gradient_handles_repeated_single_word() {
         let base = Style::default().fg(Color::White);
-        let text = "ultra code then ultracode again";
+        // The two-word "ultra code" spelling is no longer highlighted; only the
+        // single word `ultracode` matches (twice here).
+        let text = "ultracode then ultracode again";
         let spans = styled_spans_with_ultracode_gradient(text, base);
         let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(joined, text, "text preserved across multiple matches");
@@ -4736,7 +4738,7 @@ mod tests {
             .iter()
             .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
             .count();
-        // "ultra code" (10) + "ultracode" (9) styled chars.
-        assert_eq!(bold, "ultra code".len() + "ultracode".len());
+        // Two "ultracode" (9 chars each) styled runs.
+        assert_eq!(bold, "ultracode".len() * 2);
     }
 }

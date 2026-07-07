@@ -294,23 +294,27 @@ const TOOL_CANCELLED_MSG: &str = "Tool execution was cancelled by the user befor
 
 // Spinner verbs are imported from claurst_core::spinner
 
-/// Ultracode submit-time activation: if the most recent user message in
-/// `messages` contains the ultracode keyword (whole-word-ish, case-insensitive),
-/// return the per-turn system-prompt addendum that puts the agent into ultracode
-/// mode for this turn. Otherwise return `None`.
+/// Resolve the effective effort level for a turn.
 ///
-/// The addendum text is sourced from the single bundled `ultracode` skill
-/// definition (see `claurst_tools::bundled_skills`), so this never duplicates
-/// the operating procedure — it is the same source of truth as `/ultracode`.
-/// Checking only the *last* user message keeps the mode scoped to the turn that
-/// actually asked for it (a later plain turn deactivates it automatically).
-fn ultracode_addendum_for_messages(messages: &[Message]) -> Option<String> {
-    let last_user = messages.iter().rev().find(|m| m.role == Role::User)?;
-    if claurst_tools::bundled_skills::text_triggers_ultracode(&last_user.get_all_text()) {
-        claurst_tools::bundled_skills::ultracode_system_prompt_addendum()
-    } else {
-        None
+/// Ultracode is a keyword-activated effort: if the most recent user message
+/// contains the `ultracode` keyword (whole-word, case-insensitive), the effort
+/// for this turn is raised to [`EffortLevel::Ultracode`] — the model's top
+/// reasoning plus the ultracode operating procedure (injected as a system
+/// addendum by the loop). Otherwise the configured `config_effort` is used
+/// unchanged. Checking only the *last* user message keeps the mode scoped to the
+/// turn that asked for it (a later plain turn deactivates it automatically).
+///
+/// [`EffortLevel::Ultracode`]: claurst_core::effort::EffortLevel::Ultracode
+fn effective_effort_for_turn(
+    config_effort: Option<claurst_core::effort::EffortLevel>,
+    messages: &[Message],
+) -> Option<claurst_core::effort::EffortLevel> {
+    if let Some(last_user) = messages.iter().rev().find(|m| m.role == Role::User) {
+        if claurst_core::effort::text_triggers_ultracode(&last_user.get_all_text()) {
+            return Some(claurst_core::effort::EffortLevel::Ultracode);
+        }
     }
+    config_effort
 }
 
 /// Run the agentic query loop.
@@ -583,6 +587,14 @@ pub async fn run_query_loop(
                 .collect()
         };
 
+        // Effective effort for THIS turn. The configured effort is overridden to
+        // Ultracode when the latest user message invokes the `ultracode` keyword,
+        // so an ultracode turn gets the model's top reasoning (via the budget /
+        // provider mapping below) plus the ultracode procedure addendum injected
+        // into the system prompt.
+        let effective_effort_level =
+            effective_effort_for_turn(config.effort_level, messages.as_slice());
+
         // Verification nudge: if there are incomplete todos for this session
         // and the conversation has more than 2 turns, append a reminder.
         let system = {
@@ -652,13 +664,15 @@ pub async fn run_query_loop(
                 }
             }
 
-            // Ultracode mode (keyword-activated). When the current turn's user
-            // message contains the ultracode keyword, inject the bundled
-            // `ultracode` skill's operating procedure as a per-turn addendum
-            // (same source of truth as `/ultracode`). Applied fresh each turn so
-            // it naturally deactivates once the keyword turn ends. Composes with
-            // goal mode: a keyword turn under an active goal gets both addenda.
-            if let Some(uc_addendum) = ultracode_addendum_for_messages(messages.as_slice()) {
+            // Ultracode effort. When the effective effort for this turn is
+            // Ultracode (set by the `ultracode` keyword or an explicit /effort
+            // ultracode), inject the ultracode operating procedure as a per-turn
+            // system addendum — the same injection path the goal addendum uses.
+            // The keyword also raises the effort to top reasoning (see the
+            // budget / provider mapping below). Applied fresh each turn so it
+            // deactivates naturally, and composes with goal mode.
+            if effective_effort_level == Some(claurst_core::effort::EffortLevel::Ultracode) {
+                let uc_addendum = claurst_core::effort::ultracode_system_prompt_addendum();
                 patched.append_system_prompt = Some(match patched.append_system_prompt.take() {
                     Some(existing) => format!("{}\n{}", existing, uc_addendum),
                     None => uc_addendum,
@@ -678,9 +692,7 @@ pub async fn run_query_loop(
         //   1. Explicit `thinking_budget` in config takes precedence.
         //   2. Fall back to the effort level's budget when no explicit budget is set.
         let effective_thinking_budget = config.thinking_budget.or_else(|| {
-            config
-                .effort_level
-                .and_then(|el| el.thinking_budget_tokens())
+            effective_effort_level.and_then(|el| el.thinking_budget_tokens())
         });
 
         if let Some(budget) = effective_thinking_budget {
@@ -696,7 +708,7 @@ pub async fn run_query_loop(
                     .map(|t| t as f32)
             })
             .or_else(|| {
-                config.effort_level.and_then(|el| el.temperature())
+                effective_effort_level.and_then(|el| el.temperature())
             });
         if let Some(t) = effective_temperature {
             req_builder = req_builder.temperature(t);
@@ -916,7 +928,7 @@ pub async fn run_query_loop(
                         provider_options: build_provider_options(
                             &provider_id_str,
                             &model_id_str,
-                            config.effort_level,
+                            effective_effort_level,
                             effective_thinking_budget,
                         ),
                     };
@@ -2958,39 +2970,59 @@ mod tests {
         );
     }
 
-    // ---- ultracode activation -------------------------------------------
+    // ---- ultracode activation (effort) ----------------------------------
 
     #[test]
-    fn ultracode_addendum_present_when_keyword_in_last_user_message() {
+    fn ultracode_keyword_raises_effort_to_ultracode() {
+        use claurst_core::effort::EffortLevel;
         let msgs = vec![Message::user("please ultracode this refactor")];
-        let add = ultracode_addendum_for_messages(&msgs).expect("addendum expected");
-        assert!(add.contains("Ultracode Mode"));
+        // Even with no configured effort, the keyword forces Ultracode.
+        assert_eq!(
+            effective_effort_for_turn(None, &msgs),
+            Some(EffortLevel::Ultracode)
+        );
+        // ...and it overrides a lower configured effort for the turn.
+        assert_eq!(
+            effective_effort_for_turn(Some(EffortLevel::Low), &msgs),
+            Some(EffortLevel::Ultracode)
+        );
     }
 
     #[test]
-    fn ultracode_addendum_absent_without_keyword() {
+    fn no_keyword_keeps_configured_effort() {
+        use claurst_core::effort::EffortLevel;
         let msgs = vec![Message::user("please refactor this module")];
-        assert!(ultracode_addendum_for_messages(&msgs).is_none());
+        assert_eq!(effective_effort_for_turn(None, &msgs), None);
+        assert_eq!(
+            effective_effort_for_turn(Some(EffortLevel::High), &msgs),
+            Some(EffortLevel::High)
+        );
     }
 
     #[test]
-    fn ultracode_addendum_checks_only_the_last_user_message() {
+    fn ultracode_effort_checks_only_the_last_user_message() {
         // Keyword in an earlier turn does not keep ultracode active on a later
         // plain turn.
         let msgs = vec![
-            Message::user("ultracode: kick things off"),
+            Message::user("ultracode kick things off"),
             Message::assistant("working on it"),
             Message::user("now just tidy up the docs"),
         ];
-        assert!(ultracode_addendum_for_messages(&msgs).is_none());
+        assert_eq!(effective_effort_for_turn(None, &msgs), None);
     }
 
     #[test]
     fn ultracode_addendum_flows_into_built_system_prompt() {
-        // Mirrors the loop wiring: the addendum is threaded through
-        // `append_system_prompt` into the assembled system prompt.
-        let msgs = vec![Message::user("ultracode: audit the query loop")];
-        let addendum = ultracode_addendum_for_messages(&msgs).expect("addendum expected");
+        use claurst_core::effort::EffortLevel;
+        // Mirrors the loop wiring: when the effective effort is Ultracode the
+        // procedure addendum is threaded through `append_system_prompt` into the
+        // assembled system prompt.
+        let msgs = vec![Message::user("ultracode audit the query loop")];
+        assert_eq!(
+            effective_effort_for_turn(None, &msgs),
+            Some(EffortLevel::Ultracode)
+        );
+        let addendum = claurst_core::effort::ultracode_system_prompt_addendum();
         let opts = claurst_core::system_prompt::SystemPromptOptions {
             append_system_prompt: Some(addendum),
             skip_env_info: true,
@@ -3000,8 +3032,11 @@ mod tests {
         assert!(prompt.contains("Ultracode Mode"));
         assert!(prompt.contains("TeamCreate"));
 
-        // Absent path: no keyword -> no ultracode text in the built prompt.
-        assert!(ultracode_addendum_for_messages(&[Message::user("hi there")]).is_none());
+        // Absent path: no keyword -> configured effort stays, no ultracode text.
+        assert_eq!(
+            effective_effort_for_turn(None, &[Message::user("hi there")]),
+            None
+        );
         let plain = claurst_core::system_prompt::build_system_prompt(
             &claurst_core::system_prompt::SystemPromptOptions {
                 skip_env_info: true,
