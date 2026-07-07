@@ -524,7 +524,14 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     // ("> ") and the right-margin padding used inside `render_prompt_input`.
     // Keep this in sync with prefix_width=2 + right_pad=2 there.
     let prompt_text_width = size.width.saturating_sub(4);
-    let prompt_height = input_height(&app.prompt_input, prompt_text_width) + 1; // +1 for model/mode status line
+    // While the `/effort` selector is open it DOCKS into the prompt area, fully
+    // replacing the prompt box, so the row budget follows the docked panel height
+    // (clamped by the layout below) instead of the prompt's own line count.
+    let prompt_height = if app.effort_picker.visible {
+        crate::effort_picker::DOCK_HEIGHT
+    } else {
+        input_height(&app.prompt_input, prompt_text_width) + 1 // +1 for model/mode status line
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -543,7 +550,19 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     if status_height > 0 {
         render_status_row(frame, app, chunks[2]);
     }
-    render_input(frame, app, chunks[3], prompt_focused);
+    // The `/effort` selector replaces the prompt box while open: render it into
+    // the input area (full width) and SKIP the prompt input. The prompt returns
+    // when the picker closes on confirm/cancel.
+    if app.effort_picker.visible {
+        crate::effort_picker::render_effort_picker(
+            frame,
+            &app.effort_picker,
+            chunks[3],
+            app.frame_count,
+        );
+    } else {
+        render_input(frame, app, chunks[3], prompt_focused);
+    }
     app.last_input_area.set(chunks[3]);
     if suggestions_height > 0 {
         render_prompt_suggestions(frame, app, chunks[4]);
@@ -700,15 +719,8 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         render_onboarding_dialog(frame, &app.onboarding_dialog, size);
     }
 
-    // /effort picker
-    if app.effort_picker.visible {
-        crate::effort_picker::render_effort_picker(
-            frame,
-            &app.effort_picker,
-            size,
-            app.frame_count,
-        );
-    }
+    // The `/effort` selector is NOT an overlay — it docks into the prompt input
+    // area (see the input dispatch above), replacing the prompt box while open.
 
     // Import-config source picker
     if app.import_config_picker.visible {
@@ -3544,5 +3556,73 @@ mod stream_cache_tests {
         let text = joined_text(&completed);
         assert!(text.contains("a1 committed"));
         assert!(text.contains("live answer body"));
+    }
+}
+
+/// The `/effort` selector docks into the prompt area and replaces the prompt box
+/// while open (issue #275).
+#[cfg(test)]
+mod effort_dock_tests {
+    use super::*;
+    use crate::app::App;
+    use crate::model_picker::EffortLevel;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    /// The prompt pointer glyph drawn by `render_prompt_input`.
+    const PROMPT_POINTER: char = '\u{276f}';
+
+    fn render_screen(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render_app(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn effort_picker_replaces_prompt_box_when_open() {
+        let mut app = App::new(Config::default(), CostTracker::new());
+
+        // Closed: the prompt box (its pointer) is drawn; no selector chrome.
+        let closed = render_screen(&app);
+        assert!(
+            closed.contains(PROMPT_POINTER),
+            "prompt pointer should be visible when the picker is closed"
+        );
+        assert!(
+            !closed.contains("ultracode"),
+            "selector labels must not show while the picker is closed"
+        );
+
+        // Open: the selector takes over the prompt area; the prompt box is gone.
+        app.effort_picker.open(
+            EffortLevel::High,
+            vec![
+                EffortLevel::Low,
+                EffortLevel::Medium,
+                EffortLevel::High,
+                EffortLevel::XHigh,
+                EffortLevel::Max,
+                EffortLevel::Ultracode,
+            ],
+        );
+        let open = render_screen(&app);
+        assert!(
+            open.contains("Effort") && open.contains("ultracode"),
+            "the docked Effort selector should render in the prompt area"
+        );
+        assert!(
+            !open.contains(PROMPT_POINTER),
+            "prompt input must NOT be drawn while the picker is open"
+        );
     }
 }
