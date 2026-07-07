@@ -27,9 +27,11 @@ impl EffortPickerState {
         self.visible = true;
         self.selected = match current {
             EffortLevel::Low => 0,
-            EffortLevel::Normal => 1,
+            EffortLevel::Medium => 1,
             EffortLevel::High => 2,
-            EffortLevel::Max => 3,
+            // XHigh/Ultracode aren't first-class rows in this legacy 4-row
+            // picker (it's redesigned in #268); fold them onto the top row.
+            EffortLevel::XHigh | EffortLevel::Max | EffortLevel::Ultracode => 3,
         };
     }
 
@@ -48,7 +50,7 @@ impl EffortPickerState {
     pub fn current(&self) -> EffortLevel {
         match self.selected {
             0 => EffortLevel::Low,
-            1 => EffortLevel::Normal,
+            1 => EffortLevel::Medium,
             2 => EffortLevel::High,
             _ => EffortLevel::Max,
         }
@@ -77,7 +79,7 @@ pub fn render_effort_picker(frame: &mut Frame, state: &EffortPickerState, area: 
     let mut lines: Vec<Line> = Vec::new();
     let options: [(EffortLevel, &str); 4] = [
         (EffortLevel::Low,    "low"),
-        (EffortLevel::Normal, "normal"),
+        (EffortLevel::Medium, "medium"),
         (EffortLevel::High,   "high"),
         (EffortLevel::Max,    "max"),
     ];

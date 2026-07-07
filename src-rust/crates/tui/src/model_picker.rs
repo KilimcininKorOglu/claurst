@@ -14,74 +14,15 @@ use crate::overlays::{centered_rect, modal_search_line, CLAURST_PANEL_BG};
 // Effort level
 // ---------------------------------------------------------------------------
 
-/// Mirrors the TS `EffortLevel` enum and `effortLevelToSymbol()` helper.
+/// The effort level shown by the /model and /effort pickers.
 ///
-/// Effort controls the extended-thinking `budget_tokens` parameter sent to the
-/// API. Only models that support extended thinking honour this; for others it
-/// is silently ignored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[derive(Default)]
-pub enum EffortLevel {
-    Low,
-    #[default]
-    Normal,
-    High,
-    Max,
-}
-
-impl EffortLevel {
-    /// Unicode quarter-circle symbol used in the TS UI.
-    pub fn symbol(self) -> &'static str {
-        match self {
-            Self::Low    => "\u{25cb}", // ○  empty circle
-            Self::Normal => "\u{25d0}", // ◐  half
-            Self::High   => "\u{25d5}", // ◕  three-quarter
-            Self::Max    => "\u{25cf}", // ●  full
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Low    => "low",
-            Self::Normal => "normal",
-            Self::High   => "high",
-            Self::Max    => "max",
-        }
-    }
-
-    /// Returns the budget_tokens value to pass to the API, or `None` for the
-    /// default (no extended thinking).
-    pub fn budget_tokens(self) -> Option<u32> {
-        match self {
-            Self::Low    => Some(1_024),
-            Self::Normal => None,
-            Self::High   => Some(16_000),
-            Self::Max    => Some(32_000),
-        }
-    }
-
-    /// Cycle to next level; skips `Max` when the selected model does not
-    /// support it.
-    pub fn next(self, supports_max: bool) -> Self {
-        match self {
-            Self::Low    => Self::Normal,
-            Self::Normal => Self::High,
-            Self::High   => if supports_max { Self::Max } else { Self::Low },
-            Self::Max    => Self::Low,
-        }
-    }
-
-    /// Cycle to previous level.
-    pub fn prev(self, supports_max: bool) -> Self {
-        match self {
-            Self::Low    => if supports_max { Self::Max } else { Self::High },
-            Self::Normal => Self::Low,
-            Self::High   => Self::Normal,
-            Self::Max    => Self::High,
-        }
-    }
-}
+/// This is a re-export of the single canonical [`claurst_core::effort::EffortLevel`]
+/// (`Low, Medium, High, XHigh, Max, Ultracode`). The former TUI-local enum's
+/// `Normal` variant is now [`EffortLevel::Medium`]; `symbol()`, `label()`,
+/// `next()`, and `prev()` all live on the core enum. Effort controls the
+/// extended-thinking budget / reasoning-effort sent to the API; only models that
+/// support reasoning honour it.
+pub use claurst_core::effort::EffortLevel;
 
 
 // ---------------------------------------------------------------------------
@@ -523,7 +464,7 @@ impl ModelPickerState {
             models: Vec::new(),
             title: "Select model".to_string(),
             filter: String::new(),
-            effort_level: EffortLevel::Normal,
+            effort_level: EffortLevel::Medium,
             fast_mode: false,
             fast_mode_model: None,
             models_loaded: false,
@@ -537,7 +478,7 @@ impl ModelPickerState {
     /// `fast_mode` are carried over from app state so the user sees the live
     /// values.
     pub fn open(&mut self, current_model: &str) {
-        self.open_with_state(current_model, EffortLevel::Normal, false);
+        self.open_with_state(current_model, EffortLevel::Medium, false);
     }
 
     /// Open the overlay with full state context.
@@ -1036,14 +977,14 @@ mod tests {
     #[test]
     fn open_with_title_updates_dialog_title() {
         let mut p = ModelPickerState::new();
-        p.open_with_title("Anthropic", "claude-sonnet-4-6", EffortLevel::Normal, false);
+        p.open_with_title("Anthropic", "claude-sonnet-4-6", EffortLevel::Medium, false);
         assert_eq!(p.title, "Anthropic");
     }
 
     #[test]
     fn open_with_fast_mode_tracks_locked_model() {
         let mut p = ModelPickerState::new();
-        p.open_with_state("gpt-4o-mini", EffortLevel::Normal, true);
+        p.open_with_state("gpt-4o-mini", EffortLevel::Medium, true);
         assert_eq!(p.fast_mode_model.as_deref(), Some("gpt-4o-mini"));
         assert!(p.is_selected_fast_mode_model("gpt-4o-mini"));
         assert!(!p.is_selected_fast_mode_model("gpt-4o"));
@@ -1139,7 +1080,7 @@ mod tests {
     fn effort_cycles_correctly() {
         let mut p = make_picker_with_current("claude-sonnet-4-6");
         // sonnet-4-6 supports effort but not max
-        assert_eq!(p.effort_level, EffortLevel::Normal);
+        assert_eq!(p.effort_level, EffortLevel::Medium);
         p.effort_next();
         assert_eq!(p.effort_level, EffortLevel::High);
         p.effort_next();

@@ -1796,14 +1796,10 @@ async fn run_interactive(
         app.status_message = Some(warning);
     }
     // Sync initial effort level (from --effort flag or /effort command) to TUI indicator.
+    // The TUI and query effort types are now the same canonical enum, so this is
+    // a direct assignment.
     if let Some(level) = base_query_config.effort_level {
-        use claurst_tui::EffortLevel as TuiEL;
-        app.effort_level = match level {
-            claurst_core::effort::EffortLevel::Low    => TuiEL::Low,
-            claurst_core::effort::EffortLevel::Medium => TuiEL::Normal,
-            claurst_core::effort::EffortLevel::High   => TuiEL::High,
-            claurst_core::effort::EffortLevel::Max    => TuiEL::Max,
-        };
+        app.effort_level = level;
     }
     app.provider_registry = base_query_config.provider_registry.clone();
     app.refresh_context_window_size();
@@ -2220,16 +2216,7 @@ async fn run_interactive(
                             // Sync effort level when TUI cycled the visual indicator
                             // (no-args /effort → cycle Low→Med→High→Max→Low).
                             if handled_by_tui && cmd_name == "effort" && cmd_args.is_empty() {
-                                current_effort = Some(match app.effort_level {
-                                    claurst_tui::EffortLevel::Low =>
-                                        claurst_core::effort::EffortLevel::Low,
-                                    claurst_tui::EffortLevel::Normal =>
-                                        claurst_core::effort::EffortLevel::Medium,
-                                    claurst_tui::EffortLevel::High =>
-                                        claurst_core::effort::EffortLevel::High,
-                                    claurst_tui::EffortLevel::Max =>
-                                        claurst_core::effort::EffortLevel::Max,
-                                });
+                                current_effort = Some(app.effort_level);
                             }
 
                             // Honour exit/quit triggered by TUI intercept immediately.
@@ -2575,16 +2562,7 @@ async fn run_interactive(
                                     claurst_core::effort::EffortLevel::from_str(&cmd_args)
                                 {
                                     current_effort = Some(level);
-                                    app.effort_level = match level {
-                                        claurst_core::effort::EffortLevel::Low =>
-                                            claurst_tui::EffortLevel::Low,
-                                        claurst_core::effort::EffortLevel::Medium =>
-                                            claurst_tui::EffortLevel::Normal,
-                                        claurst_core::effort::EffortLevel::High =>
-                                            claurst_tui::EffortLevel::High,
-                                        claurst_core::effort::EffortLevel::Max =>
-                                            claurst_tui::EffortLevel::Max,
-                                    };
+                                    app.effort_level = level;
                                     app.status_message = Some(format!(
                                         "Effort: {} {}",
                                         app.effort_level.symbol(),

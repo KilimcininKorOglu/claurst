@@ -6,10 +6,15 @@ use crate::*;
 pub(crate) fn reasoning_effort_for_level(
     effort_level: claurst_core::effort::EffortLevel,
 ) -> &'static str {
+    use claurst_core::effort::EffortLevel;
     match effort_level {
-        claurst_core::effort::EffortLevel::Low => "low",
-        claurst_core::effort::EffortLevel::Medium => "medium",
-        claurst_core::effort::EffortLevel::High | claurst_core::effort::EffortLevel::Max => {
+        EffortLevel::Low => "low",
+        EffortLevel::Medium => "medium",
+        // XHigh/Max/Ultracode collapse to "high" for the generic OpenAI-family
+        // `reasoning_effort` value. Providers that accept a higher tier (e.g.
+        // Codex's "xhigh") get it via the provider-specific override below;
+        // defaulting to "high" keeps unknown providers safe.
+        EffortLevel::High | EffortLevel::XHigh | EffortLevel::Max | EffortLevel::Ultracode => {
             "high"
         }
     }
@@ -18,10 +23,12 @@ pub(crate) fn reasoning_effort_for_level(
 pub(crate) fn google_thinking_level_for_effort(
     effort_level: Option<claurst_core::effort::EffortLevel>,
 ) -> &'static str {
-    match effort_level.unwrap_or(claurst_core::effort::EffortLevel::High) {
-        claurst_core::effort::EffortLevel::Low => "low",
-        claurst_core::effort::EffortLevel::Medium => "medium",
-        claurst_core::effort::EffortLevel::High | claurst_core::effort::EffortLevel::Max => {
+    use claurst_core::effort::EffortLevel;
+    match effort_level.unwrap_or(EffortLevel::High) {
+        EffortLevel::Low => "low",
+        EffortLevel::Medium => "medium",
+        // Gemini's top thinking level is "high"; XHigh/Max/Ultracode all map onto it.
+        EffortLevel::High | EffortLevel::XHigh | EffortLevel::Max | EffortLevel::Ultracode => {
             "high"
         }
     }
@@ -174,12 +181,16 @@ pub(crate) fn build_provider_options(
             .map(reasoning_effort_for_level)
             .unwrap_or("medium");
         // Codex (ChatGPT) accepts the full gpt-5 effort ladder including
-        // `xhigh`, so surface the top "Max" tier as "extra high" there —
-        // matching opencode — without changing the value sent to other
-        // OpenAI-compatible providers that may not accept it.
+        // `xhigh`, so surface the top tiers (XHigh / Max / Ultracode) as "extra
+        // high" there — matching opencode — without changing the value sent to
+        // other OpenAI-compatible providers that may not accept it.
         let reasoning_effort = if matches!(provider_id, "codex" | "openai-codex")
-            && effort_level == Some(claurst_core::effort::EffortLevel::Max)
-        {
+            && matches!(
+                effort_level,
+                Some(claurst_core::effort::EffortLevel::XHigh)
+                    | Some(claurst_core::effort::EffortLevel::Max)
+                    | Some(claurst_core::effort::EffortLevel::Ultracode)
+            ) {
             "xhigh"
         } else {
             reasoning_effort
@@ -226,7 +237,9 @@ pub(crate) fn build_provider_options(
                         );
                         options.insert("reasoningEffort".to_string(), serde_json::json!("high"));
                     }
-                    Some(claurst_core::effort::EffortLevel::Max) => {
+                    Some(claurst_core::effort::EffortLevel::XHigh)
+                    | Some(claurst_core::effort::EffortLevel::Max)
+                    | Some(claurst_core::effort::EffortLevel::Ultracode) => {
                         options.insert(
                             "thinking".to_string(),
                             serde_json::json!({"type": "enabled"}),

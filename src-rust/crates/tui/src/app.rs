@@ -1300,7 +1300,7 @@ impl App {
             cost_usd: 0.0,
             model_name,
             has_credentials: true, // overridden by caller when no key is configured
-            effort_level: EffortLevel::Normal,
+            effort_level: EffortLevel::Medium,
             fast_mode: false,
             speech_mode: None,
             speech_level: "full".to_string(),
