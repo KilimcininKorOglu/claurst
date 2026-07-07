@@ -2897,10 +2897,10 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     out
 }
 
-/// Purple-gradient endpoints for the ultracode keyword, mirroring how Claude
-/// Code highlights "ultrathink": a light violet fading into a deeper purple.
-const ULTRACODE_GRADIENT_START: (u8, u8, u8) = (168, 85, 247);
-const ULTRACODE_GRADIENT_END: (u8, u8, u8) = (124, 58, 237);
+/// Claurst-red gradient endpoints for the ultracode keyword (matches the
+/// `/effort` selector's red theme): the signature red fading into a deeper red.
+const ULTRACODE_GRADIENT_START: (u8, u8, u8) = (233, 30, 99);
+const ULTRACODE_GRADIENT_END: (u8, u8, u8) = (140, 20, 45);
 
 /// Linearly interpolate between two RGB colors at `t` in `[0, 1]`.
 fn ultracode_lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
