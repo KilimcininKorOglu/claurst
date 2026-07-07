@@ -3427,14 +3427,16 @@ async fn run_interactive(
                         .strip_prefix(&provider_prefix)
                         .unwrap_or(app.model_name.as_str())
                         .to_string();
-                    // Only let a live-discovery result replace the list when it
-                    // actually returned models. An empty result — catalog-backed
-                    // provider (now the trait default), an unreachable endpoint,
-                    // or a missing entitlement — must never wipe the registry
-                    // projection set when the picker opened.
-                    if !entries.is_empty() {
-                        app.model_picker.set_models(entries);
-                    }
+                    // Additively merge the live-discovery result onto the
+                    // catalog projection already loaded when the picker opened,
+                    // mirroring opencode's github-copilot models.ts merge-by-id
+                    // (models.ts:229-255): keep the catalog metadata for ids in
+                    // both, append only live ids not already listed. An empty
+                    // result — catalog-backed provider (now the trait default),
+                    // an unreachable endpoint, or a missing entitlement — is a
+                    // no-op and never wipes the projection. For copilot the id
+                    // IS the api.id, so this is the by-api.id merge.
+                    app.model_picker.merge_models(entries);
                     for m in &mut app.model_picker.models {
                         m.is_current = m.id == current;
                     }
