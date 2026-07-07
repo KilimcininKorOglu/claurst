@@ -567,3 +567,192 @@ fn purple_shade(lit: f32) -> Color {
         (247.0 * k) as u8,
     )
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn full_ladder() -> Vec<EffortLevel> {
+        vec![
+            EffortLevel::Low,
+            EffortLevel::Medium,
+            EffortLevel::High,
+            EffortLevel::XHigh,
+            EffortLevel::Max,
+            EffortLevel::Ultracode,
+        ]
+    }
+
+    fn state_with(levels: Vec<EffortLevel>, selected: usize) -> EffortPickerState {
+        EffortPickerState {
+            visible: true,
+            levels,
+            selected,
+        }
+    }
+
+    fn render_to_buffer(state: &EffortPickerState, frame_count: u64) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| render_effort_picker(f, state, f.area(), frame_count))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    /// Each buffer row as a `String` of cell glyphs (all glyphs here are 1 cell
+    /// wide, so a char index equals its column).
+    fn buffer_rows(buf: &Buffer) -> Vec<String> {
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Char-column index of `needle` in `row` (converts the byte offset from
+    /// `str::find` to a char/column index, since labels can share a row with
+    /// multi-byte glyphs like the border/divider `│`).
+    fn char_col_of(row: &str, needle: &str) -> Option<usize> {
+        let byte_idx = row.find(needle)?;
+        Some(row[..byte_idx].chars().count())
+    }
+
+    #[test]
+    fn open_selects_current_and_clamps_navigation() {
+        let mut s = EffortPickerState::new();
+        s.open(EffortLevel::High, full_ladder());
+        assert!(s.visible);
+        assert_eq!(s.current(), EffortLevel::High);
+
+        // ← past the start clamps at Low.
+        for _ in 0..10 {
+            s.select_prev();
+        }
+        assert_eq!(s.current(), EffortLevel::Low);
+        // → past the end clamps at Ultracode.
+        for _ in 0..20 {
+            s.select_next();
+        }
+        assert_eq!(s.current(), EffortLevel::Ultracode);
+        assert!(s.wants_animation());
+    }
+
+    #[test]
+    fn open_falls_back_to_nearest_available_level() {
+        // Model without Max/XHigh; opening on Max lands on the highest native.
+        let levels = vec![
+            EffortLevel::Low,
+            EffortLevel::Medium,
+            EffortLevel::High,
+            EffortLevel::Ultracode,
+        ];
+        let mut s = EffortPickerState::new();
+        s.open(EffortLevel::Max, levels);
+        assert_eq!(s.current(), EffortLevel::High);
+    }
+
+    #[test]
+    fn renders_model_levels_and_ultracode_after_divider() {
+        // Max selected → no spectrum, so label gaps read as plain spaces.
+        let state = state_with(full_ladder(), 4);
+        let rows = buffer_rows(&render_to_buffer(&state, 0));
+        let label_row = rows
+            .iter()
+            .find(|r| r.contains("ultracode"))
+            .expect("label row present");
+
+        for lbl in ["low", "medium", "high", "xhigh", "max"] {
+            assert!(label_row.contains(lbl), "labels row missing {lbl}: {label_row:?}");
+        }
+        // A divider must sit between `max` and `ultracode`.
+        let max_end = label_row.find("max").unwrap() + "max".len();
+        let uc = label_row.find("ultracode").unwrap();
+        let gap = &label_row[max_end..uc];
+        assert!(
+            gap.contains('\u{2502}'),
+            "expected `│` divider between max and ultracode, gap={gap:?}"
+        );
+    }
+
+    #[test]
+    fn marker_sits_under_selected_level() {
+        // Select `medium` (unique, not a substring of another label).
+        let state = state_with(full_ladder(), 1);
+        let rows = buffer_rows(&render_to_buffer(&state, 0));
+
+        let (marker_y, marker_row) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, r)| r.contains('\u{25b2}'))
+            .map(|(i, r)| (i, r.clone()))
+            .expect("marker row present");
+        let marker_col = marker_row.chars().position(|c| c == '\u{25b2}').unwrap();
+
+        let label_row = &rows[marker_y - 1];
+        let start = char_col_of(label_row, "medium").expect("medium in labels row");
+        let end = start + "medium".chars().count();
+        assert!(
+            marker_col >= start && marker_col < end,
+            "marker col {marker_col} not within medium [{start}, {end})"
+        );
+    }
+
+    #[test]
+    fn max_uses_distinct_per_char_rainbow_colors() {
+        let state = state_with(full_ladder(), 4); // max selected
+        let buf = render_to_buffer(&state, 0);
+        let rows = buffer_rows(&buf);
+        let label_y = rows
+            .iter()
+            .position(|r| r.contains("ultracode"))
+            .expect("label row present");
+        let label_row = &rows[label_y];
+        let start = char_col_of(label_row, "max").expect("max in labels row");
+
+        let y = label_y as u16;
+        let colors: Vec<Color> = (0..3u16)
+            .map(|dx| buf.cell((start as u16 + dx, y)).expect("max cell").fg)
+            .collect();
+        assert_ne!(colors[0], colors[1], "rainbow chars must differ: {colors:?}");
+        assert_ne!(colors[1], colors[2], "rainbow chars must differ: {colors:?}");
+        assert_ne!(colors[0], colors[2], "rainbow chars must differ: {colors:?}");
+    }
+
+    #[test]
+    fn ultracode_spectrum_animates_but_others_are_static() {
+        let levels = vec![
+            EffortLevel::Low,
+            EffortLevel::Medium,
+            EffortLevel::High,
+            EffortLevel::Ultracode,
+        ];
+
+        // Ultracode selected → background differs between two frame_count values.
+        let ultra = state_with(levels.clone(), levels.len() - 1);
+        let a = render_to_buffer(&ultra, 0);
+        let b = render_to_buffer(&ultra, 30);
+        assert_ne!(
+            a.content(),
+            b.content(),
+            "ultracode spectrum should animate between frames"
+        );
+
+        // Non-ultracode selection → no spectrum, identical across frames.
+        let high = state_with(levels, 2);
+        let c = render_to_buffer(&high, 0);
+        let d = render_to_buffer(&high, 30);
+        assert_eq!(
+            c.content(),
+            d.content(),
+            "non-ultracode picker must not animate"
+        );
+    }
+}
