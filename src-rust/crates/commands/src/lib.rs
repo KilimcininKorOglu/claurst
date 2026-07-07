@@ -93,9 +93,6 @@ pub enum CommandResult {
     /// Clear saved provider auth, model selection, and model caches, then
     /// rebuild the live runtime state.
     RefreshProviderState,
-    /// Activate a speech mode (caveman/rocky) with level, or deactivate (normal).
-    /// (mode, level) — mode=None means deactivate.
-    SpeechMode { mode: Option<String>, level: String },
     /// Start a fresh session (opencode's `/new`): reset to a blank home,
     /// preserving the current model/provider/effort selection and working
     /// directory. Lazy — the new session is only persisted on the first message.

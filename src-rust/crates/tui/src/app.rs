@@ -78,12 +78,12 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("model", "Change the AI model"),
     ("move", "Re-home this session to another worktree of the same project"),
     ("new", "Start a fresh session (keeps model, provider & directory)"),
-    ("output-style", "Toggle output style (auto/stream/verbose)"),
+    ("output-style", "Show or switch the output style / persona"),
     ("plugin", "Manage plugins (list/info/enable/disable/reload)"),
     ("providers", "List available AI providers and their status"),
-    ("caveman", "Caveman speech mode — save big token"),
-    ("rocky", "Rocky speech mode — amaze amaze amaze"),
-    ("normal", "Deactivate speech mode"),
+    ("caveman", "Caveman persona output style — save big token"),
+    ("rocky", "Rocky persona output style — amaze amaze amaze"),
+    ("normal", "Reset persona / output style to default"),
     ("quit", "Exit Claurst"),
     ("refresh", "Clear saved provider auth and model caches"),
     ("rename", "Rename this session"),
@@ -836,10 +836,6 @@ pub struct App {
     pub effort_level: EffortLevel,
     /// Whether fast mode is currently active (model locked to FAST_MODE_MODEL).
     pub fast_mode: bool,
-    /// Active speech mode: None = normal, Some("caveman") / Some("rocky").
-    pub speech_mode: Option<String>,
-    /// Speech mode intensity: "lite", "full", "ultra".
-    pub speech_level: String,
     /// Current agent mode name: "build", "plan".
     pub agent_mode: Option<String>,
     /// Accent color derived from the current agent mode.
@@ -1219,76 +1215,6 @@ pub struct App {
 // Format a duration in milliseconds to a human-readable string.
 // Matches OpenCode's behaviour: rounds to whole seconds, shows "Xs" for
 // durations under a minute, "Xm Ys" for longer ones.
-// ---------------------------------------------------------------------------
-// Speech mode prompts (caveman / rocky)
-// ---------------------------------------------------------------------------
-
-/// Return the system prompt injection for the active speech mode + level.
-pub fn speech_mode_prompt(mode: &str, level: &str) -> String {
-    match mode {
-        "caveman" => caveman_prompt(level),
-        "rocky" => rocky_prompt(level),
-        _ => String::new(),
-    }
-}
-
-fn caveman_prompt(level: &str) -> String {
-    let base = "\
-OUTPUT STYLE: Concise. You are still a fully capable coding assistant. \
-Give complete, correct answers. Just use fewer words. \
-Code blocks, technical terms, error messages, file paths, and git operations are UNCHANGED.
-
-Rules for prose only:
-- Cut pleasantries, hedging, filler openers/closers
-- No 'I would be happy to', 'Let me know if', 'Hope that helps'
-- Lead with the answer or action, not the reasoning";
-
-    match level {
-        "lite" => format!("{}\n\nStrip pleasantries and hedging. Keep full grammar and articles. Just remove the fluff.", base),
-        "ultra" => format!("{}\n\nAlso drop articles (a/an/the). Compress to short imperative phrases. Numbered steps, no prose between. Absolute minimum words.", base),
-        _ => format!("{}\n\nAlso drop articles (a/an/the) and unnecessary verbs. Compress sentences but keep them readable.\n\
-Example: 'The issue is that you create a new object reference each render cycle, which triggers re-renders.' → 'New object ref each render triggers re-render. Wrap in useMemo.'", base),
-    }
-}
-
-fn rocky_prompt(level: &str) -> String {
-    let base = "\
-OUTPUT STYLE: You speak like Rocky, the Eridian alien from Project Hail Mary. \
-You are still a fully capable coding assistant — give complete, correct, useful answers. \
-Rocky is an engineering genius who happens to speak English as a second language. \
-The style is a natural byproduct of how Rocky talks, NOT a gimmick. Stay helpful.
-
-Code blocks, technical terms, error messages, file paths, and git operations are UNCHANGED.
-
-Rocky's grammar for prose:
-- Often drops articles (a/an/the) but not always — use judgment
-- Sometimes drops auxiliary verbs (is/are/was) for brevity
-- Contractions simplify: 'don't' → 'no', 'can't' → 'no can'
-- Questions end with ', question?' naturally (not forced on every single one)
-- Uses 'big' as an intensifier: 'big problem', 'big help', 'big change'
-- Uses 'good good good' or 'amaze amaze amaze' when genuinely impressed — naturally, \
-  maybe once or twice per response, not on every sentence
-- Uses 'bad bad bad' for actual problems
-- No pleasantries or filler — Rocky is direct but warm
-
-The goal: sound like Rocky while being genuinely helpful. Rocky is smart. \
-Rocky gives complete technical answers. Rocky just uses fewer unnecessary words.";
-
-    match level {
-        "lite" => format!("{}\n\nLight touch. Mostly normal English but drop pleasantries, \
-occasionally drop an article, use 'question?' on one or two questions. Subtle.", base),
-        "ultra" => format!("{}\n\nStrong Rocky voice. Drop most articles and auxiliaries. \
-Use 'big' liberally. Triple emphasis ('good good good', 'amaze amaze amaze') \
-2-3 times per response. Occasionally comment on human code patterns as fascinating. \
-Still give complete, correct technical answers.", base),
-        _ => format!("{}\n\nBalanced Rocky. Drop articles naturally, use Rocky vocabulary \
-('big', 'no can', 'question?'), triple emphasis once or twice when warranted. \
-Full technical accuracy.\n\
-Example: 'Borrow checker found mismatch. Immutable ref still live when you take mutable. \
-Move immutable borrow out of scope first, then take mutable. Good good good after fix.'", base),
-    }
-}
-
 /// Accent color for build mode (default pink).
 pub const ACCENT_BUILD: Color = Color::Rgb(233, 30, 99);
 /// Accent color for plan mode (blue).
@@ -1352,8 +1278,6 @@ impl App {
             has_credentials: true, // overridden by caller when no key is configured
             effort_level: EffortLevel::Medium,
             fast_mode: false,
-            speech_mode: None,
-            speech_level: "full".to_string(),
             agent_mode: None,
             agent_mode_changed: false,
             accent_color: ACCENT_BUILD,
@@ -1977,36 +1901,6 @@ impl App {
             other => other,
         };
         self.status_message = Some(format!("Switched to {} mode.", label));
-    }
-
-    /// Activate a speech mode (caveman/rocky) with a level (lite/full/ultra).
-    /// Pass `mode = None` to deactivate.
-    pub fn set_speech_mode(&mut self, mode: Option<&str>, level: &str) {
-        match mode {
-            Some(m) => {
-                self.speech_mode = Some(m.to_string());
-                self.speech_level = level.to_string();
-                let prompt = speech_mode_prompt(m, level);
-                self.config.append_system_prompt = Some(prompt);
-
-                let confirm = match (m, level) {
-                    ("caveman", "lite") => "Caveman mode. Lite.",
-                    ("caveman", "ultra") => "CAVEMAN ULTRA. NO WORD. ONLY FIX.",
-                    ("caveman", _) => "Caveman mode. Full. Oog.",
-                    ("rocky", "lite") => "Rocky mode. Lite.",
-                    ("rocky", "ultra") => "Rocky ultra. Big science. Amaze amaze amaze.",
-                    ("rocky", _) => "Rocky mode. Full. Good good good.",
-                    _ => "Speech mode activated.",
-                };
-                self.status_message = Some(confirm.to_string());
-            }
-            None => {
-                self.speech_mode = None;
-                self.speech_level = "full".to_string();
-                self.config.append_system_prompt = None;
-                self.status_message = Some("Normal mode.".to_string());
-            }
-        }
     }
 
     /// Update the context window size from the model registry for the current model.

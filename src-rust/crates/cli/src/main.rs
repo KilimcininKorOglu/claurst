@@ -2491,11 +2491,6 @@ async fn run_interactive(
                                         }
                                     }
                                 }
-                                Some(CommandResult::SpeechMode { mode, level }) => {
-                                    app.set_speech_mode(mode.as_deref(), &level);
-                                    cmd_ctx.config = app.config.clone();
-                                    tool_ctx.config = app.config.clone();
-                                }
                                 Some(CommandResult::McpAuthFlow {
                                     server_name,
                                     auth_url,
