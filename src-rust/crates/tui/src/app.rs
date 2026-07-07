@@ -60,7 +60,6 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("exit", "Quit Claurst"),
     ("export", "Export conversation"),
     ("fast", "Toggle fast mode"),
-    ("feedback", "Open session feedback survey"),
     ("fork", "Fork session into a new branch"),
     ("goal", "Set or view the current session goal"),
     ("heapdump", "Show process memory and diagnostic information"),
@@ -110,7 +109,7 @@ fn help_command_category(name: &str) -> &'static str {
         "config" | "settings" | "theme" | "keybindings" | "hooks" | "mcp" | "import-config" => {
             "Workspace"
         }
-        "agent" | "agents" | "memory" | "plugin" | "feedback" | "survey" => "Tools",
+        "agent" | "agents" | "memory" | "plugin" | "survey" => "Tools",
         "session" | "resume" | "rename" | "fork" | "clear" | "compact" | "quit" | "exit" => {
             "Session"
         }
@@ -2093,7 +2092,7 @@ impl App {
                 self.global_search.open();
                 true
             }
-            "survey" | "feedback" => {
+            "survey" => {
                 self.feedback_survey.open();
                 true
             }
