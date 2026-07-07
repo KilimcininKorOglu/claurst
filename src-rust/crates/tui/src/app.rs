@@ -2338,6 +2338,7 @@ impl App {
             || self.command_palette.visible
             || self.elicitation.visible
             || self.model_picker.visible
+            || self.effort_picker.visible
             || self.session_browser.visible
             || self.session_branching.visible
             || self.export_dialog.visible
