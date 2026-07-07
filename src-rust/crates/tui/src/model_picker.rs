@@ -301,18 +301,34 @@ pub fn default_model_for_provider(
 /// the models.dev catalog — i.e. the provider has **no** live model-discovery
 /// endpoint and its `discover_models()` is the empty trait default.
 ///
-/// For these providers (Anthropic, OpenAI, Google) the displayed list must come
-/// from [`models_for_provider_from_registry`] and nothing else; the event loop
-/// skips the background discovery fetch entirely so a provider return value can
-/// never replace the catalog projection. This is what makes a fresh
-/// `claude-opus-*` point-release surface the instant the snapshot ships it.
+/// For these providers the displayed list must come from
+/// [`models_for_provider_from_registry`] and nothing else; the event loop skips
+/// the background discovery fetch entirely so a provider return value can never
+/// replace the catalog projection. This is what makes a fresh `claude-opus-*`
+/// point-release surface the instant the snapshot ships it.
 ///
-/// Live-endpoint providers (Ollama/LM Studio/llama.cpp, Copilot, Azure, the
-/// openai-compatible gateways, …) and curated-list providers (Bedrock, Codex,
-/// free, Cohere, MiniMax) are intentionally excluded: they keep populating the
-/// picker from their `discover_models()` result.
+/// Anthropic/OpenAI/Google never had a live endpoint. Azure, Amazon Bedrock,
+/// Cohere and MiniMax used to ship a tiny hardcoded `discover_models()` list
+/// that clobbered the far richer catalog (108/85/12/6 rows); that override was
+/// removed, so they are projected from the models.dev catalog here too rather
+/// than fetched.
+///
+/// Live-endpoint providers (Ollama/LM Studio/llama.cpp, Copilot, the
+/// openai-compatible gateways, …) and curated-list providers (Codex, free) are
+/// intentionally excluded: they keep populating the picker from their
+/// `discover_models()` result, which the event loop merges additively onto the
+/// catalog projection.
 pub fn provider_uses_catalog_projection(provider_id: &str) -> bool {
-    matches!(provider_id, "anthropic" | "openai" | "google")
+    matches!(
+        provider_id,
+        "anthropic"
+            | "openai"
+            | "google"
+            | "azure"
+            | "amazon-bedrock"
+            | "cohere"
+            | "minimax"
+    )
 }
 
 /// Whether `provider_id` refers to the OpenAI Codex provider under either of
@@ -635,6 +651,44 @@ impl ModelPickerState {
     /// Resets `loading_models` and sets `models_loaded`.
     pub fn set_models(&mut self, entries: Vec<ModelEntry>) {
         self.models = entries;
+        self.loading_models = false;
+        self.models_loaded = true;
+        // Keep selected_idx in bounds.
+        let count = self.filtered_models().len();
+        if count > 0 && self.selected_idx >= count {
+            self.selected_idx = count - 1;
+        }
+    }
+
+    /// Additively merge live-discovered entries into the existing list.
+    ///
+    /// Mirrors opencode's github-copilot `models.ts` merge (by id / api.id;
+    /// models.ts:229-255): the catalog projection already loaded into the picker
+    /// is authoritative — its richer cost/context/reasoning metadata is kept for
+    /// every id present in both — and only live models whose id isn't already
+    /// present are appended. A non-empty live result also clears the synthetic
+    /// "no catalog entry" placeholder that [`models_for_provider_from_registry`]
+    /// emits for providers with no catalog rows (e.g. self-hosted endpoints).
+    ///
+    /// Unlike copilot's merge this does **not** prune catalog ids missing from
+    /// the endpoint — the overlay is purely additive, so a stale catalog row is
+    /// preferred over dropping a model the user may still have access to.
+    pub fn merge_models(&mut self, entries: Vec<ModelEntry>) {
+        if entries.is_empty() {
+            self.loading_models = false;
+            return;
+        }
+        // A real list supersedes the synthetic "no catalog" placeholder.
+        self.models
+            .retain(|m| !(m.id == "default" && m.display_name == "Default model"));
+
+        let existing: std::collections::HashSet<String> =
+            self.models.iter().map(|m| m.id.clone()).collect();
+        for e in entries {
+            if !existing.contains(&e.id) {
+                self.models.push(e);
+            }
+        }
         self.loading_models = false;
         self.models_loaded = true;
         // Keep selected_idx in bounds.
@@ -1298,5 +1352,106 @@ mod tests {
         p.set_models(openai_models);
         let ids: Vec<&str> = p.models.iter().map(|m| m.id.as_str()).collect();
         assert!(!ids.iter().any(|id| id.contains("claude")));
+    }
+
+    // 19. merge_models is additive: it keeps the catalog projection (including
+    //     its richer metadata) for ids present in both, and appends only live
+    //     ids not already listed. Mirrors copilot models.ts merge-by-id.
+    #[test]
+    fn merge_models_is_additive_and_keeps_catalog_metadata() {
+        let mut p = ModelPickerState::new();
+        p.set_models(sample_models()); // catalog projection: opus/sonnet/haiku
+
+        let live = vec![
+            // Overlaps an existing catalog id but with poorer metadata —
+            // the catalog row must win (no overwrite).
+            ModelEntry {
+                id: "claude-opus-4-6".to_string(),
+                display_name: "LIVE OVERWRITE".to_string(),
+                description: "live desc".to_string(),
+                is_current: false,
+            },
+            // A brand-new live id absent from the catalog — must be appended.
+            ModelEntry {
+                id: "gpt-5.5-live".to_string(),
+                display_name: "GPT-5.5 (live)".to_string(),
+                description: "live only".to_string(),
+                is_current: false,
+            },
+        ];
+        p.merge_models(live);
+
+        let opus = p
+            .models
+            .iter()
+            .find(|m| m.id == "claude-opus-4-6")
+            .expect("catalog opus retained");
+        assert_eq!(
+            opus.display_name, "Claude Opus 4.6",
+            "catalog metadata must be kept for shared ids (no live overwrite)"
+        );
+        assert!(
+            p.models.iter().any(|m| m.id == "gpt-5.5-live"),
+            "new live id must be appended"
+        );
+        assert!(
+            p.models.iter().filter(|m| m.id == "claude-opus-4-6").count() == 1,
+            "no duplicate for a shared id"
+        );
+        // All three original catalog ids are still present.
+        for id in ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"] {
+            assert!(p.models.iter().any(|m| m.id == id), "catalog id {id} kept");
+        }
+    }
+
+    // 20. An empty live result never wipes the catalog projection.
+    #[test]
+    fn merge_models_empty_keeps_catalog() {
+        let mut p = ModelPickerState::new();
+        p.set_models(sample_models());
+        p.merge_models(Vec::new());
+        assert_eq!(p.models.len(), 3, "empty live merge must not clear the list");
+        assert!(!p.loading_models);
+    }
+
+    // 21. A non-empty live result clears the synthetic "no catalog" placeholder.
+    #[test]
+    fn merge_models_clears_placeholder() {
+        let mut p = ModelPickerState::new();
+        p.set_models(vec![model_entry(
+            "default",
+            "Default model",
+            "no catalog entry for this provider",
+        )]);
+        p.merge_models(vec![ModelEntry {
+            id: "llama3.3".to_string(),
+            display_name: "Llama 3.3".to_string(),
+            description: "local".to_string(),
+            is_current: false,
+        }]);
+        assert!(
+            !p.models.iter().any(|m| m.id == "default"),
+            "placeholder must be dropped once a real list arrives"
+        );
+        assert!(p.models.iter().any(|m| m.id == "llama3.3"));
+    }
+
+    // 22. The four providers whose hardcoded discover_models() was removed now
+    //     project from the catalog (no live fetch that could clobber it).
+    #[test]
+    fn hardcoded_list_providers_use_catalog_projection() {
+        for pid in ["azure", "amazon-bedrock", "cohere", "minimax"] {
+            assert!(
+                provider_uses_catalog_projection(pid),
+                "{pid} must project from the catalog after its hardcoded list was removed"
+            );
+        }
+        // Live/curated providers must NOT be treated as catalog projections.
+        for pid in ["ollama", "github-copilot", "codex", "free"] {
+            assert!(
+                !provider_uses_catalog_projection(pid),
+                "{pid} must keep its live/curated discovery"
+            );
+        }
     }
 }
