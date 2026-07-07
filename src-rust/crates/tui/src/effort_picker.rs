@@ -1,25 +1,30 @@
 // effort_picker.rs — horizontal, model-adaptive Effort selector for `/effort`.
 //
-// Replaces the prior 4-row vertical modal with a horizontal "Faster → Smarter"
-// track (issue #268). The selectable levels are model-adaptive: they come from
-// `claurst_api::supported_efforts(provider, model, registry)`, which returns the
-// model's supported ladder (ascending) with `Ultracode` always last. `Ultracode`
-// is separated from the native levels by a `│` divider and rendered specially.
+// A horizontal "Faster → Smarter" track (issue #268). The selectable levels are
+// model-adaptive: they come from `claurst_api::supported_efforts(provider,
+// model, registry)`, which returns the model's supported ladder (ascending) with
+// `Ultracode` always last. `Ultracode` is separated from the native levels by a
+// `│` divider and rendered specially.
 //
-// Layout (inside a bordered "Effort" panel):
+// The selector is DOCKED to the bottom of the screen as a full-width panel that
+// takes the place of the prompt input while it is open (see `render_app` in
+// `render.rs`): the prompt box is not drawn, and returns on confirm/cancel. It is
+// no longer a small floating/centered modal.
 //
-//     Faster                                   Smarter
-//     ─────────────────────────────────────────────────
-//     low   medium   high   xhigh   max   │   ultracode
-//                     ▲
+// Layout (inside a bottom-docked, bordered "Effort" panel spanning the width):
+//
+//     Faster                                             Smarter
+//     ────────────────────────────────────────────────────────
+//                 low   medium   high   xhigh   max   │   ultracode
+//                                     ▲
 //     <description of the selected level>
-//
 //     ←/→ to adjust · Enter to confirm · Esc to cancel
 //
 // Selector-only visuals (never the prompt box): the selected label is bold and
-// highlighted; `xhigh` is bold purple; `max` is a per-character rainbow; and
-// `ultracode` is purple and, when selected, paints an animated translucent-purple
-// audio-spectrum background driven by `frame_count`.
+// highlighted; `xhigh` is bold claurst-red; `max` is a per-character rainbow that
+// ANIMATES with `frame_count`; and `ultracode` is claurst-red and, when selected,
+// paints an animated translucent-red audio-spectrum background driven by
+// `frame_count`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -29,18 +34,17 @@ use ratatui::widgets::{Block, Borders, Clear};
 use ratatui::Frame;
 
 use crate::model_picker::EffortLevel;
-use crate::overlays::centered_rect;
 
 // ---------------------------------------------------------------------------
-// Palette (selector-only)
+// Palette (selector-only) — claurst red family
 // ---------------------------------------------------------------------------
 
-/// Signature ultracode/xhigh purple.
-const PURPLE: Color = Color::Rgb(168, 85, 247);
-/// Brighter purple for the selected ultracode label / marker.
-const PURPLE_BRIGHT: Color = Color::Rgb(196, 138, 255);
-/// Dimmer purple for the unselected ultracode label and the "Smarter" end.
-const PURPLE_DIM: Color = Color::Rgb(150, 118, 205);
+/// Signature claurst red used for the panel border, `xhigh`, and `ultracode`.
+const RED: Color = Color::Rgb(233, 30, 99);
+/// Brighter red for the selected `ultracode` label / marker.
+const RED_BRIGHT: Color = Color::Rgb(255, 105, 140);
+/// Dimmer red for the unselected `ultracode` label and the "Smarter" end.
+const RED_DIM: Color = Color::Rgb(180, 78, 96);
 /// Highlight for the selected (non-special) label.
 const SELECTED_FG: Color = Color::Rgb(238, 238, 240);
 /// Gray for unselected labels.
@@ -49,8 +53,12 @@ const DIM_FG: Color = Color::Rgb(120, 120, 130);
 const TRACK_FG: Color = Color::Rgb(90, 90, 104);
 /// The "Faster" end label.
 const FASTER_FG: Color = Color::Rgb(120, 160, 200);
-/// Very dark purple wash behind the ultracode spectrum (translucent look).
-const SPECTRUM_BG: Color = Color::Rgb(24, 16, 40);
+/// Deep-red wash behind the ultracode spectrum (translucent look).
+const SPECTRUM_BG: Color = Color::Rgb(40, 12, 20);
+
+/// Rows the docked panel wants (7 content rows + top/bottom border). Clamped to
+/// the available height by the layout in `render_app`.
+pub const DOCK_HEIGHT: u16 = 9;
 
 /// Controls hint line.
 const CONTROLS: &str = "\u{2190}/\u{2192} to adjust \u{b7} Enter to confirm \u{b7} Esc to cancel";
@@ -118,11 +126,12 @@ impl EffortPickerState {
             .unwrap_or(EffortLevel::Medium)
     }
 
-    /// Whether the picker is showing its animated ultracode spectrum and so needs
-    /// continuous repaints to keep moving. The CLI event loop uses this to keep
-    /// ticking while the picker is open on `ultracode`.
+    /// Whether the picker is showing an animated visual and so needs continuous
+    /// repaints to keep moving. True for the `ultracode` spectrum background and
+    /// the `max` rainbow label. The CLI event loop uses this to keep ticking
+    /// while the picker is open on an animated level.
     pub fn wants_animation(&self) -> bool {
-        self.visible && self.current().is_ultracode()
+        self.visible && (self.current().is_ultracode() || self.current() == EffortLevel::Max)
     }
 }
 
@@ -170,90 +179,84 @@ fn rank(level: EffortLevel) -> u8 {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Render the horizontal `/effort` selector. `frame_count` drives the animated
-/// ultracode spectrum background (see [`EffortPickerState::wants_animation`]).
+/// Render the horizontal `/effort` selector as a bottom-docked, full-width panel
+/// laid out INSIDE the given `area` (typically the prompt input area). No
+/// centering — the panel fills `area`. `frame_count` drives the animated
+/// ultracode spectrum background and the animated `max` rainbow.
 pub fn render_effort_picker(
     frame: &mut Frame,
     state: &EffortPickerState,
     area: Rect,
     frame_count: u64,
 ) {
-    if !state.visible || state.levels.is_empty() {
+    if !state.visible || state.levels.is_empty() || area.width < 4 || area.height < 3 {
         return;
     }
     let selected = state.selected.min(state.levels.len() - 1);
     let sel_level = state.levels[selected];
 
     // Lay out the label row: styled spans, per-level center columns, total width.
-    let (label_spans, centers, content_w) = layout_labels(&state.levels, selected);
+    let (label_spans, centers, content_w) = layout_labels(&state.levels, selected, frame_count);
 
-    let controls_w = CONTROLS.chars().count();
-    let body_w = content_w.max(controls_w);
-
-    // 10 inner rows (see the row map below) + 2 border rows; 1 pad on each side.
-    let want_w = body_w as u16 + 4;
-    let width = want_w.min(area.width.saturating_sub(2)).max(10);
-    let height = 12u16.min(area.height.saturating_sub(2)).max(6);
-    let dlg = centered_rect(width, height, area);
-
-    frame.render_widget(Clear, dlg);
-
+    // A bottom-docked, full-width panel that occupies exactly `area`.
+    frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(PURPLE))
+        .border_style(Style::default().fg(RED))
         .title(Span::styled(
             " Effort ",
-            Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+            Style::default().fg(RED).add_modifier(Modifier::BOLD),
         ));
-    let inner = block.inner(dlg);
-    frame.render_widget(block, dlg);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
 
     let buf = frame.buffer_mut();
 
-    // When ultracode is the selected level, paint an animated translucent-purple
+    // When ultracode is the selected level, paint an animated translucent-red
     // audio-spectrum behind everything; the labels/track/text are drawn on top.
     if sel_level.is_ultracode() {
         paint_spectrum(buf, inner, frame_count);
     }
 
-    // Content is laid out from a 1-cell left pad inside the border.
+    // Content is laid out from a 1-cell pad inside the border.
     let x0 = inner.x + 1;
-    let cw = content_w as u16;
+    let usable = inner.width.saturating_sub(2); // 1-cell pad on each side
+    let cw = (content_w as u16).min(usable);
+    // Center the label track within the full width for a balanced docked bar.
+    let track_x = x0 + usable.saturating_sub(cw) / 2;
 
     // Row map (relative to inner.y):
-    //   0 blank | 1 Faster..Smarter | 2 track | 3 labels | 4 marker
-    //   5 blank | 6 desc0 | 7 desc1 | 8 blank | 9 controls
+    //   0 Faster..Smarter | 1 track | 2 labels | 3 marker
+    //   4.. description (up to 2) | last inner row: controls
     let row = |i: u16| inner.y + i;
+    let controls_row = inner.height.saturating_sub(1);
 
-    // Faster / Smarter ends of the track.
-    blit_str(buf, x0, row(1), "Faster", Style::default().fg(FASTER_FG), inner);
+    // Faster / Smarter ends, spanning the full usable width.
+    blit_str(buf, x0, row(0), "Faster", Style::default().fg(FASTER_FG), inner);
     let smarter = "Smarter";
-    let sm_x = x0 + cw.saturating_sub(smarter.chars().count() as u16);
-    blit_str(
-        buf,
-        sm_x,
-        row(1),
-        smarter,
-        Style::default().fg(PURPLE_DIM),
-        inner,
-    );
+    let sm_x = x0 + usable.saturating_sub(smarter.chars().count() as u16);
+    blit_str(buf, sm_x, row(0), smarter, Style::default().fg(RED_DIM), inner);
 
-    // Track line.
-    for dx in 0..cw {
-        set_cell(buf, x0 + dx, row(2), '\u{2500}', Style::default().fg(TRACK_FG), inner);
+    // Full-width track line.
+    for dx in 0..usable {
+        set_cell(buf, x0 + dx, row(1), '\u{2500}', Style::default().fg(TRACK_FG), inner);
     }
 
-    // Level labels.
+    // Level labels (centered track).
     for (col, span) in &label_spans {
-        blit_span(buf, x0 + *col as u16, row(3), span, inner);
+        blit_span(buf, track_x + *col as u16, row(2), span, inner);
     }
 
     // Triangle marker directly under the selected level.
-    let marker_x = x0 + centers[selected] as u16;
+    let marker_x = track_x + centers[selected] as u16;
     set_cell(
         buf,
         marker_x,
-        row(4),
+        row(3),
         '\u{25b2}',
         Style::default()
             .fg(accent_for(sel_level))
@@ -261,38 +264,48 @@ pub fn render_effort_picker(
         inner,
     );
 
-    // Description of the selected level (word-wrapped, up to two rows).
-    let desc = level_description(sel_level, &state.levels);
-    for (i, line) in word_wrap(&desc, body_w).into_iter().take(2).enumerate() {
-        blit_str(
-            buf,
-            x0,
-            row(6 + i as u16),
-            &line,
-            Style::default().fg(DIM_FG),
-            inner,
-        );
+    // Description of the selected level (word-wrapped) in the rows between the
+    // marker and the bottom-anchored controls hint.
+    let desc_rows = controls_row.saturating_sub(4).min(2) as usize;
+    if desc_rows > 0 {
+        let desc = level_description(sel_level, &state.levels);
+        for (i, line) in word_wrap(&desc, usable as usize)
+            .into_iter()
+            .take(desc_rows)
+            .enumerate()
+        {
+            blit_str(
+                buf,
+                x0,
+                row(4 + i as u16),
+                &line,
+                Style::default().fg(DIM_FG),
+                inner,
+            );
+        }
     }
 
-    // Controls hint.
-    blit_str(buf, x0, row(9), CONTROLS, Style::default().fg(DIM_FG), inner);
+    // Controls hint, anchored to the bottom inner row.
+    blit_str(buf, x0, row(controls_row), CONTROLS, Style::default().fg(DIM_FG), inner);
 }
 
 /// The accent color for a level's marker (matches its label styling).
 fn accent_for(level: EffortLevel) -> Color {
     match level {
-        EffortLevel::XHigh => PURPLE,
+        EffortLevel::XHigh => RED,
         EffortLevel::Max => Color::Rgb(255, 170, 60),
-        EffortLevel::Ultracode => PURPLE_BRIGHT,
+        EffortLevel::Ultracode => RED_BRIGHT,
         _ => SELECTED_FG,
     }
 }
 
 /// Build the label row: placed styled spans (`(col_offset, span)`), the center
 /// column of each level (for marker alignment), and the total content width.
+/// `frame_count` animates the `max` rainbow.
 fn layout_labels(
     levels: &[EffortLevel],
     selected: usize,
+    frame_count: u64,
 ) -> (Vec<(usize, Span<'static>)>, Vec<usize>, usize) {
     let mut placed: Vec<(usize, Span<'static>)> = Vec::new();
     let mut centers = vec![0usize; levels.len()];
@@ -316,7 +329,7 @@ fn layout_labels(
         let start = col;
         let width = lvl.label().chars().count();
         centers[i] = start + width / 2;
-        for span in styled_label(*lvl, i == selected) {
+        for span in styled_label(*lvl, i == selected, frame_count) {
             let w = span.content.chars().count();
             placed.push((col, span));
             col += w;
@@ -326,12 +339,12 @@ fn layout_labels(
 }
 
 /// Style a single level label. Non-selected labels are dim gray; the selected one
-/// is highlighted, with `xhigh` bold purple and `ultracode` purple. (`max` gets a
-/// per-character rainbow, added in a later step.)
-fn styled_label(level: EffortLevel, selected: bool) -> Vec<Span<'static>> {
+/// is highlighted, with `xhigh` bold red, `ultracode` red, and `max` a per-char
+/// rainbow that animates with `frame_count`.
+fn styled_label(level: EffortLevel, selected: bool, frame_count: u64) -> Vec<Span<'static>> {
     let text = level.label();
     if level.is_ultracode() {
-        let fg = if selected { PURPLE_BRIGHT } else { PURPLE_DIM };
+        let fg = if selected { RED_BRIGHT } else { RED_DIM };
         let mut st = Style::default().fg(fg);
         if selected {
             st = st.add_modifier(Modifier::BOLD);
@@ -344,9 +357,9 @@ fn styled_label(level: EffortLevel, selected: bool) -> Vec<Span<'static>> {
     match level {
         EffortLevel::XHigh => vec![Span::styled(
             text.to_string(),
-            Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+            Style::default().fg(RED).add_modifier(Modifier::BOLD),
         )],
-        EffortLevel::Max => rainbow_spans(text),
+        EffortLevel::Max => rainbow_spans(text, frame_count),
         _ => vec![Span::styled(
             text.to_string(),
             Style::default().fg(SELECTED_FG).add_modifier(Modifier::BOLD),
@@ -355,13 +368,16 @@ fn styled_label(level: EffortLevel, selected: bool) -> Vec<Span<'static>> {
 }
 
 /// One bold span per character, each with a distinct hue cycled across the word,
-/// producing a rainbow gradient (selector-only visual for `max`).
-fn rainbow_spans(text: &str) -> Vec<Span<'static>> {
+/// producing a rainbow gradient (selector-only visual for `max`). `frame_count`
+/// shifts the hue phase so the rainbow ANIMATES over time.
+fn rainbow_spans(text: &str, frame_count: u64) -> Vec<Span<'static>> {
     let n = text.chars().count().max(1);
+    // Degrees of hue rotation per frame — a full cycle every 60 frames.
+    let phase = frame_count as f32 * 6.0;
     text.chars()
         .enumerate()
         .map(|(i, ch)| {
-            let hue = 360.0 * i as f32 / n as f32;
+            let hue = 360.0 * i as f32 / n as f32 + phase;
             let (r, g, b) = hsv_to_rgb(hue, 0.9, 1.0);
             Span::styled(
                 ch.to_string(),
@@ -491,18 +507,18 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 // Ultracode spectrum background
 // ---------------------------------------------------------------------------
 
-/// Paint an animated, translucent-purple audio-spectrum into `inner`.
+/// Paint an animated, translucent claurst-red audio-spectrum into `inner`.
 ///
 /// Every column gets a vertical bar rising from the bottom whose height and
 /// brightness vary per column and SHIFT each frame — `frame_count` is the phase,
-/// so successive frames animate. All shades are low-value purples (a dark wash +
-/// dim bars) so foreground text drawn on top stays readable.
+/// so successive frames animate. All shades are low-value reds (a dark wash + dim
+/// bars) so foreground text drawn on top stays readable.
 fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
-    // Translucent purple wash across the whole panel.
+    // Translucent deep-red wash across the whole panel.
     for y in inner.top()..inner.bottom() {
         for x in inner.left()..inner.right() {
             if let Some(cell) = buf.cell_mut((x, y)) {
@@ -531,7 +547,7 @@ fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
             let y = inner.bottom() - 1 - r;
             if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.set_char(ch);
-                cell.set_style(Style::default().fg(purple_shade(lit)).bg(SPECTRUM_BG));
+                cell.set_style(Style::default().fg(red_shade(lit)).bg(SPECTRUM_BG));
             }
         }
     }
@@ -557,15 +573,18 @@ fn partial_block(frac: f32) -> char {
     BLOCKS[idx]
 }
 
-/// A dim/translucent purple whose brightness scales with `lit` in `[0, 1]`, kept
-/// in a low value range so foreground text stays dominant.
-fn purple_shade(lit: f32) -> Color {
-    let k = 0.18 + 0.30 * lit.clamp(0.0, 1.0);
-    Color::Rgb(
-        (168.0 * k) as u8,
-        (85.0 * k) as u8,
-        (247.0 * k) as u8,
-    )
+/// A dim/translucent claurst-red whose brightness scales with `lit` in `[0, 1]`:
+/// a deep red at the base brightening toward the signature red at the peak, kept
+/// in a low value range so foreground text stays dominant. Always red-dominant
+/// (`r > g` and `r > b`) — never purple.
+fn red_shade(lit: f32) -> Color {
+    let lit = lit.clamp(0.0, 1.0);
+    // Deep red (120, 20, 30) -> claurst red (233, 30, 99).
+    let r = 120.0 + 113.0 * lit;
+    let g = 20.0 + 10.0 * lit;
+    let b = 30.0 + 69.0 * lit;
+    let k = 0.55; // translucency
+    Color::Rgb((r * k) as u8, (g * k) as u8, (b * k) as u8)
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +679,52 @@ mod tests {
     }
 
     #[test]
+    fn wants_animation_for_max_and_ultracode_only() {
+        // `max` animates (rainbow) and `ultracode` animates (spectrum); the
+        // native levels below are static.
+        let mut s = EffortPickerState::new();
+        s.open(EffortLevel::Medium, full_ladder());
+        assert!(!s.wants_animation(), "medium is static");
+        s.selected = 4; // max
+        assert!(s.wants_animation(), "max rainbow animates");
+        s.selected = 5; // ultracode
+        assert!(s.wants_animation(), "ultracode spectrum animates");
+    }
+
+    #[test]
+    fn renders_docked_in_given_bottom_rect() {
+        // Render into a bottom-docked rect within a taller buffer; the panel must
+        // fill exactly that rect (full width at the docked y), NOT be centered.
+        let state = state_with(full_ladder(), 5); // ultracode
+        let mut terminal = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        let area = Rect { x: 0, y: 5, width: 60, height: DOCK_HEIGHT };
+        terminal
+            .draw(|f| render_effort_picker(f, &state, area, 0))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        // Border corners sit exactly on the rect edges — a bottom-docked panel,
+        // not a small centered modal.
+        assert_eq!(buf.cell((0, 5)).unwrap().symbol(), "\u{250c}", "top-left at rect origin");
+        assert_eq!(buf.cell((59, 5)).unwrap().symbol(), "\u{2510}", "top-right at rect edge");
+        assert_eq!(buf.cell((0, 13)).unwrap().symbol(), "\u{2514}", "bottom-left at rect bottom");
+        assert_eq!(buf.cell((59, 13)).unwrap().symbol(), "\u{2518}", "bottom-right at rect corner");
+
+        // Nothing is drawn above the docked rect (a centered modal would).
+        let top_row: String = (0..60)
+            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
+            .collect();
+        assert!(top_row.trim().is_empty(), "no content above the dock: {top_row:?}");
+
+        // The selector content is present within the panel.
+        let rows = buffer_rows(&buf);
+        assert!(
+            rows.iter().any(|r| r.contains("ultracode")),
+            "labels present inside the docked panel"
+        );
+    }
+
+    #[test]
     fn renders_model_levels_and_ultracode_after_divider() {
         // Max selected → no spectrum, so label gaps read as plain spaces.
         let state = state_with(full_ladder(), 4);
@@ -727,6 +792,52 @@ mod tests {
     }
 
     #[test]
+    fn max_rainbow_animates_across_frames() {
+        // The `max` label's per-char colors shift with frame_count.
+        let state = state_with(full_ladder(), 4); // max selected
+        let a = render_to_buffer(&state, 0);
+        let b = render_to_buffer(&state, 20);
+        let rows_a = buffer_rows(&a);
+        let label_y = rows_a
+            .iter()
+            .position(|r| r.contains("ultracode"))
+            .expect("label row present");
+        let start = char_col_of(&rows_a[label_y], "max").expect("max col");
+        let y = label_y as u16;
+        let ca = a.cell((start as u16, y)).unwrap().fg;
+        let cb = b.cell((start as u16, y)).unwrap().fg;
+        assert_ne!(ca, cb, "max rainbow should animate between frames {ca:?} vs {cb:?}");
+    }
+
+    #[test]
+    fn spectrum_shades_are_red_not_purple() {
+        // Bar shades are red-dominant across the whole lit range (a purple would
+        // have blue >= red).
+        for lit in [0.0f32, 0.35, 0.6, 1.0] {
+            match red_shade(lit) {
+                Color::Rgb(r, g, b) => {
+                    assert!(r > g && r > b, "shade must be red-dominant: {r},{g},{b} @ {lit}")
+                }
+                other => panic!("expected Rgb, got {other:?}"),
+            }
+        }
+        // The dark wash is a deep red, not a blue/purple.
+        match SPECTRUM_BG {
+            Color::Rgb(r, _g, b) => assert!(r > b, "wash must be reddish: {r} vs {b}"),
+            other => panic!("expected Rgb, got {other:?}"),
+        }
+        // The ultracode label / accent colors are all red-family.
+        for c in [RED, RED_BRIGHT, RED_DIM] {
+            match c {
+                Color::Rgb(r, g, b) => {
+                    assert!(r > g && r > b, "label color must be red: {r},{g},{b}")
+                }
+                other => panic!("expected Rgb, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn ultracode_spectrum_animates_but_others_are_static() {
         let levels = vec![
             EffortLevel::Low,
@@ -745,14 +856,14 @@ mod tests {
             "ultracode spectrum should animate between frames"
         );
 
-        // Non-ultracode selection → no spectrum, identical across frames.
+        // High selection → no spectrum, no rainbow, identical across frames.
         let high = state_with(levels, 2);
         let c = render_to_buffer(&high, 0);
         let d = render_to_buffer(&high, 30);
         assert_eq!(
             c.content(),
             d.content(),
-            "non-ultracode picker must not animate"
+            "non-animated picker must not change between frames"
         );
     }
 }
