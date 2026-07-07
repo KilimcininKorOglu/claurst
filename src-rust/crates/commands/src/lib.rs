@@ -1662,8 +1662,10 @@ mod tests {
         // End-to-end of the persist path: /output-style / /rocky set
         // config.output_style, which resolves to the persona's prompt text for
         // the system prompt.
-        let mut config = claurst_core::config::Config::default();
-        config.output_style = Some("rocky".to_string());
+        let config = claurst_core::config::Config {
+            output_style: Some("rocky".to_string()),
+            ..claurst_core::config::Config::default()
+        };
         let prompt = config
             .resolve_output_style_prompt()
             .expect("rocky must resolve to a prompt");

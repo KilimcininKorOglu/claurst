@@ -87,8 +87,6 @@ impl SlashCommand for NormalCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn personas_map_to_builtin_output_styles() {
         // The command targets must exist as built-in output styles so

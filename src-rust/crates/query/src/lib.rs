@@ -3133,8 +3133,10 @@ mod tests {
     fn persisted_persona_stands_without_an_inline_keyword() {
         // A persona chosen via /rocky or /output-style lives in the config and
         // persists across plain turns.
-        let mut cfg = QueryConfig::default();
-        cfg.output_style_prompt = Some("PERSISTED PERSONA".to_string());
+        let cfg = QueryConfig {
+            output_style_prompt: Some("PERSISTED PERSONA".to_string()),
+            ..QueryConfig::default()
+        };
         let msgs = vec![Message::user("just a plain request here please")];
         let (_style, prompt) = effective_output_style_for_turn(&cfg, &msgs);
         assert_eq!(prompt.as_deref(), Some("PERSISTED PERSONA"));
@@ -3143,8 +3145,10 @@ mod tests {
     #[test]
     fn inline_normal_resets_a_persisted_persona_for_the_turn() {
         // With a persona persisted, an inline `normal` clears it for this turn.
-        let mut cfg = QueryConfig::default();
-        cfg.output_style_prompt = Some("PERSISTED PERSONA".to_string());
+        let cfg = QueryConfig {
+            output_style_prompt: Some("PERSISTED PERSONA".to_string()),
+            ..QueryConfig::default()
+        };
         let msgs = vec![Message::user("back to normal for this one please")];
         let (style, prompt) = effective_output_style_for_turn(&cfg, &msgs);
         assert!(prompt.is_none(), "inline normal should reset the persona");
@@ -3155,10 +3159,12 @@ mod tests {
     fn inline_persona_overrides_a_different_persisted_persona() {
         // Persisted caveman, but this turn asks for rocky inline → rocky wins
         // transiently.
-        let mut cfg = QueryConfig::default();
-        cfg.output_style_prompt = Some(
-            claurst_core::output_styles::OutputStyleDef::builtin_caveman().prompt,
-        );
+        let cfg = QueryConfig {
+            output_style_prompt: Some(
+                claurst_core::output_styles::OutputStyleDef::builtin_caveman().prompt,
+            ),
+            ..QueryConfig::default()
+        };
         let msgs = vec![Message::user("rocky, review this function")];
         let (_style, prompt) = effective_output_style_for_turn(&cfg, &msgs);
         assert!(prompt.unwrap().contains("Project Hail Mary"));
