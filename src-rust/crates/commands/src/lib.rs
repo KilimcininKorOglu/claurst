@@ -1619,6 +1619,67 @@ mod tests {
         assert!(matches!(result, CommandResult::ClearConversation));
     }
 
+    // ---- /output-style + /keybindings end-to-end (issue #278 point 2) ------
+
+    #[tokio::test]
+    async fn output_style_lists_personas_and_current() {
+        // The empty-arg path only reads (no disk write) and must surface the
+        // built-in styles including the newly-consolidated personas.
+        let mut ctx = make_ctx();
+        let cmd = find_command("output-style").unwrap();
+        let result = cmd.execute("", &mut ctx).await;
+        let CommandResult::Message(text) = result else {
+            panic!("empty /output-style should list styles, got {result:?}");
+        };
+        assert!(text.contains("caveman"), "personas must appear in the list: {text}");
+        assert!(text.contains("rocky"));
+        assert!(text.contains("default"));
+        // Default config → default is the current style.
+        assert!(text.contains("Current output style: default"));
+    }
+
+    #[tokio::test]
+    async fn output_style_rejects_unknown_name() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("output-style").unwrap();
+        let result = cmd.execute("definitely-not-a-style", &mut ctx).await;
+        assert!(matches!(result, CommandResult::Error(_)));
+    }
+
+    #[test]
+    fn available_output_styles_include_personas() {
+        let names = available_output_style_names();
+        for expected in ["default", "concise", "caveman", "rocky"] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "output style '{expected}' should be available"
+            );
+        }
+    }
+
+    #[test]
+    fn persisted_persona_resolves_to_its_prompt() {
+        // End-to-end of the persist path: /output-style / /rocky set
+        // config.output_style, which resolves to the persona's prompt text for
+        // the system prompt.
+        let mut config = claurst_core::config::Config::default();
+        config.output_style = Some("rocky".to_string());
+        let prompt = config
+            .resolve_output_style_prompt()
+            .expect("rocky must resolve to a prompt");
+        assert!(prompt.contains("Project Hail Mary"));
+    }
+
+    #[test]
+    fn keybindings_template_is_valid_json() {
+        // /keybindings writes this template on first run; ensure it always
+        // generates and parses so the command cannot fail generating its file.
+        let template = generate_keybindings_template().expect("template must generate");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&template).expect("template must be valid JSON");
+        assert!(parsed.get("bindings").is_some(), "template needs a bindings block");
+    }
+
     #[test]
     fn test_new_and_move_commands_present() {
         assert!(find_command("new").is_some());
