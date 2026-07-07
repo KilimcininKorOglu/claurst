@@ -247,6 +247,17 @@ pub struct ModelEntry {
     /// Per-mode dispatch alternatives (rarely populated).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub experimental_modes: HashMap<String, ExperimentalMode>,
+    /// Default request-body options for this model, camelCase-keyed. Populated
+    /// for entries synthesized from an [`ExperimentalMode`] (opencode
+    /// `provider.body`, see [`expand_experimental_modes`]); empty for base
+    /// catalog models.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub options: HashMap<String, serde_json::Value>,
+    /// Default request headers for this model. Populated for synthesized
+    /// experimental-mode entries (opencode `provider.headers`); empty for base
+    /// catalog models.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
 }
 
 fn default_true() -> bool { true }
@@ -555,13 +566,135 @@ fn transform_api(api: md::ApiJson) -> ParsedSnapshot {
                 cost,
                 provider_override: m.provider,
                 experimental_modes,
+                options: HashMap::new(),
+                headers: HashMap::new(),
             };
 
             out.models.insert(key, entry);
         }
     }
 
+    // Expand each model's experimental.modes into extra listed models, mirroring
+    // opencode's `fromModelsDevProvider` (provider.ts:1247-1264).
+    expand_experimental_modes(&mut out.models);
+
     out
+}
+
+/// Expand each model's `experimental.modes` into additional listed models,
+/// mirroring opencode's `fromModelsDevProvider` (provider.ts:1247-1264).
+///
+/// For every model with a non-empty `experimental_modes` map, a sibling entry
+/// is synthesized keyed `"<provider>/<model>-<mode>"`, named `"<name> <Mode>"`
+/// (only the first letter of the mode is upper-cased, matching
+/// `mode[0].toUpperCase()`), with:
+///   * `cost` = the mode's `cost` deep-merged over the base cost (else base),
+///   * `options` = the mode's `provider.body` with snake_case→camelCase keys,
+///   * `headers` = the mode's `provider.headers` (else the base's).
+///
+/// The synthesized entries are what makes the extra modes appear in the picker.
+fn expand_experimental_modes(models: &mut HashMap<String, ModelEntry>) {
+    let mut synthesized: Vec<(String, ModelEntry)> = Vec::new();
+    for entry in models.values() {
+        if entry.experimental_modes.is_empty() {
+            continue;
+        }
+        let base_id: &str = &entry.info.id;
+        let provider_id: &str = &entry.info.provider_id;
+        for (mode, opts) in &entry.experimental_modes {
+            let mode_id = format!("{base_id}-{mode}");
+            let key = format!("{provider_id}/{mode_id}");
+            let mut synth = entry.clone();
+            synth.info.id = ModelId::new(mode_id);
+            synth.info.name = format!("{} {}", entry.info.name, capitalize_first(mode));
+
+            // cost: mode cost deep-merged over the base cost (opencode:
+            // `opts.cost ? mergeDeep(base.cost, cost(opts.cost)) : base.cost`).
+            if let Some(mode_cost) = &opts.cost {
+                synth.cost = merge_cost(&entry.cost, mode_cost);
+                synth.cost_input = synth.cost.input;
+                synth.cost_output = synth.cost.output;
+                synth.cost_cache_read = synth.cost.cache_read;
+                synth.cost_cache_write = synth.cost.cache_write;
+            }
+
+            // options: provider.body with snake_case → camelCase keys
+            // (opencode provider.ts:1256). When absent, keep the base's.
+            if !opts.provider_body.is_empty() {
+                synth.options = opts
+                    .provider_body
+                    .iter()
+                    .map(|(k, v)| (snake_to_camel(k), v.clone()))
+                    .collect();
+            }
+
+            // headers: mode headers override the base's (`opts.provider?.headers
+            // ?? base.headers`).
+            if !opts.provider_headers.is_empty() {
+                synth.headers = opts.provider_headers.clone();
+            }
+
+            // A synthesized entry must not itself be re-expanded.
+            synth.experimental_modes = HashMap::new();
+            synthesized.push((key, synth));
+        }
+    }
+    for (key, entry) in synthesized {
+        models.insert(key, entry);
+    }
+}
+
+/// Deep-merge cost `over` onto `base` (opencode `mergeDeep`): a `Some` value in
+/// `over` wins, a `None` keeps the `base` value; recurses into the 200K tier.
+fn merge_cost(base: &CostBreakdown, over: &CostBreakdown) -> CostBreakdown {
+    CostBreakdown {
+        input: over.input.or(base.input),
+        output: over.output.or(base.output),
+        cache_read: over.cache_read.or(base.cache_read),
+        cache_write: over.cache_write.or(base.cache_write),
+        input_audio: over.input_audio.or(base.input_audio),
+        output_audio: over.output_audio.or(base.output_audio),
+        reasoning: over.reasoning.or(base.reasoning),
+        context_over_200k: match (&over.context_over_200k, &base.context_over_200k) {
+            (Some(o), Some(b)) => Some(Box::new(merge_cost(b, o))),
+            (Some(o), None) => Some(o.clone()),
+            (None, b) => b.clone(),
+        },
+    }
+}
+
+/// Convert snake_case keys to camelCase, matching opencode's
+/// `k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())` (provider.ts:1256): only
+/// an underscore immediately followed by an ASCII lowercase letter is collapsed
+/// (upper-casing that letter); every other underscore is preserved verbatim.
+fn snake_to_camel(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut chars = key.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '_' {
+            if let Some(&next) = chars.peek() {
+                if next.is_ascii_lowercase() {
+                    out.push(next.to_ascii_uppercase());
+                    chars.next();
+                    continue;
+                }
+            }
+            out.push('_');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Upper-case only the first character of `s` (mirrors opencode's
+/// `${mode[0].toUpperCase()}${mode.slice(1)}`).
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,6 +1462,90 @@ mod tests {
         assert!(
             parsed.models.contains_key("opencode-zen/qwen3.6-plus-free"),
             "model key must use opencode-zen prefix"
+        );
+    }
+
+    // ---- experimental.modes expansion (opencode provider.ts:1247-1264) ----
+
+    #[test]
+    fn experimental_modes_expand_into_listed_models() {
+        // A model with an experimental.modes map must yield an extra sibling
+        // entry keyed "<provider>/<model>-<mode>", with cost deep-merged, the
+        // provider.body camelCased into `options`, and provider.headers carried.
+        let json = r#"{"myprov":{"id":"myprov","name":"My Provider","env":[],"models":{"base-model":{"id":"base-model","name":"Base Model","cost":{"input":1.0,"output":2.0},"limit":{"context":100000,"output":8000},"experimental":{"modes":{"fast":{"cost":{"output":5.0},"provider":{"body":{"max_output_tokens":1024,"reasoning_effort":"low"},"headers":{"x-mode":"fast"}}}}}}}}}"#;
+        let parsed = parse_snapshot_str(json).expect("parse must succeed");
+
+        // Base entry still present.
+        assert!(
+            parsed.models.contains_key("myprov/base-model"),
+            "base model must remain"
+        );
+
+        // Synthesized mode entry present under the "-fast" key.
+        let synth = parsed
+            .models
+            .get("myprov/base-model-fast")
+            .expect("experimental mode must be expanded into a listed model");
+        assert_eq!(&*synth.info.id, "base-model-fast");
+        assert_eq!(synth.info.name, "Base Model Fast");
+
+        // Cost is the mode's cost deep-merged over the base: output overridden,
+        // input retained from the base.
+        assert_eq!(synth.cost_input, Some(1.0));
+        assert_eq!(synth.cost_output, Some(5.0));
+
+        // provider.body keys are snake_case → camelCase converted.
+        assert_eq!(
+            synth.options.get("maxOutputTokens").and_then(|v| v.as_u64()),
+            Some(1024)
+        );
+        assert_eq!(
+            synth.options.get("reasoningEffort").and_then(|v| v.as_str()),
+            Some("low")
+        );
+
+        // provider.headers carried through verbatim.
+        assert_eq!(
+            synth.headers.get("x-mode").map(String::as_str),
+            Some("fast")
+        );
+
+        // The synthesized entry must not carry modes to re-expand.
+        assert!(synth.experimental_modes.is_empty());
+    }
+
+    #[test]
+    fn snake_to_camel_matches_opencode() {
+        assert_eq!(snake_to_camel("max_output_tokens"), "maxOutputTokens");
+        assert_eq!(snake_to_camel("reasoning_effort"), "reasoningEffort");
+        // Trailing / doubled underscores and non-alpha follows are preserved.
+        assert_eq!(snake_to_camel("already"), "already");
+        assert_eq!(snake_to_camel("trailing_"), "trailing_");
+        assert_eq!(snake_to_camel("a_1b"), "a_1b");
+    }
+
+    #[test]
+    fn hardcoded_list_providers_surface_full_catalog() {
+        // cohere/azure/amazon-bedrock/minimax previously overwrote the catalog
+        // via a tiny hardcoded discover_models() (2/4/3/1 models). The catalog
+        // itself carries the full models.dev list for each; the provider fix
+        // stops the overwrite so these surface in the picker.
+        let reg = ModelRegistry::new();
+        assert!(
+            reg.list_by_provider("cohere").len() >= 10,
+            "cohere catalog must surface (~12), not the old hardcoded 2"
+        );
+        assert!(
+            reg.list_by_provider("azure").len() >= 50,
+            "azure catalog must surface (~108), not the old hardcoded 4"
+        );
+        assert!(
+            reg.list_by_provider("amazon-bedrock").len() >= 50,
+            "bedrock catalog must surface (~85), not the old hardcoded 3"
+        );
+        assert!(
+            reg.list_by_provider("minimax").len() >= 5,
+            "minimax catalog must surface (~6), not the old hardcoded 1"
         );
     }
 
