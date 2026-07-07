@@ -165,8 +165,10 @@ impl SlashCommand for UpgradeCommand {
                          Release page:     {url}\n\n\
                          Upgrade in place (recommended):\n\
                            claurst upgrade\n\n\
-                         Or build from source:\n\
-                           cargo install claurst --force"
+                         Or reinstall with your original method:\n\
+                           npm install -g claurst\n\
+                           curl -fsSL https://github.com/kuberwastaken/claurst/releases/latest/download/install.sh | bash   (macOS/Linux)\n\
+                           irm https://github.com/kuberwastaken/claurst/releases/latest/download/install.ps1 | iex          (Windows)"
                     ))
                 }
             }
