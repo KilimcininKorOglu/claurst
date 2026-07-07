@@ -565,19 +565,18 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Paint claurst's red audio wave into `inner` as a BACKGROUND-color gradient
-/// (space glyphs). It reads like a glowing waveform whose ripples emanate from
-/// the CENTRE and roll outward to both sides under an elliptical envelope (a
-/// round, centre-origin ripple — see [`spectrum_amp`]): a bright, undulating
-/// crest LINE over a dim deep-red field with a dark wash above. Because the field
-/// stays dim and only the thin crest glows, foreground text clearly sits ON TOP
-/// (no washout) with no cut-out boxes. `frame_count` is the animation phase.
+/// (space glyphs). It reads like a glowing oscilloscope waveform: a bright,
+/// undulating crest LINE that flows slowly sideways over a dim deep-red field,
+/// with a dark wash above. Because the field stays dim and only the thin crest
+/// glows, foreground text clearly sits ON TOP (no washout) with no cut-out boxes.
+/// `frame_count` is the animation phase.
 fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     let height = inner.height as f32;
     for gx in 0..inner.width {
-        let amp = spectrum_amp(gx, inner.width, frame_count).clamp(0.0, 1.0);
+        let amp = spectrum_amp(gx, frame_count).clamp(0.0, 1.0);
         let crest = amp * height; // the waveform line, in rows from the bottom
         let x = inner.left() + gx;
         for r in 0..inner.height {
@@ -604,26 +603,18 @@ fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     }
 }
 
-/// Per-column crest height (a fraction of panel height) for the ultracode
-/// waveform. The ripples EMANATE FROM THE CENTRE and travel outward to both sides
-/// (the phase is keyed on distance-from-centre and recedes with time), under an
-/// elliptical envelope that swells the wave in the middle and eases it to a calm
-/// baseline at the edges — a round, centre-origin ripple, like a stone dropped in
-/// the middle of a pond. Same wavelength/speed as before. `width` is the panel
-/// width; `frame` moves the phase slowly (gentle, not frantic).
-fn spectrum_amp(gx: u16, width: u16, frame: u64) -> f32 {
-    let center = width.saturating_sub(1) as f32 / 2.0;
-    let d = (gx as f32 - center).abs(); // distance from the centre, in columns
+/// Per-column crest height in `[0.25, 0.85]` for a given column and frame. A
+/// smooth travelling wave plus a broad second harmonic make an undulating
+/// waveform that flows slowly sideways; the range keeps the crest inside the
+/// panel with headroom above and a field below. `frame` moves the phase slowly —
+/// gentle, wavy motion, not a fast flicker.
+fn spectrum_amp(gx: u16, frame: u64) -> f32 {
+    let fx = gx as f32;
     let t = frame as f32;
-    // Two harmonics rippling outward from the centre (phase grows with distance,
-    // recedes with time → crests are born in the middle and roll to the sides).
-    let ripple = 0.60 * (d * 0.28 - t * 0.055).sin()
-        + 0.40 * (d * 0.13 - t * 0.035 + 1.1).sin();
-    // Elliptical envelope: a smooth bell — 1 at the centre easing to 0 at the edges.
-    let dn = (d / center.max(1.0)).clamp(0.0, 1.0);
-    let envelope = 0.5 + 0.5 * (dn * std::f32::consts::PI).cos();
-    // A calm low baseline at the edges; the centre swells and ripples on top.
-    0.28 + envelope * (0.20 + 0.28 * (0.5 + 0.5 * ripple))
+    let a = 0.60 * (fx * 0.28 - t * 0.055).sin()
+        + 0.40 * (fx * 0.13 + t * 0.035 + 1.1).sin();
+    // Map the [-1, 1] wave into [0.25, 0.85] of the panel height.
+    0.25 + 0.60 * (0.5 + 0.5 * a)
 }
 
 /// A claurst-red whose brightness scales with `lit` in `[0, 1]`: a deep-red wash
