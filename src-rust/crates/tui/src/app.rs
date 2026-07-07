@@ -69,7 +69,6 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("import-config", "Import CLAUDE.md and settings.json from ~/.claude"),
     ("init", "Initialize AGENTS.md for this project"),
     ("insights", "Generate a session analysis report with conversation statistics"),
-    ("install-slack-app", "Install the Claurst Slack integration"),
     ("keybindings", "Show keybinding configuration"),
     ("links", "Open URLs from this session in your browser"),
     ("login", "Log in to Claurst"),
