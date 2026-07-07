@@ -26,35 +26,88 @@ pub use claurst_core::effort::EffortLevel;
 
 
 // ---------------------------------------------------------------------------
-// Model capability helpers
+// Model capability helpers — driven by the opencode variants() ladder
 // ---------------------------------------------------------------------------
+//
+// Both the /effort command and this /model picker now derive their effort
+// tiers from the single source of truth, `claurst_api::variant_ladder`
+// (a faithful port of opencode's `ProviderTransform.variants()`), instead of
+// the old name-string heuristics that disagreed between the two surfaces.
 
-/// Returns `true` for models that support extended thinking / effort levels.
+/// A process-wide bundled `ModelRegistry`, built once, used only to resolve the
+/// npm / release_date / reasoning fields that `variant_ladder` keys off.
 ///
-/// Covers Claude's extended-thinking models and the GPT-5 reasoning family
-/// (incl. Codex / ChatGPT models like `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`),
-/// which honour OpenAI's `reasoning_effort` ladder. Lets the picker surface the
-/// ←/→ thinking-level selector for Codex the way opencode does.
+/// The picker owns just a model id string (it does not carry the live registry
+/// the app holds), so the ladder is resolved against the compile-time bundled
+/// snapshot here. The `/effort` command path (`app.rs`) passes the *live*
+/// registry and is therefore exact; both funnel through the same port, so they
+/// agree tier-for-tier for every catalog model.
+fn picker_registry() -> &'static claurst_api::ModelRegistry {
+    static REG: std::sync::OnceLock<claurst_api::ModelRegistry> = std::sync::OnceLock::new();
+    REG.get_or_init(claurst_api::ModelRegistry::new)
+}
+
+/// The reasoning-effort ladder (ascending, no ultracode) a model exposes, per
+/// opencode's `variants()`. Empty for non-reasoning models.
+///
+/// The provider is inferred from the id: a `provider/model` prefix is trusted as
+/// the provider; a bare id is mapped to its canonical provider via the registry
+/// family heuristic. (Gateway upstream prefixes like `openai/…` are the one
+/// approximation — the picker's catalog providers use bare ids and resolve
+/// exactly.)
+fn picker_variant_ladder(id: &str) -> Vec<EffortLevel> {
+    let reg = picker_registry();
+    let provider = match id.split_once('/') {
+        Some((p, _)) => p.to_string(),
+        None => reg
+            .find_provider_for_model(id)
+            .map(|p| p.to_string())
+            .unwrap_or_default(),
+    };
+    claurst_api::variant_ladder(&provider, id, Some(reg))
+}
+
+/// Returns `true` when the model exposes more than one reasoning-effort tier —
+/// i.e. the picker's ←/→ selector has something to cycle through. A model with
+/// zero tiers (non-reasoning) or a single fixed tier (e.g. `gpt-5-pro` → only
+/// `high`) does not surface the selector.
 pub fn model_supports_effort(id: &str) -> bool {
-    id.starts_with("claude-3-7")
-        || id.starts_with("claude-opus-4")
-        || id.starts_with("claude-sonnet-4")
-        || is_gpt5_reasoning_model(id)
+    picker_variant_ladder(id).len() > 1
 }
 
-/// Returns `true` for models that support the maximum effort tier.
-///
-/// For Claude this is Opus-only; for the GPT-5 family the top tier maps to
-/// OpenAI's `xhigh` ("extra high") reasoning effort on the Codex endpoint.
-pub fn model_supports_max_effort(id: &str) -> bool {
-    id.starts_with("claude-opus-4") || is_gpt5_reasoning_model(id)
+/// The index of the ladder rung nearest to `current`: the highest rung `<=`
+/// current, or the lowest rung when `current` sits below the whole ladder.
+/// `ladder` is assumed ascending (as `variant_ladder` returns it).
+fn nearest_ladder_index(ladder: &[EffortLevel], current: EffortLevel) -> usize {
+    let mut best = 0usize;
+    for (i, level) in ladder.iter().enumerate() {
+        if *level <= current {
+            best = i;
+        }
+    }
+    best
 }
 
-/// Whether `id` is a GPT-5 reasoning model (`gpt-5*`), excluding the
-/// non-reasoning chat / pro snapshots that ignore `reasoning_effort`.
-fn is_gpt5_reasoning_model(id: &str) -> bool {
-    let id = id.to_ascii_lowercase();
-    id.starts_with("gpt-5") && !id.contains("-chat") && !id.contains("-pro")
+/// Clamp `effort` onto `ladder`: itself if present, else the nearest rung.
+fn clamp_to_ladder(ladder: &[EffortLevel], effort: EffortLevel) -> EffortLevel {
+    if ladder.contains(&effort) {
+        effort
+    } else {
+        ladder[nearest_ladder_index(ladder, effort)]
+    }
+}
+
+/// Step one rung along `ladder` from `current` (`dir` = +1 / -1), wrapping.
+fn cycle_ladder(ladder: &[EffortLevel], current: EffortLevel, dir: isize) -> EffortLevel {
+    if ladder.is_empty() {
+        return current;
+    }
+    let idx = ladder
+        .iter()
+        .position(|l| *l == current)
+        .unwrap_or_else(|| nearest_ladder_index(ladder, current)) as isize;
+    let n = ladder.len() as isize;
+    ladder[(((idx + dir) % n + n) % n) as usize]
 }
 
 // ---------------------------------------------------------------------------
@@ -562,29 +615,36 @@ impl ModelPickerState {
         self.selected_idx = count.saturating_sub(1);
     }
 
-    /// Cycle effort level forward (→ key).
+    /// The reasoning-effort ladder of the currently highlighted model (ascending,
+    /// no ultracode). Empty when nothing is highlighted or the model is
+    /// non-reasoning.
+    fn selected_ladder(&self) -> Vec<EffortLevel> {
+        let filtered = self.filtered_models();
+        match filtered.get(self.selected_idx) {
+            Some(m) => picker_variant_ladder(&m.id),
+            None => Vec::new(),
+        }
+    }
+
+    /// Cycle effort level forward (→ key) along the model's variants ladder.
     pub fn effort_next(&mut self) {
-        let filtered = self.filtered_models();
-        let id = filtered.get(self.selected_idx).map(|m| m.id.as_str()).unwrap_or("");
-        let supports_max = model_supports_max_effort(id);
-        self.effort_level = self.effort_level.next(supports_max);
+        let ladder = self.selected_ladder();
+        self.effort_level = cycle_ladder(&ladder, self.effort_level, 1);
     }
 
-    /// Cycle effort level backward (← key).
+    /// Cycle effort level backward (← key) along the model's variants ladder.
     pub fn effort_prev(&mut self) {
-        let filtered = self.filtered_models();
-        let id = filtered.get(self.selected_idx).map(|m| m.id.as_str()).unwrap_or("");
-        let supports_max = model_supports_max_effort(id);
-        self.effort_level = self.effort_level.prev(supports_max);
+        let ladder = self.selected_ladder();
+        self.effort_level = cycle_ladder(&ladder, self.effort_level, -1);
     }
 
-    /// Returns the effective effort for the currently highlighted model:
-    /// `None` if the model does not support extended thinking.
+    /// Returns the effective effort for the currently highlighted model, clamped
+    /// onto its variants ladder; `None` if the model exposes no selectable effort
+    /// (a single-tier or non-reasoning model).
     pub fn effective_effort(&self) -> Option<EffortLevel> {
-        let filtered = self.filtered_models();
-        let id = filtered.get(self.selected_idx).map(|m| m.id.as_str()).unwrap_or("");
-        if model_supports_effort(id) {
-            Some(self.effort_level)
+        let ladder = self.selected_ladder();
+        if ladder.len() > 1 {
+            Some(clamp_to_ladder(&ladder, self.effort_level))
         } else {
             None
         }
@@ -610,7 +670,12 @@ impl ModelPickerState {
         }
         let entry = filtered.get(self.selected_idx)?;
         let id = entry.id.clone();
-        let effort = if model_supports_effort(&id) { Some(self.effort_level) } else { None };
+        let ladder = picker_variant_ladder(&id);
+        let effort = if ladder.len() > 1 {
+            Some(clamp_to_ladder(&ladder, self.effort_level))
+        } else {
+            None
+        };
         // If user chose a model other than the fast-mode model while fast mode is
         // active, the caller should turn off fast mode (mirrors TS behaviour).
         self.close();
@@ -865,10 +930,12 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
 
             spans.push(Span::styled(model.display_name.clone(), Style::default().fg(fg).bg(bg)));
 
-            // Effort indicator
+            // Effort indicator — show the effort clamped onto this model's
+            // variants ladder so it never displays a tier the model can't do.
             if supports_effort && is_selected {
+                let shown = state.effective_effort().unwrap_or(state.effort_level);
                 spans.push(Span::styled(
-                    format!("  {} {}", state.effort_level.symbol(), state.effort_level.label()),
+                    format!("  {} {}", shown.symbol(), shown.label()),
                     Style::default().fg(Color::Rgb(200, 255, 200)).bg(bg),
                 ));
             }
@@ -1129,49 +1196,75 @@ mod tests {
         assert!(p.filter.is_empty());
     }
 
-    // 11. effort cycling works for effort-supporting models.
+    // 11. effort cycling follows the model's actual variants ladder.
     #[test]
     fn effort_cycles_correctly() {
+        // sonnet-4-6's ladder is Low/Medium/High/Max (opencode adaptive).
         let mut p = make_picker_with_current("claude-sonnet-4-6");
-        // sonnet-4-6 supports effort but not max
         assert_eq!(p.effort_level, EffortLevel::Medium);
         p.effort_next();
         assert_eq!(p.effort_level, EffortLevel::High);
         p.effort_next();
-        // no max for sonnet → wraps to Low
+        assert_eq!(p.effort_level, EffortLevel::Max);
+        p.effort_next();
+        // wraps back to the bottom of the ladder.
         assert_eq!(p.effort_level, EffortLevel::Low);
     }
 
-    // 12. Opus supports max effort.
+    // 12. The picker ladders match opencode's variants() (single source of
+    //     truth), not the old name heuristic.
     #[test]
-    fn opus_supports_max_effort() {
-        assert!(model_supports_max_effort("claude-opus-4-6"));
-        assert!(!model_supports_max_effort("claude-sonnet-4-6"));
-        assert!(!model_supports_max_effort("claude-haiku-4-5"));
+    fn ladders_match_opencode_for_known_models() {
+        use EffortLevel::*;
+        // 4.6-era opus/sonnet: low/medium/high/max.
+        assert_eq!(picker_variant_ladder("claude-opus-4-6"), vec![Low, Medium, High, Max]);
+        assert_eq!(picker_variant_ladder("claude-sonnet-4-6"), vec![Low, Medium, High, Max]);
+        // Haiku 4.5 is a thinking model: budget-based high/max.
+        assert_eq!(picker_variant_ladder("claude-haiku-4-5"), vec![High, Max]);
+        // gpt-4o is non-reasoning → no ladder, no selector.
+        assert!(picker_variant_ladder("gpt-4o").is_empty());
+        assert!(!model_supports_effort("gpt-4o"));
+        for id in ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"] {
+            assert!(model_supports_effort(id), "{id} should support effort");
+        }
     }
 
-    // 12b. GPT-5 codex/reasoning models expose the effort selector (incl. max).
+    // 12b. GPT-5 reasoning models expose the multi-tier effort selector (incl.
+    //      xhigh); a single-tier pro snapshot does not.
     #[test]
-    fn gpt5_codex_models_support_effort() {
+    fn gpt5_reasoning_models_support_effort() {
+        use EffortLevel::*;
         for id in ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"] {
+            let ladder = picker_variant_ladder(id);
+            assert!(ladder.len() > 1, "{id} should support effort: {ladder:?}");
             assert!(model_supports_effort(id), "{id} should support effort");
-            assert!(model_supports_max_effort(id), "{id} should support max/xhigh");
+            assert!(ladder.contains(&XHigh), "{id} should reach xhigh: {ladder:?}");
         }
-        // Non-reasoning chat / pro snapshots are excluded.
+        // Version-less gpt-5-pro exposes only the fixed `high` tier → no selector.
+        assert_eq!(picker_variant_ladder("gpt-5-pro"), vec![High]);
+        assert!(!model_supports_effort("gpt-5-pro"));
+        // Chat snapshots have no reasoning variants.
         assert!(!model_supports_effort("gpt-5-chat-latest"));
-        assert!(!model_supports_effort("gpt-5.5-pro"));
         // Non-gpt5 stays unaffected.
         assert!(!model_supports_effort("gpt-4o"));
     }
 
-    // 13. Non-effort models return None from effective_effort.
+    // 13. Haiku 4.5 IS a thinking model (opencode high/max), so confirming it
+    //     carries an effort clamped onto its ladder.
     #[test]
-    fn haiku_has_no_effort() {
+    fn haiku_supports_effort() {
+        assert_eq!(
+            picker_variant_ladder("claude-haiku-4-5"),
+            vec![EffortLevel::High, EffortLevel::Max]
+        );
+        assert!(model_supports_effort("claude-haiku-4-5"));
         let mut p = make_picker_with_current("claude-haiku-4-5");
         p.selected_idx = p.models.iter().position(|m| m.id == "claude-haiku-4-5").unwrap();
-        assert!(!model_supports_effort("claude-haiku-4-5"));
-        let effort = p.confirm();
-        assert!(effort.is_some_and(|(_, e)| e.is_none()));
+        let confirmed = p.confirm();
+        assert!(
+            confirmed.is_some_and(|(_, e)| e.is_some()),
+            "haiku should carry a (clamped) effort"
+        );
     }
 
     // 14. render_model_picker does not panic for a default-area call.
