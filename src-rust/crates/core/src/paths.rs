@@ -20,7 +20,10 @@ pub fn claurst_home() -> PathBuf {
     crate::config::Settings::config_dir()
 }
 
-#[cfg(test)]
+// These tests drive the resolver through `HOME`/`XDG_CONFIG_HOME`, which only
+// govern `dirs::home_dir()` on Unix — on Windows the home dir comes from the OS
+// profile API and can't be pinned via env, so they'd be non-hermetic there.
+#[cfg(all(test, unix))]
 mod tests {
     use crate::config::Settings;
     use std::path::PathBuf;

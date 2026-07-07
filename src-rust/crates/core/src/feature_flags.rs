@@ -234,7 +234,9 @@ mod tests {
     #[test]
     fn test_cache_path() {
         let path = FeatureFlagManager::get_cache_path();
-        assert!(path.to_string_lossy().contains(".claurst"));
+        // "claurst" (not ".claurst"): the config dir is legacy ~/.claurst on
+        // existing installs but XDG ~/.config/claurst on fresh ones (#207).
+        assert!(path.to_string_lossy().contains("claurst"));
         assert!(path.to_string_lossy().contains("feature_flags.json"));
     }
 
