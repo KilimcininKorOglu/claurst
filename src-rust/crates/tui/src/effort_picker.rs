@@ -338,11 +338,52 @@ fn styled_label(level: EffortLevel, selected: bool) -> Vec<Span<'static>> {
             text.to_string(),
             Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
         )],
+        EffortLevel::Max => rainbow_spans(text),
         _ => vec![Span::styled(
             text.to_string(),
             Style::default().fg(SELECTED_FG).add_modifier(Modifier::BOLD),
         )],
     }
+}
+
+/// One bold span per character, each with a distinct hue cycled across the word,
+/// producing a rainbow gradient (selector-only visual for `max`).
+fn rainbow_spans(text: &str) -> Vec<Span<'static>> {
+    let n = text.chars().count().max(1);
+    text.chars()
+        .enumerate()
+        .map(|(i, ch)| {
+            let hue = 360.0 * i as f32 / n as f32;
+            let (r, g, b) = hsv_to_rgb(hue, 0.9, 1.0);
+            Span::styled(
+                ch.to_string(),
+                Style::default()
+                    .fg(Color::Rgb(r, g, b))
+                    .add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect()
+}
+
+/// Convert HSV (`h` in degrees, `s`/`v` in `[0, 1]`) to an 8-bit RGB triple.
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let hp = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as u8 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    (
+        ((r1 + m) * 255.0).round() as u8,
+        ((g1 + m) * 255.0).round() as u8,
+        ((b1 + m) * 255.0).round() as u8,
+    )
 }
 
 /// The description shown for the selected level. Ultracode's description is
