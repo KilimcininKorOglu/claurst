@@ -49,6 +49,8 @@ const DIM_FG: Color = Color::Rgb(120, 120, 130);
 const TRACK_FG: Color = Color::Rgb(90, 90, 104);
 /// The "Faster" end label.
 const FASTER_FG: Color = Color::Rgb(120, 160, 200);
+/// Very dark purple wash behind the ultracode spectrum (translucent look).
+const SPECTRUM_BG: Color = Color::Rgb(24, 16, 40);
 
 /// Controls hint line.
 const CONTROLS: &str = "\u{2190}/\u{2192} to adjust \u{b7} Enter to confirm \u{b7} Esc to cancel";
@@ -174,7 +176,7 @@ pub fn render_effort_picker(
     frame: &mut Frame,
     state: &EffortPickerState,
     area: Rect,
-    _frame_count: u64,
+    frame_count: u64,
 ) {
     if !state.visible || state.levels.is_empty() {
         return;
@@ -207,6 +209,12 @@ pub fn render_effort_picker(
     frame.render_widget(block, dlg);
 
     let buf = frame.buffer_mut();
+
+    // When ultracode is the selected level, paint an animated translucent-purple
+    // audio-spectrum behind everything; the labels/track/text are drawn on top.
+    if sel_level.is_ultracode() {
+        paint_spectrum(buf, inner, frame_count);
+    }
 
     // Content is laid out from a 1-cell left pad inside the border.
     let x0 = inner.x + 1;
@@ -477,4 +485,85 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+// ---------------------------------------------------------------------------
+// Ultracode spectrum background
+// ---------------------------------------------------------------------------
+
+/// Paint an animated, translucent-purple audio-spectrum into `inner`.
+///
+/// Every column gets a vertical bar rising from the bottom whose height and
+/// brightness vary per column and SHIFT each frame — `frame_count` is the phase,
+/// so successive frames animate. All shades are low-value purples (a dark wash +
+/// dim bars) so foreground text drawn on top stays readable.
+fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    // Translucent purple wash across the whole panel.
+    for y in inner.top()..inner.bottom() {
+        for x in inner.left()..inner.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_char(' ');
+                cell.set_bg(SPECTRUM_BG);
+            }
+        }
+    }
+
+    // Bars rising from the bottom.
+    let height = inner.height as f32;
+    for gx in 0..inner.width {
+        let amp = spectrum_amp(gx, frame_count).clamp(0.0, 1.0);
+        let filled = amp * height;
+        let bars = filled.floor() as u16;
+        let frac = filled - bars as f32;
+        let x = inner.left() + gx;
+        for r in 0..inner.height {
+            let (ch, lit) = if r < bars {
+                ('\u{2588}', 0.65 + 0.35 * amp)
+            } else if r == bars && frac > 0.08 {
+                (partial_block(frac), 0.35 + 0.4 * frac)
+            } else {
+                continue;
+            };
+            let y = inner.bottom() - 1 - r;
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_char(ch);
+                cell.set_style(Style::default().fg(purple_shade(lit)).bg(SPECTRUM_BG));
+            }
+        }
+    }
+}
+
+/// Per-column spectrum amplitude in `[0, 1]` for a given column and frame. Two
+/// out-of-phase sines make it read like a shifting equalizer; `frame` moves the
+/// phase so the bars animate over time.
+fn spectrum_amp(gx: u16, frame: u64) -> f32 {
+    let fx = gx as f32;
+    let t = frame as f32;
+    let a = 0.55 * (fx * 0.55 + t * 0.20).sin() + 0.45 * (fx * 0.27 - t * 0.13 + 1.7).sin();
+    0.5 + 0.5 * a
+}
+
+/// The partial block glyph (`▁`..`█`) for a fractional bar height in `[0, 1]`.
+fn partial_block(frac: f32) -> char {
+    const BLOCKS: [char; 8] = [
+        '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+        '\u{2588}',
+    ];
+    let idx = ((frac * 8.0) as usize).min(BLOCKS.len() - 1);
+    BLOCKS[idx]
+}
+
+/// A dim/translucent purple whose brightness scales with `lit` in `[0, 1]`, kept
+/// in a low value range so foreground text stays dominant.
+fn purple_shade(lit: f32) -> Color {
+    let k = 0.18 + 0.30 * lit.clamp(0.0, 1.0);
+    Color::Rgb(
+        (168.0 * k) as u8,
+        (85.0 * k) as u8,
+        (247.0 * k) as u8,
+    )
 }
