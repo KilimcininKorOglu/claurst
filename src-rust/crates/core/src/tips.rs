@@ -132,11 +132,6 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
             cooldown_sessions: 15,
         },
         Tip {
-            id: "feedback-command",
-            content: "Use /feedback to help us improve!",
-            cooldown_sessions: 15,
-        },
-        Tip {
             id: "status-line",
             content: "Use /statusline to set up a custom status line that will display beneath the input box",
             cooldown_sessions: 25,
