@@ -4147,6 +4147,7 @@ pub mod remote_settings;
 pub mod settings_sync;
 pub mod import_config;
 pub mod effort;
+pub mod keywords;
 pub mod prompt_history;
 pub mod bash_classifier;
 pub mod ps_classifier;

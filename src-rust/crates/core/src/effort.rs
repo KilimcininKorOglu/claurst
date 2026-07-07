@@ -387,30 +387,12 @@ The task is the user's latest message in this conversation."#;
 /// Find every whole-word, case-insensitive occurrence of the `ultracode`
 /// keyword in `text`, returned as non-overlapping `(start, end)` byte ranges.
 ///
-/// The keyword is ASCII, so an ASCII-lowercased copy preserves byte length and
-/// offsets exactly; every match therefore maps back onto `text` at valid char
-/// boundaries. "Whole-word" means the byte immediately before/after a match must
-/// not be ASCII alphanumeric (so `ultracoder` does not match).
+/// Thin wrapper over the generalised [`crate::keywords::keyword_match_ranges`]
+/// matcher (this is the caller that inline keywords generalised). "Whole-word"
+/// means the byte immediately before/after a match must not be ASCII
+/// alphanumeric (so `ultracoder` does not match).
 pub fn ultracode_match_ranges(text: &str) -> Vec<(usize, usize)> {
-    let hay = text.as_bytes().to_ascii_lowercase();
-    let bytes = text.as_bytes();
-    let k = ULTRACODE_KEYWORD.as_bytes();
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0usize;
-    while i < hay.len() {
-        if i + k.len() <= hay.len() && &hay[i..i + k.len()] == k {
-            let end = i + k.len();
-            let left_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-            let right_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
-            if left_ok && right_ok {
-                ranges.push((i, end));
-                i = end;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    ranges
+    crate::keywords::keyword_match_ranges(text, ULTRACODE_KEYWORD)
 }
 
 /// Whether `text` contains the `ultracode` keyword (whole-word, case-insensitive).
