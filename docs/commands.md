@@ -15,7 +15,7 @@ This document is the complete reference for every slash command available in Cla
 7. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
 8. [Agents & Tasks](#agents--tasks) — `/agents`, `/tasks`, `/goal`, `/managed-agents`, `/agent`
 9. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
-10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `/ultracode`, `/plugin`, `/chrome`
+10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
 11. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
 12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`
 13. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
@@ -782,18 +782,18 @@ List and manage skills. Skills are bundled prompt-commands that extend Claurst's
 
 ---
 
-### /ultracode (skill + keyword)
+### ultracode (top effort + keyword)
 
 Run a disciplined **ultracode** workflow for serious coding tasks. Ultracode is claurst's take on Claude Code's `ultrathink`: a supervised procedure that classifies the task, picks a mode, and — when it genuinely helps — delegates bounded work across claurst's native agent primitives, then integrates and verifies in the parent session.
 
-There are two ways to trigger it:
+Ultracode is the **highest effort level** — it sits past `max` on the "Smarter" end of the effort ladder and runs the model's top reasoning **plus** the workflow procedure. (It is no longer a `/skill`.) There are two ways to trigger it:
 
-- **As a keyword.** Type `ultracode` (or `ultra code`) anywhere in a normal prompt. The keyword renders with a purple gradient in the input, and for that turn the agent operates in ultracode mode (the skill's operating procedure is injected as a system-prompt addendum). No keyword means no change to normal prompts.
-- **As a skill.** Run `/ultracode <task>` (alias `/ultra code`) to invoke it explicitly.
+- **In the effort selector.** Run `/effort` and pick **ultracode** — the rightmost level, past the `│` divider, drawn with an animated purple spectrum. Applies for subsequent turns until you change the effort.
+- **As a keyword.** Type the single word `ultracode` anywhere in a normal prompt. The keyword renders with a purple gradient in the input, and for that turn the effort is set to ultracode (its operating procedure is injected as a system-prompt addendum). No keyword means no change to normal prompts.
 
 ```
-/ultracode <task>          — run the given task in ultracode mode
-please ultracode <task>    — same, activated by the inline keyword
+please ultracode <task>    — activate ultracode for this one turn via the inline keyword
+/effort  →  ultracode      — set ultracode as the current effort level
 ```
 
 **What it does**
