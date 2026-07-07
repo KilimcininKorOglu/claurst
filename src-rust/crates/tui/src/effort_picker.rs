@@ -23,9 +23,10 @@
 // Selector-only visuals (never the prompt box): the selected label is bold and
 // highlighted; `xhigh` and `max` (the tiers above `high`, just below ultracode)
 // are per-character SOFT, DIFFUSED rainbows that gently animate with
-// `frame_count`; and `ultracode`, when selected, paints a slow, soothing
-// claurst-red audio wave as a background-color gradient (so text sits cleanly on
-// top, no cut-out boxes) framed by a gently breathing red outline.
+// `frame_count`; and `ultracode`, when selected, paints a bold claurst-red
+// spectrum-analyzer audio wave as a background-color gradient (glowing bar tips,
+// so text still sits cleanly on top, no cut-out boxes) framed by a gently
+// breathing red outline.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -558,26 +559,38 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Paint claurst's red audio wave into `inner` as a BACKGROUND-color gradient
-/// (space glyphs whose bg brightens toward each column's crest), so text drawn on
-/// top sits cleanly on it with no dark cut-out boxes. The motion is deliberately
-/// slow and gentle — a soothing red swell, not a busy equalizer. `frame_count`
-/// is the animation phase.
+/// (space glyphs), so text drawn on top sits cleanly on it with no dark cut-out
+/// boxes. It reads like a rich spectrum analyzer: each column is a bar with a
+/// deep-red base, a body that brightens up toward the crest, and a hot, glowing
+/// tip that sparkles — bold and striking, but with smooth (not frantic) motion.
+/// `frame_count` is the animation phase.
 fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     if inner.width == 0 || inner.height == 0 {
         return;
     }
     let height = inner.height as f32;
+    let t = frame_count as f32;
     for gx in 0..inner.width {
-        let amp = spectrum_amp(gx, frame_count).clamp(0.0, 1.0);
-        let filled = amp * height; // crest height, in rows from the bottom
+        let amp = spectrum_amp(gx, frame_count).clamp(0.06, 1.0);
+        let filled = (amp * height).max(0.001); // crest height, in rows from bottom
         let x = inner.left() + gx;
         for r in 0..inner.height {
-            // `r` counts rows up from the bottom (0 = bottom row).
-            let within = filled - r as f32; // >0 inside the swell; soft at the crest
-            let base = within.clamp(0.0, 1.0);
-            // A deep-red wash floor persists above the crest so the whole panel
-            // reads richly red; brightness rises smoothly toward the crest.
-            let lit = 0.18 + 0.82 * base;
+            let rf = r as f32; // rows up from the bottom (0 = bottom)
+            let lit = if rf >= filled {
+                // Dark-red wash above the bar, fading toward the top so the panel
+                // still reads red without competing with the bar.
+                (0.15 - 0.028 * (rf - filled)).clamp(0.05, 0.15)
+            } else {
+                // Vertical body gradient: deep at the base, bright toward the crest.
+                let frac = rf / filled; // 0 base -> ~1 crest
+                // A hot, faintly-sparkling cap on the topmost cell of the bar.
+                let cap = if filled - rf <= 1.0 {
+                    0.26 + 0.06 * (gx as f32 * 0.8 + t * 0.3).sin()
+                } else {
+                    0.0
+                };
+                (0.40 + 0.46 * frac + cap).clamp(0.0, 1.0)
+            };
             let shade = red_shade(lit);
             let y = inner.bottom() - 1 - r;
             if let Some(cell) = buf.cell_mut((x, y)) {
@@ -589,13 +602,17 @@ fn paint_spectrum(buf: &mut Buffer, inner: Rect, frame_count: u64) {
     }
 }
 
-/// Per-column swell height in `[0, 1]` for a given column and frame. Two gentle,
-/// slow, out-of-phase sines make it read like a calm swell; `frame` moves the
-/// phase slowly so it drifts rather than flickers (about half the earlier speed).
+/// Per-column bar height in `[0, 1]` for a given column and frame. A broad swell
+/// plus a medium ripple and a finer detail wave — three travelling sines at
+/// different spatial/temporal frequencies — give a rich, music-like equalizer
+/// whose bars clearly differ column-to-column and move with a lively (but not
+/// frantic) rhythm.
 fn spectrum_amp(gx: u16, frame: u64) -> f32 {
     let fx = gx as f32;
     let t = frame as f32;
-    let a = 0.55 * (fx * 0.42 + t * 0.10).sin() + 0.45 * (fx * 0.20 - t * 0.06 + 1.7).sin();
+    let a = 0.42 * (fx * 0.55 + t * 0.13).sin()
+        + 0.30 * (fx * 1.10 - t * 0.19 + 1.3).sin()
+        + 0.28 * (fx * 2.30 + t * 0.11 + 0.7).sin();
     0.5 + 0.5 * a
 }
 
