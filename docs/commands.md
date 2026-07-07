@@ -70,13 +70,41 @@ Display all available commands with their descriptions. Respects `isHidden` flag
 ---
 
 ### /clear
-**Aliases:** `reset`, `new`
+**Aliases:** `reset`, `c`
 
-Clear the current conversation history and start a fresh session. The session file is retained on disk; only the in-memory message list is cleared.
+Clear the current conversation history. The session id and its on-disk file are retained — only the in-memory message list is wiped, so you stay in the same session. Use `/new` to start a genuinely fresh session instead.
 
 ```
 /clear
 ```
+
+---
+
+### /new
+
+Start a fresh session, mirroring opencode's `/new`. The transcript resets to a blank home and a brand-new session id begins, while your current model, provider, effort level and working directory carry over. The new session is *lazy* — it is not written to disk until your first message, so opening `/new` without typing anything leaves no trace.
+
+Unlike `/clear` (which keeps the same session id and history file), `/new` opens a clean, separate session.
+
+```
+/new
+```
+
+---
+
+### /move
+
+Re-home the current session to another worktree or directory of the **same project**, mirroring opencode's `/move`. Any uncommitted changes in the current directory are carried over to the destination and reset in the original location; the model is informed of the new working directory on its next turn.
+
+The destination must belong to the same git repository (typically a linked `git worktree`); moving to an unrelated project is refused. Pass `--no-changes` to re-home the session without relocating working-tree changes.
+
+```
+/move <directory>
+/move ../myapp-feature
+/move --no-changes /path/to/other/worktree
+```
+
+**Adaptation note:** opencode presents an interactive worktree picker and can create a new worktree on the fly. Claurst takes the destination directory as an argument and re-homes the live session's working directory (claurst has no separate session-per-worktree registry). Uncommitted changes are relocated with `git diff`/`git apply` and the source is reset with `git checkout` (index preserved) plus `git clean` (untracked removed), matching opencode's `move-session` change handling.
 
 ---
 
