@@ -279,7 +279,6 @@ pub struct VersionCommand;
 pub struct ResumeCommand;
 pub struct StatusCommand;
 pub struct DiffCommand;
-pub struct BugCommand;
 pub struct InitCommand;
 pub struct HooksCommand;
 pub struct ImportConfigCommand;
@@ -503,7 +502,7 @@ fn command_category(name: &str) -> &'static str {
         "mcp" | "hooks" | "ide" | "chrome" => "Integrations",
         "session" | "resume" | "remote-control" | "remote-env"
         | "teleport" => "Sessions & Remote",
-        "help" | "exit" | "feedback" | "bug" => "General",
+        "help" | "exit" => "General",
         "think-back" | "thinkback-play" | "thinking" | "plan" | "tasks" => "AI & Thinking",
         "copy" | "skills" | "agents" | "plugin" | "reload-plugins"
         | "stickers" | "passes" | "desktop" | "mobile" | "btw" => "Tools & Extras",
@@ -990,31 +989,6 @@ impl SlashCommand for DiffCommand {
     }
 }
 
-// ---- /bug ----------------------------------------------------------------
-
-#[async_trait]
-impl SlashCommand for BugCommand {
-    fn name(&self) -> &str { "feedback" }
-    fn aliases(&self) -> Vec<&str> { vec!["bug"] }
-    fn description(&self) -> &str { "Submit feedback about Claurst" }
-    fn help(&self) -> &str { "Usage: /feedback [report]" }
-
-    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        let report = args.trim();
-        if report.is_empty() {
-            CommandResult::Message(
-                "To submit feedback or report a bug, visit: https://github.com/anthropics/claude-code/issues"
-                    .to_string(),
-            )
-        } else {
-            CommandResult::Message(format!(
-                "To submit feedback or report a bug, visit: https://github.com/anthropics/claude-code/issues\nSuggested report summary: {}",
-                report
-            ))
-        }
-    }
-}
-
 // ---- /init ---------------------------------------------------------------
 
 #[async_trait]
@@ -1173,7 +1147,6 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(StatusCommand),
         Box::new(DiffCommand),
         Box::new(MemoryCommand),
-        Box::new(BugCommand),
         Box::new(UsageCommand),
         Box::new(DoctorCommand),
         Box::new(LoginCommand),
@@ -1591,7 +1564,6 @@ mod tests {
         assert!(find_command("c").is_some());
         assert!(find_command("settings").is_some());
         assert!(find_command("continue").is_some());
-        assert!(find_command("bug").is_some());
         assert!(find_command("bashes").is_some());
         assert!(find_command("remote").is_some());
         assert!(find_command("remote-setup").is_some());
@@ -1608,7 +1580,7 @@ mod tests {
             "help", "clear", "compact", "cost", "exit", "model",
             "config", "version", "status", "diff", "memory", "hooks",
             "permissions", "plan", "tasks", "session", "login", "logout", "refresh",
-            "feedback", "usage", "plugin", "reload-plugins",
+            "usage", "plugin", "reload-plugins",
             "add-dir", "agents", "branch", "tag",
             "passes", "ide", "pr-comments", "desktop", "mobile",
             "install-github-app", "web-setup", "stickers",
