@@ -21,9 +21,10 @@
 //     ←/→ to adjust · Enter to confirm · Esc to cancel
 //
 // Selector-only visuals (never the prompt box): the selected label is bold and
-// highlighted; `xhigh` and `max` (the tiers above `high`, just below ultracode)
-// are per-character SOFT, DIFFUSED rainbows that gently animate with
-// `frame_count`; and `ultracode`, when selected, paints a bold claurst-red
+// highlighted; the top native tier (`max`, or `xhigh` on models that don't
+// expose `max`) is a per-character SOFT, DIFFUSED rainbow that gently animates
+// with `frame_count` — so when a model exposes both, only `max` shimmers and
+// `xhigh` stays a plain highlight; and `ultracode`, when selected, paints a bold claurst-red
 // spectrum-analyzer audio wave as a background-color gradient (glowing bar tips,
 // so text still sits cleanly on top, no cut-out boxes) framed by a gently
 // breathing red outline.
@@ -132,14 +133,15 @@ impl EffortPickerState {
 
     /// Whether the picker is showing an animated visual and so needs continuous
     /// repaints to keep moving. True for the `ultracode` spectrum background and
-    /// the `max` rainbow label. The CLI event loop uses this to keep ticking
-    /// while the picker is open on an animated level.
+    /// any rainbow label. The CLI event loop uses this to keep ticking while the
+    /// picker is open on an animated level. `xhigh` only animates when it is the
+    /// top native tier (see [`is_rainbow_level`]).
     pub fn wants_animation(&self) -> bool {
-        self.visible
-            && matches!(
-                self.current(),
-                EffortLevel::XHigh | EffortLevel::Max | EffortLevel::Ultracode
-            )
+        if !self.visible {
+            return false;
+        }
+        let cur = self.current();
+        cur.is_ultracode() || is_rainbow_level(cur, &self.levels)
     }
 }
 
@@ -287,7 +289,7 @@ pub fn render_effort_picker(
         row(3),
         '\u{25b2}',
         Style::default()
-            .fg(accent_for(sel_level, frame_count))
+            .fg(accent_for(sel_level, &state.levels, frame_count))
             .add_modifier(Modifier::BOLD),
         inner,
     );
@@ -320,17 +322,30 @@ pub fn render_effort_picker(
     blit_str(buf, x0, row(controls_row), CONTROLS, Style::default().fg(text_fg), inner);
 }
 
-/// The accent color for a level's marker (matches its label styling). `xhigh`
-/// and `max` cycle through the animated rainbow so the marker shimmers with them.
-fn accent_for(level: EffortLevel, frame_count: u64) -> Color {
+/// Whether a level should get the per-character shimmering rainbow treatment.
+/// `max` always does; `xhigh` only when it is the top native tier — i.e. the
+/// model's ladder has no `max` above it. So on models that expose both
+/// `xhigh` and `max` (e.g. Claude), `xhigh` stays a plain highlight and the
+/// rainbow is reserved for `max`.
+fn is_rainbow_level(level: EffortLevel, levels: &[EffortLevel]) -> bool {
     match level {
-        EffortLevel::XHigh | EffortLevel::Max => {
-            let (r, g, b) = hsv_to_rgb((frame_count as f32 * 6.0).rem_euclid(360.0), 0.9, 1.0);
-            Color::Rgb(r, g, b)
-        }
-        EffortLevel::Ultracode => RED_BRIGHT,
-        _ => SELECTED_FG,
+        EffortLevel::Max => true,
+        EffortLevel::XHigh => !levels.contains(&EffortLevel::Max),
+        _ => false,
     }
+}
+
+/// The accent color for a level's marker (matches its label styling). Rainbow
+/// tiers cycle through the animated rainbow so the marker shimmers with them.
+fn accent_for(level: EffortLevel, levels: &[EffortLevel], frame_count: u64) -> Color {
+    if is_rainbow_level(level, levels) {
+        let (r, g, b) = hsv_to_rgb((frame_count as f32 * 6.0).rem_euclid(360.0), 0.9, 1.0);
+        return Color::Rgb(r, g, b);
+    }
+    if level.is_ultracode() {
+        return RED_BRIGHT;
+    }
+    SELECTED_FG
 }
 
 /// Build the label row: placed styled spans (`(col_offset, span)`), the center
@@ -364,7 +379,7 @@ fn layout_labels(
         let start = col;
         let width = lvl.label().chars().count();
         centers[i] = start + width / 2;
-        for span in styled_label(*lvl, i == selected, frame_count, on_spectrum) {
+        for span in styled_label(*lvl, levels, i == selected, frame_count, on_spectrum) {
             let w = span.content.chars().count();
             placed.push((col, span));
             col += w;
@@ -374,10 +389,12 @@ fn layout_labels(
 }
 
 /// Style a single level label. Non-selected labels are dim (lighter over the
-/// wave); the selected one is highlighted, with `ultracode` red and both `xhigh`
-/// and `max` a per-char shimmering rainbow that animates with `frame_count`.
+/// wave); the selected one is highlighted, with `ultracode` red and the rainbow
+/// tiers (see [`is_rainbow_level`]) a per-char shimmer that animates with
+/// `frame_count`.
 fn styled_label(
     level: EffortLevel,
+    levels: &[EffortLevel],
     selected: bool,
     frame_count: u64,
     on_spectrum: bool,
@@ -400,14 +417,14 @@ fn styled_label(
         }
         return vec![Span::styled(text.to_string(), st)];
     }
-    match level {
-        // The tiers above `high` (just below ultracode) shimmer rainbow.
-        EffortLevel::XHigh | EffortLevel::Max => rainbow_spans(text, frame_count),
-        _ => vec![Span::styled(
-            text.to_string(),
-            Style::default().fg(SELECTED_FG).add_modifier(Modifier::BOLD),
-        )],
+    if is_rainbow_level(level, levels) {
+        // Top-tier native levels (just below ultracode) shimmer rainbow.
+        return rainbow_spans(text, frame_count);
     }
+    vec![Span::styled(
+        text.to_string(),
+        Style::default().fg(SELECTED_FG).add_modifier(Modifier::BOLD),
+    )]
 }
 
 /// One bold span per character forming a SOFT, DIFFUSED rainbow across the word:
@@ -721,27 +738,45 @@ mod tests {
         assert_eq!(s.current(), EffortLevel::High);
     }
 
+    /// A native ladder that tops out at `xhigh` (no `max`), plus `ultracode`.
+    fn xhigh_top_ladder() -> Vec<EffortLevel> {
+        vec![
+            EffortLevel::Low,
+            EffortLevel::Medium,
+            EffortLevel::High,
+            EffortLevel::XHigh,
+            EffortLevel::Ultracode,
+        ]
+    }
+
     #[test]
-    fn wants_animation_for_high_tiers_and_ultracode() {
-        // The tiers above `high` (xhigh, max) shimmer rainbow and `ultracode`
-        // animates its wave; the native levels at/below `high` are static.
+    fn wants_animation_only_for_top_rainbow_tier_and_ultracode() {
+        // `max` and `ultracode` always animate; `xhigh` animates only when it is
+        // the top native tier (no `max` above it).
         let mut s = EffortPickerState::new();
         s.open(EffortLevel::Medium, full_ladder());
         assert!(!s.wants_animation(), "medium is static");
         s.selected = 2; // high
         assert!(!s.wants_animation(), "high is static");
-        s.selected = 3; // xhigh
-        assert!(s.wants_animation(), "xhigh rainbow shimmers");
+        s.selected = 3; // xhigh — max is present, so static
+        assert!(!s.wants_animation(), "xhigh static when max is present");
         s.selected = 4; // max
         assert!(s.wants_animation(), "max rainbow shimmers");
         s.selected = 5; // ultracode
         assert!(s.wants_animation(), "ultracode wave animates");
+
+        // On a ladder without `max`, `xhigh` is the top tier and shimmers.
+        let mut s2 = EffortPickerState::new();
+        s2.open(EffortLevel::XHigh, xhigh_top_ladder());
+        assert_eq!(s2.current(), EffortLevel::XHigh);
+        assert!(s2.wants_animation(), "xhigh shimmers when it is the top tier");
     }
 
     #[test]
-    fn xhigh_uses_shimmering_rainbow_that_animates() {
-        // xhigh (like max) is a per-char rainbow that shifts across frames.
-        let state = state_with(full_ladder(), 3); // xhigh selected
+    fn xhigh_rainbows_only_when_it_is_the_top_tier() {
+        // Ladder WITHOUT max: xhigh is the top native tier → per-char rainbow
+        // that shifts across frames.
+        let state = state_with(xhigh_top_ladder(), 3); // xhigh selected, no max
         let a = render_to_buffer(&state, 0);
         let b = render_to_buffer(&state, 20);
         let rows = buffer_rows(&a);
@@ -751,13 +786,26 @@ mod tests {
             .expect("label row present");
         let start = char_col_of(&rows[label_y], "xhigh").expect("xhigh in labels row");
         let y = label_y as u16;
-        // Distinct per-char colors (rainbow) …
         let c0 = a.cell((start as u16, y)).unwrap().fg;
         let c1 = a.cell((start as u16 + 1, y)).unwrap().fg;
-        assert_ne!(c0, c1, "xhigh rainbow chars must differ: {c0:?} vs {c1:?}");
-        // … and they animate between frames (shimmer).
+        assert_ne!(c0, c1, "top-tier xhigh rainbow chars must differ: {c0:?} vs {c1:?}");
         let cb = b.cell((start as u16, y)).unwrap().fg;
-        assert_ne!(c0, cb, "xhigh rainbow should animate: {c0:?} vs {cb:?}");
+        assert_ne!(c0, cb, "top-tier xhigh rainbow should animate: {c0:?} vs {cb:?}");
+
+        // Ladder WITH max: xhigh is no longer the top → plain solid highlight
+        // (all chars share one color; the rainbow is reserved for max).
+        let state2 = state_with(full_ladder(), 3); // xhigh selected, max present
+        let f = render_to_buffer(&state2, 0);
+        let rows2 = buffer_rows(&f);
+        let ly2 = rows2
+            .iter()
+            .position(|r| r.contains("ultracode"))
+            .expect("label row present");
+        let sx = char_col_of(&rows2[ly2], "xhigh").expect("xhigh in labels row");
+        let y2 = ly2 as u16;
+        let d0 = f.cell((sx as u16, y2)).unwrap().fg;
+        let d1 = f.cell((sx as u16 + 1, y2)).unwrap().fg;
+        assert_eq!(d0, d1, "xhigh with max present should be a solid color: {d0:?} vs {d1:?}");
     }
 
     #[test]
