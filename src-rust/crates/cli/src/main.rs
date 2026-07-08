@@ -3594,7 +3594,19 @@ async fn run_interactive(
                     // an unreachable endpoint, or a missing entitlement — is a
                     // no-op and never wipes the projection. For copilot the id
                     // IS the api.id, so this is the by-api.id merge.
-                    app.model_picker.merge_models(entries);
+                    //
+                    // Anthropic is the exception: its discovery result is the
+                    // subscription/key set already intersected with the catalog,
+                    // so we REPLACE (dropping legacy claude-3.x the credential
+                    // can't serve). An empty result (discovery failed / offline)
+                    // is a no-op that keeps the full catalog projection.
+                    if provider == "anthropic" {
+                        if !entries.is_empty() {
+                            app.model_picker.set_models(entries);
+                        }
+                    } else {
+                        app.model_picker.merge_models(entries);
+                    }
                     for m in &mut app.model_picker.models {
                         m.is_current = m.id == current;
                     }
@@ -3638,6 +3650,19 @@ async fn run_interactive(
                 .clone()
                 .or_else(|| app.config.provider.clone())
                 .unwrap_or_else(|| "anthropic".to_string());
+            let is_anthropic = provider_id_str == "anthropic";
+            // For Anthropic, live `/v1/models` discovery is the authoritative set
+            // the credential can use; intersect it with the rich catalog
+            // projection so we keep context/cost metadata for known ids but drop
+            // models the subscription/key can't serve (e.g. legacy claude-3.x).
+            let anthropic_catalog: Vec<claurst_tui::model_picker::ModelEntry> = if is_anthropic {
+                claurst_tui::model_picker::models_for_provider_from_registry(
+                    "anthropic",
+                    model_registry.as_ref(),
+                )
+            } else {
+                Vec::new()
+            };
             if let Some(ref registry) = app.provider_registry {
                 let pid = claurst_core::ProviderId::new(&provider_id_str);
                 if let Some(provider) = registry.get(&pid) {
@@ -3648,17 +3673,46 @@ async fn run_interactive(
                     tokio::spawn(async move {
                         match provider.discover_models().await {
                             Ok(models) => {
-                                let entries: Vec<claurst_tui::model_picker::ModelEntry> = models
-                                    .into_iter()
-                                    .map(|m| claurst_tui::model_picker::ModelEntry {
-                                        id: m.id.to_string(),
-                                        display_name: m.name.clone(),
-                                        description: claurst_tui::model_picker::format_context_window(
-                                            m.context_window,
-                                        ),
-                                        is_current: false,
-                                    })
-                                    .collect();
+                                let entries: Vec<claurst_tui::model_picker::ModelEntry> =
+                                    if is_anthropic && !models.is_empty() {
+                                        let by_id: std::collections::HashMap<
+                                            String,
+                                            claurst_tui::model_picker::ModelEntry,
+                                        > = anthropic_catalog
+                                            .into_iter()
+                                            .map(|e| (e.id.clone(), e))
+                                            .collect();
+                                        models
+                                            .into_iter()
+                                            .map(|m| {
+                                                let id = m.id.to_string();
+                                                by_id.get(&id).cloned().unwrap_or_else(|| {
+                                                    claurst_tui::model_picker::ModelEntry {
+                                                        id: id.clone(),
+                                                        display_name: m.name.clone(),
+                                                        description:
+                                                            claurst_tui::model_picker::format_context_window(
+                                                                m.context_window,
+                                                            ),
+                                                        is_current: false,
+                                                    }
+                                                })
+                                            })
+                                            .collect()
+                                    } else {
+                                        models
+                                            .into_iter()
+                                            .map(|m| claurst_tui::model_picker::ModelEntry {
+                                                id: m.id.to_string(),
+                                                display_name: m.name.clone(),
+                                                description:
+                                                    claurst_tui::model_picker::format_context_window(
+                                                        m.context_window,
+                                                    ),
+                                                is_current: false,
+                                            })
+                                            .collect()
+                                    };
                                 let _ = tx.send(Ok(entries)).await;
                             }
                             Err(_) => {

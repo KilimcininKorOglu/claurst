@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::ProviderId;
+use claurst_core::provider_id::{ModelId, ProviderId};
 use claurst_core::types::{ContentBlock, UsageInfo};
 use futures::Stream;
 
 use crate::client::{AnthropicClient, ClientConfig};
-use crate::provider::LlmProvider;
+use crate::provider::{LlmProvider, ModelInfo};
 use crate::provider_error::ProviderError;
 use crate::provider_types::{
     ProviderCapabilities, ProviderRequest, ProviderResponse, ProviderStatus, StopReason,
@@ -280,6 +280,36 @@ impl LlmProvider for AnthropicProvider {
         };
 
         Ok(Box::pin(s))
+    }
+
+    /// Live model discovery via `GET /v1/models`, returning exactly the models
+    /// the active credential can use. For a Claude Pro/Max OAuth token this is
+    /// the curated subscription set (no legacy claude-3.x); for an API key it is
+    /// the org's accessible models. On any failure (offline, expired/absent
+    /// token) returns an empty vec so the picker keeps the models.dev catalog
+    /// projection instead of surfacing an error.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        let available = match self.client.fetch_available_models().await {
+            Ok(m) => m,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let models = available
+            .into_iter()
+            .map(|m| {
+                let name = m.display_name.unwrap_or_else(|| m.id.clone());
+                ModelInfo {
+                    id: ModelId::new(&m.id),
+                    provider_id: self.id.clone(),
+                    name,
+                    // Sensible Claude defaults; the picker overlays richer
+                    // context/cost from the models.dev catalog for known ids.
+                    context_window: 200_000,
+                    max_output_tokens: 64_000,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        Ok(models)
     }
 
     async fn health_check(&self) -> Result<ProviderStatus, ProviderError> {

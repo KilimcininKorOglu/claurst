@@ -360,11 +360,18 @@ pub fn default_model_for_provider(
 /// replace the catalog projection. This is what makes a fresh `claude-opus-*`
 /// point-release surface the instant the snapshot ships it.
 ///
-/// Anthropic/OpenAI/Google never had a live endpoint. Azure, Amazon Bedrock,
+/// OpenAI/Google never had a live endpoint. Azure, Amazon Bedrock,
 /// Cohere and MiniMax used to ship a tiny hardcoded `discover_models()` list
 /// that clobbered the far richer catalog (108/85/12/6 rows); that override was
 /// removed, so they are projected from the models.dev catalog here too rather
 /// than fetched.
+///
+/// **Anthropic is intentionally NOT here**: it implements live discovery via
+/// `GET /v1/models`, which returns exactly the models the active credential can
+/// use (for a Claude Pro/Max OAuth token, the curated subscription set — no
+/// legacy claude-3.x). The event loop opens on the catalog projection, then
+/// intersects it with the discovered set (see the anthropic branch in the
+/// discovery spawn), falling back to the full projection if discovery fails.
 ///
 /// Live-endpoint providers (Ollama/LM Studio/llama.cpp, Copilot, the
 /// openai-compatible gateways, …) and curated-list providers (Codex, free) are
@@ -374,13 +381,7 @@ pub fn default_model_for_provider(
 pub fn provider_uses_catalog_projection(provider_id: &str) -> bool {
     matches!(
         provider_id,
-        "anthropic"
-            | "openai"
-            | "google"
-            | "azure"
-            | "amazon-bedrock"
-            | "cohere"
-            | "minimax"
+        "openai" | "google" | "azure" | "amazon-bedrock" | "cohere" | "minimax"
     )
 }
 
@@ -1327,7 +1328,9 @@ mod tests {
         let registry = claurst_api::ModelRegistry::new();
 
         // Catalog-backed providers skip live discovery; live ones do not.
-        assert!(provider_uses_catalog_projection("anthropic"));
+        // Anthropic now discovers via GET /v1/models, so it's on the live side;
+        // its sync projection below is still the pre-discovery/offline fallback.
+        assert!(!provider_uses_catalog_projection("anthropic"));
         assert!(provider_uses_catalog_projection("openai"));
         assert!(provider_uses_catalog_projection("google"));
         assert!(!provider_uses_catalog_projection("ollama"));
@@ -1540,7 +1543,8 @@ mod tests {
             );
         }
         // Live/curated providers must NOT be treated as catalog projections.
-        for pid in ["ollama", "github-copilot", "codex", "free"] {
+        // Anthropic joined this group: it discovers via GET /v1/models.
+        for pid in ["anthropic", "ollama", "github-copilot", "codex", "free"] {
             assert!(
                 !provider_uses_catalog_projection(pid),
                 "{pid} must keep its live/curated discovery"
