@@ -61,34 +61,10 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
-// Spinner frames matching the TypeScript SpinnerGlyph: platform-specific base
-// characters mirrored (forward + reverse) for a smooth pulse effect.
-// Windows uses '*' instead of '✳'/'✽' for better font coverage.
-#[cfg(target_os = "windows")]
-const SPINNER: &[char] = &['\u{00b7}', '\u{2722}', '*', '\u{2736}', '\u{273b}', '\u{273d}',
-                            '\u{273d}', '\u{273b}', '\u{2736}', '*', '\u{2722}', '\u{00b7}'];
-#[cfg(not(target_os = "windows"))]
-const SPINNER: &[char] = &['\u{00b7}', '\u{2722}', '\u{2733}', '\u{2736}', '\u{273b}', '\u{273d}',
-                            '\u{273d}', '\u{273b}', '\u{2736}', '\u{2733}', '\u{2722}', '\u{00b7}'];
 const CLAUDE_ORANGE: Color = Color::Rgb(233, 30, 99);
 const WELCOME_BOX_HEIGHT: u16 = 9;
 const STATUS_THINKING: &str = "thinking";
 const STATUS_THINKING_ELLIPSIS: &str = "thinking\u{2026}";
-
-fn spinner_char(frame_count: u64) -> char {
-    SPINNER[(frame_count as usize) % SPINNER.len()]
-}
-
-/// Returns the colour to use for the streaming spinner.
-/// Turns red when no stream data has arrived for more than 3 seconds.
-fn spinner_color(app: &App) -> Color {
-    if let Some(start) = app.stall_start {
-        if start.elapsed() > std::time::Duration::from_secs(3) {
-            return Color::Red;
-        }
-    }
-    Color::Yellow
-}
 
 fn is_modal_open(app: &App) -> bool {
     app.any_modal_open()
@@ -2228,15 +2204,10 @@ fn render_status_row(frame: &mut Frame, app: &App, area: Rect) {
             .or(app.spinner_verb.as_deref())
             .unwrap_or("Thinking");
 
-        let mut s = vec![Span::styled(
-            spinner_char(app.frame_count).to_string(),
-            Style::default().fg(spinner_color(app)).add_modifier(Modifier::BOLD),
-        )];
+        // No leading ASCII-star spinner glyph — the shimmering label is the
+        // motion. (The transcript already shows a spinner for the active tool.)
         let label = format!("{}…", raw_label.trim_end_matches('…'));
-
-        s.push(Span::raw(" "));
-        s.extend(shimmer_spans(&label, app.frame_count));
-        s
+        shimmer_spans(&label, app.frame_count)
     } else if let (Some(verb), Some(elapsed)) = (app.last_turn_verb, app.last_turn_elapsed.as_deref()) {
         // "✽ Worked for 2m 5s" — mirrors TS TeammateSpinnerLine idle state
         vec![Span::styled(
