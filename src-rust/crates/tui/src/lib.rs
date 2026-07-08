@@ -332,6 +332,8 @@ pub fn setup_terminal(mouse_capture: bool) -> io::Result<Terminal<CrosstermBacke
 /// Restore the terminal to its original state.
 pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
     disable_raw_mode()?;
+    // Clear any terminal "busy" progress indicator (OSC 9;4) we may have set.
+    set_terminal_progress(false);
     // Restore the original title by clearing it (terminals fall back to default).
     let _ = execute!(
         terminal.backend_mut(),
@@ -345,6 +347,54 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io
 /// Set the terminal window title via OSC escape sequence.
 pub fn set_terminal_title(title: &str) {
     let _ = execute!(io::stdout(), crossterm::terminal::SetTitle(title));
+}
+
+/// Whether the current terminal is known to render the OSC 9;4 "progress"
+/// sequence. Most terminals silently ignore an unknown OSC, but a bare
+/// tmux/screen passthrough can leak it as visible text, so we require a real
+/// tty and an allow-listed terminal (iTerm2, WezTerm, Ghostty, Windows
+/// Terminal, ConEmu).
+pub fn supports_progress_osc() -> bool {
+    use std::io::IsTerminal;
+    if !io::stdout().is_terminal() {
+        return false;
+    }
+    // tmux/screen don't forward OSC 9;4 to the outer terminal by default.
+    if std::env::var_os("TMUX").is_some() {
+        return false;
+    }
+    if let Ok(term) = std::env::var("TERM") {
+        if term.starts_with("screen") || term.starts_with("tmux") {
+            return false;
+        }
+    }
+    if std::env::var_os("WT_SESSION").is_some() || std::env::var_os("ConEmuPID").is_some() {
+        return true;
+    }
+    matches!(
+        std::env::var("TERM_PROGRAM").unwrap_or_default().as_str(),
+        "iTerm.app" | "WezTerm" | "ghostty"
+    )
+}
+
+/// Emit the OSC 9;4 progress sequence. `active = true` shows an indeterminate
+/// "busy" indicator (e.g. iTerm2's progress bar, the Windows Terminal taskbar);
+/// `false` clears it. No-op on terminals that don't support it.
+///
+/// Safe alongside the ratatui alternate screen: OSC 9;4 addresses terminal
+/// chrome (title bar / taskbar), not the cell grid, so it doesn't disturb the
+/// rendered frame.
+pub fn set_terminal_progress(active: bool) {
+    if !supports_progress_osc() {
+        return;
+    }
+    use std::io::Write;
+    // state 3 = indeterminate/busy, state 0 = clear; the progress value is
+    // unused for the indeterminate state.
+    let seq: &[u8] = if active { b"\x1b]9;4;3;0\x07" } else { b"\x1b]9;4;0;0\x07" };
+    let mut out = io::stdout();
+    let _ = out.write_all(seq);
+    let _ = out.flush();
 }
 
 /// Update the terminal title to reflect the current session context.

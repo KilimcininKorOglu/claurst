@@ -2079,6 +2079,14 @@ async fn run_interactive(
     // any flash.
     let mut last_scroll_offset = app.scroll_offset;
     let mut last_auto_scroll = app.auto_scroll;
+    // The terminal progress bar (OSC 9;4) is opt-out via the terminalProgressBar
+    // setting; read it once at startup. `progress_shown` tracks whether we've
+    // told the terminal we're "busy", so the escape is only emitted on an actual
+    // streaming-state edge.
+    let progress_bar_enabled = claurst_core::config::Settings::load_sync()
+        .map(|s| s.terminal_progress_bar)
+        .unwrap_or(true);
+    let mut progress_shown = false;
     'main: loop {
         app.frame_count = app.frame_count.wrapping_add(1);
         app.tick_rustle_pose();
@@ -2114,6 +2122,15 @@ async fn run_interactive(
 
         // Draw the UI
         terminal.draw(|f| render_app(f, &app))?;
+
+        // Level-sync the terminal progress indicator (OSC 9;4) to streaming
+        // state, so supporting terminals (iTerm2, WezTerm, Windows Terminal, …)
+        // show a "working" bar while a turn is active and clear it when idle.
+        let want_progress = app.is_streaming && progress_bar_enabled;
+        if want_progress != progress_shown {
+            claurst_tui::set_terminal_progress(want_progress);
+            progress_shown = want_progress;
+        }
 
         // Poll for crossterm events (keyboard/mouse) with short timeout
         // unless an auto-submit (queued message) is pending — in which case
