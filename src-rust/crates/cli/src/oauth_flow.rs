@@ -21,10 +21,12 @@
 
 use anyhow::{bail, Context};
 use claurst_core::oauth::{self, OAuthTokens};
+use claurst_tui::DeviceAuthEvent;
 use serde::Deserialize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 #[allow(unused_imports)]
 use url::Url;
@@ -119,6 +121,69 @@ pub async fn run_oauth_login_flow_with_label(
         .await
         .context("Token exchange failed")?;
 
+    finalize_login(token_resp, label).await
+}
+
+/// Run the OAuth PKCE login flow from inside the TUI (no stdout / stdin use).
+///
+/// Mirrors [`run_oauth_login_flow_with_label`] but surfaces the authorize URL
+/// to the device-auth dialog through `event_tx` instead of printing it, and
+/// captures the authorization code solely from the loopback redirect — there
+/// is no pasted-code fallback because the alternate screen owns stdin. Tokens
+/// are persisted exactly as the CLI flow does (`save_and_register`), so the
+/// runtime picks up the new credentials (Claude Pro/Max Bearer for the
+/// claude.ai flow). Headless users who cannot complete the browser redirect
+/// can still fall back to `claurst auth login`.
+pub async fn run_oauth_login_flow_tui(
+    event_tx: mpsc::Sender<DeviceAuthEvent>,
+    login_with_claude_ai: bool,
+    label: Option<&str>,
+) -> anyhow::Result<LoginResult> {
+    // 1. PKCE
+    let code_verifier = oauth::generate_code_verifier();
+    let code_challenge = oauth::generate_code_challenge(&code_verifier);
+    let state = oauth::generate_state();
+
+    // 2. Bind random localhost port for the callback server
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("Failed to bind OAuth callback server")?;
+    let port = listener.local_addr()?.port();
+
+    // 3. Build the automatic (loopback-redirect) auth URL, surface it to the
+    //    dialog, and try to open it directly.
+    let authorize_base = if login_with_claude_ai {
+        oauth::CLAUDE_AI_AUTHORIZE_URL
+    } else {
+        oauth::CONSOLE_AUTHORIZE_URL
+    };
+    let automatic_url = oauth::build_auth_url(authorize_base, &code_challenge, &state, port, false);
+    let _ = event_tx
+        .send(DeviceAuthEvent::GotBrowserUrl { url: automatic_url.clone() })
+        .await;
+    try_open_browser(&automatic_url);
+
+    // 4. Capture the authorization code from the browser redirect (loopback
+    //    only — the TUI owns stdin, so there is no paste fallback here).
+    let auth_code = run_callback_server(listener, &state)
+        .await
+        .context("OAuth callback failed")?;
+
+    // 5. Exchange the code (loopback redirect) and persist via the shared tail.
+    let token_resp = exchange_code_for_tokens(&auth_code, &state, &code_verifier, port, false)
+        .await
+        .context("Token exchange failed")?;
+    finalize_login(token_resp, label).await
+}
+
+/// Shared tail of the login flows: derive account metadata from the token
+/// response, mint an API key for the Console flow, persist the tokens, and
+/// return the usable credential. Called by both the interactive CLI flow and
+/// the in-TUI flow.
+async fn finalize_login(
+    token_resp: TokenExchangeResponse,
+    label: Option<&str>,
+) -> anyhow::Result<LoginResult> {
     let expires_at_ms = chrono::Utc::now().timestamp_millis()
         + (token_resp.expires_in as i64 * 1000);
 
@@ -142,7 +207,7 @@ pub async fn run_oauth_login_flow_with_label(
 
     let uses_bearer = scopes.iter().any(|s| s == oauth::CLAUDE_AI_INFERENCE_SCOPE);
 
-    // 7. For Console flow, exchange the access token for an API key
+    // For the Console flow, exchange the access token for an API key.
     let api_key = if !uses_bearer {
         match create_api_key(&token_resp.access_token).await {
             Ok(key) => {
@@ -158,7 +223,7 @@ pub async fn run_oauth_login_flow_with_label(
         None
     };
 
-    // 8. Build and persist tokens
+    // Build and persist tokens.
     let tokens = OAuthTokens {
         access_token: token_resp.access_token.clone(),
         refresh_token: token_resp.refresh_token.clone(),

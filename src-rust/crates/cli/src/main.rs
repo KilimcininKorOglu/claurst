@@ -3669,16 +3669,30 @@ async fn run_interactive(
                         }
                     });
                 }
-                "anthropic" => {
+                "anthropic-oauth" => {
                     let tx2 = device_auth_tx.clone();
-                    // Anthropic OAuth requires a registered application.
-                    // Claurst does not have its own registered OAuth app with Anthropic.
-                    // Users should use an API key from console.anthropic.com instead.
+                    // Claude Pro/Max subscription login: claude.ai OAuth (Bearer).
+                    // Runs the loopback flow in the background and surfaces the URL
+                    // to the dialog; the flow persists the tokens itself
+                    // (save_and_register), so the success handler only switches to
+                    // the anthropic provider. Usage draws from the account's
+                    // extra-usage pool, not subscription quota.
                     tokio::spawn(async move {
-                        let _ = tx2.send(DeviceAuthEvent::Error(
-                            "Anthropic OAuth requires a registered application.\n\
-                             Use an API key instead: console.anthropic.com/settings/keys".to_string()
-                        )).await;
+                        match oauth_flow::run_oauth_login_flow_tui(tx2.clone(), true, None).await {
+                            Ok(_) => {
+                                let _ = tx2
+                                    .send(DeviceAuthEvent::TokenReceived("connected".to_string()))
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = tx2
+                                    .send(DeviceAuthEvent::Error(format!(
+                                        "Anthropic login failed: {}",
+                                        e
+                                    )))
+                                    .await;
+                            }
+                        }
                     });
                 }
                 "codex" | "openai-codex" => {
