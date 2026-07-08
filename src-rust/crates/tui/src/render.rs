@@ -2198,8 +2198,12 @@ fn should_render_status_row(app: &App) -> bool {
         })
         .unwrap_or(false);
 
+    // Note: a completed turn's "Worked for Xs" summary (`last_turn_elapsed`) is
+    // intentionally NOT a reason to keep the status row on — it stays set until
+    // the next submit, so gating on it pinned the idle spinner glyph on screen
+    // permanently after the first turn. The row now shows only while actually
+    // active (voice, streaming, or an idle status message).
     app.voice_recording
-        || app.last_turn_elapsed.is_some()
         || (!app.is_streaming && app.status_message.is_some())
         || (app.is_streaming && interesting_stream_status)
 }
