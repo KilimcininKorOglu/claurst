@@ -1353,6 +1353,49 @@ async fn refresh_provider_runtime_state(
     })
 }
 
+/// Non-destructive counterpart to [`refresh_provider_runtime_state`]: re-resolve
+/// credentials for the CURRENT provider (e.g. right after an in-session OAuth
+/// login) and rebuild the client + provider registry, keeping the active
+/// provider and model. Mirrors the startup resolution so a just-completed
+/// Claude Pro/Max login works without a restart.
+async fn reload_provider_runtime_state(
+    current_config: &Config,
+) -> anyhow::Result<RefreshedProviderRuntime> {
+    let config = current_config.clone();
+
+    let (api_key, use_bearer_auth) = if config.selected_provider_id() == "anthropic" {
+        config
+            .resolve_anthropic_auth_async()
+            .await
+            .unwrap_or((String::new(), false))
+    } else {
+        (config.resolve_api_key().unwrap_or_default(), false)
+    };
+
+    claurst_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
+    let client_config = claurst_api::client::ClientConfig {
+        api_key,
+        api_base: config.resolve_anthropic_api_base(),
+        use_bearer_auth,
+        ..Default::default()
+    };
+    let client = Arc::new(
+        claurst_api::AnthropicClient::new(client_config.clone())
+            .context("Failed to rebuild Anthropic client")?,
+    );
+    let provider_registry =
+        Arc::new(claurst_api::ProviderRegistry::from_config(&config, client_config));
+    let model_registry = load_cached_model_registry();
+
+    Ok(RefreshedProviderRuntime {
+        config,
+        client,
+        provider_registry,
+        model_registry,
+        auth_store: claurst_core::AuthStore::default(),
+    })
+}
+
 fn normalize_provider_from_model(config: &mut Config) {
     if let Some(model) = config.model.as_deref() {
         if let Some((provider, _)) = model.split_once('/') {
@@ -3935,6 +3978,42 @@ async fn run_interactive(
                         "MCP auth is unavailable because the MCP runtime is not connected."
                             .to_string(),
                     );
+                }
+            }
+        }
+
+        if !app.is_streaming && current_query.is_none() && app.take_pending_provider_reload() {
+            // A provider was just connected in-session (e.g. a Claude Pro/Max
+            // OAuth login). Re-resolve credentials and swap in a fresh client +
+            // provider registry so the current session can use them immediately,
+            // without a restart. The client built at startup had no credential.
+            // `activate_provider` updated `app.config` (not `cmd_ctx.config`), so
+            // snapshot it as the resolution source — and snapshot up-front so we
+            // don't hold a borrow of `app` across the await.
+            let reload_source = app.config.clone();
+            match reload_provider_runtime_state(&reload_source).await {
+                Ok(refreshed) => {
+                    cmd_ctx.config = refreshed.config.clone();
+                    tool_ctx.config = refreshed.config.clone();
+                    base_query_config.provider_registry =
+                        Some(refreshed.provider_registry.clone());
+                    base_query_config.model_registry = Some(refreshed.model_registry.clone());
+                    base_query_config.model = claurst_api::effective_model_for_config(
+                        &cmd_ctx.config,
+                        refreshed.model_registry.as_ref(),
+                    );
+                    client = refreshed.client;
+                    model_registry = refreshed.model_registry;
+                    session.model = claurst_api::effective_model_for_config(
+                        &cmd_ctx.config,
+                        model_registry.as_ref(),
+                    );
+                    app.provider_registry = Some(refreshed.provider_registry);
+                    app.has_credentials = true;
+                }
+                Err(err) => {
+                    app.status_message =
+                        Some(format!("Could not activate credentials: {}", err));
                 }
             }
         }
