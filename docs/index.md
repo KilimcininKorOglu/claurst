@@ -142,13 +142,13 @@ LM Studio, Ollama, or any OpenAI-compatible server on your own machine.
 
 ## Interactive vs headless
 
-| Mode | Command | Use case |
-|------|---------|----------|
-| Interactive TUI | `claurst` | Day-to-day coding |
-| Single prompt | `claurst "task"` | Quick one-shot tasks |
-| Headless print | `claurst --print "task"` | Scripts, CI |
-| JSON output | `claurst --output-format json "task"` | Machine consumption |
-| Stream JSON | `claurst --output-format stream-json "task"` | Real-time piping |
+| Mode            | Command                                      | Use case             |
+|-----------------|----------------------------------------------|----------------------|
+| Interactive TUI | `claurst`                                    | Day-to-day coding    |
+| Single prompt   | `claurst "task"`                             | Quick one-shot tasks |
+| Headless print  | `claurst --print "task"`                     | Scripts, CI          |
+| JSON output     | `claurst --output-format json "task"`        | Machine consumption  |
+| Stream JSON     | `claurst --output-format stream-json "task"` | Real-time piping     |
 
 ---
 
@@ -156,31 +156,31 @@ LM Studio, Ollama, or any OpenAI-compatible server on your own machine.
 
 Inside the interactive TUI, type `/` to see all available commands. Common ones:
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show all commands |
-| `/model` | Switch model or provider |
-| `/login` | OAuth login (Anthropic; `--codex` for ChatGPT, `--label <name>` to name) |
-| `/accounts` | List stored Anthropic + Codex accounts |
-| `/switch <id>` | Switch active account (`--codex` for Codex) |
-| `/logout` | Clear credentials for the active account (`--all` to purge) |
-| `/goal <objective>` | Set an autonomous multi-turn goal |
-| `/managed-agents` | Configure manager-executor agents |
-| `/compact` | Compress conversation history |
-| `/cost` | Token usage and cost for this session |
-| `/insights` | Session statistics and tool usage report |
-| `/caveman` | Activate telegraphic speech mode (save tokens) |
-| `/rocky` | Activate Rocky (Project Hail Mary) speech mode |
-| `/normal` | Deactivate speech modes |
-| `/rewind` | Go back to a previous message |
-| `/copy` | Copy last response to clipboard |
-| `/export` | Save session transcript |
-| `/think-back` | View thinking traces from previous responses |
-| `/ultrareview` | Exhaustive multi-dimensional code review |
-| `/advisor <model>` | Set a secondary advisor model |
-| `/sandbox-toggle` | Toggle sandboxed shell execution |
-| `/update` | Check for and download updates |
-| `/exit` | Quit |
+| Command             | Description                                                              |
+|---------------------|--------------------------------------------------------------------------|
+| `/help`             | Show all commands                                                        |
+| `/model`            | Switch model or provider                                                 |
+| `/login`            | OAuth login (Anthropic; `--codex` for ChatGPT, `--label <name>` to name) |
+| `/accounts`         | List stored Anthropic + Codex accounts                                   |
+| `/switch <id>`      | Switch active account (`--codex` for Codex)                              |
+| `/logout`           | Clear credentials for the active account (`--all` to purge)              |
+| `/goal <objective>` | Set an autonomous multi-turn goal                                        |
+| `/managed-agents`   | Configure manager-executor agents                                        |
+| `/compact`          | Compress conversation history                                            |
+| `/cost`             | Token usage and cost for this session                                    |
+| `/insights`         | Session statistics and tool usage report                                 |
+| `/caveman`          | Activate telegraphic speech mode (save tokens)                           |
+| `/rocky`            | Activate Rocky (Project Hail Mary) speech mode                           |
+| `/normal`           | Deactivate speech modes                                                  |
+| `/rewind`           | Go back to a previous message                                            |
+| `/copy`             | Copy last response to clipboard                                          |
+| `/export`           | Save session transcript                                                  |
+| `/think-back`       | View thinking traces from previous responses                             |
+| `/ultrareview`      | Exhaustive multi-dimensional code review                                 |
+| `/advisor <model>`  | Set a secondary advisor model                                            |
+| `/sandbox-toggle`   | Toggle sandboxed shell execution                                         |
+| `/update`           | Check for and download updates                                           |
+| `/exit`             | Quit                                                                     |
 
 See [Slash Commands](commands) for the complete reference.
 

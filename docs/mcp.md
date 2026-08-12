@@ -53,14 +53,14 @@ The `type` field defaults to `"stdio"` when omitted.
 
 Each entry in the `mcpServers` / `mcp_servers` array (or the `config.mcp_servers` list) is an `McpServerConfig` object:
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | Yes | Unique identifier for the server in this session |
-| `command` | string | Stdio only | Executable to launch (e.g. `"npx"`, `"uvx"`, `"python"`) |
-| `args` | array of strings | No | Arguments passed to `command` |
-| `env` | object | No | Extra environment variables set for the child process |
-| `url` | string | HTTP only | Full URL of the SSE endpoint |
-| `type` | string | No | Transport type: `"stdio"` (default) or `"http"` |
+| Field     | Type             | Required   | Description                                              |
+|-----------|------------------|------------|----------------------------------------------------------|
+| `name`    | string           | Yes        | Unique identifier for the server in this session         |
+| `command` | string           | Stdio only | Executable to launch (e.g. `"npx"`, `"uvx"`, `"python"`) |
+| `args`    | array of strings | No         | Arguments passed to `command`                            |
+| `env`     | object           | No         | Extra environment variables set for the child process    |
+| `url`     | string           | HTTP only  | Full URL of the SSE endpoint                             |
+| `type`    | string           | No         | Transport type: `"stdio"` (default) or `"http"`          |
 
 ---
 
@@ -70,10 +70,10 @@ All string fields in `McpServerConfig` (`command`, `args`, `env` values, `url`) 
 
 **Supported syntax:**
 
-| Pattern | Behaviour |
-|---|---|
-| `${VAR_NAME}` | Substituted with the value of `VAR_NAME` from the process environment. If the variable is not set, the placeholder is left unchanged. |
-| `${VAR_NAME:-default}` | Substituted with `VAR_NAME` if set; falls back to `default` if not set. |
+| Pattern                | Behaviour                                                                                                                             |
+|------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `${VAR_NAME}`          | Substituted with the value of `VAR_NAME` from the process environment. If the variable is not set, the placeholder is left unchanged. |
+| `${VAR_NAME:-default}` | Substituted with `VAR_NAME` if set; falls back to `default` if not set.                                                               |
 
 **Example:**
 
@@ -198,12 +198,12 @@ The loop exits as soon as the server connects successfully. A new loop can be st
 
 Server statuses during reconnection:
 
-| Status | Meaning |
-|---|---|
-| `Connected` | Active connection; reports tool count |
-| `Connecting` | Connection attempt in progress |
+| Status         | Meaning                                   |
+|----------------|-------------------------------------------|
+| `Connected`    | Active connection; reports tool count     |
+| `Connecting`   | Connection attempt in progress            |
 | `Disconnected` | Cleanly disconnected or not yet attempted |
-| `Failed` | Last attempt failed; retry scheduled |
+| `Failed`       | Last attempt failed; retry scheduled      |
 
 ---
 

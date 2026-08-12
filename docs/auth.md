@@ -475,26 +475,26 @@ providers. Each provider looks for credentials in this order:
 
 ### Provider environment variables
 
-| Provider | Environment variable |
-|----------|---------------------|
-| `anthropic` | `ANTHROPIC_API_KEY` |
-| `openai` | `OPENAI_API_KEY` |
-| `google` | `GOOGLE_API_KEY` |
-| `groq` | `GROQ_API_KEY` |
-| `cerebras` | `CEREBRAS_API_KEY` |
-| `deepseek` | `DEEPSEEK_API_KEY` |
-| `mistral` | `MISTRAL_API_KEY` |
-| `xai` | `XAI_API_KEY` |
-| `openrouter` | `OPENROUTER_API_KEY` |
-| `togetherai` | `TOGETHER_API_KEY` |
-| `perplexity` | `PERPLEXITY_API_KEY` |
-| `cohere` | `COHERE_API_KEY` |
-| `deepinfra` | `DEEPINFRA_API_KEY` |
-| `venice` | `VENICE_API_KEY` |
-| `github-copilot` | `GITHUB_TOKEN` |
-| `azure` | `AZURE_API_KEY` |
-| `huggingface` | `HF_TOKEN` |
-| `nvidia` | `NVIDIA_API_KEY` |
+| Provider         | Environment variable |
+|------------------|----------------------|
+| `anthropic`      | `ANTHROPIC_API_KEY`  |
+| `openai`         | `OPENAI_API_KEY`     |
+| `google`         | `GOOGLE_API_KEY`     |
+| `groq`           | `GROQ_API_KEY`       |
+| `cerebras`       | `CEREBRAS_API_KEY`   |
+| `deepseek`       | `DEEPSEEK_API_KEY`   |
+| `mistral`        | `MISTRAL_API_KEY`    |
+| `xai`            | `XAI_API_KEY`        |
+| `openrouter`     | `OPENROUTER_API_KEY` |
+| `togetherai`     | `TOGETHER_API_KEY`   |
+| `perplexity`     | `PERPLEXITY_API_KEY` |
+| `cohere`         | `COHERE_API_KEY`     |
+| `deepinfra`      | `DEEPINFRA_API_KEY`  |
+| `venice`         | `VENICE_API_KEY`     |
+| `github-copilot` | `GITHUB_TOKEN`       |
+| `azure`          | `AZURE_API_KEY`      |
+| `huggingface`    | `HF_TOKEN`           |
+| `nvidia`         | `NVIDIA_API_KEY`     |
 
 ### Example: multiple providers in settings.json
 

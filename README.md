@@ -85,12 +85,12 @@ claurst upgrade
 
 If you'd rather grab the binary yourself, the latest archives are on [**GitHub Releases**](https://github.com/kuberwastaken/claurst/releases):
 
-| Platform | Archive |
-|----------|---------|
-| **Windows** x86_64 | `claurst-windows-x86_64.zip` |
-| **Linux** x86_64 | `claurst-linux-x86_64.tar.gz` |
-| **Linux** aarch64 | `claurst-linux-aarch64.tar.gz` |
-| **macOS** Intel | `claurst-macos-x86_64.tar.gz` |
+| Platform                | Archive                        |
+|-------------------------|--------------------------------|
+| **Windows** x86_64      | `claurst-windows-x86_64.zip`   |
+| **Linux** x86_64        | `claurst-linux-x86_64.tar.gz`  |
+| **Linux** aarch64       | `claurst-linux-aarch64.tar.gz` |
+| **macOS** Intel         | `claurst-macos-x86_64.tar.gz`  |
 | **macOS** Apple Silicon | `claurst-macos-aarch64.tar.gz` |
 
 Each archive contains a single `claurst` (or `claurst.exe`) binary. Extract it and put it on your `PATH`.

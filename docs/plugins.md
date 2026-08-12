@@ -149,31 +149,31 @@ marketplace_id = "you/my-plugin"
 
 ### Required
 
-| Field | Type | Description |
-|---|---|---|
+| Field  | Type   | Description                                                            |
+|--------|--------|------------------------------------------------------------------------|
 | `name` | string | Plugin name. Must be non-empty and contain no spaces (use kebab-case). |
 
 ### Metadata (optional)
 
-| Field | Type | Description |
-|---|---|---|
-| `version` | string | Plugin version string |
-| `description` | string | Human-readable description |
-| `author` | object | `name`, `email` (optional), `url` (optional) |
-| `homepage` | string | URL for the plugin's home page |
-| `repository` | string | URL for the source repository |
-| `license` | string | SPDX license identifier (e.g. `"MIT"`) |
-| `keywords` | array of strings | Tags used in marketplace search |
-| `marketplace_id` | string | Unique identifier in the plugin marketplace (e.g. `"author/plugin-name"`) |
+| Field            | Type             | Description                                                               |
+|------------------|------------------|---------------------------------------------------------------------------|
+| `version`        | string           | Plugin version string                                                     |
+| `description`    | string           | Human-readable description                                                |
+| `author`         | object           | `name`, `email` (optional), `url` (optional)                              |
+| `homepage`       | string           | URL for the plugin's home page                                            |
+| `repository`     | string           | URL for the source repository                                             |
+| `license`        | string           | SPDX license identifier (e.g. `"MIT"`)                                    |
+| `keywords`       | array of strings | Tags used in marketplace search                                           |
+| `marketplace_id` | string           | Unique identifier in the plugin marketplace (e.g. `"author/plugin-name"`) |
 
 ### Content Declarations
 
-| Field | Type | Description |
-|---|---|---|
-| `commands` | array of strings | Paths to extra slash command `.md` files or directories, relative to the plugin root. Supplements the `commands/` directory. |
-| `agents` | array of strings | Paths to extra agent `.md` files. Supplements the `agents/` directory. |
-| `skills` | array of strings | Paths to extra skill directories (each must contain a `SKILL.md`). Supplements the `skills/` directory. |
-| `output_styles` | array of strings | Paths to extra output style definitions. |
+| Field           | Type             | Description                                                                                                                  |
+|-----------------|------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `commands`      | array of strings | Paths to extra slash command `.md` files or directories, relative to the plugin root. Supplements the `commands/` directory. |
+| `agents`        | array of strings | Paths to extra agent `.md` files. Supplements the `agents/` directory.                                                       |
+| `skills`        | array of strings | Paths to extra skill directories (each must contain a `SKILL.md`). Supplements the `skills/` directory.                      |
+| `output_styles` | array of strings | Paths to extra output style definitions.                                                                                     |
 
 ### mcp_servers
 
@@ -183,19 +183,19 @@ An array of inline MCP server definitions. Each entry is identical to an `McpSer
 
 An array of LSP server definitions for language-aware editing support:
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | string | Server identifier |
-| `command` | string | Executable to launch |
-| `args` | array | Command-line arguments |
-| `extension_to_language` | object | Map of file extension → LSP language ID |
-| `transport` | string | `"stdio"` (default) |
-| `env` | object | Extra environment variables |
-| `workspace_folder` | string | Optional workspace path |
-| `startup_timeout` | number | Milliseconds to wait for server readiness |
-| `shutdown_timeout` | number | Milliseconds to wait for clean shutdown |
-| `restart_on_crash` | bool | Automatically restart on unexpected exit |
-| `max_restarts` | number | Maximum restart attempts |
+| Field                   | Type   | Description                               |
+|-------------------------|--------|-------------------------------------------|
+| `name`                  | string | Server identifier                         |
+| `command`               | string | Executable to launch                      |
+| `args`                  | array  | Command-line arguments                    |
+| `extension_to_language` | object | Map of file extension → LSP language ID   |
+| `transport`             | string | `"stdio"` (default)                       |
+| `env`                   | object | Extra environment variables               |
+| `workspace_folder`      | string | Optional workspace path                   |
+| `startup_timeout`       | number | Milliseconds to wait for server readiness |
+| `shutdown_timeout`      | number | Milliseconds to wait for clean shutdown   |
+| `restart_on_crash`      | bool   | Automatically restart on unexpected exit  |
+| `max_restarts`          | number | Maximum restart attempts                  |
 
 ### hooks
 
@@ -205,14 +205,14 @@ Either a path string pointing to a `hooks.json` file inside the plugin directory
 
 A map of option keys to `PluginUserConfigOption` objects, allowing the plugin to declare user-configurable settings that are surfaced by `/plugin info`:
 
-| Field | Type | Description |
-|---|---|---|
-| `type` | enum | Value type: `"string"`, `"number"`, `"boolean"`, `"directory"`, `"file"` |
-| `title` | string | Display label |
-| `description` | string | Explanation of the option |
-| `required` | bool | Whether the user must supply a value |
-| `default` | any | Default value (optional) |
-| `sensitive` | bool | When `true`, the value is masked in UI output |
+| Field         | Type   | Description                                                              |
+|---------------|--------|--------------------------------------------------------------------------|
+| `type`        | enum   | Value type: `"string"`, `"number"`, `"boolean"`, `"directory"`, `"file"` |
+| `title`       | string | Display label                                                            |
+| `description` | string | Explanation of the option                                                |
+| `required`    | bool   | Whether the user must supply a value                                     |
+| `default`     | any    | Default value (optional)                                                 |
+| `sensitive`   | bool   | When `true`, the value is masked in UI output                            |
 
 ### capabilities
 
@@ -228,45 +228,45 @@ Plugins can run shell commands in response to lifecycle events. Hooks receive a 
 
 ### Available Events
 
-| Event | When it fires |
-|---|---|
-| `PreToolUse` | Before any tool is executed |
-| `PostToolUse` | After a tool returns its result |
-| `PostToolUseFailure` | After a tool call throws an error |
-| `PermissionDenied` | When a permission request is rejected |
-| `PermissionRequest` | When a permission is requested (before decision) |
-| `Notification` | General notification from the agent |
-| `UserPromptSubmit` | When the user submits a prompt |
-| `SessionStart` | At the beginning of a session |
-| `SessionEnd` | At clean session shutdown |
-| `Stop` | When the model finishes its turn |
-| `StopFailure` | When the stop sequence fails |
-| `SubagentStart` | When a sub-agent is spawned |
-| `SubagentStop` | When a sub-agent finishes |
-| `PreCompact` | Before context compaction |
-| `PostCompact` | After context compaction |
-| `Setup` | During plugin setup phase |
-| `TeammateIdle` | When a teammate agent becomes idle |
-| `TaskCreated` | When a task is created |
-| `TaskCompleted` | When a task finishes |
-| `Elicitation` | When the model requests clarification |
-| `ElicitationResult` | When elicitation receives a response |
-| `ConfigChange` | When configuration is modified |
-| `WorktreeCreate` | When a git worktree is created |
-| `WorktreeRemove` | When a git worktree is removed |
-| `InstructionsLoaded` | When CLAUDE.md / instructions are loaded |
-| `CwdChanged` | When the working directory changes |
-| `FileChanged` | When a watched file changes |
+| Event                | When it fires                                    |
+|----------------------|--------------------------------------------------|
+| `PreToolUse`         | Before any tool is executed                      |
+| `PostToolUse`        | After a tool returns its result                  |
+| `PostToolUseFailure` | After a tool call throws an error                |
+| `PermissionDenied`   | When a permission request is rejected            |
+| `PermissionRequest`  | When a permission is requested (before decision) |
+| `Notification`       | General notification from the agent              |
+| `UserPromptSubmit`   | When the user submits a prompt                   |
+| `SessionStart`       | At the beginning of a session                    |
+| `SessionEnd`         | At clean session shutdown                        |
+| `Stop`               | When the model finishes its turn                 |
+| `StopFailure`        | When the stop sequence fails                     |
+| `SubagentStart`      | When a sub-agent is spawned                      |
+| `SubagentStop`       | When a sub-agent finishes                        |
+| `PreCompact`         | Before context compaction                        |
+| `PostCompact`        | After context compaction                         |
+| `Setup`              | During plugin setup phase                        |
+| `TeammateIdle`       | When a teammate agent becomes idle               |
+| `TaskCreated`        | When a task is created                           |
+| `TaskCompleted`      | When a task finishes                             |
+| `Elicitation`        | When the model requests clarification            |
+| `ElicitationResult`  | When elicitation receives a response             |
+| `ConfigChange`       | When configuration is modified                   |
+| `WorktreeCreate`     | When a git worktree is created                   |
+| `WorktreeRemove`     | When a git worktree is removed                   |
+| `InstructionsLoaded` | When CLAUDE.md / instructions are loaded         |
+| `CwdChanged`         | When the working directory changes               |
+| `FileChanged`        | When a watched file changes                      |
 
 ### HookEntry Fields
 
 Each hook entry in a hooks configuration:
 
-| Field | Type | Description |
-|---|---|---|
-| `command` | string | Shell command to run. Receives event JSON on stdin. |
-| `matcher` | string | Optional tool-name filter. Supports `*` wildcard (e.g. `"File*"`, `"*Tool"`). Only relevant for `PreToolUse` / `PostToolUse`. |
-| `blocking` | bool | If `true`, a non-zero exit code blocks the operation. Non-blocking hooks (default) only log a warning on failure. |
+| Field      | Type   | Description                                                                                                                   |
+|------------|--------|-------------------------------------------------------------------------------------------------------------------------------|
+| `command`  | string | Shell command to run. Receives event JSON on stdin.                                                                           |
+| `matcher`  | string | Optional tool-name filter. Supports `*` wildcard (e.g. `"File*"`, `"*Tool"`). Only relevant for `PreToolUse` / `PostToolUse`. |
+| `blocking` | bool   | If `true`, a non-zero exit code blocks the operation. Non-blocking hooks (default) only log a warning on failure.             |
 
 ### Hooks Configuration Format
 
@@ -325,12 +325,12 @@ When a blocking hook exits non-zero, Claurst denies the operation and reports th
 
 **Environment variables available to hook processes:**
 
-| Variable | Value |
-|---|---|
-| `CLAUDE_PLUGIN_ROOT` | Absolute path to the plugin directory |
-| `CLAUDE_PLUGIN_NAME` | Plugin name from the manifest |
-| `CLAUDE_TOOL_NAME` | Tool name (PostToolUse hooks only) |
-| `CLAUDE_TOOL_INPUT` | Tool input as JSON string (PostToolUse hooks only) |
+| Variable             | Value                                               |
+|----------------------|-----------------------------------------------------|
+| `CLAUDE_PLUGIN_ROOT` | Absolute path to the plugin directory               |
+| `CLAUDE_PLUGIN_NAME` | Plugin name from the manifest                       |
+| `CLAUDE_TOOL_NAME`   | Tool name (PostToolUse hooks only)                  |
+| `CLAUDE_TOOL_INPUT`  | Tool input as JSON string (PostToolUse hooks only)  |
 | `CLAUDE_TOOL_RESULT` | Tool result as JSON string (PostToolUse hooks only) |
 
 ---

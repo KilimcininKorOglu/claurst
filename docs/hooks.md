@@ -32,16 +32,16 @@ Claurst supports four hook implementations:
 
 Runs the given string through the configured shell (`bash` by default, or `powershell`).
 
-| Field | Description |
-|---|---|
-| `command` | Shell command string to execute. |
-| `shell` | `"bash"` (default, uses `$SHELL`) or `"powershell"` (uses `pwsh`). |
-| `timeout` | Per-hook timeout in seconds. |
-| `statusMessage` | Custom spinner text shown while the hook runs. |
-| `async` | If `true`, the hook runs in the background without blocking the event. |
-| `asyncRewake` | Background hook that wakes the model on exit code 2. Implies `async`. |
-| `once` | If `true`, the hook is removed from the session after it fires once. |
-| `if` | Condition filter; see [Filtering with `if`](#filtering-with-if). |
+| Field           | Description                                                            |
+|-----------------|------------------------------------------------------------------------|
+| `command`       | Shell command string to execute.                                       |
+| `shell`         | `"bash"` (default, uses `$SHELL`) or `"powershell"` (uses `pwsh`).     |
+| `timeout`       | Per-hook timeout in seconds.                                           |
+| `statusMessage` | Custom spinner text shown while the hook runs.                         |
+| `async`         | If `true`, the hook runs in the background without blocking the event. |
+| `asyncRewake`   | Background hook that wakes the model on exit code 2. Implies `async`.  |
+| `once`          | If `true`, the hook is removed from the session after it fires once.   |
+| `if`            | Condition filter; see [Filtering with `if`](#filtering-with-if).       |
 
 ### `prompt` — LLM evaluation
 
@@ -54,14 +54,14 @@ Runs the given string through the configured shell (`bash` by default, or `power
 
 Sends the event payload to a lightweight model for evaluation. The model must respond with `{"ok": true}` to pass, or `{"ok": false, "reason": "..."}` to fail.
 
-| Field | Description |
-|---|---|
-| `prompt` | Prompt string. Use `$ARGUMENTS` as a placeholder for the hook's JSON input. |
-| `model` | Model ID to use (e.g. `"claude-haiku-4-5"`). Defaults to the fastest available small model. |
-| `timeout` | Timeout in seconds. |
-| `statusMessage` | Spinner text. |
-| `once` | Run once and remove. |
-| `if` | Condition filter. |
+| Field           | Description                                                                                 |
+|-----------------|---------------------------------------------------------------------------------------------|
+| `prompt`        | Prompt string. Use `$ARGUMENTS` as a placeholder for the hook's JSON input.                 |
+| `model`         | Model ID to use (e.g. `"claude-haiku-4-5"`). Defaults to the fastest available small model. |
+| `timeout`       | Timeout in seconds.                                                                         |
+| `statusMessage` | Spinner text.                                                                               |
+| `once`          | Run once and remove.                                                                        |
+| `if`            | Condition filter.                                                                           |
 
 ### `agent` — agentic verifier
 
@@ -74,14 +74,14 @@ Sends the event payload to a lightweight model for evaluation. The model must re
 
 Spawns a short-lived agent session to verify a condition. Like `prompt`, it expects a structured `{"ok": bool, "reason": "..."}` response from the `SyntheticOutput` tool.
 
-| Field | Description |
-|---|---|
-| `prompt` | Verification description. `$ARGUMENTS` expands to the hook input JSON. |
-| `model` | Model ID to use. Defaults to Haiku. |
-| `timeout` | Timeout in seconds (default 60). |
-| `statusMessage` | Spinner text. |
-| `once` | Run once and remove. |
-| `if` | Condition filter. |
+| Field           | Description                                                            |
+|-----------------|------------------------------------------------------------------------|
+| `prompt`        | Verification description. `$ARGUMENTS` expands to the hook input JSON. |
+| `model`         | Model ID to use. Defaults to Haiku.                                    |
+| `timeout`       | Timeout in seconds (default 60).                                       |
+| `statusMessage` | Spinner text.                                                          |
+| `once`          | Run once and remove.                                                   |
+| `if`            | Condition filter.                                                      |
 
 ### `http` — HTTP POST
 
@@ -98,15 +98,15 @@ Spawns a short-lived agent session to verify a condition. Like `prompt`, it expe
 
 POSTs the event payload JSON to a URL.
 
-| Field | Description |
-|---|---|
-| `url` | Destination URL. |
-| `headers` | Extra request headers. Values may reference env vars using `$VAR` or `${VAR}`. |
-| `allowedEnvVars` | Explicit list of env var names that may be interpolated in headers. |
-| `timeout` | Timeout in seconds. |
-| `statusMessage` | Spinner text. |
-| `once` | Run once and remove. |
-| `if` | Condition filter. |
+| Field            | Description                                                                    |
+|------------------|--------------------------------------------------------------------------------|
+| `url`            | Destination URL.                                                               |
+| `headers`        | Extra request headers. Values may reference env vars using `$VAR` or `${VAR}`. |
+| `allowedEnvVars` | Explicit list of env var names that may be interpolated in headers.            |
+| `timeout`        | Timeout in seconds.                                                            |
+| `statusMessage`  | Spinner text.                                                                  |
+| `once`           | Run once and remove.                                                           |
+| `if`             | Condition filter.                                                              |
 
 ---
 

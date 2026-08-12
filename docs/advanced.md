@@ -24,12 +24,12 @@ claurst --effort <level>       Set the effort level (low/medium/high/max)
 
 ### Effort levels
 
-| Level | Description |
-|---|---|
-| `low` | Minimal thinking; fastest responses |
-| `medium` | Moderate reasoning; balanced speed and quality |
-| `high` | Deep reasoning; best quality for most tasks |
-| `max` | Maximum available budget; reserved for Opus-class models |
+| Level    | Description                                              |
+|----------|----------------------------------------------------------|
+| `low`    | Minimal thinking; fastest responses                      |
+| `medium` | Moderate reasoning; balanced speed and quality           |
+| `high`   | Deep reasoning; best quality for most tasks              |
+| `max`    | Maximum available budget; reserved for Opus-class models |
 
 The `max` level is only supported by models that expose it in the API (currently the Opus 4.6 generation). Attempting to set `max` on an unsupported model will fall back to `high`.
 
@@ -123,14 +123,14 @@ The transcript directory is derived from the working directory at session start.
 
 ### Commands
 
-| Command | Description |
-|---|---|
-| `/resume [id or search]` | Resume a previous session by ID or fuzzy search term. Alias: `/continue`. |
-| `/session` | Show the remote session URL and QR code (available in remote mode). |
-| `/fork` | Fork the current session into a new branch with fresh UUIDs, preserving the full message history. |
-| `/rename <title>` | Rename the current session. Appends a custom-title entry to the JSONL file. |
-| `/export` | Export the current session transcript. |
-| `/rewind` | Step back to an earlier point in the conversation. |
+| Command                  | Description                                                                                       |
+|--------------------------|---------------------------------------------------------------------------------------------------|
+| `/resume [id or search]` | Resume a previous session by ID or fuzzy search term. Alias: `/continue`.                         |
+| `/session`               | Show the remote session URL and QR code (available in remote mode).                               |
+| `/fork`                  | Fork the current session into a new branch with fresh UUIDs, preserving the full message history. |
+| `/rename <title>`        | Rename the current session. Appends a custom-title entry to the JSONL file.                       |
+| `/export`                | Export the current session transcript.                                                            |
+| `/rewind`                | Step back to an earlier point in the conversation.                                                |
 
 ### JSONL transcript format
 
@@ -231,12 +231,12 @@ Claurst displays both to the user before marking the goal complete. The model is
 
 ### Goal status lifecycle
 
-| Status | Meaning |
-|--------|---------|
-| `Active` | Goal is set and work is ongoing |
-| `Paused` | Work paused by user; goal is preserved |
+| Status      | Meaning                                             |
+|-------------|-----------------------------------------------------|
+| `Active`    | Goal is set and work is ongoing                     |
+| `Paused`    | Work paused by user; goal is preserved              |
 | `Completed` | Model called `GoalCompleteTool` with accepted audit |
-| `Failed` | Runaway guard fired or budget exhausted |
+| `Failed`    | Runaway guard fired or budget exhausted             |
 
 ### Disabling the goal system
 
@@ -292,11 +292,11 @@ Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4
 
 Control how the total token/cost budget is divided between the manager and executors:
 
-| Policy | Command | Description |
-|--------|---------|-------------|
-| `shared` | `budget-split shared` | All agents draw from a single shared pool |
-| `percentage` | `budget-split percentage:20` | Manager gets 20%, executors share the rest |
-| `fixed` | `budget-split fixed:0.50:2.00` | Manager capped at $0.50, each executor at $2.00 |
+| Policy       | Command                        | Description                                     |
+|--------------|--------------------------------|-------------------------------------------------|
+| `shared`     | `budget-split shared`          | All agents draw from a single shared pool       |
+| `percentage` | `budget-split percentage:20`   | Manager gets 20%, executors share the rest      |
+| `fixed`      | `budget-split fixed:0.50:2.00` | Manager capped at $0.50, each executor at $2.00 |
 
 ```
 /managed-agents budget 5.00           — set a total $5 budget (0 to clear)
@@ -386,10 +386,10 @@ claurst --print --output-format json "..."
 claurst --print --output-format stream-json --verbose "..."
 ```
 
-| Format | Description |
-|---|---|
-| (default) | Plain text output — only the final assistant message. |
-| `json` | Full message array as JSON (requires `--verbose`). |
+| Format        | Description                                                                      |
+|---------------|----------------------------------------------------------------------------------|
+| (default)     | Plain text output — only the final assistant message.                            |
+| `json`        | Full message array as JSON (requires `--verbose`).                               |
 | `stream-json` | Newline-delimited JSON stream of messages as they arrive (requires `--verbose`). |
 
 `stream-json` is the format used by the Agent SDK transport. It emits every message event as it arrives, making it suitable for real-time processing pipelines.
@@ -430,13 +430,13 @@ Only the soul (name, personality) is persisted to `~/.claude.json` under the `co
 
 ### Rarity tiers
 
-| Rarity | Weight | Stars |
-|---|---|---|
-| common | 60% | ★ |
-| uncommon | 25% | ★★ |
-| rare | 10% | ★★★ |
-| epic | 4% | ★★★★ |
-| legendary | 1% | ★★★★★ |
+| Rarity    | Weight | Stars |
+|-----------|--------|-------|
+| common    | 60%    | ★     |
+| uncommon  | 25%    | ★★    |
+| rare      | 10%    | ★★★   |
+| epic      | 4%     | ★★★★  |
+| legendary | 1%     | ★★★★★ |
 
 Rarity affects the floor value of the companion's stats. A legendary companion has a minimum stat floor of 50, while a common companion starts at 5.
 
@@ -526,11 +526,11 @@ The `/memory` command opens the memory management UI for viewing, editing, and o
 
 ### Permission modes
 
-| Mode | Description |
-|---|---|
-| `default` | Prompts the user before executing dangerous or write operations. |
-| `plan` | Read-only; write and execute require explicit approval. |
-| `autoAccept` | Accepts all tool calls without prompting. Use with caution. |
+| Mode                | Description                                                                 |
+|---------------------|-----------------------------------------------------------------------------|
+| `default`           | Prompts the user before executing dangerous or write operations.            |
+| `plan`              | Read-only; write and execute require explicit approval.                     |
+| `autoAccept`        | Accepts all tool calls without prompting. Use with caution.                 |
 | `bypassPermissions` | Skips the permission system entirely. Intended for trusted automation only. |
 
 The active mode is set with `--permission-mode <mode>` or via the `PermissionRequest` hook.
@@ -539,13 +539,13 @@ The active mode is set with `--permission-mode <mode>` or via the `PermissionReq
 
 Every tool is classified into a risk tier that determines the default permission behaviour:
 
-| Tier | Examples | Default behaviour |
-|---|---|---|
-| `forbidden` | Directly destructive operations | Always blocked |
-| `dangerous` | Broad filesystem writes, network access | Prompt required |
-| `execute` | Bash, shell commands | Prompt required |
-| `write` | FileWrite, FileEdit, TodoWrite | Prompt in default mode |
-| `readonly` | FileRead, Glob, Grep, WebFetch | Allowed automatically |
+| Tier        | Examples                                | Default behaviour      |
+|-------------|-----------------------------------------|------------------------|
+| `forbidden` | Directly destructive operations         | Always blocked         |
+| `dangerous` | Broad filesystem writes, network access | Prompt required        |
+| `execute`   | Bash, shell commands                    | Prompt required        |
+| `write`     | FileWrite, FileEdit, TodoWrite          | Prompt in default mode |
+| `readonly`  | FileRead, Glob, Grep, WebFetch          | Allowed automatically  |
 
 ### Bash command risk classification
 
@@ -660,13 +660,13 @@ The `LspTool` provides code intelligence by communicating with a Language Server
 
 ### Operations
 
-| Operation | Description |
-|---|---|
-| `hover` | Get type information and documentation for the symbol at a position |
-| `definition` | Find where a symbol is defined |
-| `references` | Find all references to a symbol |
-| `symbols` | List all symbols (functions, classes, variables) in the file |
-| `diagnostics` | Get errors and warnings reported by the language server |
+| Operation     | Description                                                         |
+|---------------|---------------------------------------------------------------------|
+| `hover`       | Get type information and documentation for the symbol at a position |
+| `definition`  | Find where a symbol is defined                                      |
+| `references`  | Find all references to a symbol                                     |
+| `symbols`     | List all symbols (functions, classes, variables) in the file        |
+| `diagnostics` | Get errors and warnings reported by the language server             |
 
 ### Input schema
 

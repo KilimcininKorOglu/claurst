@@ -9,13 +9,13 @@ that directory to your `PATH` automatically.
 
 ## System Requirements
 
-| Platform | Architecture | Minimum OS |
-|----------|-------------|------------|
-| Windows  | x86_64      | Windows 10 / Server 2019 |
-| Linux    | x86_64      | glibc 2.17+ (most distros from 2014 onward) |
-| Linux    | aarch64     | glibc 2.17+ (Raspberry Pi 4, AWS Graviton, etc.) |
-| macOS    | x86_64      | macOS 11 Big Sur |
-| macOS    | aarch64     | macOS 11 Big Sur (Apple Silicon: M1/M2/M3) |
+| Platform | Architecture | Minimum OS                                       |
+|----------|--------------|--------------------------------------------------|
+| Windows  | x86_64       | Windows 10 / Server 2019                         |
+| Linux    | x86_64       | glibc 2.17+ (most distros from 2014 onward)      |
+| Linux    | aarch64      | glibc 2.17+ (Raspberry Pi 4, AWS Graviton, etc.) |
+| macOS    | x86_64       | macOS 11 Big Sur                                 |
+| macOS    | aarch64      | macOS 11 Big Sur (Apple Silicon: M1/M2/M3)       |
 
 There are no other runtime dependencies. The binary is statically linked where
 possible; on Linux it links against the system glibc.
@@ -53,13 +53,13 @@ the updated `PATH` takes effect, then run `claurst --version` to verify.
 
 Both scripts accept the same flags:
 
-| Flag (sh) | Flag (ps1) | Effect |
-|---|---|---|
-| `--version 0.1.0` | `-Version 0.1.0` | Install a specific version |
-| `--binary <path>` | `-Binary <path>` | Install from a local file (skip download) |
-| `--install-dir <path>` | `-InstallDir <path>` | Override the install directory |
-| `--no-modify-path` | `-NoModifyPath` | Don't touch shell config / user PATH |
-| `--help` | `-Help` | Show usage |
+| Flag (sh)              | Flag (ps1)           | Effect                                    |
+|------------------------|----------------------|-------------------------------------------|
+| `--version 0.1.0`      | `-Version 0.1.0`     | Install a specific version                |
+| `--binary <path>`      | `-Binary <path>`     | Install from a local file (skip download) |
+| `--install-dir <path>` | `-InstallDir <path>` | Override the install directory            |
+| `--no-modify-path`     | `-NoModifyPath`      | Don't touch shell config / user PATH      |
+| `--help`               | `-Help`              | Show usage                                |
 
 Example: `curl -fsSL https://.../install.sh | bash -s -- --version 0.1.0`
 
@@ -90,11 +90,11 @@ bunx claurst         # via bun
 
 **Supported platforms via npm:**
 
-| Platform | Architecture |
-|----------|-------------|
-| Linux    | x86_64, aarch64 |
+| Platform | Architecture                            |
+|----------|-----------------------------------------|
+| Linux    | x86_64, aarch64                         |
 | macOS    | x86_64 (Intel), aarch64 (Apple Silicon) |
-| Windows  | x86_64 |
+| Windows  | x86_64                                  |
 
 ---
 
@@ -119,12 +119,12 @@ new binary, and replaces the running executable atomically. Settings in
 If you'd rather not run an install script, grab archives directly from
 [**GitHub Releases**](https://github.com/Kuberwastaken/claurst/releases):
 
-| Archive | Platform |
-|---------|----------|
-| `claurst-windows-x86_64.zip` | Windows 64-bit |
-| `claurst-linux-x86_64.tar.gz` | Linux x86_64 |
-| `claurst-linux-aarch64.tar.gz` | Linux ARM64 |
-| `claurst-macos-x86_64.tar.gz` | macOS Intel |
+| Archive                        | Platform            |
+|--------------------------------|---------------------|
+| `claurst-windows-x86_64.zip`   | Windows 64-bit      |
+| `claurst-linux-x86_64.tar.gz`  | Linux x86_64        |
+| `claurst-linux-aarch64.tar.gz` | Linux ARM64         |
+| `claurst-macos-x86_64.tar.gz`  | macOS Intel         |
 | `claurst-macos-aarch64.tar.gz` | macOS Apple Silicon |
 
 Every archive contains a single binary named `claurst` (or `claurst.exe`).
@@ -241,11 +241,11 @@ sudo pacman -S alsa-lib openssl
 
 ### Optional cargo features
 
-| Feature | Description |
-|---------|-------------|
-| `voice` | Microphone input / voice prompting |
+| Feature        | Description                                   |
+|----------------|-----------------------------------------------|
+| `voice`        | Microphone input / voice prompting            |
 | `computer-use` | Screenshot capture and mouse/keyboard control |
-| `dev_full` | All experimental features combined |
+| `dev_full`     | All experimental features combined            |
 
 To enable a feature:
 

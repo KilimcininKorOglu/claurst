@@ -42,11 +42,11 @@ The default provider. Uses the `/v1/messages` streaming endpoint.
 
 **Available models (bundled snapshot):**
 
-| Model ID | Context Window | Max Output | Input ($/1M) | Output ($/1M) |
-|---|---|---|---|---|
-| `claude-opus-4-6` | 200,000 | 32,000 | $15.00 | $75.00 |
-| `claude-sonnet-4-6` | 200,000 | 16,000 | $3.00 | $15.00 |
-| `claude-haiku-4-5-20251001` | 200,000 | 8,096 | $0.80 | $4.00 |
+| Model ID                    | Context Window | Max Output | Input ($/1M) | Output ($/1M) |
+|-----------------------------|----------------|------------|--------------|---------------|
+| `claude-opus-4-6`           | 200,000        | 32,000     | $15.00       | $75.00        |
+| `claude-sonnet-4-6`         | 200,000        | 16,000     | $3.00        | $15.00        |
+| `claude-haiku-4-5-20251001` | 200,000        | 8,096      | $0.80        | $4.00         |
 
 All Anthropic models support tool calling, vision, and extended reasoning.
 
@@ -78,12 +78,12 @@ Uses the OpenAI Chat Completions API (`/v1/chat/completions`).
 
 **Available models (bundled snapshot):**
 
-| Model ID | Context Window | Max Output | Reasoning |
-|---|---|---|---|
-| `gpt-4o` | 128,000 | 16,384 | No |
-| `gpt-4o-mini` | 128,000 | 16,384 | No |
-| `o3` | 200,000 | 100,000 | Yes |
-| `o4-mini` | 200,000 | 100,000 | Yes |
+| Model ID      | Context Window | Max Output | Reasoning |
+|---------------|----------------|------------|-----------|
+| `gpt-4o`      | 128,000        | 16,384     | No        |
+| `gpt-4o-mini` | 128,000        | 16,384     | No        |
+| `o3`          | 200,000        | 100,000    | Yes       |
+| `o4-mini`     | 200,000        | 100,000    | Yes       |
 
 **Configuration:**
 
@@ -111,11 +111,11 @@ Uses the Google Generative Language / Vertex AI API.
 
 **Available models (bundled snapshot):**
 
-| Model ID | Context Window | Max Output |
-|---|---|---|
-| `gemini-2.5-pro` | 1,048,576 | 65,536 |
-| `gemini-2.5-flash` | 1,048,576 | 65,536 |
-| `gemini-2.0-flash` | 1,048,576 | 8,192 |
+| Model ID           | Context Window | Max Output |
+|--------------------|----------------|------------|
+| `gemini-2.5-pro`   | 1,048,576      | 65,536     |
+| `gemini-2.5-flash` | 1,048,576      | 65,536     |
+| `gemini-2.0-flash` | 1,048,576      | 8,192      |
 
 **Configuration:**
 
@@ -254,27 +254,27 @@ The built-in provider uses the Anthropic-compatible Messages API.
 
 **Default model:** `MiniMax-M3`
 
-| Model | Context window | Input modalities | Thinking |
-|---|---:|---|---|
-| `MiniMax-M3` | 1,000,000 | Text, image, video | Off by default; supports `adaptive` and `disabled` |
-| `MiniMax-M2.7` | 204,800 | Text | Always on |
+| Model          | Context window | Input modalities   | Thinking                                           |
+|----------------|---------------:|--------------------|----------------------------------------------------|
+| `MiniMax-M3`   |      1,000,000 | Text, image, video | Off by default; supports `adaptive` and `disabled` |
+| `MiniMax-M2.7` |        204,800 | Text               | Always on                                          |
 
 The catalog retains the model's complete input-modality metadata. Claurst's built-in attachment flow currently sends text and image blocks.
 
 Pricing is in USD per million tokens:
 
-| Model | Service tier | Input range | Input | Output | Cache read | Cache write |
-|---|---|---:|---:|---:|---:|---:|
-| `MiniMax-M3` | Standard | Up to 512k | $0.30 | $1.20 | $0.06 | Not published |
-| `MiniMax-M3` | Standard | Over 512k | $0.60 | $2.40 | $0.12 | Not published |
-| `MiniMax-M3` | Priority | Up to 512k | $0.45 | $1.80 | $0.09 | Not published |
-| `MiniMax-M3` | Priority | Over 512k | $0.90 | $3.60 | $0.18 | Not published |
-| `MiniMax-M2.7` | Standard | All requests | $0.30 | $1.20 | $0.06 | $0.375 |
+| Model          | Service tier |  Input range | Input | Output | Cache read |   Cache write |
+|----------------|--------------|-------------:|------:|-------:|-----------:|--------------:|
+| `MiniMax-M3`   | Standard     |   Up to 512k | $0.30 |  $1.20 |      $0.06 | Not published |
+| `MiniMax-M3`   | Standard     |    Over 512k | $0.60 |  $2.40 |      $0.12 | Not published |
+| `MiniMax-M3`   | Priority     |   Up to 512k | $0.45 |  $1.80 |      $0.09 | Not published |
+| `MiniMax-M3`   | Priority     |    Over 512k | $0.90 |  $3.60 |      $0.18 | Not published |
+| `MiniMax-M2.7` | Standard     | All requests | $0.30 |  $1.20 |      $0.06 |        $0.375 |
 
-| Protocol | Global base URL | China base URL | Path added by Claurst |
-|---|---|---|---|
-| Anthropic | `https://api.minimax.io/anthropic` | `https://api.minimaxi.com/anthropic` | `/v1/messages` |
-| OpenAI-compatible | `https://api.minimax.io/v1` | `https://api.minimaxi.com/v1` | `/chat/completions` |
+| Protocol          | Global base URL                    | China base URL                       | Path added by Claurst |
+|-------------------|------------------------------------|--------------------------------------|-----------------------|
+| Anthropic         | `https://api.minimax.io/anthropic` | `https://api.minimaxi.com/anthropic` | `/v1/messages`        |
+| OpenAI-compatible | `https://api.minimax.io/v1`        | `https://api.minimaxi.com/v1`        | `/chat/completions`   |
 
 The built-in `minimax` provider uses the Anthropic row. To use the China endpoint, set `MINIMAX_BASE_URL` or configure `api_base`:
 
@@ -688,14 +688,14 @@ The `providers` map in `~/.claurst/settings.json` accepts per-provider `Provider
 
 **Fields:**
 
-| Field | Type | Description |
-|---|---|---|
-| `api_key` | string | Override the environment variable API key |
-| `api_base` | string | Override the default base URL |
-| `enabled` | bool | Enable or disable the provider (default: `true`) |
-| `models_whitelist` | array of strings | If non-empty, only listed model IDs are allowed |
-| `models_blacklist` | array of strings | Listed model IDs are refused |
-| `options` | object | Provider-specific pass-through options |
+| Field              | Type             | Description                                      |
+|--------------------|------------------|--------------------------------------------------|
+| `api_key`          | string           | Override the environment variable API key        |
+| `api_base`         | string           | Override the default base URL                    |
+| `enabled`          | bool             | Enable or disable the provider (default: `true`) |
+| `models_whitelist` | array of strings | If non-empty, only listed model IDs are allowed  |
+| `models_blacklist` | array of strings | Listed model IDs are refused                     |
+| `options`          | object           | Provider-specific pass-through options           |
 
 ## Model Whitelist and Blacklist
 
@@ -751,13 +751,13 @@ object), keyed by the fully-qualified `"provider/model"` id:
 
 **Fields** (all optional — an unset field keeps the catalog value):
 
-| Field | Type | Description |
-|---|---|---|
-| `contextWindow` | integer | Total context window size in tokens |
-| `maxOutputTokens` | integer | Maximum tokens the model can emit in one response |
-| `name` | string | Human-readable display name shown in the model picker |
-| `releaseDate` | string | ISO 8601 date; drives newest-first ordering in the picker |
-| `status` | string | Lifecycle status (`active`, `beta`, `alpha`, `deprecated`) |
+| Field             | Type    | Description                                                |
+|-------------------|---------|------------------------------------------------------------|
+| `contextWindow`   | integer | Total context window size in tokens                        |
+| `maxOutputTokens` | integer | Maximum tokens the model can emit in one response          |
+| `name`            | string  | Human-readable display name shown in the model picker      |
+| `releaseDate`     | string  | ISO 8601 date; drives newest-first ordering in the picker  |
+| `status`          | string  | Lifecycle status (`active`, `beta`, `alpha`, `deprecated`) |
 
 Field names accept both camelCase (`contextWindow`) and snake_case
 (`context_window`). The key **must** contain a `/` — a bare model id is ignored,

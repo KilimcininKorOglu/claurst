@@ -284,11 +284,11 @@ reliable tool calling, so it is generally a poor fit for small local models.
 
 ## Quick troubleshooting
 
-| Symptom | Likely cause / fix |
-|---------|--------------------|
-| Model "thinks" forever, never edits files | Missing `--jinja`, or the model/template doesn't support tool calls. Try a tool-capable instruct model. |
-| Context fills almost immediately | `--parallel N` is dividing `--ctx-size` across slots. Use `--parallel 1` or raise `--ctx-size`. |
-| Cache read shows `n/a` in `/usage` | Server isn't reporting `cached_tokens`. Upgrade llama.cpp (>= b4600); caching may still be working. |
-| `0k/262k` never moves | No completed turns — check that prompts actually reach the model, not a caching problem. |
-| Errors when context fills (with `--no-context-shift`) | Expected — raise `--ctx-size` and enable Claurst `auto_compact`. |
-| Tool calls arrive as plain text | Template isn't tool-aware; pass `--chat-template`/`--chat-template-file` or pick another model. |
+| Symptom                                               | Likely cause / fix                                                                                      |
+|-------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| Model "thinks" forever, never edits files             | Missing `--jinja`, or the model/template doesn't support tool calls. Try a tool-capable instruct model. |
+| Context fills almost immediately                      | `--parallel N` is dividing `--ctx-size` across slots. Use `--parallel 1` or raise `--ctx-size`.         |
+| Cache read shows `n/a` in `/usage`                    | Server isn't reporting `cached_tokens`. Upgrade llama.cpp (>= b4600); caching may still be working.     |
+| `0k/262k` never moves                                 | No completed turns — check that prompts actually reach the model, not a caching problem.                |
+| Errors when context fills (with `--no-context-shift`) | Expected — raise `--ctx-size` and enable Claurst `auto_compact`.                                        |
+| Tool calls arrive as plain text                       | Template isn't tool-aware; pass `--chat-template`/`--chat-template-file` or pick another model.         |

@@ -67,50 +67,50 @@ The `config` object holds runtime behaviour options.
 
 ### Model and token settings
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `api_key` | string \| null | null | Anthropic API key. Overrides `ANTHROPIC_API_KEY` env var. Prefer the env var in shared environments. |
-| `model` | string \| null | provider default | Model ID to use. When absent, the provider's default is used (e.g. `claude-sonnet-4-6` for Anthropic, `gpt-4o` for OpenAI). |
-| `max_tokens` | integer \| null | 8192 | Maximum tokens per model response. |
-| `provider` | string \| null | `"anthropic"` | Active provider. See the [Providers](#providers) section. |
+| Key          | Type            | Default          | Description                                                                                                                 |
+|--------------|-----------------|------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `api_key`    | string \| null  | null             | Anthropic API key. Overrides `ANTHROPIC_API_KEY` env var. Prefer the env var in shared environments.                        |
+| `model`      | string \| null  | provider default | Model ID to use. When absent, the provider's default is used (e.g. `claude-sonnet-4-6` for Anthropic, `gpt-4o` for OpenAI). |
+| `max_tokens` | integer \| null | 8192             | Maximum tokens per model response.                                                                                          |
+| `provider`   | string \| null  | `"anthropic"`    | Active provider. See the [Providers](#providers) section.                                                                   |
 
 ### Permission mode
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
+| Key               | Type   | Default     | Description                                                                                                       |
+|-------------------|--------|-------------|-------------------------------------------------------------------------------------------------------------------|
 | `permission_mode` | string | `"default"` | Controls how tool permissions are enforced. One of `"default"`, `"acceptEdits"`, `"bypassPermissions"`, `"plan"`. |
 
 See [Permission Modes](#permission-modes) for a full description of each value.
 
 ### Interface and output
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `theme` | string | `"default"` | Color theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`. |
-| `output_style` | string \| null | null | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.claurst/output-styles/`. |
-| `output_format` | string | `"text"` | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`. |
-| `verbose` | boolean | false | Enable debug-level log output. |
+| Key             | Type           | Default     | Description                                                                                                                                                 |
+|-----------------|----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `theme`         | string         | `"default"` | Color theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`.                                                                         |
+| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.claurst/output-styles/`. |
+| `output_format` | string         | `"text"`    | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`.                                                                    |
+| `verbose`       | boolean        | false       | Enable debug-level log output.                                                                                                                              |
 
 ### Context compaction
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `auto_compact` | boolean | true | Automatically compact the conversation context when the context window nears capacity. |
-| `compact_threshold` | float | 0.85 | Fraction of the context window that triggers auto-compaction (0.0–1.0). |
+| Key                 | Type    | Default | Description                                                                            |
+|---------------------|---------|---------|----------------------------------------------------------------------------------------|
+| `auto_compact`      | boolean | true    | Automatically compact the conversation context when the context window nears capacity. |
+| `compact_threshold` | float   | 0.85    | Fraction of the context window that triggers auto-compaction (0.0–1.0).                |
 
 ### System prompt
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `custom_system_prompt` | string \| null | null | Replace the default Claurst system prompt entirely with this text. |
-| `append_system_prompt` | string \| null | null | Append this text to the end of the assembled system prompt (after AGENTS.md content). |
+| Key                    | Type           | Default | Description                                                                           |
+|------------------------|----------------|---------|---------------------------------------------------------------------------------------|
+| `custom_system_prompt` | string \| null | null    | Replace the default Claurst system prompt entirely with this text.                    |
+| `append_system_prompt` | string \| null | null    | Append this text to the end of the assembled system prompt (after AGENTS.md content). |
 
 ### Tool access
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `allowed_tools` | array of strings | [] (all) | Restrict the tool set to this explicit list. An empty array means all tools are available. |
-| `disallowed_tools` | array of strings | [] | Always deny these tools, regardless of other settings. |
+| Key                | Type             | Default  | Description                                                                                |
+|--------------------|------------------|----------|--------------------------------------------------------------------------------------------|
+| `allowed_tools`    | array of strings | [] (all) | Restrict the tool set to this explicit list. An empty array means all tools are available. |
+| `disallowed_tools` | array of strings | []       | Always deny these tools, regardless of other settings.                                     |
 
 Tool names match the internal names: `Bash`, `Read`, `Write`, `Edit`, `Glob`,
 `Grep`, `WebSearch`, `WebFetch`, `TodoWrite`, `TodoRead`, and MCP tool names
@@ -118,15 +118,15 @@ prefixed with their server name (`myserver_toolname`).
 
 ### Directory access
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `additional_dirs` | array of strings | [] | Additional filesystem paths Claurst is allowed to read and write. Equivalent to passing `--add-dir` on the command line. |
+| Key               | Type             | Default | Description                                                                                                              |
+|-------------------|------------------|---------|--------------------------------------------------------------------------------------------------------------------------|
+| `additional_dirs` | array of strings | []      | Additional filesystem paths Claurst is allowed to read and write. Equivalent to passing `--add-dir` on the command line. |
 
 ### MCP servers
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `mcp_servers` | array of `McpServerConfig` | [] | Model Context Protocol servers to connect at startup. |
+| Key           | Type                       | Default | Description                                           |
+|---------------|----------------------------|---------|-------------------------------------------------------|
+| `mcp_servers` | array of `McpServerConfig` | []      | Model Context Protocol servers to connect at startup. |
 
 Each `McpServerConfig` object:
 
@@ -145,9 +145,9 @@ case `command` is the base URL).
 
 ### Environment variables injected into tools
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `env` | object (string → string) | {} | Environment variables injected into every tool execution. Useful for setting project-specific tokens without polluting the system environment. Values may reference existing env vars using `{env:VARNAME}` syntax. |
+| Key   | Type                     | Default | Description                                                                                                                                                                                                         |
+|-------|--------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `env` | object (string → string) | {}      | Environment variables injected into every tool execution. Useful for setting project-specific tokens without polluting the system environment. Values may reference existing env vars using `{env:VARNAME}` syntax. |
 
 ### Hooks
 
@@ -170,22 +170,22 @@ defined as a map from event name to an array of hook entries.
 
 Available events:
 
-| Event | When it fires |
-|-------|--------------|
-| `PreToolUse` | Before a tool executes. Receives event JSON on stdin. |
-| `PostToolUse` | After a tool returns its result. |
-| `Stop` | When the model finishes its turn (stop reason). |
-| `PostModelTurn` | After the model samples a response, before tool execution. |
-| `UserPromptSubmit` | When the user submits a prompt. |
-| `Notification` | General-purpose notification event. |
+| Event              | When it fires                                              |
+|--------------------|------------------------------------------------------------|
+| `PreToolUse`       | Before a tool executes. Receives event JSON on stdin.      |
+| `PostToolUse`      | After a tool returns its result.                           |
+| `Stop`             | When the model finishes its turn (stop reason).            |
+| `PostModelTurn`    | After the model samples a response, before tool execution. |
+| `UserPromptSubmit` | When the user submits a prompt.                            |
+| `Notification`     | General-purpose notification event.                        |
 
 Hook entry fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `command` | string | Shell command to execute. |
-| `tool_filter` | string \| null | Only run for this tool name (`PreToolUse`/`PostToolUse` only). |
-| `blocking` | boolean | If true, a non-zero exit code blocks the operation. Default: false. |
+| Field         | Type           | Description                                                         |
+|---------------|----------------|---------------------------------------------------------------------|
+| `command`     | string         | Shell command to execute.                                           |
+| `tool_filter` | string \| null | Only run for this tool name (`PreToolUse`/`PostToolUse` only).      |
+| `blocking`    | boolean        | If true, a non-zero exit code blocks the operation. Default: false. |
 
 ---
 
@@ -243,12 +243,12 @@ yourself in every session.
 Claurst loads AGENTS.md files from four locations. They are processed in the
 following order (earlier = higher priority, later content is appended below):
 
-| Scope | Path | Description |
-|-------|------|-------------|
-| Managed | `~/.claurst/rules/*.md` | Global policy files. All `.md` files in this directory are loaded in alphabetical order. |
-| User | `~/.claurst/AGENTS.md` | Your personal preferences and instructions, applied to all projects. |
-| Project | `<project-root>/AGENTS.md` | Project-level context: architecture notes, conventions, workflows. Typically committed to version control. |
-| Local | `<project-root>/.claurst/AGENTS.md` | Local overrides not committed to version control (add `.claurst/` to `.gitignore`). |
+| Scope   | Path                                | Description                                                                                                |
+|---------|-------------------------------------|------------------------------------------------------------------------------------------------------------|
+| Managed | `~/.claurst/rules/*.md`             | Global policy files. All `.md` files in this directory are loaded in alphabetical order.                   |
+| User    | `~/.claurst/AGENTS.md`              | Your personal preferences and instructions, applied to all projects.                                       |
+| Project | `<project-root>/AGENTS.md`          | Project-level context: architecture notes, conventions, workflows. Typically committed to version control. |
+| Local   | `<project-root>/.claurst/AGENTS.md` | Local overrides not committed to version control (add `.claurst/` to `.gitignore`).                        |
 
 Files from all four locations are concatenated (separated by blank lines) into
 a single system-prompt fragment. If the same instruction appears at multiple
@@ -279,11 +279,11 @@ Always use 4-space indentation. Prefer `anyhow` for error handling.
 
 Frontmatter fields:
 
-| Field | Description |
-|-------|-------------|
-| `memory_type` | Informal label (currently informational only). |
-| `priority` | Integer sort priority (lower numbers are prepended first within the same scope). |
-| `scope` | Informational label for documentation purposes. |
+| Field         | Description                                                                      |
+|---------------|----------------------------------------------------------------------------------|
+| `memory_type` | Informal label (currently informational only).                                   |
+| `priority`    | Integer sort priority (lower numbers are prepended first within the same scope). |
+| `scope`       | Informational label for documentation purposes.                                  |
 
 ### @include directives
 
@@ -320,28 +320,28 @@ via the `provider` key in settings or the `--provider` CLI flag.
 
 ### Provider IDs
 
-| Provider ID | Default model |
-|-------------|--------------|
-| `anthropic` | `claude-sonnet-4-6` (or latest) |
-| `openai` | `gpt-4o` |
-| `google` | `gemini-2.5-flash` |
-| `groq` | `llama-3.3-70b-versatile` |
-| `cerebras` | `llama-3.3-70b` |
-| `deepseek` | `deepseek-chat` |
-| `mistral` | `mistral-large-latest` |
-| `xai` | `grok-2` |
-| `openrouter` | `anthropic/claude-sonnet-4` |
-| `togetherai` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
-| `perplexity` | `sonar-pro` |
-| `cohere` | `command-r-plus` |
-| `deepinfra` | `meta-llama/Llama-3.3-70B-Instruct` |
-| `github-copilot` | `gpt-4o` |
-| `ollama` | `llama3.2` |
-| `lmstudio` | `default` |
-| `llamacpp` | `default` |
-| `azure` | `gpt-4o` |
-| `amazon-bedrock` | `anthropic.claude-sonnet-4-6-v1` |
-| `venice` | `llama-3.3-70b` |
+| Provider ID      | Default model                             |
+|------------------|-------------------------------------------|
+| `anthropic`      | `claude-sonnet-4-6` (or latest)           |
+| `openai`         | `gpt-4o`                                  |
+| `google`         | `gemini-2.5-flash`                        |
+| `groq`           | `llama-3.3-70b-versatile`                 |
+| `cerebras`       | `llama-3.3-70b`                           |
+| `deepseek`       | `deepseek-chat`                           |
+| `mistral`        | `mistral-large-latest`                    |
+| `xai`            | `grok-2`                                  |
+| `openrouter`     | `anthropic/claude-sonnet-4`               |
+| `togetherai`     | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| `perplexity`     | `sonar-pro`                               |
+| `cohere`         | `command-r-plus`                          |
+| `deepinfra`      | `meta-llama/Llama-3.3-70B-Instruct`       |
+| `github-copilot` | `gpt-4o`                                  |
+| `ollama`         | `llama3.2`                                |
+| `lmstudio`       | `default`                                 |
+| `llamacpp`       | `default`                                 |
+| `azure`          | `gpt-4o`                                  |
+| `amazon-bedrock` | `anthropic.claude-sonnet-4-6-v1`          |
+| `venice`         | `llama-3.3-70b`                           |
 
 ### Per-provider configuration
 
@@ -371,43 +371,43 @@ and `api_base` override the corresponding environment variables.
 
 `ProviderConfig` fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `api_key` | string \| null | API key for this provider. |
-| `api_base` | string \| null | Override the default API base URL. |
-| `enabled` | boolean | Whether this provider is active. Default: true. |
-| `models_whitelist` | array | If non-empty, only these model IDs are offered. |
-| `models_blacklist` | array | These model IDs are never offered. |
-| `options` | object | Provider-specific passthrough options. |
+| Field              | Type           | Description                                     |
+|--------------------|----------------|-------------------------------------------------|
+| `api_key`          | string \| null | API key for this provider.                      |
+| `api_base`         | string \| null | Override the default API base URL.              |
+| `enabled`          | boolean        | Whether this provider is active. Default: true. |
+| `models_whitelist` | array          | If non-empty, only these model IDs are offered. |
+| `models_blacklist` | array          | These model IDs are never offered.              |
+| `options`          | object         | Provider-specific passthrough options.          |
 
 ---
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API key. Checked after the `config.api_key` setting. |
-| `ANTHROPIC_BASE_URL` | Override the Anthropic API base URL. |
-| `CLAURST_PROVIDER` | Active provider. Equivalent to `--provider`. |
-| `CLAURST_API_BASE` | Override the API base URL for the active provider. Equivalent to `--api_base`. |
-| `CLAURST_GOALS` | Set to `0` to disable the goal system (`/goal` command and `GoalCompleteTool`). |
-| `OPENAI_API_KEY` | API key for the `openai` provider. |
-| `GOOGLE_API_KEY` | API key for the `google` provider. |
-| `GROQ_API_KEY` | API key for the `groq` provider. |
-| `XAI_API_KEY` | API key for the `xai` provider. |
-| `MISTRAL_API_KEY` | API key for the `mistral` provider. |
-| `OPENROUTER_API_KEY` | API key for the `openrouter` provider. |
-| `DEEPSEEK_API_KEY` | API key for the `deepseek` provider. |
-| `COHERE_API_KEY` | API key for the `cohere` provider. |
-| `DEEPINFRA_API_KEY` | API key for the `deepinfra` provider. |
-| `VENICE_API_KEY` | API key for the `venice` provider. |
-| `GITHUB_TOKEN` | Token for the `github-copilot` provider. |
-| `AZURE_API_KEY` | API key for the `azure` provider. |
-| `HF_TOKEN` | Token for the `huggingface` provider. |
-| `NVIDIA_API_KEY` | API key for the `nvidia` provider. |
-| `CLAURST_BRIDGE_URL` | Enable the remote-control bridge by setting the server URL. |
-| `CLAURST_BRIDGE_TOKEN` | Bearer token for the remote-control bridge. |
-| `RUST_LOG` | Tracing filter (e.g. `debug`, `claurst_core=trace`). |
+| Variable               | Description                                                                     |
+|------------------------|---------------------------------------------------------------------------------|
+| `ANTHROPIC_API_KEY`    | Anthropic API key. Checked after the `config.api_key` setting.                  |
+| `ANTHROPIC_BASE_URL`   | Override the Anthropic API base URL.                                            |
+| `CLAURST_PROVIDER`     | Active provider. Equivalent to `--provider`.                                    |
+| `CLAURST_API_BASE`     | Override the API base URL for the active provider. Equivalent to `--api_base`.  |
+| `CLAURST_GOALS`        | Set to `0` to disable the goal system (`/goal` command and `GoalCompleteTool`). |
+| `OPENAI_API_KEY`       | API key for the `openai` provider.                                              |
+| `GOOGLE_API_KEY`       | API key for the `google` provider.                                              |
+| `GROQ_API_KEY`         | API key for the `groq` provider.                                                |
+| `XAI_API_KEY`          | API key for the `xai` provider.                                                 |
+| `MISTRAL_API_KEY`      | API key for the `mistral` provider.                                             |
+| `OPENROUTER_API_KEY`   | API key for the `openrouter` provider.                                          |
+| `DEEPSEEK_API_KEY`     | API key for the `deepseek` provider.                                            |
+| `COHERE_API_KEY`       | API key for the `cohere` provider.                                              |
+| `DEEPINFRA_API_KEY`    | API key for the `deepinfra` provider.                                           |
+| `VENICE_API_KEY`       | API key for the `venice` provider.                                              |
+| `GITHUB_TOKEN`         | Token for the `github-copilot` provider.                                        |
+| `AZURE_API_KEY`        | API key for the `azure` provider.                                               |
+| `HF_TOKEN`             | Token for the `huggingface` provider.                                           |
+| `NVIDIA_API_KEY`       | API key for the `nvidia` provider.                                              |
+| `CLAURST_BRIDGE_URL`   | Enable the remote-control bridge by setting the server URL.                     |
+| `CLAURST_BRIDGE_TOKEN` | Bearer token for the remote-control bridge.                                     |
+| `RUST_LOG`             | Tracing filter (e.g. `debug`, `claurst_core=trace`).                            |
 
 ---
 
@@ -428,12 +428,12 @@ User-defined slash commands can be added to the `commands` map:
 
 `CommandTemplate` fields:
 
-| Field | Description |
-|-------|-------------|
-| `template` | Template string. `$ARGUMENTS` is replaced with whatever the user types after the command name. |
-| `description` | Short description shown in `/help`. |
-| `agent` | Optional named agent to use (e.g. `"plan"`, `"build"`, `"explore"`). |
-| `model` | Optional model override for this command. |
+| Field         | Description                                                                                    |
+|---------------|------------------------------------------------------------------------------------------------|
+| `template`    | Template string. `$ARGUMENTS` is replaced with whatever the user types after the command name. |
+| `description` | Short description shown in `/help`.                                                            |
+| `agent`       | Optional named agent to use (e.g. `"plan"`, `"build"`, `"explore"`).                           |
+| `model`       | Optional model override for this command.                                                      |
 
 Use the command with `/review path/to/file.rs`.
 
@@ -444,11 +444,11 @@ Use the command with `/review path/to/file.rs`.
 Agents are named configurations that combine a system prompt prefix, model,
 permission level, and turn limit. Three are built in:
 
-| Agent | Access | Description |
-|-------|--------|-------------|
-| `build` | full | Read, write, and execute. For feature implementation. |
-| `plan` | read-only | Read files; no writes or commands. For analysis and planning. |
-| `explore` | search-only | Search and read. For rapid codebase exploration. |
+| Agent     | Access      | Description                                                   |
+|-----------|-------------|---------------------------------------------------------------|
+| `build`   | full        | Read, write, and execute. For feature implementation.         |
+| `plan`    | read-only   | Read files; no writes or commands. For analysis and planning. |
+| `explore` | search-only | Search and read. For rapid codebase exploration.              |
 
 You can define custom agents in `settings.json`:
 
@@ -469,16 +469,16 @@ You can define custom agents in `settings.json`:
 
 `AgentDefinition` fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `description` | string \| null | Description shown in `@agent` autocomplete. |
-| `model` | string \| null | Model override for this agent. |
-| `temperature` | float \| null | Sampling temperature override. |
-| `prompt` | string \| null | System prompt prefix (prepended before the main system prompt). |
-| `access` | string | Permission level: `"full"`, `"read-only"`, or `"search-only"`. |
-| `visible` | boolean | Whether to show in autocomplete. Default: true. |
-| `max_turns` | integer \| null | Maximum agentic turns. |
-| `color` | string \| null | ANSI display color: `"cyan"`, `"magenta"`, `"green"`, `"yellow"`, etc. |
+| Field         | Type            | Description                                                            |
+|---------------|-----------------|------------------------------------------------------------------------|
+| `description` | string \| null  | Description shown in `@agent` autocomplete.                            |
+| `model`       | string \| null  | Model override for this agent.                                         |
+| `temperature` | float \| null   | Sampling temperature override.                                         |
+| `prompt`      | string \| null  | System prompt prefix (prepended before the main system prompt).        |
+| `access`      | string          | Permission level: `"full"`, `"read-only"`, or `"search-only"`.         |
+| `visible`     | boolean         | Whether to show in autocomplete. Default: true.                        |
+| `max_turns`   | integer \| null | Maximum agentic turns.                                                 |
+| `color`       | string \| null  | ANSI display color: `"cyan"`, `"magenta"`, `"green"`, `"yellow"`, etc. |
 
 Invoke an agent with `@agentname` in the TUI or `--agent agentname` on the CLI.
 
@@ -506,11 +506,11 @@ The `managed_agents` key stores the managed-agents architecture configuration se
 
 `budget_split` types:
 
-| Type | JSON | Description |
-|------|------|-------------|
-| `SharedPool` | `{ "type": "SharedPool" }` | All agents draw from a single pool |
-| `Percentage` | `{ "type": "Percentage", "manager_pct": 20 }` | Manager gets N% of total budget |
-| `FixedCaps` | `{ "type": "FixedCaps", "manager_usd": 0.50, "executor_usd": 2.00 }` | Hard USD caps per role |
+| Type         | JSON                                                                 | Description                        |
+|--------------|----------------------------------------------------------------------|------------------------------------|
+| `SharedPool` | `{ "type": "SharedPool" }`                                           | All agents draw from a single pool |
+| `Percentage` | `{ "type": "Percentage", "manager_pct": 20 }`                        | Manager gets N% of total budget    |
+| `FixedCaps`  | `{ "type": "FixedCaps", "manager_usd": 0.50, "executor_usd": 2.00 }` | Hard USD caps per role             |
 
 Configure via `/managed-agents configure` or `/managed-agents preset <name>`. Set `enabled: false` to disable without removing the configuration.
 
@@ -536,11 +536,11 @@ matches. They are defined in the `formatter` map:
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `command` | Command array. The filename is appended as the final argument. |
+| Field        | Description                                                       |
+|--------------|-------------------------------------------------------------------|
+| `command`    | Command array. The filename is appended as the final argument.    |
 | `extensions` | File extensions this formatter handles (include the leading dot). |
-| `disabled` | Set to true to temporarily disable without removing the entry. |
+| `disabled`   | Set to true to temporarily disable without removing the entry.    |
 
 ---
 

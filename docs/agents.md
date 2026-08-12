@@ -12,11 +12,11 @@ Three agents ship by default. Their definitions can be overridden per-user in `~
 
 Full tool access. Intended for implementing features and fixing bugs.
 
-| Property | Value |
-|---|---|
-| Access | `full` — all tools available |
-| Max turns | Unlimited (uses the global default) |
-| Display color | Cyan |
+| Property      | Value                               |
+|---------------|-------------------------------------|
+| Access        | `full` — all tools available        |
+| Max turns     | Unlimited (uses the global default) |
+| Display color | Cyan                                |
 
 Default system prompt prefix:
 
@@ -26,11 +26,11 @@ Default system prompt prefix:
 
 Read-only analysis. Cannot write files or execute commands. Intended for understanding codebases and planning changes before committing to implementation.
 
-| Property | Value |
-|---|---|
-| Access | `read-only` — file reads, no writes or shell execution |
-| Max turns | 20 |
-| Display color | Yellow |
+| Property      | Value                                                  |
+|---------------|--------------------------------------------------------|
+| Access        | `read-only` — file reads, no writes or shell execution |
+| Max turns     | 20                                                     |
+| Display color | Yellow                                                 |
 
 Default system prompt prefix:
 
@@ -40,11 +40,11 @@ Default system prompt prefix:
 
 Fast search-only exploration. Intended for quickly locating relevant code and answering questions about structure.
 
-| Property | Value |
-|---|---|
-| Access | `search-only` — search tools only |
-| Max turns | 15 |
-| Display color | Green |
+| Property      | Value                             |
+|---------------|-----------------------------------|
+| Access        | `search-only` — search tools only |
+| Max turns     | 15                                |
+| Display color | Green                             |
 
 Default system prompt prefix:
 
@@ -124,16 +124,16 @@ Define custom agents in `~/.claurst/settings.json` under the `agents` key. Custo
 
 ### AgentDefinition Fields
 
-| Field | Type | Description |
-|---|---|---|
-| `description` | string | Short description shown in `/agents` |
-| `model` | string | Model override in `provider/model` or bare `model` form. Omit to use the session default. |
-| `temperature` | number | Sampling temperature override (0.0–1.0). Omit to use the model default. |
-| `prompt` | string | System prompt prefix prepended before the main system prompt. |
-| `access` | string | Permission restriction: `"full"` (all tools), `"read-only"` (no writes/shell), `"search-only"` (search tools only). Default: `"full"`. |
-| `visible` | bool | Whether to show in `/agents` output. Default: `true`. |
-| `max_turns` | number or null | Maximum agentic turns. Null means unlimited. Overrides the global turn budget. |
-| `color` | string | ANSI terminal color for display: `"cyan"`, `"magenta"`, `"green"`, `"yellow"`, `"blue"`, etc. |
+| Field         | Type           | Description                                                                                                                            |
+|---------------|----------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `description` | string         | Short description shown in `/agents`                                                                                                   |
+| `model`       | string         | Model override in `provider/model` or bare `model` form. Omit to use the session default.                                              |
+| `temperature` | number         | Sampling temperature override (0.0–1.0). Omit to use the model default.                                                                |
+| `prompt`      | string         | System prompt prefix prepended before the main system prompt.                                                                          |
+| `access`      | string         | Permission restriction: `"full"` (all tools), `"read-only"` (no writes/shell), `"search-only"` (search tools only). Default: `"full"`. |
+| `visible`     | bool           | Whether to show in `/agents` output. Default: `true`.                                                                                  |
+| `max_turns`   | number or null | Maximum agentic turns. Null means unlimited. Overrides the global turn budget.                                                         |
+| `color`       | string         | ANSI terminal color for display: `"cyan"`, `"magenta"`, `"green"`, `"yellow"`, `"blue"`, etc.                                          |
 
 Use the agent with the `--agent` flag:
 
@@ -180,13 +180,13 @@ Worker prompts must be fully self-contained: workers cannot see the coordinator'
 
 The following tools are available to the coordinator but are not passed to worker agents:
 
-| Tool | Purpose |
-|---|---|
-| `Agent` | Spawn a new worker agent with a given prompt |
-| `SendMessage` | Continue communication with a running worker |
-| `TaskStop` | Cancel a worker that is no longer needed |
-| `TeamCreate` | Create a named team of workers |
-| `TeamDelete` | Dismantle a team |
+| Tool              | Purpose                                       |
+|-------------------|-----------------------------------------------|
+| `Agent`           | Spawn a new worker agent with a given prompt  |
+| `SendMessage`     | Continue communication with a running worker  |
+| `TaskStop`        | Cancel a worker that is no longer needed      |
+| `TeamCreate`      | Create a named team of workers                |
+| `TeamDelete`      | Dismantle a team                              |
 | `SyntheticOutput` | Inject synthetic output into the conversation |
 
 ### Worker Tool Set
@@ -205,14 +205,14 @@ The coordinator itself does not use `Bash` directly — shell execution is deleg
 
 These tools are available in coordinator mode for tracking parallel work:
 
-| Tool | Description |
-|---|---|
-| `TaskCreate` | Create a new tracked task |
-| `TaskGet` | Retrieve task details by ID |
-| `TaskUpdate` | Update task status or metadata |
-| `TaskList` | List all active tasks |
-| `TaskStop` | Cancel a running task (coordinator only) |
-| `TaskOutput` | Read output produced by a task |
+| Tool         | Description                              |
+|--------------|------------------------------------------|
+| `TaskCreate` | Create a new tracked task                |
+| `TaskGet`    | Retrieve task details by ID              |
+| `TaskUpdate` | Update task status or metadata           |
+| `TaskList`   | List all active tasks                    |
+| `TaskStop`   | Cancel a running task (coordinator only) |
+| `TaskOutput` | Read output produced by a task           |
 
 ### /tasks Command
 
@@ -324,13 +324,13 @@ Managed agents provide a formal **manager-executor** architecture that is distin
 
 ### When to use managed agents vs coordinator mode
 
-| | Coordinator mode | Managed agents |
-|---|---|---|
-| **Setup** | `CLAURST_COORDINATOR_MODE=1` | `/managed-agents enable` |
+|                     | Coordinator mode              | Managed agents                                 |
+|---------------------|-------------------------------|------------------------------------------------|
+| **Setup**           | `CLAURST_COORDINATOR_MODE=1`  | `/managed-agents enable`                       |
 | **Model selection** | All agents use the same model | Manager and executors can use different models |
-| **Budget control** | Global session limits | Per-role USD caps or percentage splits |
-| **Presets** | None | Several built-in presets available |
-| **Use case** | Homogeneous parallel workers | Heterogeneous manager/worker separation |
+| **Budget control**  | Global session limits         | Per-role USD caps or percentage splits         |
+| **Presets**         | None                          | Several built-in presets available             |
+| **Use case**        | Homogeneous parallel workers  | Heterogeneous manager/worker separation        |
 
 ### Enabling and configuring
 

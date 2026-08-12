@@ -31,50 +31,50 @@ This document covers all keyboard shortcuts in Claurst, how to customize them, v
 
 These bindings are active in all contexts.
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| `Ctrl+C` | interrupt | Interrupt the current operation (non-rebindable) |
-| `Ctrl+D` | exit | Exit Claurst (non-rebindable) |
-| `Ctrl+L` | redraw | Redraw the terminal screen |
-| `Ctrl+R` | historySearch | Open interactive history search |
-| `Ctrl+B` | createBranch | Create a new git branch |
-| `Alt+H` | openHelp | Open the help panel |
+| Key      | Action        | Description                                      |
+|----------|---------------|--------------------------------------------------|
+| `Ctrl+C` | interrupt     | Interrupt the current operation (non-rebindable) |
+| `Ctrl+D` | exit          | Exit Claurst (non-rebindable)                    |
+| `Ctrl+L` | redraw        | Redraw the terminal screen                       |
+| `Ctrl+R` | historySearch | Open interactive history search                  |
+| `Ctrl+B` | createBranch  | Create a new git branch                          |
+| `Alt+H`  | openHelp      | Open the help panel                              |
 
 ### Chat Context
 
 These bindings are active when focus is in the chat input field.
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| `Enter` | submit | Submit the current message to the model |
-| `Shift+Enter` | newline | Insert a literal newline without submitting |
-| `Ctrl+J` | newline | Newline (fallback for terminals without CSI-u protocol) |
-| `Up` / `Ctrl+O` | historyPrev | Navigate to the previous message in input history |
-| `Down` / `Ctrl+I` | historyNext | Navigate to the next message in input history |
-| `Tab` | indent | Insert indentation (or cycle completions if open) |
-| `Shift+Tab` | reverseIndent | Remove one level of indentation |
-| `Page Up` | scrollUp | Scroll the conversation view up one page |
-| `Page Down` | scrollDown | Scroll the conversation view down one page |
-| `Home` / `Cmd+Left` / `Ctrl+A` | goLineStart | Move cursor to beginning of line |
-| `End` / `Cmd+Right` / `Ctrl+E` | goLineEnd | Move cursor to end of line |
-| `Ctrl+Left` | moveWordBackward | Move one word left |
-| `Ctrl+Right` | moveWordForward | Move one word right |
-| `Alt+Left` | previousMessage | Jump to previous user/assistant message |
-| `Alt+Right` | nextMessage | Jump to next user/assistant message |
-| `Ctrl+Shift+A` | openModelPicker | Open the interactive model picker |
-| `Ctrl+K` | openCommandPalette | Open the slash command palette |
-| `Ctrl+U` | killToStart | Delete from cursor to beginning of line |
-| `Ctrl+W` / `Alt+Backspace` | killWord | Delete the word before the cursor |
-| `Alt+D` | deleteWord | Delete the word after the cursor |
-| `Ctrl+H` | deleteCharBefore | Delete character before cursor |
-| `Ctrl+L` | clearLine | Clear current input line |
-| `Ctrl+F` | findInMessage | Open inline search within the current conversation |
-| `Ctrl+Shift+F` | globalSearch | Open global codebase search |
-| `F3` / `Ctrl+]` | findNext | Jump to next search match |
-| `Shift+F3` / `Ctrl+[` | findPrev | Jump to previous search match |
-| `Ctrl+G` | goToLine | Jump to a specific line |
-| `Ctrl+.` | jumpToNextError | Jump to next error / issue |
-| `Ctrl+Shift+.` | jumpToPreviousError | Jump to previous error / issue |
+| Key                            | Action              | Description                                             |
+|--------------------------------|---------------------|---------------------------------------------------------|
+| `Enter`                        | submit              | Submit the current message to the model                 |
+| `Shift+Enter`                  | newline             | Insert a literal newline without submitting             |
+| `Ctrl+J`                       | newline             | Newline (fallback for terminals without CSI-u protocol) |
+| `Up` / `Ctrl+O`                | historyPrev         | Navigate to the previous message in input history       |
+| `Down` / `Ctrl+I`              | historyNext         | Navigate to the next message in input history           |
+| `Tab`                          | indent              | Insert indentation (or cycle completions if open)       |
+| `Shift+Tab`                    | reverseIndent       | Remove one level of indentation                         |
+| `Page Up`                      | scrollUp            | Scroll the conversation view up one page                |
+| `Page Down`                    | scrollDown          | Scroll the conversation view down one page              |
+| `Home` / `Cmd+Left` / `Ctrl+A` | goLineStart         | Move cursor to beginning of line                        |
+| `End` / `Cmd+Right` / `Ctrl+E` | goLineEnd           | Move cursor to end of line                              |
+| `Ctrl+Left`                    | moveWordBackward    | Move one word left                                      |
+| `Ctrl+Right`                   | moveWordForward     | Move one word right                                     |
+| `Alt+Left`                     | previousMessage     | Jump to previous user/assistant message                 |
+| `Alt+Right`                    | nextMessage         | Jump to next user/assistant message                     |
+| `Ctrl+Shift+A`                 | openModelPicker     | Open the interactive model picker                       |
+| `Ctrl+K`                       | openCommandPalette  | Open the slash command palette                          |
+| `Ctrl+U`                       | killToStart         | Delete from cursor to beginning of line                 |
+| `Ctrl+W` / `Alt+Backspace`     | killWord            | Delete the word before the cursor                       |
+| `Alt+D`                        | deleteWord          | Delete the word after the cursor                        |
+| `Ctrl+H`                       | deleteCharBefore    | Delete character before cursor                          |
+| `Ctrl+L`                       | clearLine           | Clear current input line                                |
+| `Ctrl+F`                       | findInMessage       | Open inline search within the current conversation      |
+| `Ctrl+Shift+F`                 | globalSearch        | Open global codebase search                             |
+| `F3` / `Ctrl+]`                | findNext            | Jump to next search match                               |
+| `Shift+F3` / `Ctrl+[`          | findPrev            | Jump to previous search match                           |
+| `Ctrl+G`                       | goToLine            | Jump to a specific line                                 |
+| `Ctrl+.`                       | jumpToNextError     | Jump to next error / issue                              |
+| `Ctrl+Shift+.`                 | jumpToPreviousError | Jump to previous error / issue                          |
 
 > `Ctrl+A` previously opened the model picker; it now moves the cursor to the line start (matching Emacs/readline). The model picker is now `Ctrl+Shift+A`. Old `keybindings.json` files are auto-migrated.
 
@@ -82,13 +82,13 @@ These bindings are active when focus is in the chat input field.
 
 These bindings are active when Claurst is displaying a yes/no confirmation prompt (e.g., tool permission requests).
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| `Y` / `y` | confirm | Approve the pending action |
-| `N` / `n` | deny | Deny the pending action |
-| `A` / `a` | alwaysAllow | Approve and add a permanent allow rule |
-| `Enter` | defaultAction | Accept the highlighted default option |
-| `Escape` | cancel | Cancel the prompt and deny the action |
+| Key       | Action        | Description                            |
+|-----------|---------------|----------------------------------------|
+| `Y` / `y` | confirm       | Approve the pending action             |
+| `N` / `n` | deny          | Deny the pending action                |
+| `A` / `a` | alwaysAllow   | Approve and add a permanent allow rule |
+| `Enter`   | defaultAction | Accept the highlighted default option  |
+| `Escape`  | cancel        | Cancel the prompt and deny the action  |
 
 ---
 
@@ -96,17 +96,17 @@ These bindings are active when Claurst is displaying a yes/no confirmation promp
 
 Claurst uses a context system so that the same key can have different effects depending on where focus is. A binding in a more specific context takes precedence over a binding in a broader context.
 
-| Context | Description |
-|---------|-------------|
-| `global` | Always active regardless of focus |
-| `chat` | Active when the chat input field has focus |
-| `confirmation` | Active when a permission confirmation dialog is open |
-| `modelPicker` | Active inside the model selection overlay |
-| `commandPalette` | Active inside the slash command palette overlay |
-| `search` | Active while the inline search bar is open |
-| `vim.normal` | Active in vim normal mode (when vim mode is enabled) |
-| `vim.insert` | Active in vim insert mode (when vim mode is enabled) |
-| `vim.visual` | Active in vim visual mode (when vim mode is enabled) |
+| Context          | Description                                          |
+|------------------|------------------------------------------------------|
+| `global`         | Always active regardless of focus                    |
+| `chat`           | Active when the chat input field has focus           |
+| `confirmation`   | Active when a permission confirmation dialog is open |
+| `modelPicker`    | Active inside the model selection overlay            |
+| `commandPalette` | Active inside the slash command palette overlay      |
+| `search`         | Active while the inline search bar is open           |
+| `vim.normal`     | Active in vim normal mode (when vim mode is enabled) |
+| `vim.insert`     | Active in vim insert mode (when vim mode is enabled) |
+| `vim.visual`     | Active in vim visual mode (when vim mode is enabled) |
 
 ---
 
@@ -146,11 +146,11 @@ For batch edits or scripted configuration, edit `~/.claurst/keybindings.json` di
 
 Each binding object has:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `context` | string | Keybinding context (see table above) |
-| `action` | string \| null | Action identifier (or `null` to unbind) |
-| `chord` | string | Key combination in normalized form |
+| Field     | Type           | Description                             |
+|-----------|----------------|-----------------------------------------|
+| `context` | string         | Keybinding context (see table above)    |
+| `action`  | string \| null | Action identifier (or `null` to unbind) |
+| `chord`   | string         | Key combination in normalized form      |
 
 ### Schema Versioning and Smart Merge
 
@@ -169,12 +169,12 @@ Setting `"action": null` for a chord explicitly **unbinds** the default — usef
 
 Key notation uses lowercase letters, with modifier prefixes separated by `+`:
 
-| Prefix | Modifier key |
-|--------|-------------|
-| `ctrl+` | Control |
-| `alt+` | Alt / Option |
-| `shift+` | Shift |
-| `super+` | Super / Cmd |
+| Prefix   | Modifier key |
+|----------|--------------|
+| `ctrl+`  | Control      |
+| `alt+`   | Alt / Option |
+| `shift+` | Shift        |
+| `super+` | Super / Cmd  |
 
 Special key names: `enter`, `escape`, `tab`, `backspace`, `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1` through `f12`.
 
@@ -212,10 +212,10 @@ Example — map `Ctrl+X Ctrl+C` to exit:
 
 The following keys have fixed behavior and cannot be rebound:
 
-| Key | Fixed behavior |
-|-----|---------------|
-| `Ctrl+C` | Interrupt current operation / send SIGINT to foreground process |
-| `Ctrl+D` | Exit Claurst when input is empty; signal EOF when input has content |
+| Key      | Fixed behavior                                                            |
+|----------|---------------------------------------------------------------------------|
+| `Ctrl+C` | Interrupt current operation / send SIGINT to foreground process           |
+| `Ctrl+D` | Exit Claurst when input is empty; signal EOF when input has content       |
 | `Ctrl+M` | Identical to `Enter` at the terminal level (terminals emit `CR` for both) |
 
 These keys are handled at the terminal input layer before the keybinding system processes events. If any of them appear as a `chord` in `keybindings.json`, Claurst:
@@ -253,32 +253,32 @@ In vim mode the input field has three modes:
 
 **Normal mode** — movement and editing commands:
 
-| Key | Action |
-|-----|--------|
-| `h` / `l` | Move cursor left / right |
-| `j` / `k` | History prev / next |
-| `w` / `b` | Move forward / backward by word |
-| `0` / `$` | Move to line start / end |
-| `i` | Enter insert mode at cursor |
-| `a` | Enter insert mode after cursor |
-| `A` | Enter insert mode at end of line |
-| `I` | Enter insert mode at beginning of line |
-| `x` | Delete character under cursor |
-| `dd` | Delete entire line |
-| `u` | Undo last change |
-| `Ctrl+R` | Redo |
-| `yy` | Yank (copy) line |
-| `p` | Paste after cursor |
-| `Enter` | Submit message |
-| `/` | Enter inline search |
-| `Escape` | Clear pending command / return to normal |
+| Key       | Action                                   |
+|-----------|------------------------------------------|
+| `h` / `l` | Move cursor left / right                 |
+| `j` / `k` | History prev / next                      |
+| `w` / `b` | Move forward / backward by word          |
+| `0` / `$` | Move to line start / end                 |
+| `i`       | Enter insert mode at cursor              |
+| `a`       | Enter insert mode after cursor           |
+| `A`       | Enter insert mode at end of line         |
+| `I`       | Enter insert mode at beginning of line   |
+| `x`       | Delete character under cursor            |
+| `dd`      | Delete entire line                       |
+| `u`       | Undo last change                         |
+| `Ctrl+R`  | Redo                                     |
+| `yy`      | Yank (copy) line                         |
+| `p`       | Paste after cursor                       |
+| `Enter`   | Submit message                           |
+| `/`       | Enter inline search                      |
+| `Escape`  | Clear pending command / return to normal |
 
 **Visual mode** — entered with `v` from normal mode; use movement keys to select text, then:
 
-| Key | Action |
-|-----|--------|
-| `y` | Yank selection |
-| `d` | Delete selection |
+| Key      | Action           |
+|----------|------------------|
+| `y`      | Yank selection   |
+| `d`      | Delete selection |
 | `Escape` | Exit visual mode |
 
 ### Vim Mode Indicator
@@ -330,31 +330,31 @@ An `@` that is *not* at a word boundary (e.g. inside an email `me@example.com`) 
 
 **Limits and warnings.** If a referenced path is too large, binary, a directory, or unreadable, Claurst opens a confirmation dialog before sending:
 
-| Issue | Behavior |
-|-------|----------|
-| File exceeds size limit | Dialog offers "Allow anyway" or "Abort" |
-| Binary file | Dialog warns; same choice |
-| Path is a directory | Dialog warns; cannot inject (must remove or rewrite the @ref) |
-| Path unreadable | Skipped; error shown in dialog |
+| Issue                   | Behavior                                                      |
+|-------------------------|---------------------------------------------------------------|
+| File exceeds size limit | Dialog offers "Allow anyway" or "Abort"                       |
+| Binary file             | Dialog warns; same choice                                     |
+| Path is a directory     | Dialog warns; cannot inject (must remove or rewrite the @ref) |
+| Path unreadable         | Skipped; error shown in dialog                                |
 
 Files that pass all checks are injected silently — no dialog is shown.
 
 **Configuration.** Two settings in `~/.claurst/settings.json`:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `fileInjectionEnabled` | `true` | Master switch — set to `false` to disable @-injection entirely |
-| `fileInjectionMaxSize` | `100` | Per-file size limit in KB; `0` disables the check (accept all) |
+| Setting                | Default | Description                                                    |
+|------------------------|---------|----------------------------------------------------------------|
+| `fileInjectionEnabled` | `true`  | Master switch — set to `false` to disable @-injection entirely |
+| `fileInjectionMaxSize` | `100`   | Per-file size limit in KB; `0` disables the check (accept all) |
 
 These can also be edited in the in-app settings screen.
 
 **Typeahead navigation.** While the completion overlay is open:
 
-| Key | Action |
-|-----|--------|
-| `Up` / `Down` | Move selection |
-| `Tab` / `Enter` | Insert the highlighted completion |
-| `Escape` | Dismiss the overlay (keep typed text) |
+| Key             | Action                                |
+|-----------------|---------------------------------------|
+| `Up` / `Down`   | Move selection                        |
+| `Tab` / `Enter` | Insert the highlighted completion     |
+| `Escape`        | Dismiss the overlay (keep typed text) |
 
 ---
 

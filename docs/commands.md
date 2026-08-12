@@ -36,11 +36,11 @@ workflowCommands -> pluginCommands -> pluginSkills -> COMMANDS()
 
 ### Command Types
 
-| Type | Behavior |
-|------|----------|
-| `local` | Runs synchronously; returns text output directly |
+| Type        | Behavior                                                                  |
+|-------------|---------------------------------------------------------------------------|
+| `local`     | Runs synchronously; returns text output directly                          |
 | `local-jsx` | Renders an interactive TUI component (model picker, theme selector, etc.) |
-| `prompt` | Expands to a prompt sent to the model via the main inference loop |
+| `prompt`    | Expands to a prompt sent to the model via the main inference loop         |
 
 Commands support aliases — for example `/h`, `/?`, and `/help` all invoke the same handler.
 
@@ -243,12 +243,12 @@ See also `/effort` for a higher-level interface to thinking depth.
 
 Set the thinking effort level. This is a convenience wrapper over `/thinking` that maps human-readable levels to token budgets.
 
-| Level | Description |
-|-------|-------------|
-| `low` | Minimal thinking; fastest responses |
-| `medium` | Balanced thinking and speed |
-| `high` | Deep reasoning; slower responses |
-| `max` | Maximum token budget for thinking |
+| Level    | Description                         |
+|----------|-------------------------------------|
+| `low`    | Minimal thinking; fastest responses |
+| `medium` | Balanced thinking and speed         |
+| `high`   | Deep reasoning; slower responses    |
+| `max`    | Maximum token budget for thinking   |
 
 ```
 /effort low
@@ -306,13 +306,13 @@ View or modify Claurst configuration values. Without arguments, renders an inter
 
 Common keys:
 
-| Key | Description |
-|-----|-------------|
-| `model` | Default model name |
-| `theme` | Color theme name |
-| `vim` | Vim mode enabled (`true`/`false`) |
-| `outputStyle` | Output rendering style |
-| `autoApprove` | Auto-approve tool calls |
+| Key           | Description                       |
+|---------------|-----------------------------------|
+| `model`       | Default model name                |
+| `theme`       | Color theme name                  |
+| `vim`         | Vim mode enabled (`true`/`false`) |
+| `outputStyle` | Output rendering style            |
+| `autoApprove` | Auto-approve tool calls           |
 
 ---
 
@@ -1246,11 +1246,11 @@ The following commands are only available when the `USER_TYPE` environment varia
 
 Some commands are available only under certain account or platform conditions:
 
-| Command | Restriction |
-|---------|-------------|
-| `/fast` | Available when a fast-mode model is configured for the active provider |
-| `/privacy-settings` | Opens Anthropic privacy portal (useful for claude.ai accounts) |
-| `/sandbox-toggle` | Functional on macOS, Linux, WSL2 only; no-op on native Windows |
+| Command             | Restriction                                                            |
+|---------------------|------------------------------------------------------------------------|
+| `/fast`             | Available when a fast-mode model is configured for the active provider |
+| `/privacy-settings` | Opens Anthropic privacy portal (useful for claude.ai accounts)         |
+| `/sandbox-toggle`   | Functional on macOS, Linux, WSL2 only; no-op on native Windows         |
 
 ### Feature-Flagged Commands
 
