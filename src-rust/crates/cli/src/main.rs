@@ -344,6 +344,32 @@ fn resolve_bridge_config(
         bridge_config.enabled = true;
     }
 
+    // A self-hosted relay configured in settings.json. Environment variables
+    // still win, which keeps a temporary redirect during development a one-line
+    // change rather than a settings edit.
+    if let Some(remote) = settings.remote_control.as_ref() {
+        match remote.validate() {
+            Ok(()) => {
+                let from_env = std::env::var("CLAURST_BRIDGE_URL").is_ok()
+                    || std::env::var("CLAUDE_BRIDGE_BASE_URL").is_ok();
+                if !from_env {
+                    bridge_config.server_url = remote.url.trim().trim_end_matches('/').to_string();
+                }
+                if bridge_config.session_token.is_none() {
+                    bridge_config.session_token = Some(remote.token.trim().to_string());
+                }
+                bridge_config.enabled = true;
+            }
+            Err(e) => {
+                // Refuse rather than fall back to the Anthropic credential
+                // against a half-configured relay: this token is what stops an
+                // outsider from running tools on this machine.
+                eprintln!("Remote control is configured but unusable: {e}. Bridge not started.");
+                return None;
+            }
+        }
+    }
+
     if bridge_config.session_token.is_none() && use_bearer_auth && !auth_credential.is_empty() {
         bridge_config.session_token = Some(auth_credential.to_string());
     }
@@ -5211,5 +5237,152 @@ mod dump_system_prompt_tests {
     fn the_dump_reflects_the_advisor_setting() {
         assert!(!rendered_prompt(None).contains("Call Advisor"));
         assert!(rendered_prompt(Some("claude-opus-4-6")).contains("Call Advisor"));
+    }
+}
+
+#[cfg(test)]
+mod remote_control_config_tests {
+    //! The relay token is what stops an outsider from running tools on this
+    //! machine, so a half-configured relay must not start the bridge.
+    use super::*;
+    use claurst_core::config::{RemoteControlSettings, RemotePermissionMode, MIN_REMOTE_TOKEN_LEN};
+    use std::sync::Mutex;
+
+    // `resolve_bridge_config` reads process-global env.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let keys = [
+                "CLAURST_BRIDGE_URL",
+                "CLAUDE_BRIDGE_BASE_URL",
+                "CLAURST_BRIDGE_TOKEN",
+                "CLAUDE_BRIDGE_OAUTH_TOKEN",
+            ];
+            let saved = keys
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect::<Vec<_>>();
+            for k in keys {
+                std::env::remove_var(k);
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (k, v) in &self.saved {
+                match v {
+                    Some(value) => std::env::set_var(k, value),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    fn settings_with(remote: Option<RemoteControlSettings>) -> Settings {
+        Settings {
+            remote_control: remote,
+            ..Default::default()
+        }
+    }
+
+    fn configured() -> RemoteControlSettings {
+        RemoteControlSettings {
+            url: "https://relay.example/".to_string(),
+            token: "a".repeat(MIN_REMOTE_TOKEN_LEN),
+            permission_mode: RemotePermissionMode::Ask,
+            label: Some("workstation".to_string()),
+        }
+    }
+
+    #[test]
+    fn a_configured_relay_activates_the_bridge() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+
+        let config = resolve_bridge_config(&settings_with(Some(configured())), "", false, false)
+            .expect("bridge is active");
+
+        assert_eq!(
+            config.server_url, "https://relay.example",
+            "the trailing slash must be trimmed or every path gains a double slash"
+        );
+        assert_eq!(
+            config.session_token.as_deref(),
+            Some("a".repeat(MIN_REMOTE_TOKEN_LEN).as_str())
+        );
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn a_short_token_refuses_to_start_the_bridge() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+
+        let weak = RemoteControlSettings {
+            token: "hunter2".to_string(),
+            ..configured()
+        };
+
+        assert!(
+            resolve_bridge_config(&settings_with(Some(weak)), "", false, false).is_none(),
+            "a weak secret must not reach the network"
+        );
+    }
+
+    #[test]
+    fn a_half_configured_relay_does_not_fall_back_to_the_anthropic_credential() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+
+        let no_url = RemoteControlSettings {
+            url: String::new(),
+            ..configured()
+        };
+
+        assert!(
+            resolve_bridge_config(&settings_with(Some(no_url)), "oauth-token", true, false)
+                .is_none(),
+            "falling back would point the session credential at an unknown host"
+        );
+    }
+
+    #[test]
+    fn the_environment_overrides_the_configured_url() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+        std::env::set_var("CLAURST_BRIDGE_URL", "http://localhost:8350");
+
+        let config = resolve_bridge_config(&settings_with(Some(configured())), "", false, false)
+            .expect("bridge is active");
+
+        assert_eq!(
+            config.server_url, "http://localhost:8350",
+            "a temporary redirect during development must not need a settings edit"
+        );
+    }
+
+    #[test]
+    fn headless_never_starts_the_bridge() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+
+        assert!(
+            resolve_bridge_config(&settings_with(Some(configured())), "", false, true).is_none()
+        );
+    }
+
+    #[test]
+    fn no_remote_section_leaves_the_old_behaviour_alone() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _env = EnvGuard::new();
+
+        assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
     }
 }
