@@ -812,6 +812,136 @@ pub async fn provider_for_config(
     provider_by_id(config, config.selected_provider_id()).await
 }
 
+/// Why a provider could not be resolved.
+///
+/// `provider_by_id` collapses every failure into `None`. Naming an account
+/// adds failures the caller has to tell apart, because "this provider has no
+/// accounts" and "this account does not exist" call for different advice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderResolveError {
+    /// The provider is not registered, or it has no usable credentials.
+    NotAvailable { provider_id: String },
+    /// The provider stores a single credential, so it has no accounts to pick.
+    ProfilesUnsupported { provider_id: String },
+    /// No account with that id is stored for the provider.
+    ProfileNotFound {
+        provider_id: String,
+        profile_id: String,
+        available: Vec<String>,
+    },
+    /// The account exists in the registry but its stored tokens are missing or
+    /// unusable.
+    ProfileCredentialsMissing {
+        provider_id: String,
+        profile_id: String,
+    },
+}
+
+impl std::fmt::Display for ProviderResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAvailable { provider_id } => {
+                write!(f, "provider '{provider_id}' is not available")
+            }
+            Self::ProfilesUnsupported { provider_id } => write!(
+                f,
+                "provider '{provider_id}' stores one credential and has no accounts to choose from"
+            ),
+            Self::ProfileNotFound {
+                provider_id,
+                profile_id,
+                available,
+            } => {
+                write!(f, "no '{provider_id}' account named '{profile_id}'")?;
+                if available.is_empty() {
+                    write!(f, "; none are stored")
+                } else {
+                    write!(f, "; stored accounts: {}", available.join(", "))
+                }
+            }
+            Self::ProfileCredentialsMissing {
+                provider_id,
+                profile_id,
+            } => write!(
+                f,
+                "the '{provider_id}' account '{profile_id}' has no usable credentials"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProviderResolveError {}
+
+/// Hand back a provider, optionally authenticated as a named account profile.
+///
+/// With no `profile_id` this is `provider_by_id` with a typed error. With one,
+/// the provider is built directly from that account's stored credentials
+/// rather than through the registry, because the registry always resolves the
+/// *active* account.
+pub async fn provider_by_id_for_profile(
+    config: &claurst_core::config::Config,
+    provider_id: &str,
+    profile_id: Option<&str>,
+) -> Result<Arc<dyn LlmProvider>, ProviderResolveError> {
+    let Some(profile_id) = profile_id else {
+        return provider_by_id(config, provider_id).await.ok_or_else(|| {
+            ProviderResolveError::NotAvailable {
+                provider_id: provider_id.to_string(),
+            }
+        });
+    };
+
+    if !claurst_core::accounts::provider_supports_profiles(provider_id) {
+        return Err(ProviderResolveError::ProfilesUnsupported {
+            provider_id: provider_id.to_string(),
+        });
+    }
+
+    let registry = claurst_core::accounts::AccountRegistry::load();
+    if registry.get(provider_id, profile_id).is_none() {
+        return Err(ProviderResolveError::ProfileNotFound {
+            provider_id: provider_id.to_string(),
+            profile_id: profile_id.to_string(),
+            available: registry
+                .list(provider_id)
+                .into_iter()
+                .map(|profile| profile.id)
+                .collect(),
+        });
+    }
+
+    let missing = || ProviderResolveError::ProfileCredentialsMissing {
+        provider_id: provider_id.to_string(),
+        profile_id: profile_id.to_string(),
+    };
+
+    match provider_id {
+        claurst_core::accounts::PROVIDER_ANTHROPIC => {
+            let (credential, use_bearer_auth) =
+                claurst_core::oauth::resolve_auth_for_profile(profile_id)
+                    .await
+                    .ok_or_else(missing)?;
+            // Built directly rather than through `ProviderRegistry`, which
+            // would resolve the active account instead of this one.
+            Ok(Arc::new(AnthropicProvider::from_config(
+                crate::client::ClientConfig {
+                    api_key: credential,
+                    api_base: config.resolve_anthropic_api_base(),
+                    use_bearer_auth,
+                    ..Default::default()
+                },
+            )))
+        }
+        claurst_core::accounts::PROVIDER_CODEX => CodexProvider::from_profile(profile_id)
+            .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
+            .ok_or_else(missing),
+        // `provider_supports_profiles` already rejected everything else.
+        _ => Err(ProviderResolveError::ProfilesUnsupported {
+            provider_id: provider_id.to_string(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -841,5 +971,157 @@ mod tests {
         registry.set_default(ProviderId::new("lmstudio"));
 
         assert_eq!(&**registry.default_provider_id(), ProviderId::LM_STUDIO);
+    }
+}
+
+#[cfg(test)]
+mod profile_resolution_tests {
+    //! Naming an account must fail with a reason the caller can act on, and it
+    //! must never fall back to the active account.
+    use super::*;
+    use claurst_core::accounts::{AccountProfile, AccountRegistry, PROVIDER_ANTHROPIC};
+    // Held across awaits, so it has to be the async-aware lock.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self { saved, _dir: dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    fn register(id: &str) {
+        let mut registry = AccountRegistry::load();
+        registry
+            .upsert(
+                PROVIDER_ANTHROPIC,
+                AccountProfile {
+                    id: id.to_string(),
+                    ..Default::default()
+                },
+                false,
+            )
+            .expect("upsert");
+    }
+
+    #[tokio::test]
+    async fn a_provider_without_accounts_rejects_a_profile() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        let config = claurst_core::config::Config::default();
+
+        let error = provider_by_id_for_profile(&config, "openai", Some("personal"))
+            .await
+            .err()
+            .expect("openai stores one credential");
+
+        assert_eq!(
+            error,
+            ProviderResolveError::ProfilesUnsupported {
+                provider_id: "openai".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_account_lists_the_stored_ones() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        register("work");
+        register("personal");
+        let config = claurst_core::config::Config::default();
+
+        let error = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("missing"))
+            .await
+            .err()
+            .expect("no such account");
+
+        match error {
+            ProviderResolveError::ProfileNotFound { available, .. } => {
+                assert_eq!(available, vec!["personal".to_string(), "work".to_string()]);
+            }
+            other => panic!("expected ProfileNotFound, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_registered_account_without_tokens_is_reported_as_such() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        // Registered in the registry, but no oauth_tokens.json was written.
+        register("work");
+        let config = claurst_core::config::Config::default();
+
+        let error = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("work"))
+            .await
+            .err()
+            .expect("no credentials on disk");
+
+        assert_eq!(
+            error,
+            ProviderResolveError::ProfileCredentialsMissing {
+                provider_id: PROVIDER_ANTHROPIC.to_string(),
+                profile_id: "work".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn an_account_resolves_to_a_provider_carrying_its_own_credential() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        register("personal");
+        claurst_core::oauth::OAuthTokens {
+            access_token: "personal-token".to_string(),
+            scopes: vec![claurst_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
+            ..Default::default()
+        }
+        .persist(Some("personal"))
+        .await
+        .expect("persist");
+        let config = claurst_core::config::Config::default();
+
+        let provider = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("personal"))
+            .await
+            .expect("resolves");
+
+        assert_eq!(provider.id(), &ProviderId::new(PROVIDER_ANTHROPIC));
+    }
+
+    #[tokio::test]
+    async fn no_profile_keeps_the_existing_lookup() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        let config = claurst_core::config::Config::default();
+
+        // No credentials anywhere, so an unknown provider reports NotAvailable
+        // rather than an account-shaped error.
+        let error = provider_by_id_for_profile(&config, "not-a-provider", None)
+            .await
+            .err()
+            .expect("unknown provider");
+
+        assert_eq!(
+            error,
+            ProviderResolveError::NotAvailable {
+                provider_id: "not-a-provider".to_string()
+            }
+        );
     }
 }
