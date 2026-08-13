@@ -1,5 +1,6 @@
-/* Mobile width first: the phone is the primary client, the desktop browser
-   is the wide case. */
+/* Phone first, then tablet, then desktop.
+   The layout is one column at every width; what changes is the measure, the
+   density, and how many session cards sit side by side. */
 
 :root {
   --bg: #101014;
@@ -11,23 +12,40 @@
   --danger: #f7768e;
   --ok: #9ece6a;
   --radius: 10px;
+
+  /* Reading measure. Widened at each breakpoint rather than let loose: a
+     transcript line that runs the width of a desktop monitor is unreadable. */
+  --measure: 100%;
+  --gutter: 12px;
+
+  /* Safe-area insets, so a notch or a home indicator never covers a control. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
 }
 
 * { box-sizing: border-box; }
 
-html, body {
-  margin: 0;
+html {
   height: 100%;
-  background: var(--bg);
-  color: var(--fg);
-  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* The palette is dark only, so form controls must not render light. */
+  color-scheme: dark;
 }
 
 body {
+  margin: 0;
+  min-height: 100%;
+  /* Dynamic viewport units track the mobile browser's collapsing chrome, so
+     the composer is not pushed under the address bar. */
+  min-height: 100dvh;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   display: flex;
   flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow: hidden;
 }
 
 .view {
@@ -56,18 +74,26 @@ button {
   border: 0;
   border-radius: var(--radius);
   padding: 11px 16px;
+  /* 44px is the touch target a finger needs. Trimmed back for a mouse below. */
   min-height: 44px;
   cursor: pointer;
 }
 
 button:disabled { opacity: 0.5; cursor: default; }
 
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 button.ghost {
   background: transparent;
   color: var(--fg);
   border: 1px solid var(--line);
   padding: 8px 12px;
-  min-height: 36px;
+  min-height: 40px;
 }
 
 button.danger { background: var(--danger); }
@@ -92,22 +118,30 @@ input, textarea {
 
 .panel {
   margin: auto;
-  padding: 24px 20px;
+  padding: 24px var(--gutter);
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
   width: min(420px, 100%);
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-/* Session list */
+/* Header bar */
 
 .bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 12px var(--gutter);
+  padding-top: max(12px, var(--safe-t));
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
+
+.bar > * { min-width: 0; }
 
 .bar h1 {
   flex: 1;
@@ -116,28 +150,50 @@ input, textarea {
   white-space: nowrap;
 }
 
+/* Session list */
+
 .sessions {
   list-style: none;
-  margin: 0;
-  padding: 8px;
+  margin: 0 auto;
+  padding: var(--gutter);
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
+  padding-bottom: max(var(--gutter), var(--safe-b));
   overflow-y: auto;
+  width: var(--measure);
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
-
-.sessions li { margin-bottom: 8px; }
 
 .sessions button {
   width: 100%;
+  height: 100%;
   text-align: left;
   background: var(--panel);
   color: var(--fg);
   border: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   gap: 3px;
 }
 
-.sessions .label { font-weight: 600; }
-.sessions .meta { color: var(--muted); font-size: 12px; word-break: break-all; }
+.sessions button:hover { border-color: var(--accent); }
+
+.sessions .label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sessions .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+#sessions-empty {
+  margin: 0 auto;
+  padding: 0 var(--gutter) var(--gutter);
+  width: var(--measure);
+}
 
 /* Session screen */
 
@@ -145,10 +201,14 @@ input, textarea {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px;
+  padding: var(--gutter);
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: var(--measure);
+  margin-inline: auto;
 }
 
 .msg {
@@ -180,11 +240,13 @@ input, textarea {
 /* Permission card */
 
 .permission {
-  margin: 0 12px 12px;
+  margin: 0 auto var(--gutter);
   padding: 12px;
   background: var(--panel);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
+  width: calc(var(--measure) - 2 * var(--gutter));
+  flex: 0 0 auto;
 }
 
 .permission[hidden] { display: none; }
@@ -204,16 +266,77 @@ input, textarea {
 .composer {
   display: flex;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 10px var(--gutter);
+  padding-bottom: max(10px, var(--safe-b));
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
   border-top: 1px solid var(--line);
+  width: var(--measure);
+  margin-inline: auto;
+  flex: 0 0 auto;
 }
 
 .composer textarea { resize: none; max-height: 140px; }
 .composer button { flex: 0 0 auto; }
 
-.status { margin: 0; padding: 0 14px 10px; color: var(--muted); font-size: 13px; }
+.status {
+  margin: 0 auto;
+  padding: 0 var(--gutter) 10px;
+  color: var(--muted);
+  font-size: 13px;
+  width: var(--measure);
+  flex: 0 0 auto;
+}
+
 .status[hidden] { display: none; }
 
-@media (min-width: 720px) {
-  .stream, .composer, .permission { width: min(760px, 100%); margin-inline: auto; }
+/* A phone held sideways has almost no vertical room; give it back to the
+   transcript by shrinking the chrome rather than letting it scroll away. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .bar { padding-block: 6px; }
+  .composer { padding-block: 6px; }
+  button { min-height: 38px; padding-block: 8px; }
+  .composer textarea { max-height: 80px; }
+}
+
+/* Large phone and small tablet: session cards pair up, gutters open out. */
+@media (min-width: 600px) {
+  :root { --gutter: 16px; }
+  .sessions { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
+
+/* Tablet portrait: cap the measure. Past roughly 80 characters a line is hard
+   to track back to its start, and the transcript is the whole point here. */
+@media (min-width: 700px) {
+  :root { --measure: min(680px, 100%); }
+  h1 { font-size: 18px; }
+  /* Centred with the transcript, so the screen reads as one column rather
+     than a full-bleed header over a narrow body. */
+  .bar {
+    width: var(--measure);
+    margin-inline: auto;
+  }
+}
+
+/* Tablet landscape and laptop. */
+@media (min-width: 1000px) {
+  :root { --measure: min(800px, 100%); --gutter: 16px; }
+}
+
+/* Desktop. */
+@media (min-width: 1400px) {
+  :root { --measure: min(900px, 100%); --gutter: 20px; }
+}
+
+@media (pointer: fine) {
+  button { min-height: 38px; padding: 9px 14px; }
+  button.ghost { min-height: 34px; }
+}
+
+/* The session list is a picker, not a transcript, so it keeps more of the
+   window than the measure allows and fits more cards across. */
+@media (min-width: 700px) {
+  .sessions,
+  #sessions-empty,
+  #view-sessions .bar { width: min(1100px, 100%); }
 }

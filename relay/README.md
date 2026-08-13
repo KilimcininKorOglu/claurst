@@ -86,7 +86,9 @@ Authentication accepts either a bearer token or the cookie. The cookie exists be
 
 Open the relay in a browser and enter the token. The page is compiled into the binary, so there is nothing to serve separately and no asset directory to mount.
 
-Three views: token entry, the list of connected sessions, and the session screen with the live transcript, a prompt box and the permission card. It is laid out for a phone first.
+Three views: token entry, the list of connected sessions, and the session screen with the live transcript, a prompt box and the permission card.
+
+The layout starts at phone width and adapts upward. Session cards sit one per row on a phone and fill a grid on a tablet or desktop. The transcript is capped at a readable measure from 700px up rather than stretching across a wide monitor, and a phone held sideways gets its chrome trimmed so the transcript keeps the vertical room. Touch targets are 44px until the browser reports a mouse. Safe-area insets keep controls clear of a notch or a home indicator.
 
 The token goes into an `HttpOnly` cookie, so the page cannot read it back and a script injected into the page cannot exfiltrate it. `Secure` is added when the request arrives over TLS, which the relay learns from `X-Forwarded-Proto`; set that header on your reverse proxy. Transcript text is written with `textContent` and the page carries a `default-src 'none'` policy, so nothing the agent prints can become markup or script.
 

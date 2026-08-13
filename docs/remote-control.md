@@ -95,7 +95,7 @@ Point a browser at the relay address and enter the token. Three views:
 - **Session list** — every connected machine, most recently active first, with its label and working directory.
 - **Session screen** — the live transcript, a prompt box, a stop button, and the permission card.
 
-The layout is built for a phone first.
+The layout starts at phone width and adapts upward, so a phone, a tablet and a desktop browser all get a usable screen. Session cards fill a grid once there is room for it, and the transcript stops widening past a readable measure instead of running the width of a monitor.
 
 ---
 
