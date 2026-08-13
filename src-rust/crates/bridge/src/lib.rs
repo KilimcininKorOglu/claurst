@@ -1349,6 +1349,22 @@ pub enum BridgeOutbound {
 // run_bridge_loop — high-level bridge task entry point
 // ---------------------------------------------------------------------------
 
+/// Translate a remote client's decision into the local permission outcome.
+///
+/// `AllowPermanently` becomes a session-scoped allow rather than a persistent
+/// rule: a tap on a phone should not write a permanent entry into the
+/// machine's settings. Collapsing it into a one-shot allow instead would
+/// re-prompt on the very next tool call, which is not what was chosen.
+fn response_kind_for(decision: PermissionDecision) -> PermissionResponseKind {
+    match decision {
+        PermissionDecision::Allow => PermissionResponseKind::Allow,
+        PermissionDecision::AllowPermanently => PermissionResponseKind::AllowSession,
+        PermissionDecision::Deny | PermissionDecision::DenyPermanently => {
+            PermissionResponseKind::Deny
+        }
+    }
+}
+
 /// Run the bridge subsystem as a background task, translating low-level
 /// [`BridgeMessage`] poll results into [`TuiBridgeEvent`] values and
 /// forwarding [`BridgeOutbound`] events to the server.
@@ -1493,14 +1509,7 @@ pub async fn run_bridge_loop(
                             .await;
                     }
                     Some(BridgeMessage::PermissionResponse { tool_use_id, decision, .. }) => {
-                        let kind = match decision {
-                            PermissionDecision::Allow | PermissionDecision::AllowPermanently => {
-                                PermissionResponseKind::Allow
-                            }
-                            PermissionDecision::Deny | PermissionDecision::DenyPermanently => {
-                                PermissionResponseKind::Deny
-                            }
-                        };
+                        let kind = response_kind_for(decision);
                         let tuid = tool_use_id.unwrap_or_default();
                         if !tuid.is_empty() {
                             let _ = tui_tx
@@ -1712,6 +1721,22 @@ mod tests {
         assert_eq!(s, r#""allow_permanently""#);
         let back: PermissionDecision = serde_json::from_str(&s).unwrap();
         assert_eq!(back, d);
+    }
+
+    #[test]
+    fn an_allow_permanently_survives_the_next_tool_call() {
+        assert_eq!(
+            response_kind_for(PermissionDecision::AllowPermanently),
+            PermissionResponseKind::AllowSession
+        );
+        assert_eq!(
+            response_kind_for(PermissionDecision::Allow),
+            PermissionResponseKind::Allow
+        );
+        assert_eq!(
+            response_kind_for(PermissionDecision::DenyPermanently),
+            PermissionResponseKind::Deny
+        );
     }
 
     #[test]
