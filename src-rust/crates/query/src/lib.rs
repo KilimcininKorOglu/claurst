@@ -1215,6 +1215,7 @@ pub async fn run_query_loop(
                         uuid: Some(msg_id),
                         cost: None,
                         snapshot_patch: None,
+                        timestamp: Some(chrono::Utc::now().to_rfc3339()),
                     };
 
                     cost_tracker.add_usage(
@@ -1282,6 +1283,7 @@ pub async fn run_query_loop(
                             uuid: None,
                             cost: None,
                             snapshot_patch: None,
+                            timestamp: Some(chrono::Utc::now().to_rfc3339()),
                         });
                         continue; // loop for next turn
                     }

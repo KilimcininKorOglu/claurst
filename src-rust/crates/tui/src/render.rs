@@ -439,6 +439,9 @@ struct MessageLinesCacheKey {
     annotations_ptr: usize,
     annotations_len: usize,
     thinking_expanded_len: usize,
+    // Toggling `showMessageTimestamps` mid-session changes every rendered turn
+    // without touching `transcript_version`, so it has to be part of the key.
+    show_timestamps: bool,
 }
 
 #[derive(Clone)]
@@ -468,6 +471,8 @@ struct CompletedMsgCacheKey {
     annotations_ptr: usize,
     annotations_len: usize,
     thinking_expanded_len: usize,
+    // See `MessageLinesCacheKey::show_timestamps`.
+    show_timestamps: bool,
 }
 
 #[derive(Clone)]
@@ -1353,7 +1358,7 @@ fn append_turn_items(
     let width = ctx.width;
     push_rendered_items(
         items,
-        render_transcript_user_message(turn.user_message, turn.metadata, width),
+        render_transcript_user_message(turn.user_message, width, ctx.show_timestamps),
         Some(turn.user_index),
         true,
     );
@@ -1410,7 +1415,15 @@ fn append_turn_items(
     }
 
     if !turn.active {
-        if let Some(meta_line) = render_transcript_assistant_meta(turn.metadata, accent) {
+        // The turn's footer time is the last assistant message's instant, i.e.
+        // when the reply finished, not when the user submitted.
+        let replied_at = turn
+            .assistant_messages
+            .last()
+            .and_then(|(_, message)| message.timestamp.as_deref());
+        if let Some(meta_line) =
+            render_transcript_assistant_meta(turn.metadata, accent, replied_at, ctx.show_timestamps)
+        {
             if turn.has_visible_assistant_content() {
                 sections.push((SectionContent::Plain(vec![meta_line]), Some(turn.primary_message_index())));
             }
@@ -1504,6 +1517,7 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         show_thinking: false,
         tool_names: &tool_names,
         expanded_thinking: &app.thinking_expanded,
+        show_timestamps: app.settings_screen.show_message_timestamps,
     };
     let turns = build_transcript_turns(app);
     let mut turn_map = std::collections::HashMap::new();
@@ -1557,6 +1571,7 @@ fn render_message_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         annotations_ptr: app.system_annotations.as_ptr() as usize,
         annotations_len: app.system_annotations.len(),
         thinking_expanded_len: app.thinking_expanded.len(),
+        show_timestamps: app.settings_screen.show_message_timestamps,
     };
     if let Some(lines) = MESSAGE_LINES_CACHE.with(|cache| {
         cache
@@ -1595,6 +1610,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         show_thinking: false,
         tool_names: &tool_names,
         expanded_thinking: &app.thinking_expanded,
+        show_timestamps: app.settings_screen.show_message_timestamps,
     };
     let turns = build_transcript_turns(app);
 
@@ -1620,6 +1636,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         annotations_ptr: app.system_annotations.as_ptr() as usize,
         annotations_len: app.system_annotations.len(),
         thinking_expanded_len: app.thinking_expanded.len(),
+        show_timestamps: app.settings_screen.show_message_timestamps,
     };
 
     // Committed prefix: messages before the live turn. Stable across streaming
@@ -3909,5 +3926,76 @@ mod recent_activity_tests {
             .collect();
         assert!(screen.contains("Recent activity"), "header rendered: present");
         assert!(screen.contains("Sortable label"), "session label rendered");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Message timestamps (showMessageTimestamps)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod message_timestamp_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use claurst_core::types::Message;
+
+    /// Whether the rendered transcript contains an `HH:MM` clock.
+    fn has_clock(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.windows(5).any(|w| {
+            w[0].is_ascii_digit()
+                && w[1].is_ascii_digit()
+                && w[2] == b':'
+                && w[3].is_ascii_digit()
+                && w[4].is_ascii_digit()
+        })
+    }
+
+    fn transcript_text(app: &App) -> String {
+        render_message_items(app, 80)
+            .iter()
+            .flat_map(|item| item.line.spans.iter().map(|span| span.content.to_string()))
+            .collect()
+    }
+
+    fn app_with_a_turn() -> App {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.replace_messages(vec![
+            Message::user("ping"),
+            Message::assistant("pong"),
+        ]);
+        app
+    }
+
+    #[test]
+    fn transcript_hides_times_until_the_setting_is_on() {
+        let app = app_with_a_turn();
+        let rendered = transcript_text(&app);
+        assert!(rendered.contains("ping") && rendered.contains("pong"));
+        assert!(
+            !has_clock(&rendered),
+            "timestamps are opt-in, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn toggling_the_setting_refreshes_the_cached_transcript() {
+        let mut app = app_with_a_turn();
+
+        // Prime the full-result cache with the timestamps-off rendering.
+        let before = transcript_text(&app);
+        assert!(!has_clock(&before));
+
+        // Flipping the setting does not bump `transcript_version`, so this only
+        // repaints if the flag is part of the cache key.
+        app.settings_screen.show_message_timestamps = true;
+        let after = transcript_text(&app);
+        assert!(
+            has_clock(&after),
+            "toggling the setting must invalidate the cached lines, got {after:?}"
+        );
+        assert!(after.contains("ping") && after.contains("pong"));
     }
 }

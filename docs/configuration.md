@@ -50,7 +50,8 @@ values. Keys absent from the project file fall back to the global value.
   "permissionRules": [],
   "enabledPlugins": [],
   "disabledPlugins": [],
-  "hasCompletedOnboarding": false
+  "hasCompletedOnboarding": false,
+  "showMessageTimestamps": false
 }
 ```
 
@@ -58,6 +59,16 @@ Most day-to-day options live inside the `config` object. Provider credentials
 live in the `providers` map. Corrected model metadata for self-hosted or
 unknown models lives in the `modelOverrides` map — see
 [Model metadata overrides](providers.md#overriding-model-metadata).
+
+### Transcript display
+
+| Key                     | Type    | Default | Description                                                                                                                                                                    |
+|-------------------------|---------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `showMessageTimestamps` | boolean | false   | Print the local time beneath each message. Times are stored in UTC and converted using the machine's time zone. Messages from an earlier day also show their date (`13 Aug 14:32`). |
+
+Toggle it from the TUI with `/config` → **Show message timestamps**. Turns
+restored from a transcript recorded before this option existed carry no time
+and render without one.
 
 ---
 

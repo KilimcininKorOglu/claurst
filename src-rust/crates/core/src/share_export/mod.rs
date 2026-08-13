@@ -129,6 +129,7 @@ mod tests {
             uuid: None,
             cost: None,
             snapshot_patch: None,
+            timestamp: None,
         }];
         let html = render_session_html(&msgs, &meta());
         assert!(html.starts_with("<!DOCTYPE html>"));

@@ -75,6 +75,27 @@ pub fn format_relative_time(ts_ms: u64) -> String {
     }
 }
 
+/// Format a message's RFC 3339 timestamp for display beneath a transcript
+/// message, converted to the machine's local time zone.
+///
+/// Messages from the current local day render as `"14:32"`. Anything older
+/// carries its date as well (`"13 Aug 14:32"`) so a resumed session makes
+/// clear which turns came from an earlier sitting.
+///
+/// Returns `None` when the input is not a parseable RFC 3339 instant, so a
+/// malformed transcript renders with no time rather than a wrong one.
+pub fn format_message_time(rfc3339: &str) -> Option<String> {
+    let local = chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .ok()?
+        .with_timezone(&chrono::Local);
+
+    if local.date_naive() == chrono::Local::now().date_naive() {
+        Some(local.format("%H:%M").to_string())
+    } else {
+        Some(local.format("%d %b %H:%M").to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +119,48 @@ mod tests {
         assert_eq!(format_tokens(500), "500");
         assert_eq!(format_tokens(1500), "1.5K");
         assert_eq!(format_tokens(50_000), "50K");
+    }
+
+    /// `HH:MM`: two digits, a colon, two digits.
+    fn is_clock(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        s.len() == 5
+            && bytes[..2].iter().all(u8::is_ascii_digit)
+            && bytes[2] == b':'
+            && bytes[3..].iter().all(u8::is_ascii_digit)
+    }
+
+    #[test]
+    fn message_time_rejects_malformed_input() {
+        assert_eq!(format_message_time("not a timestamp"), None);
+        assert_eq!(format_message_time(""), None);
+        // Valid ISO-8601 date, but not a full RFC 3339 instant.
+        assert_eq!(format_message_time("2024-03-15"), None);
+    }
+
+    #[test]
+    fn message_time_today_omits_the_date() {
+        let now = chrono::Utc::now().to_rfc3339();
+        let formatted = format_message_time(&now).expect("now is a valid instant");
+        assert!(
+            is_clock(&formatted),
+            "a message from today should render as HH:MM, got {formatted:?}"
+        );
+    }
+
+    #[test]
+    fn message_time_other_day_includes_the_date() {
+        // Fixed instant far enough in the past that no time zone can place it
+        // on the current local day.
+        let formatted =
+            format_message_time("2020-03-15T09:05:00Z").expect("fixed instant is valid");
+        let (date, clock) = formatted
+            .rsplit_once(' ')
+            .expect("an older message should carry its date before the clock");
+        assert!(is_clock(clock), "clock part should be HH:MM, got {clock:?}");
+        assert!(
+            date.contains("Mar") || date.contains("Feb") || date.contains("Apr"),
+            "date part should name the month, got {date:?}"
+        );
     }
 }

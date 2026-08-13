@@ -116,6 +116,10 @@ pub fn cloud_to_message(cloud: &CloudMessage) -> Message {
         uuid: None,
         cost: None,
         snapshot_patch: None,
+        // `created_at` is Unix seconds; keep it as the message instant so a
+        // cloud round-trip does not lose the time shown in the transcript.
+        timestamp: chrono::DateTime::from_timestamp(cloud.created_at as i64, 0)
+            .map(|dt| dt.to_rfc3339()),
     }
 }
 

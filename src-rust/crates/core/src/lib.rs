@@ -341,6 +341,13 @@ pub mod types {
         /// Populated by the query loop on `finish-step`; absent on user messages.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub snapshot_patch: Option<crate::snapshot::Patch>,
+        /// RFC 3339 UTC instant at which this message was created, stamped by
+        /// the `Message::user`/`assistant` constructors. Stored in UTC and
+        /// rendered in the machine's local zone by
+        /// [`crate::format_utils::format_message_time`]. Absent on messages
+        /// restored from transcripts written before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub timestamp: Option<String>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,6 +366,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -370,6 +378,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -381,6 +390,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -392,6 +402,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -484,6 +495,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -498,6 +510,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -512,6 +525,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -526,6 +540,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -545,6 +560,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
 
@@ -564,6 +580,7 @@ pub mod types {
                 uuid: None,
                 cost: None,
                 snapshot_patch: None,
+                timestamp: Some(chrono::Utc::now().to_rfc3339()),
             }
         }
     }
@@ -1291,6 +1308,11 @@ pub mod config {
         /// Whether to show turn duration in output. Defaults to false.
         #[serde(default, rename = "showTurnDuration")]
         pub show_turn_duration: bool,
+        /// Whether to show the local time beneath each transcript message.
+        /// Defaults to false, because the extra line lengthens the transcript.
+        /// Opt in via `"showMessageTimestamps": true`.
+        #[serde(default, rename = "showMessageTimestamps")]
+        pub show_message_timestamps: bool,
         /// Whether to reduce motion in UI. Defaults to false.
         #[serde(default, rename = "reduceMotion")]
         pub reduce_motion: bool,
@@ -2022,6 +2044,8 @@ pub mod config {
                 auto_copy_on_highlight: over.auto_copy_on_highlight || base.auto_copy_on_highlight,
                 notifications: over.notifications || base.notifications,
                 show_turn_duration: over.show_turn_duration || base.show_turn_duration,
+                show_message_timestamps: over.show_message_timestamps
+                    || base.show_message_timestamps,
                 reduce_motion: over.reduce_motion || base.reduce_motion,
                 terminal_progress_bar: over.terminal_progress_bar || base.terminal_progress_bar,
                 show_cwd: over.show_cwd || base.show_cwd,
@@ -4747,6 +4771,59 @@ mod tests {
         let back: crate::config::Config = serde_json::from_str(&json).unwrap();
         assert_eq!(back.mouse_capture, Some(false));
         assert!(!back.mouse_capture_enabled());
+    }
+
+    #[test]
+    fn test_settings_show_message_timestamps_defaults_off() {
+        // Absent from an existing settings file → timestamps stay hidden, so
+        // upgrading does not silently change anyone's transcript layout.
+        let settings: crate::config::Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.show_message_timestamps);
+
+        let settings: crate::config::Settings =
+            serde_json::from_str(r#"{"showMessageTimestamps":true}"#).unwrap();
+        assert!(settings.show_message_timestamps);
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"showMessageTimestamps\":true"));
+    }
+
+    #[test]
+    fn test_message_timestamp_serde_roundtrip() {
+        // Constructors stamp the instant, and it survives a JSON round-trip.
+        let msg = crate::types::Message::user("hi");
+        let stamped = msg.timestamp.clone().expect("constructor stamps the instant");
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: crate::types::Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.timestamp.as_deref(), Some(stamped.as_str()));
+        assert!(crate::format_utils::format_message_time(&stamped).is_some());
+
+        // A transcript written before the field existed still loads, with no
+        // time rather than a fabricated one.
+        let legacy = r#"{"role":"user","content":"hi"}"#;
+        let back: crate::types::Message = serde_json::from_str(legacy).unwrap();
+        assert_eq!(back.timestamp, None);
+    }
+
+    #[test]
+    fn test_session_round_trip_keeps_message_timestamps() {
+        // The resume path reloads a whole `ConversationSession`, so the per
+        // message instant has to survive that serialization, not just a bare
+        // `Message`.
+        let mut session = crate::history::ConversationSession::new("test-model".to_string());
+        session.add_message(crate::types::Message::user("ping"));
+        session.add_message(crate::types::Message::assistant("pong"));
+        let stamps: Vec<_> = session
+            .messages
+            .iter()
+            .map(|m| m.timestamp.clone())
+            .collect();
+        assert!(stamps.iter().all(Option::is_some), "both turns are stamped");
+
+        let json = serde_json::to_string(&session).unwrap();
+        let back: crate::history::ConversationSession = serde_json::from_str(&json).unwrap();
+        let restored: Vec<_> = back.messages.iter().map(|m| m.timestamp.clone()).collect();
+        assert_eq!(restored, stamps);
     }
 
     #[test]

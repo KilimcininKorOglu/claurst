@@ -55,6 +55,7 @@ pub struct SettingsScreen {
     pub auto_compact: bool,
     pub notifications: bool,
     pub show_turn_duration: bool,
+    pub show_message_timestamps: bool,
     pub output_style: String,
     pub reduce_motion: bool,
     pub terminal_progress_bar: bool,
@@ -89,6 +90,7 @@ impl SettingsScreen {
             auto_compact: false,
             notifications: true,
             show_turn_duration: false,
+            show_message_timestamps: false,
             output_style: "default".to_string(),
             reduce_motion: false,
             terminal_progress_bar: true,
@@ -118,6 +120,7 @@ impl SettingsScreen {
         self.auto_compact = self.settings_snapshot.auto_compact;
         self.notifications = self.settings_snapshot.notifications;
         self.show_turn_duration = self.settings_snapshot.show_turn_duration;
+        self.show_message_timestamps = self.settings_snapshot.show_message_timestamps;
         self.output_style = self.settings_snapshot.config.output_style.clone().unwrap_or_else(|| "default".to_string());
         self.reduce_motion = self.settings_snapshot.reduce_motion;
         self.terminal_progress_bar = self.settings_snapshot.terminal_progress_bar;
@@ -287,6 +290,13 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Display elapsed time per turn in status bar.",
             kind: SettingKind::Bool,
             value: if screen.show_turn_duration { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "show_message_timestamps",
+            label: "Show message timestamps",
+            description: "Display the local time under each message.",
+            kind: SettingKind::Bool,
+            value: if screen.show_message_timestamps { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "output_style",
@@ -716,6 +726,11 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "show_turn_duration" => {
                         screen.show_turn_duration = new_value;
                         screen.settings_snapshot.show_turn_duration = new_value;
+                        let _ = screen.settings_snapshot.save_sync();
+                    }
+                    "show_message_timestamps" => {
+                        screen.show_message_timestamps = new_value;
+                        screen.settings_snapshot.show_message_timestamps = new_value;
                         let _ = screen.settings_snapshot.save_sync();
                     }
                     "reduce_motion" => {

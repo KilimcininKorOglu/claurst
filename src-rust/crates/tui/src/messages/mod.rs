@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use claurst_core::format_utils::format_message_time;
 use claurst_core::types::{ContentBlock, Message, Role, ToolResultContent};
 use crate::app::TurnMetadata;
 use crate::kitty_image::render_image;
@@ -44,6 +45,9 @@ pub struct RenderContext<'a> {
     pub tool_names: &'a HashMap<String, String>,
     /// Set of thinking block content hashes that are expanded per-block.
     pub expanded_thinking: &'a std::collections::HashSet<u64>,
+    /// Whether to print each message's local time beneath it
+    /// (`showMessageTimestamps`).
+    pub show_timestamps: bool,
 }
 
 /// Shared empty collections so `RenderContext::default()` can hand out
@@ -61,6 +65,7 @@ impl Default for RenderContext<'static> {
             show_thinking: false,
             tool_names: &EMPTY_TOOL_NAMES,
             expanded_thinking: &EMPTY_EXPANDED_THINKING,
+            show_timestamps: false,
         }
     }
 }
@@ -227,33 +232,53 @@ fn render_attachment_chip_colored(kind: &str, label: String, badge_bg: Color, ba
     ])
 }
 
-fn user_metadata_line(_meta: Option<&TurnMetadata>) -> Option<Line<'static>> {
-    // User prompt line has no metadata — mode/model/duration are shown on the
-    // assistant footer instead (matching OpenCode's layout).
-    None
+/// The muted local-time span shown beneath a message, e.g. `14:32`.
+///
+/// `None` when the feature is off, when the message predates timestamping, or
+/// when the stored instant cannot be parsed.
+fn message_time_span(timestamp: Option<&str>, show_timestamps: bool) -> Option<Span<'static>> {
+    if !show_timestamps {
+        return None;
+    }
+    let text = format_message_time(timestamp?)?;
+    Some(Span::styled(text, Style::default().fg(TRANSCRIPT_MUTED)))
 }
 
-pub fn render_transcript_assistant_meta(meta: Option<&TurnMetadata>, accent: Color) -> Option<Line<'static>> {
-    let meta = meta?;
-
-    // Only show interrupted status — mode, model, and duration are already
-    // displayed in the status line above the prompt.
-    if !meta.interrupted {
+pub fn render_transcript_assistant_meta(
+    meta: Option<&TurnMetadata>,
+    accent: Color,
+    timestamp: Option<&str>,
+    show_timestamps: bool,
+) -> Option<Line<'static>> {
+    // Mode, model, and duration are already displayed in the status line above
+    // the prompt, so this footer carries only the interrupted marker and the
+    // message time.
+    let interrupted = meta.is_some_and(|meta| meta.interrupted);
+    let time = message_time_span(timestamp, show_timestamps);
+    if !interrupted && time.is_none() {
         return None;
     }
 
-    let spans = vec![
-        Span::styled(
+    let mut spans = Vec::new();
+    if interrupted {
+        spans.push(Span::styled(
             "   \u{25a3} ",
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
             "interrupted",
             Style::default().fg(TRANSCRIPT_MUTED),
-        ),
-    ];
+        ));
+    } else {
+        spans.push(Span::raw("   "));
+    }
+
+    if let Some(time) = time {
+        if interrupted {
+            spans.push(Span::styled(" · ", Style::default().fg(TRANSCRIPT_MUTED)));
+        }
+        spans.push(time);
+    }
 
     Some(Line::from(spans))
 }
@@ -361,8 +386,8 @@ fn extract_file_segments(text: &str) -> Vec<TextSegment> {
 
 pub fn render_transcript_user_message(
     msg: &Message,
-    meta: Option<&TurnMetadata>,
     width: u16,
+    show_timestamps: bool,
 ) -> Vec<Line<'static>> {
     // Goal-event messages injected by the /goal machinery render as a compact
     // event block, not as a user input bubble. The same applies to the user's
@@ -526,11 +551,8 @@ pub fn render_transcript_user_message(
     }
     flush_text(&mut pending_text, &mut lines);
 
-    if let Some(meta_line) = user_metadata_line(meta) {
-        if !lines.is_empty() {
-            lines.push(Line::from(""));
-        }
-        lines.push(meta_line);
+    if let Some(time) = message_time_span(msg.timestamp.as_deref(), show_timestamps) {
+        lines.push(Line::from(time));
     }
 
     if lines.is_empty() {
@@ -2656,6 +2678,87 @@ mod tests {
         let a_text: Vec<_> = a.iter().map(|l| line_text(l)).collect();
         let b_text: Vec<_> = b.iter().map(|l| line_text(l)).collect();
         assert_eq!(a_text, b_text);
+    }
+
+    /// Whether the text contains an `HH:MM` clock.
+    fn has_clock(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes.windows(5).any(|w| {
+            w[0].is_ascii_digit()
+                && w[1].is_ascii_digit()
+                && w[2] == b':'
+                && w[3].is_ascii_digit()
+                && w[4].is_ascii_digit()
+        })
+    }
+
+    #[test]
+    fn user_message_omits_time_when_the_setting_is_off() {
+        let msg = Message::user("hello");
+        assert!(msg.timestamp.is_some(), "constructor stamps the instant");
+        let rendered: String = render_transcript_user_message(&msg, 80, false)
+            .iter()
+            .map(line_text)
+            .collect();
+        assert!(
+            !has_clock(&rendered),
+            "timestamps are opt-in, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn user_message_shows_time_when_the_setting_is_on() {
+        let msg = Message::user("hello");
+        let rendered: String = render_transcript_user_message(&msg, 80, true)
+            .iter()
+            .map(line_text)
+            .collect();
+        assert!(has_clock(&rendered), "expected a clock, got {rendered:?}");
+        assert!(rendered.contains("hello"), "message text must survive");
+    }
+
+    #[test]
+    fn user_message_without_a_stored_instant_renders_no_time() {
+        // A turn restored from a transcript written before timestamping.
+        let mut msg = Message::user("legacy");
+        msg.timestamp = None;
+        let rendered: String = render_transcript_user_message(&msg, 80, true)
+            .iter()
+            .map(line_text)
+            .collect();
+        assert!(!has_clock(&rendered), "got {rendered:?}");
+    }
+
+    #[test]
+    fn assistant_meta_is_absent_without_an_interruption_or_a_time() {
+        let meta = TurnMetadata::default();
+        let stamp = chrono::Utc::now().to_rfc3339();
+        assert!(
+            render_transcript_assistant_meta(Some(&meta), Color::Cyan, Some(&stamp), false)
+                .is_none()
+        );
+        assert!(render_transcript_assistant_meta(Some(&meta), Color::Cyan, None, true).is_none());
+    }
+
+    #[test]
+    fn assistant_meta_shows_time_alone_and_beside_an_interruption() {
+        let stamp = chrono::Utc::now().to_rfc3339();
+
+        let quiet = render_transcript_assistant_meta(None, Color::Cyan, Some(&stamp), true)
+            .map(|line| line_text(&line))
+            .expect("a time alone still produces a footer");
+        assert!(has_clock(&quiet), "got {quiet:?}");
+        assert!(!quiet.contains("interrupted"));
+
+        let meta = TurnMetadata {
+            interrupted: true,
+            ..TurnMetadata::default()
+        };
+        let both = render_transcript_assistant_meta(Some(&meta), Color::Cyan, Some(&stamp), true)
+            .map(|line| line_text(&line))
+            .expect("an interrupted turn produces a footer");
+        assert!(both.contains("interrupted"), "got {both:?}");
+        assert!(has_clock(&both), "got {both:?}");
     }
 
     #[test]

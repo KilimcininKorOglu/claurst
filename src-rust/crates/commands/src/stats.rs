@@ -1257,6 +1257,7 @@ mod tests {
                     cost_usd: cost,
                 }),
                 snapshot_patch: None,
+                timestamp: None,
             },
             is_sidechain: false,
             user_type: "external".to_string(),

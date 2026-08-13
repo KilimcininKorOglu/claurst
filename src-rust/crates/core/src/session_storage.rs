@@ -864,6 +864,7 @@ mod tests {
             uuid: Some(uuid::Uuid::new_v4().to_string()),
             cost: None,
             snapshot_patch: None,
+            timestamp: None,
         }
     }
 
@@ -942,6 +943,7 @@ mod tests {
             uuid: Some(format!("msg-{uuid}")),
             cost: None,
             snapshot_patch: None,
+            timestamp: None,
         };
         let tm = TranscriptMessage {
             uuid: Some(uuid.to_string()),
@@ -1094,6 +1096,7 @@ mod tests {
             uuid: Some(uuid.to_string()),
             cost: None,
             snapshot_patch: None,
+            timestamp: None,
         }
     }
 
