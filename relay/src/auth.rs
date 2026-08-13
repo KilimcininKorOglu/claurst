@@ -93,13 +93,32 @@ pub fn token_from_cookies(header: &str) -> Option<&str> {
     })
 }
 
+/// Whether the request reached the relay over TLS.
+///
+/// The relay never terminates TLS itself, so this is entirely what the reverse
+/// proxy in front reports. The first entry wins, because a proxy chain appends
+/// rather than replaces.
+pub fn is_secure_request(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .is_some_and(|proto| proto.trim().eq_ignore_ascii_case("https"))
+}
+
 /// Cookie attributes for the authenticated session.
 ///
 /// `HttpOnly` keeps page scripts from reading the token back out, and
 /// `SameSite=Strict` stops another site from driving the relay through the
 /// browser's ambient credentials.
-pub fn session_cookie(token: &str) -> String {
-    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800")
+///
+/// `Secure` is added only when the request arrived over TLS. Setting it
+/// unconditionally would stop the cookie being sent at all on a plain-HTTP LAN
+/// deployment, and omitting it behind a proxy would let the token travel over
+/// a plaintext downgrade.
+pub fn session_cookie(token: &str, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{secure}")
 }
 
 #[cfg(test)]
@@ -156,5 +175,40 @@ mod tests {
         assert_eq!(bearer_from_header("Bearer "), None);
         assert_eq!(bearer_from_header("Basic abc"), None);
         assert_eq!(bearer_from_header(""), None);
+    }
+
+    #[test]
+    fn the_cookie_is_locked_down() {
+        let cookie = session_cookie("abc", false);
+
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
+
+    #[test]
+    fn the_cookie_is_marked_secure_only_behind_tls() {
+        assert!(!session_cookie("abc", false).contains("Secure"));
+        assert!(session_cookie("abc", true).contains("; Secure"));
+    }
+
+    #[test]
+    fn tls_is_detected_from_the_first_proxy_in_the_chain() {
+        let mut headers = axum::http::HeaderMap::new();
+        assert!(!is_secure_request(&headers));
+
+        headers.insert("x-forwarded-proto", "https".parse().expect("valid header"));
+        assert!(is_secure_request(&headers));
+
+        headers.insert(
+            "x-forwarded-proto",
+            "https, http".parse().expect("valid header"),
+        );
+        assert!(is_secure_request(&headers));
+
+        headers.insert(
+            "x-forwarded-proto",
+            "http, https".parse().expect("valid header"),
+        );
+        assert!(!is_secure_request(&headers));
     }
 }

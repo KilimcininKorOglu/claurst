@@ -79,7 +79,7 @@ async fn auth_check(headers: axum::http::HeaderMap) -> Response {
     (
         [(
             axum::http::header::SET_COOKIE,
-            crate::auth::session_cookie(token),
+            crate::auth::session_cookie(token, crate::auth::is_secure_request(&headers)),
         )],
         Json(json!({ "ok": true })),
     )

@@ -10,6 +10,8 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
     && rm -rf src
 
 COPY src ./src
+# The web client is compiled into the binary, so it has to be present here.
+COPY static ./static
 # Touch so cargo does not reuse the stub's timestamp and skip the real build.
 RUN touch src/main.rs && cargo build --release --locked
 

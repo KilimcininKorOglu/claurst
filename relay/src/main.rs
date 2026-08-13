@@ -15,6 +15,7 @@ mod client;
 mod protocol;
 mod runner;
 mod state;
+mod web;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,6 +130,9 @@ pub fn app(relay: Arc<Relay>, token: Arc<String>) -> Router {
         // Liveness sits outside the auth layer so a health check does not need
         // the credential.
         .route("/healthz", axum::routing::get(healthz))
+        // So does the page itself: it has to load before the user can enter a
+        // token, and it carries no secret of its own.
+        .merge(web::routes())
 }
 
 async fn healthz() -> &'static str {
@@ -183,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "claurst_relay=info,tower_http=warn".into()),
+                .unwrap_or_else(|_| "claurst_relay=info".into()),
         )
         .init();
 

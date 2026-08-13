@@ -1,0 +1,219 @@
+/* Mobile width first: the phone is the primary client, the desktop browser
+   is the wide case. */
+
+:root {
+  --bg: #101014;
+  --panel: #17171d;
+  --line: #2a2a33;
+  --fg: #e6e6ea;
+  --muted: #9a9aa6;
+  --accent: #7aa2f7;
+  --danger: #f7768e;
+  --ok: #9ece6a;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.view[hidden] { display: none; }
+
+h1 { font-size: 17px; margin: 0; font-weight: 600; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: #000;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+button {
+  font: inherit;
+  color: #0b0b0f;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  padding: 11px 16px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: default; }
+
+button.ghost {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  min-height: 36px;
+}
+
+button.danger { background: var(--danger); }
+button.ghost.danger { background: transparent; color: var(--danger); }
+
+input, textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  width: 100%;
+  /* 16px stops iOS Safari zooming the viewport on focus. */
+  font-size: 16px;
+}
+
+.hint { color: var(--muted); font-size: 13px; }
+.error { color: var(--danger); font-size: 13px; }
+
+/* Token view */
+
+.panel {
+  margin: auto;
+  padding: 24px 20px;
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Session list */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar h1 {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.sessions li { margin-bottom: 8px; }
+
+.sessions button {
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sessions .label { font-weight: 600; }
+.sessions .meta { color: var(--muted); font-size: 12px; word-break: break-all; }
+
+/* Session screen */
+
+.stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg.user { background: #23304a; align-self: flex-end; max-width: 85%; }
+.msg.assistant { background: var(--panel); }
+
+.tool {
+  border-left: 2px solid var(--line);
+  padding: 4px 0 4px 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.tool.running { border-left-color: var(--accent); }
+.tool.failed { border-left-color: var(--danger); color: var(--danger); }
+.tool.done { border-left-color: var(--ok); }
+
+.notice { color: var(--muted); font-size: 13px; text-align: center; }
+.notice.bad { color: var(--danger); }
+
+/* Permission card */
+
+.permission {
+  margin: 0 12px 12px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.permission[hidden] { display: none; }
+.permission-tool { margin: 0 0 4px; font-weight: 600; }
+.permission-desc {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.permission-actions button { flex: 1 1 140px; }
+
+/* Composer */
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.composer textarea { resize: none; max-height: 140px; }
+.composer button { flex: 0 0 auto; }
+
+.status { margin: 0; padding: 0 14px 10px; color: var(--muted); font-size: 13px; }
+.status[hidden] { display: none; }
+
+@media (min-width: 720px) {
+  .stream, .composer, .permission { width: min(760px, 100%); margin-inline: auto; }
+}

@@ -82,6 +82,16 @@ The CLI also runs a second, best-effort path under `/api/bridge/sessions`. It ca
 
 Authentication accepts either a bearer token or the cookie. The cookie exists because a browser `EventSource` cannot set request headers, so the stream endpoint is unreachable without it.
 
+## Web client
+
+Open the relay in a browser and enter the token. The page is compiled into the binary, so there is nothing to serve separately and no asset directory to mount.
+
+Three views: token entry, the list of connected sessions, and the session screen with the live transcript, a prompt box and the permission card. It is laid out for a phone first.
+
+The token goes into an `HttpOnly` cookie, so the page cannot read it back and a script injected into the page cannot exfiltrate it. `Secure` is added when the request arrives over TLS, which the relay learns from `X-Forwarded-Proto`; set that header on your reverse proxy. Transcript text is written with `textContent` and the page carries a `default-src 'none'` policy, so nothing the agent prints can become markup or script.
+
+The page itself is served without a token, because it has to load before the user can enter one. Every API call behind it is still authenticated.
+
 ## State
 
 Everything is in memory. A restart drops the sessions and the CLI re-registers on its next poll. Nothing is written to disk, so the relay host never holds a durable copy of your code.
