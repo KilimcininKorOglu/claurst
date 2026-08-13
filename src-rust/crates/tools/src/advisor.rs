@@ -10,6 +10,8 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
+use claurst_api::ProviderResolveError;
+use claurst_core::advisor_target::{parse_advisor_model, AdvisorTarget};
 use claurst_core::message_utils::text_from_blocks;
 use claurst_core::types::Message;
 use serde::Deserialize;
@@ -65,15 +67,42 @@ fn claim_call_slot(turn: usize) -> bool {
     true
 }
 
-/// Split a configured advisor model into its provider and bare model id.
+/// Turn a failed provider lookup into advice the model can act on.
 ///
-/// `"openai/gpt-4o"` targets a specific provider; a bare `"opus"` runs against
-/// the session's active provider. Only the first `/` separates the two, so
-/// nested model paths such as `"openrouter/meta/llama-3"` keep their tail.
-fn split_advisor_model<'a>(configured: &'a str, active_provider: &'a str) -> (&'a str, &'a str) {
-    match configured.split_once('/') {
-        Some((provider, model)) if !provider.is_empty() && !model.is_empty() => (provider, model),
-        _ => (active_provider, configured),
+/// The model cannot change settings, so each message says who has to fix what
+/// rather than suggesting a retry.
+fn describe_resolve_error(error: &ProviderResolveError) -> String {
+    match error {
+        ProviderResolveError::NotAvailable { provider_id } => format!(
+            "Advisor provider '{provider_id}' is not available. \
+             Tell the user to check its credentials or pick another model with `/advisor <model>`."
+        ),
+        ProviderResolveError::ProfilesUnsupported { provider_id } => format!(
+            "Advisor provider '{provider_id}' stores one credential, so naming an account for it \
+             is a configuration mistake. Tell the user to drop the account from `advisorModel`."
+        ),
+        ProviderResolveError::ProfileNotFound {
+            provider_id,
+            profile_id,
+            available,
+        } => {
+            let stored = if available.is_empty() {
+                "none are stored".to_string()
+            } else {
+                format!("stored accounts: {}", available.join(", "))
+            };
+            format!(
+                "There is no '{provider_id}' account named '{profile_id}' ({stored}). \
+                 Tell the user to fix `advisorModel`."
+            )
+        }
+        ProviderResolveError::ProfileCredentialsMissing {
+            provider_id,
+            profile_id,
+        } => format!(
+            "The '{provider_id}' account '{profile_id}' has no usable credentials. \
+             Tell the user to log into it again."
+        ),
     }
 }
 
@@ -129,6 +158,16 @@ impl Tool for AdvisorTool {
             }
         };
 
+        let target = match parse_advisor_model(configured, ctx.config.selected_provider_id()) {
+            Ok(target) => target,
+            Err(e) => {
+                return ToolResult::error(format!(
+                    "The configured advisor model '{configured}' cannot be read: {e}. \
+                     Tell the user to fix `advisorModel`."
+                ))
+            }
+        };
+
         let turn = ctx.current_turn.load(std::sync::atomic::Ordering::Relaxed);
         if !claim_call_slot(turn) {
             return ToolResult::error(format!(
@@ -137,19 +176,25 @@ impl Tool for AdvisorTool {
             ));
         }
 
-        let (provider_id, model) =
-            split_advisor_model(configured, ctx.config.selected_provider_id());
-        debug!(provider = provider_id, model, "Consulting advisor");
+        let AdvisorTarget {
+            provider_id,
+            profile_id,
+            model,
+        } = target;
+        debug!(
+            provider = provider_id,
+            profile = profile_id,
+            model,
+            "Consulting advisor"
+        );
 
-        let provider = match claurst_api::provider_by_id(&ctx.config, provider_id).await {
-            Some(provider) => provider,
-            None => {
-                return ToolResult::error(format!(
-                    "Advisor provider '{provider_id}' is not available. \
-                     Check its credentials, or pick another model with `/advisor <model>`."
-                ))
-            }
-        };
+        let provider =
+            match claurst_api::provider_by_id_for_profile(&ctx.config, provider_id, profile_id)
+                .await
+            {
+                Ok(provider) => provider,
+                Err(e) => return ToolResult::error(describe_resolve_error(&e)),
+            };
 
         let mut prompt = params.question;
         if let Some(context) = params.context.as_deref().map(str::trim) {
@@ -211,45 +256,72 @@ mod tests {
         *state = (usize::MAX, 0);
     }
 
+    // Model-string parsing itself is covered in `claurst_core::advisor_target`.
+    // These cover what this tool adds on top: turning a failed lookup into
+    // something the model can act on.
+
     #[test]
-    fn bare_model_runs_against_the_active_provider() {
-        assert_eq!(
-            split_advisor_model("opus", "anthropic"),
-            ("anthropic", "opus")
-        );
-        assert_eq!(
-            split_advisor_model("gpt-4o", "openai"),
-            ("openai", "gpt-4o")
+    fn an_unknown_account_names_the_stored_ones() {
+        let message = describe_resolve_error(&ProviderResolveError::ProfileNotFound {
+            provider_id: "anthropic".to_string(),
+            profile_id: "missing".to_string(),
+            available: vec!["personal".to_string(), "work".to_string()],
+        });
+
+        assert!(message.contains("'missing'"));
+        assert!(
+            message.contains("personal, work"),
+            "the model should be able to quote the real ids back to the user: {message}"
         );
     }
 
     #[test]
-    fn prefixed_model_selects_its_own_provider() {
-        assert_eq!(
-            split_advisor_model("openai/gpt-4o", "anthropic"),
-            ("openai", "gpt-4o")
-        );
+    fn an_unknown_account_with_none_stored_says_so() {
+        let message = describe_resolve_error(&ProviderResolveError::ProfileNotFound {
+            provider_id: "codex".to_string(),
+            profile_id: "work".to_string(),
+            available: Vec::new(),
+        });
+
+        assert!(message.contains("none are stored"));
     }
 
     #[test]
-    fn only_the_first_separator_splits_the_provider() {
-        // Gateways route to nested model paths; the tail must survive intact.
-        assert_eq!(
-            split_advisor_model("openrouter/meta/llama-3", "anthropic"),
-            ("openrouter", "meta/llama-3")
-        );
+    fn a_provider_without_accounts_is_reported_as_a_settings_mistake() {
+        let message = describe_resolve_error(&ProviderResolveError::ProfilesUnsupported {
+            provider_id: "openai".to_string(),
+        });
+
+        assert!(message.contains("advisorModel"));
     }
 
     #[test]
-    fn a_lone_separator_falls_back_to_the_active_provider() {
-        assert_eq!(
-            split_advisor_model("/gpt-4o", "openai"),
-            ("openai", "/gpt-4o")
-        );
-        assert_eq!(
-            split_advisor_model("openai/", "anthropic"),
-            ("anthropic", "openai/")
-        );
+    fn every_resolve_failure_tells_the_model_to_involve_the_user() {
+        let failures = [
+            ProviderResolveError::NotAvailable {
+                provider_id: "openai".to_string(),
+            },
+            ProviderResolveError::ProfilesUnsupported {
+                provider_id: "openai".to_string(),
+            },
+            ProviderResolveError::ProfileNotFound {
+                provider_id: "anthropic".to_string(),
+                profile_id: "work".to_string(),
+                available: Vec::new(),
+            },
+            ProviderResolveError::ProfileCredentialsMissing {
+                provider_id: "anthropic".to_string(),
+                profile_id: "work".to_string(),
+            },
+        ];
+
+        for failure in failures {
+            let message = describe_resolve_error(&failure);
+            assert!(
+                message.contains("Tell the user"),
+                "the model cannot fix settings itself, so every failure must hand off: {message}"
+            );
+        }
     }
 
     #[test]
