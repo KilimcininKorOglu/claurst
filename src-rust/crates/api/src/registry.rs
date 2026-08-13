@@ -87,6 +87,8 @@ fn provider_from_key(provider_id: &str, key: String) -> Option<Arc<dyn LlmProvid
         }
         "cohere" => Some(Arc::new(CohereProvider::new(key))),
         "custom-openai" => Some(Arc::new(p::custom_openai().with_api_key(key))),
+        // The base URL comes from settings, so the key alone cannot build it.
+        "custom-anthropic" => custom_anthropic_provider(),
         // "free" needs two keys (Zen + OpenRouter) — single-key path doesn't
         // apply.  The auth-store-aware path `runtime_provider_for` handles it.
         "free" => build_free_provider(),
@@ -139,6 +141,41 @@ pub fn build_free_provider() -> Option<Arc<dyn LlmProvider>> {
     Some(Arc::new(FreeProvider::new(chain)) as Arc<dyn LlmProvider>)
 }
 
+/// Build the user-supplied Anthropic-compatible provider from settings.
+///
+/// Needs a base URL: without one there is nothing to point at, and falling
+/// back to the real Anthropic endpoint would make this a confusing duplicate.
+/// The key may be empty, because a self-hosted gateway can be unauthenticated.
+pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
+    let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+    let provider_id = ProviderId::CUSTOM_ANTHROPIC;
+    let entry = settings.providers.get(provider_id);
+    if entry.is_some_and(|provider| !provider.enabled) {
+        return None;
+    }
+
+    let base_url = entry
+        .and_then(|provider| provider.api_base.clone())
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| std::env::var("CUSTOM_ANTHROPIC_BASE_URL").ok())
+        .filter(|url| !url.trim().is_empty())?;
+
+    let api_key = entry
+        .and_then(|provider| provider.api_key.clone())
+        .filter(|key| !key.trim().is_empty())
+        .or_else(|| claurst_core::AuthStore::load().api_key_for(provider_id))
+        .unwrap_or_default();
+
+    Some(Arc::new(AnthropicProvider::from_config_with_id(
+        ClientConfig {
+            api_key,
+            api_base: base_url,
+            ..Default::default()
+        },
+        provider_id,
+    )))
+}
+
 pub fn provider_from_config(
     config: &claurst_core::config::Config,
     provider_id: &str,
@@ -155,6 +192,9 @@ pub fn provider_from_config(
 
     match provider_id {
         "anthropic" => None,
+        // Built from settings rather than the resolved key, because it needs a
+        // base URL and speaks the Anthropic wire format, not OpenAI's.
+        "custom-anthropic" => custom_anthropic_provider(),
         // Composite "Free" provider — two keys are pulled internally from the
         // auth store; the `api_key` resolved above is ignored.
         "free" => build_free_provider(),
@@ -491,6 +531,18 @@ impl ProviderRegistry {
         self
     }
 
+    /// Register the user-supplied Anthropic-compatible endpoint when one is
+    /// configured.
+    ///
+    /// Registered under its own id so it sits alongside the real Anthropic
+    /// provider; overriding `providers.anthropic.api_base` would replace it.
+    pub fn with_custom_anthropic_if_configured(&mut self) -> &mut Self {
+        if let Some(provider) = custom_anthropic_provider() {
+            self.register(provider);
+        }
+        self
+    }
+
     /// Build a registry with **all** providers that have credentials configured
     /// in the environment.  Anthropic is always the default provider.
     ///
@@ -505,6 +557,7 @@ impl ProviderRegistry {
             .with_copilot_if_configured()
             .with_codex_if_configured()
             .with_cohere_if_key_set()
+            .with_custom_anthropic_if_configured()
             .with_available_providers();
         registry
     }
@@ -1123,5 +1176,123 @@ mod profile_resolution_tests {
                 provider_id: "not-a-provider".to_string()
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod custom_anthropic_tests {
+    //! `custom-anthropic` is a second Anthropic-format endpoint. It has to sit
+    //! next to the real provider rather than replace it, which is what
+    //! overriding `providers.anthropic.api_base` would do.
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    struct HomeGuard {
+        saved_home: Option<std::ffi::OsString>,
+        saved_base: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved_home = std::env::var_os("CLAURST_HOME");
+            let saved_base = std::env::var_os("CUSTOM_ANTHROPIC_BASE_URL");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            std::env::remove_var("CUSTOM_ANTHROPIC_BASE_URL");
+            Self {
+                saved_home,
+                saved_base,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved_home {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+            match &self.saved_base {
+                Some(value) => std::env::set_var("CUSTOM_ANTHROPIC_BASE_URL", value),
+                None => std::env::remove_var("CUSTOM_ANTHROPIC_BASE_URL"),
+            }
+        }
+    }
+
+    fn write_settings(body: &str) {
+        let path = claurst_core::config::Settings::global_settings_path();
+        std::fs::create_dir_all(path.parent().expect("settings dir")).expect("mkdir");
+        std::fs::write(&path, body).expect("write settings");
+    }
+
+    #[test]
+    fn without_a_base_url_there_is_nothing_to_register() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _home = HomeGuard::new();
+
+        assert!(
+            custom_anthropic_provider().is_none(),
+            "falling back to the real Anthropic endpoint would be a confusing duplicate"
+        );
+    }
+
+    #[test]
+    fn a_base_url_in_settings_builds_the_provider() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _home = HomeGuard::new();
+        write_settings(
+            r#"{"providers":{"custom-anthropic":{"api_base":"https://gateway.example/v1"}}}"#,
+        );
+
+        let provider = custom_anthropic_provider().expect("configured");
+
+        assert_eq!(
+            provider.id(),
+            &ProviderId::new(ProviderId::CUSTOM_ANTHROPIC),
+            "registering under the anthropic id would replace the real provider"
+        );
+    }
+
+    #[test]
+    fn an_env_base_url_is_accepted_without_settings() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _home = HomeGuard::new();
+        std::env::set_var("CUSTOM_ANTHROPIC_BASE_URL", "https://gateway.example/v1");
+
+        assert!(custom_anthropic_provider().is_some());
+    }
+
+    #[test]
+    fn a_disabled_entry_is_skipped() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _home = HomeGuard::new();
+        write_settings(
+            r#"{"providers":{"custom-anthropic":{"api_base":"https://gateway.example/v1","enabled":false}}}"#,
+        );
+
+        assert!(custom_anthropic_provider().is_none());
+    }
+
+    #[test]
+    fn it_registers_alongside_the_real_anthropic_provider() {
+        let _lock = ENV_LOCK.lock().expect("lock");
+        let _home = HomeGuard::new();
+        write_settings(
+            r#"{"providers":{"custom-anthropic":{"api_base":"https://gateway.example/v1"}}}"#,
+        );
+
+        let mut registry = ProviderRegistry::with_anthropic(ClientConfig::default());
+        registry.with_custom_anthropic_if_configured();
+
+        assert!(registry
+            .get(&ProviderId::new(ProviderId::ANTHROPIC))
+            .is_some());
+        assert!(registry
+            .get(&ProviderId::new(ProviderId::CUSTOM_ANTHROPIC))
+            .is_some());
     }
 }

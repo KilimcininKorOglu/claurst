@@ -49,6 +49,13 @@ impl ProviderId {
     pub const OLLAMA: &'static str = "ollama";
     pub const LM_STUDIO: &'static str = "lm-studio";
     pub const LLAMA_CPP: &'static str = "llama-cpp";
+    /// User-supplied endpoint speaking the OpenAI wire format.
+    pub const CUSTOM_OPENAI: &'static str = "custom-openai";
+    /// User-supplied endpoint speaking the Anthropic wire format.
+    ///
+    /// Separate from [`ANTHROPIC`](Self::ANTHROPIC) so a custom gateway can sit
+    /// alongside the real one instead of replacing it.
+    pub const CUSTOM_ANTHROPIC: &'static str = "custom-anthropic";
     pub const DEEPSEEK: &'static str = "deepseek";
     pub const GITLAB: &'static str = "gitlab";
     pub const CLOUDFLARE: &'static str = "cloudflare";

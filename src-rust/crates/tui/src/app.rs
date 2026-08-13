@@ -335,6 +335,13 @@ fn provider_picker_items() -> Vec<SelectItem> {
             badge: None,
         },
         SelectItem {
+            id: "custom-anthropic".into(),
+            title: "Custom Anthropic-Compatible".into(),
+            description: "Custom URL + API key; sits alongside Anthropic".into(),
+            category: "Advanced".into(),
+            badge: None,
+        },
+        SelectItem {
             id: "openrouter".into(),
             title: "OpenRouter".into(),
             description: "100+ models with one key".into(),
@@ -2243,11 +2250,11 @@ impl App {
         self.open_model_picker_for_provider(&provider_id, Some(picker_title));
     }
 
-    fn persist_custom_provider_base_url(&self, base_url: &str) {
+    fn persist_custom_provider_base_url(&self, provider_id: &str, base_url: &str) {
         let mut settings = Settings::load_sync().unwrap_or_default();
         let entry = settings
             .providers
-            .entry("custom-openai".to_string())
+            .entry(provider_id.to_string())
             .or_default();
         entry.api_base = Some(base_url.to_string());
         entry.enabled = true;
@@ -2299,6 +2306,8 @@ impl App {
                 "amazon-bedrock",
                 "free",
                 "opencode-zen",
+                "custom-openai",
+                "custom-anthropic",
             ];
             if known.contains(&provider) {
                 return Some(provider.to_string());
@@ -3960,7 +3969,7 @@ impl App {
                         let provider_id = self.custom_provider_dialog.provider_id.clone();
                         let provider_name = self.custom_provider_dialog.provider_name.clone();
                         let (base_url, api_key) = self.custom_provider_dialog.take_values();
-                        self.persist_custom_provider_base_url(&base_url);
+                        self.persist_custom_provider_base_url(&provider_id, &base_url);
                         self.auth_store.set(
                             &provider_id,
                             claurst_core::StoredCredential::ApiKey { key: api_key },
@@ -4064,11 +4073,12 @@ impl App {
                                     .open(selected.id.clone(), selected.title.clone());
                                 self.device_auth_pending = Some("anthropic-oauth".to_string());
                             }
-                            "custom-openai" => {
+                            "custom-openai" | "custom-anthropic" => {
+                                let provider_id = selected.id.clone();
                                 let current_url = Settings::load_sync().ok().and_then(|settings| {
                                     settings
                                         .providers
-                                        .get("custom-openai")
+                                        .get(&provider_id)
                                         .and_then(|p| p.api_base.clone())
                                 });
                                 self.custom_provider_dialog.open(

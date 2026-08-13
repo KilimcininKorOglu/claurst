@@ -1532,6 +1532,7 @@ pub mod config {
                 Some("lmstudio") => "default",
                 Some("llamacpp") => "default",
                 Some("custom-openai") => "default",
+                Some("custom-anthropic") => "default",
                 Some("azure") => "gpt-4o",
                 Some("amazon-bedrock") => "anthropic.claude-sonnet-4-6-v1",
                 Some("venice") => "llama-3.3-70b",

@@ -48,11 +48,20 @@ impl AnthropicProvider {
 
     /// Construct directly from a [`ClientConfig`], creating the inner client.
     pub fn from_config(config: ClientConfig) -> Self {
+        Self::from_config_with_id(config, ProviderId::ANTHROPIC)
+    }
+
+    /// Construct under a different provider id.
+    ///
+    /// A user-supplied Anthropic-compatible gateway speaks the same wire
+    /// format but has to register under its own id, or it would replace the
+    /// real Anthropic entry in the registry.
+    pub fn from_config_with_id(config: ClientConfig, provider_id: &str) -> Self {
         let client = AnthropicClient::new(config)
             .expect("AnthropicProvider::from_config: failed to create AnthropicClient");
         Self {
             client: Arc::new(client),
-            id: ProviderId::new(ProviderId::ANTHROPIC),
+            id: ProviderId::new(provider_id),
         }
     }
 
