@@ -590,15 +590,6 @@ async fn main() -> anyhow::Result<()> {
             .api_base = Some(base.clone());
     }
 
-    // --dump-system-prompt fast path
-    if cli.dump_system_prompt {
-        let ctx = ContextBuilder::new(cwd.clone()).disable_claude_mds(config.disable_claude_mds);
-        let sys = ctx.build_system_context().await;
-        let user = ctx.build_user_context().await;
-        println!("{}\n\n{}", sys, user);
-        return Ok(());
-    }
-
     // Build context
     let ctx_builder =
         ContextBuilder::new(cwd.clone()).disable_claude_mds(config.disable_claude_mds);
@@ -619,6 +610,42 @@ async fn main() -> anyhow::Result<()> {
         system_parts.push(append.clone());
     }
     let system_prompt = system_parts.join("\n\n");
+
+    // --dump-system-prompt: print exactly what a run would send.
+    //
+    // The string assembled above is only the *custom* part; the core builder
+    // wraps it with the capabilities, tool-use guidelines, output style and
+    // safety sections. Rendering goes through the same `build_system_prompt`
+    // the query loop calls, so this output cannot drift from the real one.
+    //
+    // The tool list is built without MCP so the dump stays a side-effect-free
+    // fast path. That does not change the output: only the built-in tools in
+    // `GUIDELINE_TOOLS` contribute per-tool guidance, and MCP tools are never
+    // in that set.
+    if cli.dump_system_prompt {
+        let model_registry = load_cached_model_registry(&config);
+        let mut dump_config =
+            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+        dump_config.system_prompt = Some(system_prompt);
+        dump_config.append_system_prompt = None;
+        dump_config.working_directory = Some(cwd.display().to_string());
+        dump_config.enabled_tools = Some(
+            build_tools_with_mcp(None, config.advisor_model.as_deref())
+                .iter()
+                .map(|tool| tool.name().to_string())
+                .collect(),
+        );
+
+        match claurst_query::build_system_prompt(&dump_config) {
+            claurst_api::SystemPrompt::Text(text) => println!("{text}"),
+            claurst_api::SystemPrompt::Blocks(blocks) => {
+                for block in blocks {
+                    println!("{}", block.text);
+                }
+            }
+        }
+        return Ok(());
+    }
 
     // Initialize API client.
     // Try config/env first; fall back to saved OAuth tokens.
@@ -5119,5 +5146,51 @@ mod advisor_registration_tests {
         // An empty or whitespace value is a cleared setting, not a model.
         assert!(!tool_names(Some("")).contains(&"Advisor".to_string()));
         assert!(!tool_names(Some("   ")).contains(&"Advisor".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod dump_system_prompt_tests {
+    //! `--dump-system-prompt` must print what a run actually sends. It used to
+    //! print only the context attachments, so tool guidelines never appeared.
+    use super::*;
+
+    fn rendered_prompt(advisor_model: Option<&str>) -> String {
+        let config = claurst_core::config::Config {
+            advisor_model: advisor_model.map(str::to_string),
+            ..Default::default()
+        };
+        let model_registry = claurst_api::ModelRegistry::new();
+        let mut dump_config =
+            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+        dump_config.enabled_tools = Some(
+            build_tools_with_mcp(None, config.advisor_model.as_deref())
+                .iter()
+                .map(|tool| tool.name().to_string())
+                .collect(),
+        );
+        match claurst_query::build_system_prompt(&dump_config) {
+            claurst_api::SystemPrompt::Text(text) => text,
+            claurst_api::SystemPrompt::Blocks(blocks) => blocks
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    #[test]
+    fn the_dump_carries_tool_guidelines() {
+        let prompt = rendered_prompt(None);
+        assert!(
+            prompt.contains("Read a file with the Read tool"),
+            "the dump must include per-tool guidance, not just context"
+        );
+    }
+
+    #[test]
+    fn the_dump_reflects_the_advisor_setting() {
+        assert!(!rendered_prompt(None).contains("Call Advisor"));
+        assert!(rendered_prompt(Some("claude-opus-4-6")).contains("Call Advisor"));
     }
 }

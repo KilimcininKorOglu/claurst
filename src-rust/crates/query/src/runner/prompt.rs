@@ -12,7 +12,10 @@ use crate::*;
 ///
 /// - `system_prompt`        → `custom_system_prompt` (added to cacheable block)
 /// - `append_system_prompt` → `append_system_prompt` (added after boundary)
-pub(crate) fn build_system_prompt(config: &QueryConfig) -> SystemPrompt {
+///
+/// Public so `--dump-system-prompt` can print exactly what a run would send,
+/// rather than a second assembly that drifts from this one.
+pub fn build_system_prompt(config: &QueryConfig) -> SystemPrompt {
     use claurst_core::system_prompt::SystemPromptOptions;
 
     let opts = SystemPromptOptions {
