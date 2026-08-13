@@ -82,7 +82,7 @@ pub use transform::MessageTransformer;
 pub use protocol::{LineStreamDecoder, OpenAiChatDecoder};
 
 // Phase 1C re-exports — provider registry.
-pub use registry::ProviderRegistry;
+pub use registry::{provider_by_id, provider_for_config, provider_lookup_ids, ProviderRegistry};
 
 // Phase 1D re-exports — concrete provider adapters.
 pub use providers::AnthropicProvider;

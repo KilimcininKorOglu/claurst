@@ -757,6 +757,61 @@ impl Default for ProviderRegistry {
     }
 }
 
+/// Every spelling a provider is registered under, so a lookup by the id the
+/// user typed still finds it. `ProviderRegistry::get` already canonicalises
+/// local runtimes; this covers the hyphenation variants of hosted providers.
+pub fn provider_lookup_ids(provider_id: &str) -> Vec<&str> {
+    match provider_id {
+        "togetherai" | "together-ai" => vec!["togetherai", "together-ai"],
+        "lmstudio" | "lm-studio" => vec!["lmstudio", "lm-studio"],
+        "llamacpp" | "llama-cpp" | "llama-server" => {
+            vec!["llamacpp", "llama-cpp", "llama-server"]
+        }
+        "moonshot" | "moonshotai" => vec!["moonshot", "moonshotai"],
+        "zhipu" | "zhipuai" => vec!["zhipu", "zhipuai"],
+        "vultr" | "vultr-ai" => vec!["vultr", "vultr-ai"],
+        "google" | "google-vertex" => vec!["google", "google-vertex"],
+        _ => vec![provider_id],
+    }
+}
+
+/// Build a registry from `config` and hand back the provider registered under
+/// `provider_id`, or `None` when that provider has no usable credentials.
+///
+/// Anthropic auth is resolved first because the registry needs it to construct
+/// the Anthropic client even when the caller wants a different provider.
+pub async fn provider_by_id(
+    config: &claurst_core::config::Config,
+    provider_id: &str,
+) -> Option<Arc<dyn LlmProvider>> {
+    let anthropic_auth = config.resolve_anthropic_auth_async().await;
+    let registry = ProviderRegistry::from_config(
+        config,
+        crate::client::ClientConfig {
+            api_key: anthropic_auth
+                .as_ref()
+                .map(|(credential, _)| credential.clone())
+                .unwrap_or_default(),
+            api_base: config.resolve_anthropic_api_base(),
+            use_bearer_auth: anthropic_auth
+                .as_ref()
+                .is_some_and(|(_, use_bearer)| *use_bearer),
+            ..Default::default()
+        },
+    );
+
+    provider_lookup_ids(provider_id)
+        .into_iter()
+        .find_map(|lookup_id| registry.get(&ProviderId::new(lookup_id)).cloned())
+}
+
+/// Hand back the provider selected by `config`.
+pub async fn provider_for_config(
+    config: &claurst_core::config::Config,
+) -> Option<Arc<dyn LlmProvider>> {
+    provider_by_id(config, config.selected_provider_id()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

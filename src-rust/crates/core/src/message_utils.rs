@@ -87,6 +87,22 @@ pub fn get_message_text(msg: &Message) -> String {
     }
 }
 
+/// Concatenate the text of every `Text` block, ignoring every other block type.
+///
+/// Unlike [`get_message_text`] this takes a raw block slice (e.g. a
+/// `ProviderResponse.content`) and skips `Thinking` blocks, so callers that
+/// want only the model's visible answer do not have to strip reasoning.
+pub fn text_from_blocks(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 /// Returns `true` if the message is a tool-use turn (assistant with tool_use blocks).
 pub fn is_tool_use_message(msg: &Message) -> bool {
     msg.role == Role::Assistant

@@ -145,21 +145,6 @@ fn canonical_model_for_provider(provider_id: &str, model_id: &str) -> String {
     }
 }
 
-fn provider_lookup_ids(provider_id: &str) -> Vec<&str> {
-    match provider_id {
-        "togetherai" | "together-ai" => vec!["togetherai", "together-ai"],
-        "lmstudio" | "lm-studio" => vec!["lmstudio", "lm-studio"],
-        "llamacpp" | "llama-cpp" | "llama-server" => {
-            vec!["llamacpp", "llama-cpp", "llama-server"]
-        }
-        "moonshot" | "moonshotai" => vec!["moonshot", "moonshotai"],
-        "zhipu" | "zhipuai" => vec!["zhipu", "zhipuai"],
-        "vultr" | "vultr-ai" => vec!["vultr", "vultr-ai"],
-        "google" | "google-vertex" => vec!["google", "google-vertex"],
-        _ => vec![provider_id],
-    }
-}
-
 fn resolve_fast_model_id(config: &Config) -> String {
     let provider_id = config.selected_provider_id();
     let registry = claurst_api::ModelRegistry::new();
@@ -172,44 +157,8 @@ fn resolve_fast_model_id(config: &Config) -> String {
         })
 }
 
-async fn provider_for_config(
-    config: &Config,
-) -> Option<std::sync::Arc<dyn claurst_api::LlmProvider>> {
-    let anthropic_auth = config.resolve_anthropic_auth_async().await;
-    let registry = claurst_api::ProviderRegistry::from_config(
-        config,
-        claurst_api::client::ClientConfig {
-            api_key: anthropic_auth
-                .as_ref()
-                .map(|(credential, _)| credential.clone())
-                .unwrap_or_default(),
-            api_base: config.resolve_anthropic_api_base(),
-            use_bearer_auth: anthropic_auth
-                .as_ref()
-                .is_some_and(|(_, use_bearer)| *use_bearer),
-            ..Default::default()
-        },
-    );
-
-    provider_lookup_ids(config.selected_provider_id())
-        .into_iter()
-        .find_map(|lookup_id| {
-            registry
-                .get(&claurst_core::ProviderId::new(lookup_id))
-                .cloned()
-        })
-}
-
-fn text_from_content_blocks(blocks: &[ContentBlock]) -> String {
-    blocks
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("")
-}
+use claurst_api::{provider_for_config, provider_lookup_ids};
+use claurst_core::message_utils::text_from_blocks as text_from_content_blocks;
 
 // ---------------------------------------------------------------------------
 // Feature command modules (extracted per issue #232 to shrink this file).
