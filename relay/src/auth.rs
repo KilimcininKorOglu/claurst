@@ -76,6 +76,32 @@ pub fn bearer_from_header(value: &str) -> Option<&str> {
     (!rest.is_empty()).then_some(rest)
 }
 
+/// Name of the cookie the web page authenticates with.
+pub const COOKIE_NAME: &str = "relay_token";
+
+/// Pull the token out of a `Cookie` header value.
+///
+/// The browser `EventSource` API cannot set request headers, so the SSE
+/// endpoint is unreachable with a bearer token alone and has to accept a
+/// cookie as well.
+pub fn token_from_cookies(header: &str) -> Option<&str> {
+    header.split(';').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name.trim() == COOKIE_NAME)
+            .then(|| value.trim())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+/// Cookie attributes for the authenticated session.
+///
+/// `HttpOnly` keeps page scripts from reading the token back out, and
+/// `SameSite=Strict` stops another site from driving the relay through the
+/// browser's ambient credentials.
+pub fn session_cookie(token: &str) -> String {
+    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,4 @@
+/target
+
+# RELAY_TOKEN grants command execution on any connected machine.
+.env

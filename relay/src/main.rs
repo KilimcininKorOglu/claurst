@@ -11,6 +11,7 @@
 //! VPN or LAN.
 
 mod auth;
+mod client;
 mod protocol;
 mod runner;
 mod state;
@@ -90,11 +91,20 @@ async fn require_token(
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let presented = request
-        .headers()
+    let headers = request.headers();
+    // A browser `EventSource` cannot set request headers, so the SSE endpoint
+    // is only reachable with the cookie. Both are accepted everywhere rather
+    // than per route, so the two paths cannot drift apart.
+    let presented = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(auth::bearer_from_header);
+        .and_then(auth::bearer_from_header)
+        .or_else(|| {
+            headers
+                .get(header::COOKIE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(auth::token_from_cookies)
+        });
 
     match presented {
         Some(presented) if auth::token_matches(&token, presented) => Ok(next.run(request).await),
@@ -113,6 +123,7 @@ async fn require_token(
 pub fn app(relay: Arc<Relay>, token: Arc<String>) -> Router {
     Router::new()
         .merge(runner::routes())
+        .merge(client::routes())
         .with_state(relay)
         .layer(middleware::from_fn_with_state(token, require_token))
         // Liveness sits outside the auth layer so a health check does not need
