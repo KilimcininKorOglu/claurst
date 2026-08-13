@@ -1277,6 +1277,18 @@ pub mod config {
         pub projects: HashMap<String, ProjectSettings>,
         #[serde(default, rename = "remoteControlAtStartup")]
         pub remote_control_at_startup: bool,
+        /// Connection details for a self-hosted remote-control relay.
+        ///
+        /// SECURITY: this is set only from the user's global settings, never
+        /// from a project's settings file. A repository that could point the
+        /// bridge at its own relay would gain a channel for driving the agent
+        /// on the developer's machine.
+        #[serde(
+            default,
+            rename = "remoteControl",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub remote_control: Option<RemoteControlSettings>,
         /// Global opt-in: trust and auto-launch project-defined MCP servers
         /// (those declared in a repository's `.claurst/settings.json`) without
         /// prompting. Defaults to `false`. Leaving it off means project servers
@@ -1427,6 +1439,90 @@ pub mod config {
         /// Whether this formatter is disabled.
         #[serde(default)]
         pub disabled: bool,
+    }
+
+    /// How a session reached over the relay handles tool permissions.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum RemotePermissionMode {
+        /// Every tool asks, and the answer may come from the remote client.
+        #[default]
+        Ask,
+        /// Every tool asks, but only the machine's own operator may answer.
+        ///
+        /// Safer, at the cost of the agent stalling on its first tool call
+        /// while nobody is at the keyboard.
+        LocalOnly,
+    }
+
+    /// Connection details for a self-hosted remote-control relay.
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    pub struct RemoteControlSettings {
+        /// Base URL of the relay, e.g. `https://relay.example`.
+        #[serde(default)]
+        pub url: String,
+        /// Shared secret. Must satisfy [`validate_remote_token`].
+        #[serde(default)]
+        pub token: String,
+        /// Who may answer a permission prompt for a remote session.
+        #[serde(default, rename = "permissionMode")]
+        pub permission_mode: RemotePermissionMode,
+        /// Human-readable name for this machine, shown in the client's session
+        /// list. Without it the client can only show an opaque session id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub label: Option<String>,
+    }
+
+    /// Shortest remote-control token that will be accepted.
+    ///
+    /// Kept in step with the relay's own limit. A weak secret here is a remote
+    /// shell on the developer's machine.
+    pub const MIN_REMOTE_TOKEN_LEN: usize = 32;
+
+    /// Why a remote-control configuration was refused.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum RemoteConfigError {
+        MissingUrl,
+        MissingToken,
+        TokenTooShort { len: usize },
+    }
+
+    impl std::fmt::Display for RemoteConfigError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::MissingUrl => write!(f, "remoteControl.url is empty"),
+                Self::MissingToken => write!(f, "remoteControl.token is empty"),
+                Self::TokenTooShort { len } => write!(
+                    f,
+                    "remoteControl.token is {len} characters; at least \
+                     {MIN_REMOTE_TOKEN_LEN} are required, because this token lets \
+                     a remote client run tools on this machine"
+                ),
+            }
+        }
+    }
+
+    impl std::error::Error for RemoteConfigError {}
+
+    impl RemoteControlSettings {
+        /// Accept the configuration only if it is safe to connect with.
+        ///
+        /// Refusing here rather than at first use means a weak token never
+        /// reaches the network.
+        pub fn validate(&self) -> Result<(), RemoteConfigError> {
+            if self.url.trim().is_empty() {
+                return Err(RemoteConfigError::MissingUrl);
+            }
+            let token = self.token.trim();
+            if token.is_empty() {
+                return Err(RemoteConfigError::MissingToken);
+            }
+            let len = token.chars().count();
+            if len < MIN_REMOTE_TOKEN_LEN {
+                return Err(RemoteConfigError::TokenTooShort { len });
+            }
+            Ok(())
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2119,6 +2215,11 @@ pub mod config {
                 projects: merge_map(base.projects, over.projects),
                 remote_control_at_startup: over.remote_control_at_startup
                     || base.remote_control_at_startup,
+                // SECURITY: only the user's global settings may point the
+                // bridge at a relay. A project settings file that could set
+                // this would gain a channel for driving the agent on the
+                // developer's machine.
+                remote_control: base.remote_control,
                 // SECURITY: only the user's global settings may grant blanket
                 // trust to project MCP servers. A project's own settings file
                 // (`over`) must NOT be able to flip this on — otherwise a
@@ -2276,6 +2377,49 @@ pub mod config {
             }
         }
         result
+    }
+
+    #[cfg(test)]
+    mod remote_control_merge_tests {
+        //! `remoteControl` must never come from a repository's settings file:
+        //! pointing the bridge at a relay opens a channel for driving the agent
+        //! on the developer's machine.
+        use super::*;
+
+        fn configured() -> RemoteControlSettings {
+            RemoteControlSettings {
+                url: "https://relay.example".to_string(),
+                token: "a".repeat(MIN_REMOTE_TOKEN_LEN),
+                permission_mode: RemotePermissionMode::Ask,
+                label: None,
+            }
+        }
+
+        #[test]
+        fn a_project_settings_file_cannot_point_the_bridge_at_a_relay() {
+            let user = Settings::default();
+            let project = Settings {
+                remote_control: Some(configured()),
+                ..Default::default()
+            };
+
+            let merged = Settings::merge(user, project);
+            assert!(
+                merged.remote_control.is_none(),
+                "only the user's global settings may configure remote control"
+            );
+        }
+
+        #[test]
+        fn the_users_own_configuration_survives_the_merge() {
+            let user = Settings {
+                remote_control: Some(configured()),
+                ..Default::default()
+            };
+
+            let merged = Settings::merge(user, Settings::default());
+            assert!(merged.remote_control.is_some());
+        }
     }
 
     #[cfg(test)]
@@ -5950,5 +6094,108 @@ mod oauth_profile_tests {
             "with no refresh token the caller still gets a credential to try"
         );
         assert!(OAuthTokens::load_for_profile("personal").await.is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_control_settings_tests {
+    //! `remoteControl` carries a credential that lets a remote client run tools
+    //! on this machine, so it is validated before it can reach the network and
+    //! it never comes from a project's settings file.
+    use crate::config::{
+        RemoteConfigError, RemoteControlSettings, RemotePermissionMode, Settings,
+        MIN_REMOTE_TOKEN_LEN,
+    };
+
+    fn good_token() -> String {
+        "a".repeat(MIN_REMOTE_TOKEN_LEN)
+    }
+
+    fn settings() -> RemoteControlSettings {
+        RemoteControlSettings {
+            url: "https://relay.example".to_string(),
+            token: good_token(),
+            permission_mode: RemotePermissionMode::Ask,
+            label: Some("workstation".to_string()),
+        }
+    }
+
+    #[test]
+    fn a_complete_configuration_is_accepted() {
+        assert_eq!(settings().validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_short_token_is_refused_with_its_length() {
+        let short = RemoteControlSettings {
+            token: "hunter2".to_string(),
+            ..settings()
+        };
+        assert_eq!(
+            short.validate(),
+            Err(RemoteConfigError::TokenTooShort { len: 7 })
+        );
+    }
+
+    #[test]
+    fn the_refusal_says_why_the_length_matters() {
+        let message = RemoteConfigError::TokenTooShort { len: 4 }.to_string();
+        assert!(
+            message.contains("run tools on this machine"),
+            "the user has to understand the stake, got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_missing_url_or_token_is_refused() {
+        let no_url = RemoteControlSettings {
+            url: "  ".to_string(),
+            ..settings()
+        };
+        assert_eq!(no_url.validate(), Err(RemoteConfigError::MissingUrl));
+
+        let no_token = RemoteControlSettings {
+            token: String::new(),
+            ..settings()
+        };
+        assert_eq!(no_token.validate(), Err(RemoteConfigError::MissingToken));
+    }
+
+    #[test]
+    fn the_section_survives_a_settings_round_trip() {
+        let original = Settings {
+            remote_control: Some(settings()),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&original).expect("serialise");
+        assert!(json.contains("\"remoteControl\""));
+        assert!(json.contains("\"permissionMode\":\"ask\""));
+
+        let restored: Settings = serde_json::from_str(&json).expect("deserialise");
+        let restored = restored.remote_control.expect("section survives");
+        assert_eq!(restored.url, "https://relay.example");
+        assert_eq!(restored.permission_mode, RemotePermissionMode::Ask);
+        assert_eq!(restored.label.as_deref(), Some("workstation"));
+    }
+
+    #[test]
+    fn an_unset_section_writes_no_key() {
+        let json = serde_json::to_string(&Settings::default()).expect("serialise");
+        assert!(
+            !json.contains("remoteControl\""),
+            "an unconfigured user must not gain an empty key: {json}"
+        );
+    }
+
+    #[test]
+    fn local_only_mode_round_trips_in_kebab_case() {
+        let mode = RemotePermissionMode::LocalOnly;
+        let json = serde_json::to_string(&mode).expect("serialise");
+        assert_eq!(json, "\"local-only\"");
+        assert_eq!(
+            serde_json::from_str::<RemotePermissionMode>(&json).expect("deserialise"),
+            RemotePermissionMode::LocalOnly
+        );
     }
 }
