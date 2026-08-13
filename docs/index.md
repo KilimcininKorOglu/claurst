@@ -199,4 +199,5 @@ See [Slash Commands](commands) for the complete reference.
 - [Plugins](plugins) — building and using plugins
 - [Agents](agents) — multi-agent orchestration
 - [Hooks](hooks) — event-driven automation
+- [Remote Control](remote-control) — drive a session from your phone through a self-hosted relay
 - [Advanced Features](advanced) — extended thinking, sessions, and more

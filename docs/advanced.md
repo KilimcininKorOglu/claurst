@@ -488,7 +488,15 @@ The setting persists to user settings. The `--vim` CLI flag enables vim mode for
 
 ## Bridge and remote sessions
 
-Claurst can be controlled remotely through a web interface at claude.ai. This "bridge" mode keeps a WebSocket connection open that allows a remote UI to send prompts and receive streaming responses.
+Claurst can be driven from a phone or another browser through a relay you host yourself. The CLI dials out and long-polls, so the machine running the session needs no inbound port.
+
+```
+/remote-control
+```
+
+Shows the relay the bridge resolved, where each value came from, and whether the token is usable. `/remote-control start` enables the bridge at startup.
+
+The relay ships in `relay/` and runs in Docker. Setup, the settings block, the permission model and the client API are in [Remote Control](remote-control).
 
 ```
 /session
@@ -497,8 +505,8 @@ Claurst can be controlled remotely through a web interface at claude.ai. This "b
 Shows the current remote session URL and a QR code for scanning on mobile.
 
 The bridge operates in two topologies:
-- **In-process bridge** — the WebSocket lives inside the Claurst process. If the process dies, the connection is lost.
-- **Daemon bridge** — the WebSocket lives in a parent daemon process. The agent can be respawned while the claude.ai session stays connected. This is the `connectRemoteControl` SDK primitive.
+- **In-process bridge** — the connection lives inside the Claurst process. If the process dies, the connection is lost.
+- **Daemon bridge** — the connection lives in a parent daemon process. The agent can be respawned while the remote session stays connected. This is the `connectRemoteControl` SDK primitive.
 
 SSH sessions work similarly: `claurst --ssh` enables a remote-accessible session that can be connected to from another machine.
 

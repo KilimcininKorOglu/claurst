@@ -52,7 +52,8 @@ values. Keys absent from the project file fall back to the global value.
   "disabledPlugins": [],
   "hasCompletedOnboarding": false,
   "showMessageTimestamps": false,
-  "advisorModel": "claude-opus-4-6"
+  "advisorModel": "claude-opus-4-6",
+  "remoteControl": { ... }
 }
 ```
 
@@ -79,6 +80,30 @@ and render without one.
 
 Set it with [`/advisor <model>`](commands.md#advisor) rather than by hand. When
 unset, the `Advisor` tool is not offered to the model at all.
+
+### Remote control
+
+Points the bridge at a relay you host yourself, so a phone or browser can drive a running session. See [Remote Control](remote-control) for the full setup.
+
+| Key             | Type           | Default | Description                                                                                                       |
+|-----------------|----------------|---------|-------------------------------------------------------------------------------------------------------------------|
+| `url`           | string         | unset   | Base address of your relay, for example `https://relay.example`. A trailing slash is trimmed.                     |
+| `token`         | string         | unset   | Shared secret, at least 32 characters. Shorter values are refused and the bridge does not start.                  |
+| `permissionMode`| string         | `"ask"` | `"ask"` lets a remote client approve a tool. `"local-only"` refuses a remote answer, so only the keyboard decides. |
+| `label`         | string \| null | unset   | Name shown in the session list. Falls back to the machine's hostname.                                             |
+
+```json
+"remoteControl": {
+  "url": "https://relay.example",
+  "token": "a-generated-token-of-at-least-32-characters",
+  "permissionMode": "ask",
+  "label": "workstation"
+}
+```
+
+This block is read from the user settings file only. A project settings file cannot set it, because pointing the bridge at a relay is a decision about the machine, not about the repository.
+
+`CLAURST_BRIDGE_URL` and `CLAURST_BRIDGE_TOKEN` override it when set.
 
 ---
 
@@ -426,8 +451,8 @@ and `api_base` override the corresponding environment variables.
 | `AZURE_API_KEY`        | API key for the `azure` provider.                                               |
 | `HF_TOKEN`             | Token for the `huggingface` provider.                                           |
 | `NVIDIA_API_KEY`       | API key for the `nvidia` provider.                                              |
-| `CLAURST_BRIDGE_URL`   | Enable the remote-control bridge by setting the server URL.                     |
-| `CLAURST_BRIDGE_TOKEN` | Bearer token for the remote-control bridge.                                     |
+| `CLAURST_BRIDGE_URL`   | Relay address for the remote-control bridge. Overrides `remoteControl.url`.     |
+| `CLAURST_BRIDGE_TOKEN` | Bearer token for the remote-control bridge. Overrides `remoteControl.token`.    |
 | `RUST_LOG`             | Tracing filter (e.g. `debug`, `claurst_core=trace`).                            |
 
 ---

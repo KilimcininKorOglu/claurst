@@ -20,7 +20,7 @@ This document is the complete reference for every slash command available in Cla
 12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`
 13. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
 14. [Export & Sharing](#export--sharing) — `/export`, `/copy`
-15. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
+15. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
 16. [Command Availability](#command-availability)
 
 ---
@@ -1197,6 +1197,36 @@ Output a brief status message for use in non-interactive contexts. Renders minim
 
 ```
 /brief
+```
+
+---
+
+### /remote-control
+**Aliases:** `rc`
+
+Manage the bridge that lets a phone or browser drive this session through a relay you host yourself. See [Remote Control](remote-control.md) for the relay setup and the settings block.
+
+```
+/remote-control          — show the resolved relay, token source, and permission mode
+/remote-control start    — enable the bridge at startup
+/remote-control stop     — disable the bridge at startup
+/remote-control status   — same as no argument
+```
+
+With no argument it reports the relay address it resolved and which source each value came from, so a session configured through `settings.json` and one redirected by `CLAURST_BRIDGE_URL` are told apart. A token shorter than 32 characters is reported as unusable and the bridge does not start.
+
+`start` and `stop` change the setting only. The bridge connects on the next launch.
+
+---
+
+### /remote-env
+
+Manage environment variables sent to remote sessions.
+
+```
+/remote-env list
+/remote-env set <KEY> <VALUE>
+/remote-env unset <KEY>
 ```
 
 ---
