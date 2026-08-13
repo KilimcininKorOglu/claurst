@@ -577,6 +577,25 @@ See also: `/goal complete` command.
 
 ---
 
+### AdvisorTool
+
+**Permission level:** None
+
+Ask a second, independent model to review a decision before acting on it. The model calls this itself when a change is hard to reverse, when two designs are genuinely close, or when it doubts its own answer.
+
+| Parameter  | Type   | Required | Description                                                                        |
+|------------|--------|----------|--------------------------------------------------------------------------------------|
+| `question` | string | yes      | The specific decision, claim, or trade-off to review                               |
+| `context`  | string | no       | The material to review: a diff, a plan, or a code snippet                          |
+
+The advisor has no access to the conversation, so the caller must include everything it needs to judge. Its reply comes back as an ordinary tool result and the transcript shows a single status line rather than repeating the question.
+
+The tool is only registered when `advisorModel` is configured (see [`/advisor`](commands.md#advisor)), so a session without an advisor pays neither the schema cost nor the system-prompt guideline. Calls are capped at two per turn; beyond that the tool returns an error telling the model to decide with what it has.
+
+Advisor tokens are added to the session cost. `CostTracker` prices every token at the session model's rate, so the figure drifts when the advisor model is priced differently.
+
+---
+
 ## Notebook Tools
 
 ### NotebookEditTool

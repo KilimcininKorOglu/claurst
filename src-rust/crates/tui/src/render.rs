@@ -459,6 +459,10 @@ struct MessageLinesCacheKey {
     // Toggling `showMessageTimestamps` mid-session changes every rendered turn
     // without touching `transcript_version`, so it has to be part of the key.
     show_timestamps: bool,
+    // Same reasoning for the advisor model, which is printed on advisor tool
+    // blocks. Hashed rather than owned so building a key stays allocation-free
+    // on the per-frame path.
+    advisor_model_hash: u64,
 }
 
 #[derive(Clone)]
@@ -490,6 +494,17 @@ struct CompletedMsgCacheKey {
     thinking_expanded_len: usize,
     // See `MessageLinesCacheKey::show_timestamps`.
     show_timestamps: bool,
+    // See `MessageLinesCacheKey::advisor_model_hash`.
+    advisor_model_hash: u64,
+}
+
+/// Hash the configured advisor model so a change invalidates the transcript
+/// caches without holding an owned copy in the key.
+fn advisor_model_hash(app: &App) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    app.config.advisor_model.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[derive(Clone)]
@@ -1465,7 +1480,7 @@ fn append_turn_items(
 
     for block in &turn.tool_blocks {
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, block, frame_count);
+        render_tool_block_lines(&mut lines, block, frame_count, ctx.advisor_model);
         if !lines.is_empty() {
             sections.push((
                 SectionContent::Plain(lines),
@@ -1629,6 +1644,7 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         tool_names: &tool_names,
         expanded_thinking: &app.thinking_expanded,
         show_timestamps: app.settings_screen.show_message_timestamps,
+        advisor_model: app.config.advisor_model.as_deref(),
     };
     let turns = build_transcript_turns(app);
     let mut turn_map = std::collections::HashMap::new();
@@ -1647,7 +1663,12 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
     if total == 0 && !app.tool_use_blocks.is_empty() {
         for block in &app.tool_use_blocks {
             let mut lines = Vec::new();
-            render_tool_block_lines(&mut lines, block, app.frame_count);
+            render_tool_block_lines(
+                &mut lines,
+                block,
+                app.frame_count,
+                app.config.advisor_model.as_deref(),
+            );
             push_rendered_items(&mut items, lines, None, false);
             push_blank_item(&mut items);
         }
@@ -1682,6 +1703,7 @@ fn render_message_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         annotations_len: app.system_annotations.len(),
         thinking_expanded_len: app.thinking_expanded.len(),
         show_timestamps: app.settings_screen.show_message_timestamps,
+        advisor_model_hash: advisor_model_hash(app),
     };
     if let Some(lines) = MESSAGE_LINES_CACHE.with(|cache| {
         cache
@@ -1721,6 +1743,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         tool_names: &tool_names,
         expanded_thinking: &app.thinking_expanded,
         show_timestamps: app.settings_screen.show_message_timestamps,
+        advisor_model: app.config.advisor_model.as_deref(),
     };
     let turns = build_transcript_turns(app);
 
@@ -1747,6 +1770,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         annotations_len: app.system_annotations.len(),
         thinking_expanded_len: app.thinking_expanded.len(),
         show_timestamps: app.settings_screen.show_message_timestamps,
+        advisor_model_hash: advisor_model_hash(app),
     };
 
     // Committed prefix: messages before the live turn. Stable across streaming
@@ -2179,6 +2203,7 @@ fn render_tool_block_lines(
     lines: &mut Vec<Line<'static>>,
     block: &crate::app::ToolUseBlock,
     frame_count: u64,
+    advisor_model: Option<&str>,
 ) {
     let input_val: serde_json::Value =
         serde_json::from_str(&block.input_json).unwrap_or(serde_json::Value::Null);
@@ -2195,6 +2220,16 @@ fn render_tool_block_lines(
     if matches!(normalized.as_str(), "todowrite" | "todo_write" | "todo")
         && render_todo_block(lines, &input_val, icon, accent, running, frame_count)
     {
+        return;
+    }
+
+    // The advisor collapses to a one-line status: the advice itself lands in
+    // the tool result, so echoing the question here would duplicate it.
+    if normalized == "advisor" {
+        lines.extend(crate::messages::render_advisor_message(
+            running,
+            advisor_model,
+        ));
         return;
     }
 
@@ -3690,8 +3725,55 @@ mod tool_block_tests {
 
     fn render(b: &ToolUseBlock) -> Vec<String> {
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, b, 0);
+        render_tool_block_lines(&mut lines, b, 0, None);
         lines.iter().map(flatten_line_text).collect()
+    }
+
+    fn render_with_advisor(b: &ToolUseBlock, model: &str) -> Vec<String> {
+        let mut lines = Vec::new();
+        render_tool_block_lines(&mut lines, b, 0, Some(model));
+        lines.iter().map(flatten_line_text).collect()
+    }
+
+    #[test]
+    fn advisor_block_collapses_to_a_status_line() {
+        let input = r#"{"question":"is this refactor safe?"}"#;
+
+        let running = render_with_advisor(
+            &block("Advisor", ToolStatus::Running, input, None),
+            "claude-opus-4-6",
+        )
+        .join("\n");
+        assert!(running.contains("Advising"), "got {running:?}");
+        assert!(running.contains("claude-opus-4-6"), "got {running:?}");
+
+        let done = render_with_advisor(
+            &block("Advisor", ToolStatus::Done, input, Some("looks fine")),
+            "claude-opus-4-6",
+        )
+        .join("\n");
+        assert!(done.contains("Advisor reviewed"), "got {done:?}");
+
+        // The question is echoed by neither state: the advice lands in the
+        // tool result, so repeating the prompt here would duplicate it.
+        assert!(
+            !running.contains("is this refactor safe?"),
+            "got {running:?}"
+        );
+        assert!(!done.contains("is this refactor safe?"), "got {done:?}");
+    }
+
+    #[test]
+    fn advisor_block_omits_the_model_when_unknown() {
+        let rendered = render(&block(
+            "Advisor",
+            ToolStatus::Done,
+            r#"{"question":"q"}"#,
+            None,
+        ))
+        .join("\n");
+        assert!(rendered.contains("Advisor reviewed"), "got {rendered:?}");
+        assert!(!rendered.contains('('), "no empty parens, got {rendered:?}");
     }
 
     #[test]

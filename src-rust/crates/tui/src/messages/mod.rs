@@ -47,6 +47,9 @@ pub struct RenderContext<'a> {
     /// Whether to print each message's local time beneath it
     /// (`showMessageTimestamps`).
     pub show_timestamps: bool,
+    /// The configured advisor model, shown on the `Advisor` tool block. The
+    /// tool input does not carry it, so the renderer supplies it.
+    pub advisor_model: Option<&'a str>,
 }
 
 /// Shared empty collections so `RenderContext::default()` can hand out
@@ -65,6 +68,7 @@ impl Default for RenderContext<'static> {
             tool_names: &EMPTY_TOOL_NAMES,
             expanded_thinking: &EMPTY_EXPANDED_THINKING,
             show_timestamps: false,
+            advisor_model: None,
         }
     }
 }

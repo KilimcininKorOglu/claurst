@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 // Sub-modules – each contains a full tool implementation.
+pub mod advisor;
 pub mod apply_patch;
 pub mod ask_user;
 pub mod batch_edit;
@@ -61,6 +62,7 @@ pub mod web_search;
 pub mod worktree;
 
 // Re-exports for convenience.
+pub use advisor::AdvisorTool;
 pub use apply_patch::ApplyPatchTool;
 pub use ask_user::AskUserQuestionTool;
 pub use batch_edit::BatchEditTool;

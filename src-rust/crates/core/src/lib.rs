@@ -1080,6 +1080,15 @@ pub mod config {
         /// Active provider ID (default: "anthropic")
         #[serde(default)]
         pub provider: Option<String>,
+        /// Live copy of [`Settings::advisor_model`], merged in by
+        /// [`Settings::effective_config`] so the running session sees an
+        /// advisor change without a restart.
+        #[serde(
+            default,
+            rename = "advisorModel",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub advisor_model: Option<String>,
         /// Per-provider configurations
         #[serde(default)]
         pub provider_configs: HashMap<String, ProviderConfig>,
@@ -1297,6 +1306,16 @@ pub mod config {
         /// App version at last launch — used to detect upgrades and show release notes.
         #[serde(default, rename = "lastSeenVersion")]
         pub last_seen_version: Option<String>,
+        /// Secondary model consulted for a second opinion, set via `/advisor`.
+        /// Accepts a bare model ID (resolved against the active provider) or
+        /// `"provider/model"`. Absent means the advisor is off, and the
+        /// `Advisor` tool is then not offered to the model at all.
+        #[serde(
+            default,
+            rename = "advisorModel",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub advisor_model: Option<String>,
         /// Active provider ID at the settings level (e.g. "anthropic", "openai").
         #[serde(default)]
         pub provider: Option<String>,
@@ -1896,6 +1915,10 @@ pub mod config {
             if self.provider.is_some() && config.provider.is_none() {
                 config.provider = self.provider.clone();
             }
+            // Same precedence for the advisor: the nested `config` block wins.
+            if config.advisor_model.is_none() {
+                config.advisor_model = self.advisor_model.clone();
+            }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
                 config
@@ -2089,6 +2112,7 @@ pub mod config {
                 },
                 hooks: merge_map(base.config.hooks, over.config.hooks),
                 provider: over.config.provider.or(base.config.provider),
+                advisor_model: over.config.advisor_model.or(base.config.advisor_model),
                 provider_configs: merge_map(
                     base.config.provider_configs,
                     over.config.provider_configs,
@@ -2204,6 +2228,7 @@ pub mod config {
                 show_turn_duration: over.show_turn_duration || base.show_turn_duration,
                 show_message_timestamps: over.show_message_timestamps
                     || base.show_message_timestamps,
+                advisor_model: over.advisor_model.clone().or(base.advisor_model.clone()),
                 reduce_motion: over.reduce_motion || base.reduce_motion,
                 terminal_progress_bar: over.terminal_progress_bar || base.terminal_progress_bar,
                 show_cwd: over.show_cwd || base.show_cwd,
@@ -2560,6 +2585,7 @@ pub mod constants {
     pub const TOOL_NAME_GLOB: &str = "Glob";
     pub const TOOL_NAME_GREP: &str = "Grep";
     pub const TOOL_NAME_AGENT: &str = "Agent";
+    pub const TOOL_NAME_ADVISOR: &str = "Advisor";
     pub const TOOL_NAME_WEB_FETCH: &str = "WebFetch";
     pub const TOOL_NAME_WEB_SEARCH: &str = "WebSearch";
     pub const TOOL_NAME_TODO_WRITE: &str = "TodoWrite";
@@ -5005,6 +5031,30 @@ mod tests {
 
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"showMessageTimestamps\":true"));
+    }
+
+    #[test]
+    fn test_settings_advisor_model_survives_a_round_trip() {
+        // `save_to_path_sync` serializes the typed struct, so a key without a
+        // field is dropped on the next write. This guards against the advisor
+        // setting being wiped when the user changes anything else.
+        let settings: crate::config::Settings =
+            serde_json::from_str(r#"{"advisorModel":"openai/gpt-4o"}"#).unwrap();
+        assert_eq!(settings.advisor_model.as_deref(), Some("openai/gpt-4o"));
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"advisorModel\":\"openai/gpt-4o\""));
+        let back: crate::config::Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.advisor_model, settings.advisor_model);
+    }
+
+    #[test]
+    fn test_settings_omit_advisor_model_when_unset() {
+        // An unconfigured advisor must not add a null key to everyone's file.
+        let settings = crate::config::Settings::default();
+        assert_eq!(settings.advisor_model, None);
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("advisorModel"));
     }
 
     #[test]

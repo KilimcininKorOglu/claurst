@@ -46,7 +46,10 @@ use std::sync::{Arc, Mutex};
 use tracing::debug;
 
 const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
-    ("advisor", "Set or unset the server-side advisor model"),
+    (
+        "advisor",
+        "Set the second model that reviews decisions on request",
+    ),
     ("agent", "List available agents or show agent details"),
     ("agents", "Browse agent definitions and active agents"),
     ("changes", "Inspect changes from the current session"),

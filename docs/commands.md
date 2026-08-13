@@ -261,17 +261,24 @@ Set the thinking effort level. This is a convenience wrapper over `/thinking` th
 
 ### /advisor
 
-Set or unset a secondary advisor model that provides supplementary suggestions alongside the main model. When set, the advisor model's context is available to improve main-model responses.
+Set the second model that reviews a decision on request. The advisor is a critic: it is asked a specific question and answers with the problems it sees, rather than continuing the work.
+
+There are two ways to reach it. The main model calls the [`Advisor`](tools.md#advisor) tool itself when it judges a decision hard to reverse or a call genuinely close. You can also run it yourself over the last reply with `review`.
 
 ```
-/advisor                          — show current advisor setting
-/advisor claude-opus-4-6          — set advisor model by name
-/advisor provider/model           — set advisor using provider/model format
-/advisor off                      — disable the advisor
-/advisor unset                    — disable the advisor
+/advisor                          show the current setting
+/advisor claude-opus-4-6          set the advisor model
+/advisor openai/gpt-4o            set a model on another provider
+/advisor review                   have the advisor review the last reply
+/advisor off                      disable the advisor
+/advisor unset                    disable the advisor
 ```
 
-The advisor model persists to `~/.claurst/settings.json` under `advisorModel`. Model IDs must start with `claude-` or contain a `/` (provider/model format).
+Any non-empty model ID is accepted. The advisor runs client-side, so it works on every configured provider, not only Anthropic. A bare ID runs against the session's active provider; `provider/model` targets a specific one.
+
+The setting persists to `~/.claurst/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
+
+Advisor calls are capped at two per turn and their tokens are added to the session cost.
 
 ---
 

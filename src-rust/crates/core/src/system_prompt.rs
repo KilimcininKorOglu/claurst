@@ -512,6 +512,7 @@ const GUIDELINE_TOOLS: &[&str] = &[
     "NotebookEdit",
     "Skill",
     "AskUserQuestion",
+    "Advisor",
 ];
 
 /// The per-tool guidance line for `tool`, or `None` if we ship no block for it.
@@ -530,6 +531,7 @@ fn tool_specific_guideline(tool: &str) -> Option<&'static str> {
         "NotebookEdit" => "- Use NotebookEdit to modify Jupyter (.ipynb) cells instead of editing raw JSON.",
         "Skill" => "- Invoke Skill to run a matching skill/slash-command instead of reimplementing it.",
         "AskUserQuestion" => "- Use AskUserQuestion when the user must choose between options or clarify intent.",
+        "Advisor" => "- Call Advisor for a second opinion before a hard-to-reverse change, when two designs are genuinely close, or when you doubt your own answer; it cannot see the conversation, so send the question and the material. Not for routine steps.",
         _ => return None,
     })
 }
@@ -740,6 +742,29 @@ mod tests {
         assert!(prompt.contains("Use WebSearch"));
         // General guidance is always present.
         assert!(prompt.contains("Parallelize independent tool calls"));
+    }
+
+    #[test]
+    fn test_advisor_guideline_follows_the_enabled_tool_set() {
+        // The Advisor tool is only registered when an advisor model is set, so
+        // its guidance must not reach a session that cannot call it.
+        let without = build_system_prompt(&SystemPromptOptions {
+            enabled_tools: Some(vec!["Read".to_string()]),
+            ..Default::default()
+        });
+        assert!(
+            !without.contains("Call Advisor"),
+            "advisor guidance must be absent when the tool is not loaded"
+        );
+
+        let with = build_system_prompt(&SystemPromptOptions {
+            enabled_tools: Some(vec!["Read".to_string(), "Advisor".to_string()]),
+            ..Default::default()
+        });
+        assert!(
+            with.contains("Call Advisor"),
+            "advisor guidance should be emitted when the tool is loaded"
+        );
     }
 
     #[test]

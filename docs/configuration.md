@@ -51,7 +51,8 @@ values. Keys absent from the project file fall back to the global value.
   "enabledPlugins": [],
   "disabledPlugins": [],
   "hasCompletedOnboarding": false,
-  "showMessageTimestamps": false
+  "showMessageTimestamps": false,
+  "advisorModel": "claude-opus-4-6"
 }
 ```
 
@@ -69,6 +70,15 @@ unknown models lives in the `modelOverrides` map — see
 Toggle it from the TUI with `/config` → **Show message timestamps**. Turns
 restored from a transcript recorded before this option existed carry no time
 and render without one.
+
+### Advisor
+
+| Key            | Type   | Default | Description                                                                                                                                       |
+|----------------|--------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `advisorModel` | string | unset   | Second model consulted for a review. A bare ID runs against the active provider; `provider/model` targets a specific one. Unset disables the advisor. |
+
+Set it with [`/advisor <model>`](commands.md#advisor) rather than by hand. When
+unset, the `Advisor` tool is not offered to the model at all.
 
 ---
 

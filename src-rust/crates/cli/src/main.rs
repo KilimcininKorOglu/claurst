@@ -813,7 +813,7 @@ async fn main() -> anyhow::Result<()> {
     // Build the full tool list: built-ins from cc-tools plus AgentTool from cc-query
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
-    let tools = build_tools_with_mcp(mcp_manager_arc.clone());
+    let tools = build_tools_with_mcp(mcp_manager_arc.clone(), config.advisor_model.as_deref());
 
     // Load plugins and register any plugin-provided MCP servers into the
     // in-memory config (does not modify the settings file on disk).
@@ -971,9 +971,16 @@ async fn connect_mcp_manager_arc(
 
 fn build_tools_with_mcp(
     mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
+    advisor_model: Option<&str>,
 ) -> Arc<Vec<Box<dyn claurst_tools::Tool>>> {
     let mut v: Vec<Box<dyn claurst_tools::Tool>> = claurst_tools::all_tools();
     v.push(Box::new(claurst_query::AgentTool));
+
+    // Offer the advisor only when a model backs it, so a session without one
+    // pays neither the tool schema nor the system-prompt guideline for it.
+    if advisor_model.is_some_and(|model| !model.trim().is_empty()) {
+        v.push(Box::new(claurst_tools::AdvisorTool));
+    }
 
     if let Some(ref manager_arc) = mcp_manager {
         for (server_name, tool_def) in manager_arc.all_tool_definitions() {
@@ -4358,7 +4365,10 @@ async fn run_interactive(
             let new_mcp_manager = connect_mcp_manager_arc(&decision.allowed).await;
             tool_ctx.mcp_manager = new_mcp_manager.clone();
             app.mcp_manager = new_mcp_manager.clone();
-            tools_arc = build_tools_with_mcp(new_mcp_manager.clone());
+            tools_arc = build_tools_with_mcp(
+                new_mcp_manager.clone(),
+                tool_ctx.config.advisor_model.as_deref(),
+            );
             if app.mcp_view.visible {
                 app.refresh_mcp_view();
             }
@@ -5078,5 +5088,36 @@ mod bare_mode_tests {
         hooks.clear(); // mirrors `config.hooks.clear()` in bare mode
 
         assert!(hooks.is_empty(), "bare mode leaves no hooks to run");
+    }
+}
+
+#[cfg(test)]
+mod advisor_registration_tests {
+    //! The Advisor tool is offered only when an advisor model backs it, so a
+    //! session without one pays neither the tool schema nor its guideline.
+    use super::*;
+
+    fn tool_names(advisor_model: Option<&str>) -> Vec<String> {
+        build_tools_with_mcp(None, advisor_model)
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn advisor_is_absent_without_a_configured_model() {
+        assert!(!tool_names(None).contains(&"Advisor".to_string()));
+    }
+
+    #[test]
+    fn advisor_is_offered_once_a_model_is_configured() {
+        assert!(tool_names(Some("claude-opus-4-6")).contains(&"Advisor".to_string()));
+    }
+
+    #[test]
+    fn a_blank_model_does_not_enable_the_advisor() {
+        // An empty or whitespace value is a cleared setting, not a model.
+        assert!(!tool_names(Some("")).contains(&"Advisor".to_string()));
+        assert!(!tool_names(Some("   ")).contains(&"Advisor".to_string()));
     }
 }
