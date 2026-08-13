@@ -170,6 +170,13 @@ pub struct BridgeConfig {
     pub session_timeout_ms: u64,
     /// Runner version string sent on API calls for server-side diagnostics.
     pub runner_version: String,
+    /// Human-readable name for this machine, sent at registration.
+    ///
+    /// Without it a remote client can only list opaque session ids, which
+    /// makes picking between two open sessions guesswork.
+    pub label: Option<String>,
+    /// Working directory of the session, used as a fallback label.
+    pub cwd: Option<String>,
 }
 
 impl Default for BridgeConfig {
@@ -183,6 +190,8 @@ impl Default for BridgeConfig {
             max_reconnect_attempts: 10,
             session_timeout_ms: 24 * 60 * 60 * 1_000,
             runner_version: env!("CARGO_PKG_VERSION").to_string(),
+            label: None,
+            cwd: None,
         }
     }
 }
@@ -448,10 +457,14 @@ impl BridgeSession {
 
         let url = format!("{}/api/claude_code/sessions", self.config.server_url);
 
+        // `label` and `cwd` are additions on top of the original payload;
+        // extra JSON keys are ignored by servers that do not know them.
         let body = serde_json::json!({
             "session_id": self.session_id,
             "device_id": self.config.device_id,
             "client_version": self.config.runner_version,
+            "label": self.config.label,
+            "cwd": self.config.cwd,
         });
 
         debug!(session_id = %self.session_id, url = %url, "Registering bridge session");
@@ -1319,6 +1332,17 @@ pub enum BridgeOutbound {
         title: Option<String>,
         session_id: String,
     },
+    /// A tool is waiting on approval that the remote client may give.
+    ///
+    /// Without this the remote client never learns a prompt is pending, so a
+    /// remotely-driven session stalls on its first tool call.
+    PermissionRequest {
+        request_id: String,
+        tool_use_id: String,
+        tool_name: String,
+        description: String,
+        options: Vec<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,6 +1575,23 @@ pub async fn run_bridge_loop(
                             .send(BridgeEvent::Error {
                                 message,
                                 code: None,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::PermissionRequest {
+                        request_id,
+                        tool_use_id,
+                        tool_name,
+                        description,
+                        options,
+                    }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::PermissionRequest {
+                                request_id,
+                                tool_use_id,
+                                tool_name,
+                                description,
+                                options,
                             })
                             .await;
                     }

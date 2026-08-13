@@ -1887,6 +1887,71 @@ fn permission_request_from_core(
     }
 }
 
+/// Settle a waiting permission request and release the blocked tool.
+///
+/// `selected_key` uses the dialog's own option keys: `y` allow once, `Y` allow
+/// for the rest of the session, `p` allow persistently, `n` deny. Anything else
+/// is treated as a plain allow, matching the dialog's default action.
+///
+/// Both the keyboard handler and the remote-control handler call this, so a
+/// decision made on a phone cannot drift from one made at the terminal.
+///
+/// Returns `false` when no request was waiting under that id, which happens if
+/// the same request was already answered from the other side.
+fn settle_pending_permission(
+    pending_permissions: &ParkingMutex<claurst_tools::PendingPermissionStore>,
+    permission_manager: Option<
+        &Arc<std::sync::Mutex<claurst_core::permissions::PermissionManager>>,
+    >,
+    tool_use_id: &str,
+    selected_key: Option<char>,
+) -> bool {
+    let Some(mut pending) = pending_permissions.lock().waiting.remove(tool_use_id) else {
+        return false;
+    };
+
+    let selected_path = pending.request.path.clone();
+    let decision = match selected_key {
+        Some('n') => claurst_core::permissions::PermissionDecision::Deny,
+        _ => claurst_core::permissions::PermissionDecision::Allow,
+    };
+
+    if let Some(manager) = permission_manager {
+        if let Ok(mut manager) = manager.lock() {
+            match selected_key {
+                Some('Y') => {
+                    if let Some(path) = selected_path.as_deref() {
+                        manager.add_session_allow_path(&pending.request.tool_name, path);
+                    } else {
+                        manager.add_session_allow(&pending.request.tool_name);
+                    }
+                }
+                Some('p') => {
+                    let mut settings =
+                        claurst_core::config::Settings::load_sync().unwrap_or_default();
+                    if let Some(path) = selected_path.as_deref() {
+                        let pattern = format!("{}*", path);
+                        let _ = manager.add_persistent_allow_path(
+                            &pending.request.tool_name,
+                            &pattern,
+                            &mut settings,
+                        );
+                    } else {
+                        let _ =
+                            manager.add_persistent_allow(&pending.request.tool_name, &mut settings);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(tx) = pending.decision_tx.take() {
+        let _ = tx.send(decision);
+    }
+    true
+}
+
 async fn run_interactive(
     config: Config,
     settings: claurst_core::config::Settings,
@@ -2162,6 +2227,16 @@ async fn run_interactive(
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
     let bridge_token: Option<String> = bridge_config.as_ref().and_then(|c| c.session_token.clone());
+
+    // Whether a permission answer arriving over the relay is honoured. Absent
+    // configuration means the documented default, which is to honour it; the
+    // feature is off entirely unless the user configured a relay.
+    let remote_permission_ask = settings
+        .remote_control
+        .as_ref()
+        .map(|rc| rc.permission_mode)
+        .unwrap_or_default()
+        == claurst_core::config::RemotePermissionMode::Ask;
 
     let mut bridge_runtime: Option<BridgeRuntime> = if let Some(cfg) = bridge_config {
         let bridge_cancel = CancellationToken::new();
@@ -3193,11 +3268,6 @@ async fn run_interactive(
                             let selected_option = pr.selected_option;
                             let selected_key = pr.options.get(selected_option).map(|o| o.key);
                             let should_record_bash_prefix = selected_key == Some('P');
-                            let selected_path = pending_permissions
-                                .lock()
-                                .waiting
-                                .get(&tool_use_id)
-                                .and_then(|p| p.request.path.clone());
                             let bash_prefix = if should_record_bash_prefix {
                                 match &pr.kind {
                                     claurst_tui::dialogs::PermissionDialogKind::Bash {
@@ -3237,58 +3307,12 @@ async fn run_interactive(
                                 }
                             }
 
-                            if let Some(mut pending) =
-                                pending_permissions.lock().waiting.remove(&tool_use_id)
-                            {
-                                let decision = match selected_key {
-                                    Some('n') => {
-                                        claurst_core::permissions::PermissionDecision::Deny
-                                    }
-                                    _ => claurst_core::permissions::PermissionDecision::Allow,
-                                };
-
-                                if let Some(manager) = tool_ctx.permission_manager.as_ref() {
-                                    if let Ok(mut manager) = manager.lock() {
-                                        match selected_key {
-                                            Some('Y') => {
-                                                if let Some(path) = selected_path.as_deref() {
-                                                    manager.add_session_allow_path(
-                                                        &pending.request.tool_name,
-                                                        path,
-                                                    );
-                                                } else {
-                                                    manager.add_session_allow(
-                                                        &pending.request.tool_name,
-                                                    );
-                                                }
-                                            }
-                                            Some('p') => {
-                                                let mut settings =
-                                                    claurst_core::config::Settings::load_sync()
-                                                        .unwrap_or_default();
-                                                if let Some(path) = selected_path.as_deref() {
-                                                    let pattern = format!("{}*", path);
-                                                    let _ = manager.add_persistent_allow_path(
-                                                        &pending.request.tool_name,
-                                                        &pattern,
-                                                        &mut settings,
-                                                    );
-                                                } else {
-                                                    let _ = manager.add_persistent_allow(
-                                                        &pending.request.tool_name,
-                                                        &mut settings,
-                                                    );
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-
-                                if let Some(tx) = pending.decision_tx.take() {
-                                    let _ = tx.send(decision);
-                                }
-                            }
+                            settle_pending_permission(
+                                &pending_permissions,
+                                tool_ctx.permission_manager.as_ref(),
+                                &tool_use_id,
+                                selected_key,
+                            );
                             continue;
                         }
                         continue;
@@ -3401,7 +3425,26 @@ async fn run_interactive(
                 match reevaluated {
                     Some(claurst_core::permissions::PermissionDecision::Ask { .. }) | None => {
                         let tool_use_id = pending.tool_use_id.clone();
-                        app.permission_request = Some(permission_request_from_core(&pending));
+                        let dialog = permission_request_from_core(&pending);
+                        // Tell the remote client too, or a remotely-driven
+                        // session stalls here with nobody at the keyboard.
+                        if let Some(ref runtime) = bridge_runtime {
+                            let _ =
+                                runtime
+                                    .outbound_tx
+                                    .try_send(BridgeOutbound::PermissionRequest {
+                                        request_id: tool_use_id.clone(),
+                                        tool_use_id: tool_use_id.clone(),
+                                        tool_name: dialog.tool_name.clone(),
+                                        description: dialog.description.clone(),
+                                        options: dialog
+                                            .options
+                                            .iter()
+                                            .map(|option| option.label.clone())
+                                            .collect(),
+                                    });
+                        }
+                        app.permission_request = Some(dialog);
                         pending_permissions
                             .lock()
                             .waiting
@@ -3744,17 +3787,37 @@ async fn run_interactive(
                         tool_use_id,
                         response,
                     }) => {
-                        // Resolve a pending permission dialog if IDs match.
-                        if let Some(ref pr) = app.permission_request {
-                            if pr.tool_use_id == tool_use_id {
-                                use claurst_bridge::PermissionResponseKind;
-                                let _allow = matches!(
-                                    response,
-                                    PermissionResponseKind::Allow
-                                        | PermissionResponseKind::AllowSession
-                                );
+                        // A remote answer must take the same route as a keyboard
+                        // answer, otherwise the blocked tool never learns the
+                        // outcome and the dialog only appears to close.
+                        if remote_permission_ask {
+                            use claurst_bridge::PermissionResponseKind;
+                            let selected_key = match response {
+                                PermissionResponseKind::Allow => 'y',
+                                PermissionResponseKind::AllowSession => 'Y',
+                                PermissionResponseKind::Deny => 'n',
+                            };
+                            let settled = settle_pending_permission(
+                                &pending_permissions,
+                                tool_ctx.permission_manager.as_ref(),
+                                &tool_use_id,
+                                Some(selected_key),
+                            );
+                            if settled
+                                && app
+                                    .permission_request
+                                    .as_ref()
+                                    .is_some_and(|pr| pr.tool_use_id == tool_use_id)
+                            {
                                 app.permission_request = None;
                             }
+                        } else {
+                            app.notifications.push(
+                                NotificationKind::Warning,
+                                "Remote permission answer ignored: permissionMode is local-only."
+                                    .to_string(),
+                                Some(5),
+                            );
                         }
                     }
                     Ok(TuiBridgeEvent::SessionNameUpdate { title }) => {
@@ -5384,5 +5447,117 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_permission_tests {
+    use super::*;
+
+    fn pending(
+        tool_use_id: &str,
+    ) -> (
+        claurst_tools::PendingPermissionRequest,
+        tokio::sync::oneshot::Receiver<claurst_core::permissions::PermissionDecision>,
+    ) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let request = claurst_core::permissions::PermissionRequest {
+            tool_name: "Bash".to_string(),
+            description: "run a command".to_string(),
+            details: None,
+            is_read_only: false,
+            path: Some("ls -la".to_string()),
+            working_dir: None,
+            allowed_roots: Vec::new(),
+            context_description: None,
+        };
+        (
+            claurst_tools::PendingPermissionRequest {
+                tool_use_id: tool_use_id.to_string(),
+                request,
+                reason: "needs approval".to_string(),
+                decision_tx: Some(tx),
+            },
+            rx,
+        )
+    }
+
+    fn store_with(
+        id: &str,
+    ) -> (
+        ParkingMutex<claurst_tools::PendingPermissionStore>,
+        tokio::sync::oneshot::Receiver<claurst_core::permissions::PermissionDecision>,
+    ) {
+        let (entry, rx) = pending(id);
+        let store = claurst_tools::PendingPermissionStore {
+            waiting: std::collections::HashMap::from([(id.to_string(), entry)]),
+            ..Default::default()
+        };
+        (ParkingMutex::new(store), rx)
+    }
+
+    #[test]
+    fn a_remote_allow_releases_the_blocked_tool() {
+        let (store, rx) = store_with("tool-1");
+
+        assert!(settle_pending_permission(&store, None, "tool-1", Some('y')));
+
+        assert_eq!(
+            rx.blocking_recv().ok(),
+            Some(claurst_core::permissions::PermissionDecision::Allow)
+        );
+        assert!(store.lock().waiting.is_empty());
+    }
+
+    #[test]
+    fn a_remote_deny_reaches_the_blocked_tool() {
+        let (store, rx) = store_with("tool-2");
+
+        assert!(settle_pending_permission(&store, None, "tool-2", Some('n')));
+
+        assert_eq!(
+            rx.blocking_recv().ok(),
+            Some(claurst_core::permissions::PermissionDecision::Deny)
+        );
+    }
+
+    #[test]
+    fn answering_twice_is_reported_rather_than_silently_ignored() {
+        let (store, _rx) = store_with("tool-3");
+
+        assert!(settle_pending_permission(&store, None, "tool-3", Some('y')));
+        assert!(!settle_pending_permission(
+            &store,
+            None,
+            "tool-3",
+            Some('n')
+        ));
+    }
+
+    #[test]
+    fn a_session_allow_is_recorded_on_the_manager() {
+        let (store, _rx) = store_with("tool-4");
+        let manager = Arc::new(std::sync::Mutex::new(
+            claurst_core::permissions::PermissionManager::new(
+                claurst_core::config::PermissionMode::Default,
+                &claurst_core::config::Settings::default(),
+            ),
+        ));
+
+        assert!(settle_pending_permission(
+            &store,
+            Some(&manager),
+            "tool-4",
+            Some('Y')
+        ));
+
+        let decision = manager
+            .lock()
+            .map(|m| m.evaluate("Bash", "run a command", Some("ls -la"), None, &[]))
+            .ok();
+        assert_eq!(
+            decision,
+            Some(claurst_core::permissions::PermissionDecision::Allow)
+        );
     }
 }
