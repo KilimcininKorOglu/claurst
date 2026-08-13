@@ -1,0 +1,32 @@
+services:
+  relay:
+    build: .
+    image: claurst-relay:local
+    container_name: claurst-relay
+    restart: unless-stopped
+    # Read from .env, never written into this file: RELAY_TOKEN grants command
+    # execution on every connected machine.
+    environment:
+      RELAY_TOKEN: ${RELAY_TOKEN:?set RELAY_TOKEN in relay/.env (at least 32 characters)}
+      RELAY_BIND: 0.0.0.0:8350
+      RELAY_SESSION_TTL_SECS: ${RELAY_SESSION_TTL_SECS:-900}
+      RELAY_EVENT_BUFFER: ${RELAY_EVENT_BUFFER:-500}
+      RUST_LOG: ${RUST_LOG:-claurst_relay=info}
+    ports:
+      # Bound to loopback by default. The relay does not terminate TLS, so
+      # publishing it on 0.0.0.0 would put the token and your code on the wire
+      # in plaintext. Put a TLS-terminating reverse proxy in front, or reach it
+      # over a VPN, before changing this.
+      - "127.0.0.1:8350:8350"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      # No curl in the slim image; the relay answers /healthz without a token.
+      test: ["CMD", "/usr/local/bin/claurst-relay", "--health-check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

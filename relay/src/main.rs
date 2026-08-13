@@ -73,7 +73,7 @@ fn load_config() -> anyhow::Result<Config> {
     let defaults = Limits::default();
     Ok(Config {
         token,
-        bind: std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8110".to_string()),
+        bind: std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8350".to_string()),
         limits: Limits {
             event_buffer: env_usize("RELAY_EVENT_BUFFER", defaults.event_buffer),
             inbound_queue: env_usize("RELAY_INBOUND_QUEUE", defaults.inbound_queue),
@@ -148,8 +148,38 @@ async fn sweep_loop(relay: Arc<Relay>) {
     }
 }
 
+/// Address a health check should dial.
+///
+/// `RELAY_BIND` may be a wildcard, which is not connectable, so the host part
+/// is rewritten to loopback while the port is kept.
+fn health_check_target(bind: &str) -> String {
+    match bind.rsplit_once(':') {
+        Some((host, port)) if host.is_empty() || host == "0.0.0.0" || host == "[::]" => {
+            format!("127.0.0.1:{port}")
+        }
+        _ => bind.to_string(),
+    }
+}
+
+/// Prove the listener is up, for the container healthcheck.
+///
+/// A TCP connect rather than an HTTP request: it needs no client library, and
+/// the runtime image carries no `curl` or `wget` to shell out to.
+async fn run_health_check(bind: &str) -> anyhow::Result<()> {
+    let target = health_check_target(bind);
+    tokio::net::TcpStream::connect(&target)
+        .await
+        .map_err(|e| anyhow::anyhow!("health check could not reach {target}: {e}"))?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == "--health-check") {
+        let bind = std::env::var("RELAY_BIND").unwrap_or_else(|_| "0.0.0.0:8350".to_string());
+        return run_health_check(&bind).await;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -213,6 +243,27 @@ mod tests {
             .expect("body")
             .to_bytes();
         serde_json::from_slice(&bytes).expect("json")
+    }
+
+    #[test]
+    fn a_wildcard_bind_is_dialled_on_loopback() {
+        // 0.0.0.0 is bindable but not connectable, so the health check has to
+        // rewrite it or it would always report the relay as down.
+        assert_eq!(health_check_target("0.0.0.0:8350"), "127.0.0.1:8350");
+        assert_eq!(health_check_target("[::]:8350"), "127.0.0.1:8350");
+        assert_eq!(health_check_target(":8350"), "127.0.0.1:8350");
+    }
+
+    #[test]
+    fn a_concrete_bind_is_dialled_as_given() {
+        assert_eq!(health_check_target("127.0.0.1:9000"), "127.0.0.1:9000");
+        assert_eq!(health_check_target("10.0.0.5:8350"), "10.0.0.5:8350");
+    }
+
+    #[tokio::test]
+    async fn a_health_check_against_nothing_fails() {
+        // Port 1 needs root to bind, so nothing is listening there.
+        assert!(run_health_check("127.0.0.1:1").await.is_err());
     }
 
     #[tokio::test]
