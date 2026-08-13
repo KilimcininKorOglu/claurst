@@ -121,6 +121,17 @@ pub fn jwt_is_expired(token: &str) -> bool {
 /// hashes them and returns the full hex digest. Matching the TypeScript
 /// `trustedDevice.ts` algorithm so fingerprints are consistent across the
 /// two implementations.
+/// This machine's hostname, when the system will tell us.
+///
+/// Used as the default session label so a remote client lists something a
+/// person recognises.
+pub fn machine_hostname() -> Option<String> {
+    hostname::get()
+        .ok()
+        .map(|host| host.to_string_lossy().into_owned())
+        .filter(|host| !host.is_empty())
+}
+
 pub fn device_fingerprint() -> String {
     let mut input = String::with_capacity(128);
 
@@ -459,11 +470,16 @@ impl BridgeSession {
 
         // `label` and `cwd` are additions on top of the original payload;
         // extra JSON keys are ignored by servers that do not know them.
+        //
+        // The hostname is the fallback because an unlabelled session shows up
+        // on the phone as a bare uuid, which is unusable once two machines are
+        // connected.
+        let label = self.config.label.clone().or_else(machine_hostname);
         let body = serde_json::json!({
             "session_id": self.session_id,
             "device_id": self.config.device_id,
             "client_version": self.config.runner_version,
-            "label": self.config.label,
+            "label": label,
             "cwd": self.config.cwd,
         });
 

@@ -23,12 +23,12 @@ impl SlashCommand for RemoteControlCommand {
     }
     fn help(&self) -> &str {
         "Usage: /remote-control [start|stop|status]\n\n\
-         The Bridge feature lets you connect your local Claurst CLI to the\n\
-         claude.ai web UI or mobile app.\n\n\
+         The bridge lets a phone or browser drive this session through a\n\
+         relay you host yourself. See docs/remote-control.md.\n\n\
          Subcommands:\n\
-         /remote-control          Show current bridge status and connection URL\n\
-         /remote-control start    Start the remote-control bridge listener\n\
-         /remote-control stop     Stop the bridge listener\n\
+         /remote-control          Show current bridge status and configuration\n\
+         /remote-control start    Enable the bridge at startup\n\
+         /remote-control stop     Disable the bridge at startup\n\
          /remote-control status   Show bridge status"
     }
 
@@ -46,16 +46,7 @@ impl SlashCommand for RemoteControlCommand {
                     .map(|h| h.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| "(unknown host)".to_string());
 
-                let bridge_url = std::env::var("CLAURST_BRIDGE_URL")
-                    .unwrap_or_else(|_| "https://claude.ai".to_string());
-
-                let token_status = if std::env::var("CLAURST_BRIDGE_TOKEN").is_ok()
-                    || std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN").is_ok()
-                {
-                    "configured via environment variable"
-                } else {
-                    "not set (required to connect)"
-                };
+                let (bridge_url, token_status) = resolved_relay(&settings);
 
                 let startup_status = if remote_at_startup {
                     "enabled at startup"
@@ -81,12 +72,22 @@ impl SlashCommand for RemoteControlCommand {
                 let fingerprint = claurst_bridge::device_fingerprint();
                 let fp_short = &fingerprint[..fingerprint.len().min(12)];
 
+                let permission_note = match settings.remote_control.as_ref() {
+                    Some(remote)
+                        if remote.permission_mode
+                            == claurst_core::config::RemotePermissionMode::LocalOnly =>
+                    {
+                        "local-only (a remote answer is refused)"
+                    }
+                    _ => "ask (a remote client may approve a tool)",
+                };
+
                 CommandResult::Message(format!(
                     "Remote Control (Bridge)\n\
                      ═══════════════════════\n\
-                     What it does: lets you connect the claude.ai web UI or mobile app\n\
-                     to this running Claurst CLI session on your local machine.\n\
-                     All prompts and responses are relayed bidirectionally.\n\
+                     Lets a phone or browser drive this session through a relay you\n\
+                     host yourself. The CLI dials out, so this machine needs no\n\
+                     inbound port.\n\
                      \n\
                      Local Machine\n\
                      ─────────────\n\
@@ -95,21 +96,22 @@ impl SlashCommand for RemoteControlCommand {
                      \n\
                      Bridge Configuration\n\
                      ────────────────────\n\
-                     Bridge server:   {bridge_url}\n\
-                     Session token:   {token_status}\n\
+                     Relay:           {bridge_url}\n\
+                     Token:           {token_status}\n\
                      Startup mode:    {startup_status}\n\
+                     Permissions:     {permission_note}\n\
                      {session_section}\n\
                      How to connect\n\
                      ──────────────\n\
-                     1. Obtain a session token from claude.ai (Settings → Remote Control)\n\
-                     2. Set it:  export CLAURST_BRIDGE_TOKEN=<your-token>\n\
+                     1. Run the relay:  cd relay && docker compose up -d\n\
+                     2. Put its address and token in settings.json under\n\
+                        \"remoteControl\" (the token must be 32 characters or more)\n\
                      3. Enable:  /remote-control start\n\
-                     4. Restart Claurst — the bridge will connect automatically\n\
-                     5. Open {bridge_url}/claude-code in your browser\n\
+                     4. Restart Claurst — the bridge connects automatically\n\
+                     5. Open the relay in a browser and enter the same token\n\
                      \n\
-                     Note: Full bridge polling requires server-side session infrastructure.\n\
-                     The cc-bridge crate implements the complete protocol (register → poll\n\
-                     → events) and is ready to use once a valid session token is provided.\n\
+                     CLAURST_BRIDGE_URL and CLAURST_BRIDGE_TOKEN override the\n\
+                     settings file when set.\n\
                      \n\
                      Use /remote-control start   to enable bridge at next startup\n\
                      Use /remote-control stop    to disable bridge at startup",
@@ -118,6 +120,7 @@ impl SlashCommand for RemoteControlCommand {
                     bridge_url = bridge_url,
                     token_status = token_status,
                     startup_status = startup_status,
+                    permission_note = permission_note,
                     session_section = session_section,
                 ))
             }
@@ -125,26 +128,15 @@ impl SlashCommand for RemoteControlCommand {
                 if let Err(e) = save_settings_mutation(|s| s.remote_control_at_startup = true) {
                     return CommandResult::Error(format!("Failed to save settings: {}", e));
                 }
-                let bridge_url = std::env::var("CLAURST_BRIDGE_URL")
-                    .unwrap_or_else(|_| "https://claude.ai".to_string());
-                let token_note = if std::env::var("CLAURST_BRIDGE_TOKEN").is_ok()
-                    || std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN").is_ok()
-                {
-                    "Session token detected in environment — bridge will connect on next start."
-                        .to_string()
-                } else {
-                    format!(
-                        "No session token found.\n\
-                         Get a token from {bridge_url} (Settings → Remote Control)\n\
-                         then run:  export CLAURST_BRIDGE_TOKEN=<token>",
-                        bridge_url = bridge_url
-                    )
-                };
+                let (bridge_url, token_status) = resolved_relay(&settings);
                 CommandResult::Message(format!(
                     "Remote control bridge enabled at startup.\n\
-                     Restart Claurst to activate the bridge connection.\n\n\
-                     {token_note}",
-                    token_note = token_note
+                     Restart Claurst to activate the bridge connection.\n\
+                     \n\
+                     Relay:  {bridge_url}\n\
+                     Token:  {token_status}",
+                    bridge_url = bridge_url,
+                    token_status = token_status,
                 ))
             }
             "stop" => {
@@ -163,6 +155,41 @@ impl SlashCommand for RemoteControlCommand {
             )),
         }
     }
+}
+
+/// Describe where the bridge will connect and whether it has a usable token.
+///
+/// Mirrors the CLI's own resolution order so the status screen cannot claim
+/// one thing while the bridge does another: an environment override wins, then
+/// the `remoteControl` block, then the built-in default.
+fn resolved_relay(settings: &claurst_core::config::Settings) -> (String, String) {
+    let env_url = std::env::var("CLAURST_BRIDGE_URL")
+        .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
+        .ok()
+        .filter(|url| !url.trim().is_empty());
+    let env_token = std::env::var("CLAURST_BRIDGE_TOKEN")
+        .or_else(|_| std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN"))
+        .is_ok();
+
+    let configured = settings.remote_control.as_ref();
+    let invalid = configured.and_then(|remote| remote.validate().err());
+
+    let url = match (&env_url, configured) {
+        (Some(url), _) => format!("{} (from the environment)", url.trim_end_matches('/')),
+        (None, Some(remote)) if invalid.is_none() => {
+            format!("{} (from settings.json)", remote.url.trim_end_matches('/'))
+        }
+        _ => "not configured".to_string(),
+    };
+
+    let token = match (env_token, configured, invalid) {
+        (true, _, _) => "set in the environment".to_string(),
+        (false, Some(_), Some(error)) => format!("unusable: {error}"),
+        (false, Some(_), None) => "set in settings.json".to_string(),
+        (false, None, _) => "not set (required to connect)".to_string(),
+    };
+
+    (url, token)
 }
 
 // ---- /remote-env ---------------------------------------------------------
@@ -263,5 +290,94 @@ impl SlashCommand for RemoteEnvCommand {
                 other
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod resolved_relay_tests {
+    use super::*;
+    use claurst_core::config::{RemoteControlSettings, RemotePermissionMode, Settings};
+
+    /// The environment variables are process-wide, so these tests share a lock
+    /// and clear what they set.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_env() {
+        for name in [
+            "CLAURST_BRIDGE_URL",
+            "CLAUDE_BRIDGE_BASE_URL",
+            "CLAURST_BRIDGE_TOKEN",
+            "CLAUDE_BRIDGE_OAUTH_TOKEN",
+        ] {
+            std::env::remove_var(name);
+        }
+    }
+
+    fn settings_with(url: &str, token: &str) -> Settings {
+        Settings {
+            remote_control: Some(RemoteControlSettings {
+                url: url.to_string(),
+                token: token.to_string(),
+                permission_mode: RemotePermissionMode::Ask,
+                label: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_unconfigured_relay_says_so() {
+        let _guard = ENV_LOCK.lock();
+        clear_env();
+
+        let (url, token) = resolved_relay(&Settings::default());
+
+        assert_eq!(url, "not configured");
+        assert!(token.contains("not set"));
+    }
+
+    #[test]
+    fn the_settings_file_is_reported_when_the_environment_is_quiet() {
+        let _guard = ENV_LOCK.lock();
+        clear_env();
+
+        let (url, token) = resolved_relay(&settings_with(
+            "https://relay.example/",
+            &"a".repeat(claurst_core::config::MIN_REMOTE_TOKEN_LEN),
+        ));
+
+        assert_eq!(url, "https://relay.example (from settings.json)");
+        assert!(token.contains("settings.json"));
+    }
+
+    #[test]
+    fn a_short_token_is_reported_as_unusable() {
+        let _guard = ENV_LOCK.lock();
+        clear_env();
+
+        let (_, token) = resolved_relay(&settings_with("https://relay.example", "short"));
+
+        assert!(
+            token.starts_with("unusable:"),
+            "the operator has to see why the bridge will not start, got: {token}"
+        );
+    }
+
+    #[test]
+    fn the_environment_wins_over_the_settings_file() {
+        let _guard = ENV_LOCK.lock();
+        clear_env();
+        std::env::set_var("CLAURST_BRIDGE_URL", "https://dev.example");
+        std::env::set_var("CLAURST_BRIDGE_TOKEN", "whatever");
+
+        let (url, token) = resolved_relay(&settings_with(
+            "https://relay.example",
+            &"a".repeat(claurst_core::config::MIN_REMOTE_TOKEN_LEN),
+        ));
+
+        clear_env();
+
+        assert_eq!(url, "https://dev.example (from the environment)");
+        assert!(token.contains("environment"));
     }
 }

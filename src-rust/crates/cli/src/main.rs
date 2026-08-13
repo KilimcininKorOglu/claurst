@@ -358,6 +358,16 @@ fn resolve_bridge_config(
                 if bridge_config.session_token.is_none() {
                     bridge_config.session_token = Some(remote.token.trim().to_string());
                 }
+                // Without these the phone lists bare identifiers and the
+                // operator cannot tell one machine's session from another's.
+                bridge_config.label = remote
+                    .label
+                    .as_ref()
+                    .map(|label| label.trim().to_string())
+                    .filter(|label| !label.is_empty());
+                bridge_config.cwd = std::env::current_dir()
+                    .ok()
+                    .map(|dir| dir.display().to_string());
                 bridge_config.enabled = true;
             }
             Err(e) => {
