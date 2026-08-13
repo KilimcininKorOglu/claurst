@@ -325,6 +325,36 @@ For the OpenAI-compatible protocol, use the custom provider with the correspondi
 
 ---
 
+### Custom endpoints
+
+Two slots exist for endpoints Claurst does not ship a provider for, one per wire format:
+
+| Provider id         | Wire format | Base URL setting                          | Key environment variable   |
+|---------------------|-------------|-------------------------------------------|----------------------------|
+| `custom-openai`     | OpenAI      | `providers."custom-openai".api_base`      | `CUSTOM_OPENAI_API_KEY`    |
+| `custom-anthropic`  | Anthropic   | `providers."custom-anthropic".api_base`   | `CUSTOM_ANTHROPIC_API_KEY` |
+
+Both are offered under "Advanced" in [`/connect`](commands.md#connect), which asks for the URL and the key and writes them for you.
+
+`custom-anthropic` is a separate provider, not a redirect of the built-in one. Pointing `providers.anthropic.api_base` at a gateway *replaces* Anthropic for the session; configuring `custom-anthropic` adds a second entry, so both appear in [`/model`](commands.md#model) and you can move between them.
+
+```json
+{
+  "providers": {
+    "custom-anthropic": {
+      "api_key": "...",
+      "api_base": "https://gateway.example/v1"
+    }
+  }
+}
+```
+
+`CUSTOM_ANTHROPIC_BASE_URL` sets the base URL from the environment instead. Without a base URL the provider is not registered at all, since there would be nothing to point it at. The key may be left empty for an unauthenticated self-hosted gateway.
+
+Neither slot has models.dev catalog entries. The picker shows whatever the endpoint reports from live discovery, falling back to a single `default` row; use [`modelOverrides`](#overriding-model-metadata) to name models and correct their context windows.
+
+---
+
 ### Ollama
 
 Connects to a locally running Ollama instance. No API key required.
