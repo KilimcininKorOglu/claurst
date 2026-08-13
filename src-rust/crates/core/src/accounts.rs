@@ -35,6 +35,14 @@ use std::path::PathBuf;
 pub const PROVIDER_ANTHROPIC: &str = "anthropic";
 pub const PROVIDER_CODEX: &str = "codex";
 
+/// Whether `provider_id` stores credentials per account profile.
+///
+/// Every other provider holds a single credential, so naming an account for
+/// one of them is a configuration mistake rather than a missing profile.
+pub fn provider_supports_profiles(provider_id: &str) -> bool {
+    matches!(provider_id, PROVIDER_ANTHROPIC | PROVIDER_CODEX)
+}
+
 /// Metadata recorded for a single stored profile.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccountProfile {
@@ -564,5 +572,13 @@ mod tests {
             0o700,
             "codex account dir must be owner-only"
         );
+    }
+    #[test]
+    fn only_the_multi_account_providers_support_profiles() {
+        assert!(provider_supports_profiles(PROVIDER_ANTHROPIC));
+        assert!(provider_supports_profiles(PROVIDER_CODEX));
+        assert!(!provider_supports_profiles("openai"));
+        assert!(!provider_supports_profiles("google"));
+        assert!(!provider_supports_profiles(""));
     }
 }

@@ -57,6 +57,10 @@ pub mod claudemd;
 // Message manipulation utilities (T4-2).
 pub mod message_utils;
 
+// Reading of the `advisorModel` setting, shared by the Advisor tool and
+// the `/advisor` command.
+pub mod advisor_target;
+
 // Per-session file modification history (T4-6).
 pub mod file_history;
 
