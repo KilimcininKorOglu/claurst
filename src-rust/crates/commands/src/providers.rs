@@ -13,8 +13,12 @@ pub struct AgentCommand;
 
 #[async_trait]
 impl SlashCommand for ProvidersCommand {
-    fn name(&self) -> &str { "providers" }
-    fn description(&self) -> &str { "List available AI providers and their status" }
+    fn name(&self) -> &str {
+        "providers"
+    }
+    fn description(&self) -> &str {
+        "List available AI providers and their status"
+    }
     fn help(&self) -> &str {
         "Usage: /providers\n\nList all providers registered in the model registry with their\nmodel counts, context windows, and pricing information."
     }
@@ -44,15 +48,23 @@ impl SlashCommand for ProvidersCommand {
         let mut lines = vec!["Available providers:\n".to_string()];
         for provider in &provider_keys {
             let models = &by_provider[provider];
-            lines.push(format!("\n{} ({} model{})", provider.to_uppercase(), models.len(),
-                if models.len() == 1 { "" } else { "s" }));
+            lines.push(format!(
+                "\n{} ({} model{})",
+                provider.to_uppercase(),
+                models.len(),
+                if models.len() == 1 { "" } else { "s" }
+            ));
             for m in models.iter().take(3) {
                 let cost_str = match (m.cost_input, m.cost_output) {
                     (Some(i), Some(o)) => format!("${:.2}/${:.2} per 1M", i, o),
                     _ => "free/local".to_string(),
                 };
-                lines.push(format!("  {} — {}K ctx, {}",
-                    m.info.id, m.info.context_window / 1000, cost_str));
+                lines.push(format!(
+                    "  {} — {}K ctx, {}",
+                    m.info.id,
+                    m.info.context_window / 1000,
+                    cost_str
+                ));
             }
             if models.len() > 3 {
                 lines.push(format!("  ... and {} more", models.len() - 3));
@@ -67,8 +79,12 @@ impl SlashCommand for ProvidersCommand {
 
 #[async_trait]
 impl SlashCommand for ConnectCommand {
-    fn name(&self) -> &str { "connect" }
-    fn description(&self) -> &str { "Connect an AI provider" }
+    fn name(&self) -> &str {
+        "connect"
+    }
+    fn description(&self) -> &str {
+        "Connect an AI provider"
+    }
     fn help(&self) -> &str {
         "Usage: /connect\n\nOpens the interactive provider picker dialog.\nSelect a provider to see setup instructions."
     }
@@ -83,8 +99,12 @@ impl SlashCommand for ConnectCommand {
 
 #[async_trait]
 impl SlashCommand for AgentCommand {
-    fn name(&self) -> &str { "agent" }
-    fn description(&self) -> &str { "List available agents or get info about a specific agent" }
+    fn name(&self) -> &str {
+        "agent"
+    }
+    fn description(&self) -> &str {
+        "List available agents or get info about a specific agent"
+    }
     fn help(&self) -> &str {
         "Usage: /agent [name]\n\nWithout arguments, lists all available named agents.\nWith a name, shows details for that agent.\n\nTo use an agent, start Claurst with: --agent <name>"
     }
@@ -142,9 +162,7 @@ impl SlashCommand for AgentCommand {
             if let Some(ref prompt) = def.prompt {
                 output.push_str(&format!("\nSystem prompt prefix:\n  {}\n", prompt));
             }
-            output.push_str(&format!(
-                "\nTo activate: claurst --agent {}", agent_name
-            ));
+            output.push_str(&format!("\nTo activate: claurst --agent {}", agent_name));
             CommandResult::Message(output)
         } else {
             CommandResult::Error(format!(

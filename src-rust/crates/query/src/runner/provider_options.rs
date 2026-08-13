@@ -120,10 +120,7 @@ pub(crate) fn build_provider_options(
                 "reasoningEffort".to_string(),
                 serde_json::json!(reasoning_effort),
             );
-            options.insert(
-                "reasoningSummary".to_string(),
-                serde_json::json!("auto"),
-            );
+            options.insert("reasoningSummary".to_string(), serde_json::json!("auto"));
             options.insert(
                 "include".to_string(),
                 serde_json::json!(["reasoning.encrypted_content"]),
@@ -133,10 +130,7 @@ pub(crate) fn build_provider_options(
                 && !model_id.contains("codex")
                 && !model_id.contains("-chat")
             {
-                options.insert(
-                    "textVerbosity".to_string(),
-                    serde_json::json!("low"),
-                );
+                options.insert("textVerbosity".to_string(), serde_json::json!("low"));
             }
         }
     }
@@ -227,10 +221,7 @@ pub(crate) fn build_provider_options(
             && !model_id.contains("-chat")
             && provider_id != "azure"
         {
-            options.insert(
-                "textVerbosity".to_string(),
-                serde_json::json!("low"),
-            );
+            options.insert("textVerbosity".to_string(), serde_json::json!("low"));
 
             // DeepSeek V4 thinking mode: map effort level to thinking/reasoning_effort params.
             // DeepSeek docs: thinking={"type":"enabled/disabled"}, reasoning_effort="high"|"max"
@@ -279,9 +270,7 @@ pub(crate) fn build_provider_options(
         }
     }
 
-    if provider_id == "qwen"
-        && thinking_budget.is_some()
-        && !model_id.contains("kimi-k2-thinking")
+    if provider_id == "qwen" && thinking_budget.is_some() && !model_id.contains("kimi-k2-thinking")
     {
         options.insert("enable_thinking".to_string(), serde_json::json!(true));
     }
