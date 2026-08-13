@@ -1642,70 +1642,13 @@ pub mod config {
 
             let tokens = crate::oauth::OAuthTokens::load().await?;
 
-            // If expired and we have a refresh token, attempt silent refresh.
-            // Clone the refresh token up-front so we don't borrow `tokens` during the async call.
-            let refresh_token_owned = tokens.refresh_token.clone();
-            let tokens = if tokens.is_expired() {
-                if let Some(rt) = refresh_token_owned {
-                    // Inline the refresh HTTP call (cc_core can't depend on cc_cli::oauth_flow).
-                    let body = serde_json::json!({
-                        "grant_type": "refresh_token",
-                        "refresh_token": rt,
-                        "client_id": crate::oauth::CLIENT_ID,
-                        "scope": crate::oauth::ALL_SCOPES.join(" "),
-                    });
-                    let refreshed = 'refresh: {
-                        let Ok(client) = reqwest::Client::builder()
-                            .timeout(std::time::Duration::from_secs(30))
-                            .build()
-                        else {
-                            break 'refresh None;
-                        };
-                        let Ok(resp) = client
-                            .post(crate::oauth::TOKEN_URL)
-                            .header("content-type", "application/json")
-                            .json(&body)
-                            .send()
-                            .await
-                        else {
-                            break 'refresh None;
-                        };
-                        if !resp.status().is_success() {
-                            break 'refresh None;
-                        }
-                        let Ok(data) = resp.json::<serde_json::Value>().await else {
-                            break 'refresh None;
-                        };
-                        let new_at = data["access_token"].as_str().unwrap_or("").to_string();
-                        if new_at.is_empty() {
-                            break 'refresh None;
-                        }
-                        let new_rt = data["refresh_token"].as_str().map(String::from);
-                        let exp_in = data["expires_in"].as_u64().unwrap_or(3600);
-                        let exp_ms = chrono::Utc::now().timestamp_millis() + (exp_in as i64 * 1000);
-                        let scopes: Vec<String> = data["scope"]
-                            .as_str()
-                            .unwrap_or("")
-                            .split_whitespace()
-                            .map(String::from)
-                            .collect();
-                        let mut r = tokens.clone();
-                        r.access_token = new_at;
-                        if let Some(nrt) = new_rt {
-                            r.refresh_token = Some(nrt);
-                        }
-                        r.expires_at_ms = Some(exp_ms);
-                        r.scopes = scopes;
-                        let _ = r.save().await;
-                        Some(r)
-                    };
-                    refreshed.unwrap_or(tokens)
-                } else {
-                    tokens // expired, no refresh token → can't fix
-                }
-            } else {
-                tokens
-            };
+            // Read the active profile *after* `load()`, which migrates a legacy
+            // token file into a profile and marks it active on first read. A
+            // refresh has to write back to the profile the tokens came from.
+            let active = crate::accounts::AccountRegistry::load()
+                .active(crate::accounts::PROVIDER_ANTHROPIC)
+                .map(String::from);
+            let tokens = tokens.refreshed_into(active.as_deref()).await;
 
             tokens
                 .effective_credential()
@@ -4428,6 +4371,90 @@ pub mod oauth {
             serde_json::from_str(&content).ok()
         }
 
+        /// Persist to `profile_id` when given, else through the active-profile
+        /// path.
+        ///
+        /// Every write that follows a read must name the profile it read from.
+        /// `save()` resolves the *active* profile, so persisting a non-active
+        /// account through it would overwrite the active account's tokens and
+        /// break both.
+        pub async fn persist(&self, profile_id: Option<&str>) -> anyhow::Result<()> {
+            match profile_id {
+                Some(id) => self.save_for_profile(id).await,
+                None => self.save().await,
+            }
+        }
+
+        /// Exchange the refresh token for a fresh access token and persist the
+        /// result to `profile_id`.
+        ///
+        /// Returns the tokens unchanged when they are still valid, when there
+        /// is no refresh token, or when the exchange fails. A failed refresh is
+        /// not an error here: the caller still gets a credential to try, and
+        /// the API reports the real problem.
+        pub async fn refreshed_into(self, profile_id: Option<&str>) -> Self {
+            if !self.is_expired() {
+                return self;
+            }
+            // Clone up-front so `self` is not borrowed across the await.
+            let Some(refresh_token) = self.refresh_token.clone() else {
+                return self; // expired, no refresh token → can't fix
+            };
+
+            // The HTTP call is inlined because this crate cannot depend on the
+            // CLI's oauth_flow module.
+            let body = serde_json::json!({
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": CLIENT_ID,
+                "scope": ALL_SCOPES.join(" "),
+            });
+            let refreshed = 'refresh: {
+                let Ok(client) = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                else {
+                    break 'refresh None;
+                };
+                let Ok(resp) = client
+                    .post(TOKEN_URL)
+                    .header("content-type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await
+                else {
+                    break 'refresh None;
+                };
+                if !resp.status().is_success() {
+                    break 'refresh None;
+                }
+                let Ok(data) = resp.json::<serde_json::Value>().await else {
+                    break 'refresh None;
+                };
+                let new_access = data["access_token"].as_str().unwrap_or("").to_string();
+                if new_access.is_empty() {
+                    break 'refresh None;
+                }
+                let expires_in = data["expires_in"].as_u64().unwrap_or(3600);
+                let mut updated = self.clone();
+                updated.access_token = new_access;
+                if let Some(new_refresh) = data["refresh_token"].as_str() {
+                    updated.refresh_token = Some(new_refresh.to_string());
+                }
+                updated.expires_at_ms =
+                    Some(chrono::Utc::now().timestamp_millis() + (expires_in as i64 * 1000));
+                updated.scopes = data["scope"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .map(String::from)
+                    .collect();
+                let _ = updated.persist(profile_id).await;
+                Some(updated)
+            };
+            refreshed.unwrap_or(self)
+        }
+
         /// Save these tokens, register/refresh a profile in the account
         /// registry, and mark it active. Returns the profile id used.
         ///
@@ -4539,6 +4566,21 @@ pub mod oauth {
             }
             Ok(())
         }
+    }
+
+    /// Resolve the Anthropic credential for one named account profile.
+    ///
+    /// Returns the credential and whether it is a Bearer token, matching
+    /// `Config::resolve_anthropic_auth_async`. Unlike that function this one
+    /// deliberately ignores any configured or ambient `ANTHROPIC_API_KEY`: the
+    /// caller asked for a specific OAuth account, so a stray API key must not
+    /// silently answer in its place.
+    pub async fn resolve_auth_for_profile(profile_id: &str) -> Option<(String, bool)> {
+        let tokens = OAuthTokens::load_for_profile(profile_id).await?;
+        let tokens = tokens.refreshed_into(Some(profile_id)).await;
+        tokens
+            .effective_credential()
+            .map(|cred| (cred.to_string(), tokens.uses_bearer_auth()))
     }
 
     // ---- PKCE helpers ----
@@ -5758,5 +5800,150 @@ mod tests {
             registry.get(&id).unwrap().status,
             tasks::TaskStatus::Cancelled
         );
+    }
+}
+
+#[cfg(test)]
+mod oauth_profile_tests {
+    //! A refreshed token must land in the profile it was read from. Persisting
+    //! a non-active account through the active-profile path would overwrite the
+    //! active account's credentials and break both.
+    use crate::accounts::{AccountRegistry, PROVIDER_ANTHROPIC};
+    use crate::oauth::OAuthTokens;
+
+    // `Settings::config_dir()` reads process-global env. Serialise every test
+    // that repoints it. The lock is async-aware because it is held across the
+    // awaits these tests make.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self { saved, _dir: dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    fn tokens(access: &str) -> OAuthTokens {
+        OAuthTokens {
+            access_token: access.to_string(),
+            refresh_token: Some("refresh".to_string()),
+            scopes: vec![crate::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn persist_with_a_profile_writes_to_that_profiles_file() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        tokens("token-for-personal")
+            .persist(Some("personal"))
+            .await
+            .expect("persist");
+
+        let loaded = OAuthTokens::load_for_profile("personal")
+            .await
+            .expect("profile tokens");
+        assert_eq!(loaded.access_token, "token-for-personal");
+    }
+
+    #[tokio::test]
+    async fn persist_with_a_profile_leaves_the_active_profile_untouched() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        // "work" is the active account; "personal" is a second one.
+        tokens("token-for-work")
+            .save_and_register(Some("work"))
+            .await
+            .expect("register work");
+        tokens("token-for-personal")
+            .persist(Some("personal"))
+            .await
+            .expect("persist personal");
+
+        let work = OAuthTokens::load_for_profile("work")
+            .await
+            .expect("work tokens");
+        assert_eq!(
+            work.access_token, "token-for-work",
+            "writing a non-active profile must not touch the active one"
+        );
+        assert_eq!(
+            AccountRegistry::load().active(PROVIDER_ANTHROPIC),
+            Some("work"),
+            "persisting a profile must not move the active pointer"
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_without_a_profile_falls_back_to_the_active_path() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        // No registry yet, so `save()` registers a profile and marks it active.
+        tokens("token-for-default")
+            .persist(None)
+            .await
+            .expect("persist");
+
+        let registry = AccountRegistry::load();
+        let active = registry.active(PROVIDER_ANTHROPIC).expect("active profile");
+        let loaded = OAuthTokens::load_for_profile(active)
+            .await
+            .expect("active tokens");
+        assert_eq!(loaded.access_token, "token-for-default");
+    }
+
+    #[tokio::test]
+    async fn refreshed_into_leaves_a_valid_token_alone() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        let mut valid = tokens("still-good");
+        valid.expires_at_ms = Some(chrono::Utc::now().timestamp_millis() + 60 * 60 * 1000);
+
+        let result = valid.refreshed_into(Some("personal")).await;
+
+        assert_eq!(result.access_token, "still-good");
+        assert!(
+            OAuthTokens::load_for_profile("personal").await.is_none(),
+            "a token that is still valid must not be written back"
+        );
+    }
+
+    #[tokio::test]
+    async fn refreshed_into_keeps_an_expired_token_without_a_refresh_token() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        let mut expired = tokens("stale");
+        expired.refresh_token = None;
+        expired.expires_at_ms = Some(chrono::Utc::now().timestamp_millis() - 1000);
+
+        let result = expired.refreshed_into(Some("personal")).await;
+
+        assert_eq!(
+            result.access_token, "stale",
+            "with no refresh token the caller still gets a credential to try"
+        );
+        assert!(OAuthTokens::load_for_profile("personal").await.is_none());
     }
 }
