@@ -2089,9 +2089,8 @@ impl App {
         crate::model_picker::default_model_for_provider(provider_id, &self.model_registry)
     }
 
-    fn open_model_picker_for_provider(&mut self, provider_id: &str, title: Option<String>) {
-        self.dismiss_error_notifications();
-
+    /// Overlay the on-disk models.dev cache onto the bundled registry.
+    fn load_model_registry_cache(&mut self) {
         let cache_path = dirs::cache_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("claurst")
@@ -2099,6 +2098,11 @@ impl App {
         if cache_path.exists() {
             self.model_registry.load_cache(&cache_path);
         }
+    }
+
+    fn open_model_picker_for_provider(&mut self, provider_id: &str, title: Option<String>) {
+        self.dismiss_error_notifications();
+        self.load_model_registry_cache();
 
         let models = crate::model_picker::models_for_provider_from_registry(
             provider_id,
@@ -2139,6 +2143,89 @@ impl App {
             self.effort_level,
             self.fast_mode,
         );
+    }
+
+    /// Provider ids this configuration can actually reach, for the `/model`
+    /// list.
+    ///
+    /// Taken from the live `ProviderRegistry` so the list matches what a
+    /// request would resolve, rather than re-deriving it from settings and
+    /// drifting. Before the registry is attached there is nothing to enumerate,
+    /// so the caller falls back to the single-provider picker.
+    fn reachable_provider_ids(&self) -> Vec<String> {
+        let Some(registry) = self.provider_registry.as_ref() else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = registry
+            .provider_ids()
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    /// Open the picker over every reachable provider, grouped by provider.
+    ///
+    /// Falls back to the single-provider picker when the registry is not
+    /// attached yet or lists only one provider, so nothing regresses for a
+    /// single-provider setup.
+    fn open_model_picker_for_all_providers(&mut self) {
+        let provider_ids = self.reachable_provider_ids();
+        if provider_ids.len() < 2 {
+            let provider = self
+                .config
+                .provider
+                .clone()
+                .unwrap_or_else(|| "anthropic".to_string());
+            self.open_model_picker_for_provider(&provider, None);
+            return;
+        }
+
+        self.dismiss_error_notifications();
+        self.load_model_registry_cache();
+
+        let models = crate::model_picker::models_for_all_providers_from_registry(
+            &provider_ids,
+            &self.model_registry,
+        );
+        self.model_picker.set_models(models);
+
+        // The live fetch is per-provider, so it still targets the session's
+        // provider. Every other section shows the catalog projection.
+        let active = self
+            .config
+            .provider
+            .clone()
+            .unwrap_or_else(|| "anthropic".to_string());
+        self.model_picker_provider_id = Some(active.clone());
+        if crate::model_picker::provider_uses_catalog_projection(&active) {
+            self.model_picker.loading_models = false;
+            self.model_picker_fetch_pending = false;
+        } else {
+            self.model_picker.loading_models = true;
+            self.model_picker_fetch_pending = true;
+        }
+
+        // Entries are provider-qualified here, so the highlight has to compare
+        // against the qualified id rather than the bare model name.
+        let current = self.qualified_current_model(&active);
+        self.model_picker.open_with_title(
+            "Select model",
+            &current,
+            self.effort_level,
+            self.fast_mode,
+        );
+    }
+
+    /// The session's model in `provider/model` form.
+    fn qualified_current_model(&self, provider_id: &str) -> String {
+        if self.model_name.contains('/') {
+            self.model_name.clone()
+        } else {
+            format!("{provider_id}/{}", self.model_name)
+        }
     }
 
     fn activate_provider(
@@ -2491,12 +2578,7 @@ impl App {
                     self.status_message = Some("Connect a provider to choose a model.".to_string());
                     return true;
                 }
-                let provider = self
-                    .config
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| "anthropic".to_string());
-                self.open_model_picker_for_provider(&provider, None);
+                self.open_model_picker_for_all_providers();
                 true
             }
             "session" | "resume" => {
@@ -4178,6 +4260,13 @@ impl App {
                         if let Some(e) = effort {
                             self.effort_level = e;
                         }
+                        // A cross-provider list qualifies every id, so the
+                        // selection also names the provider to switch to.
+                        if let Some(picked) = self.model_picker.take_confirmed_provider_id() {
+                            if self.config.provider.as_deref() != Some(picked.as_str()) {
+                                self.set_provider_default(picked);
+                            }
+                        }
                         // Store explicit selections in the canonical
                         // "provider/model" form for non-Anthropic providers.
                         // The "free" composite's picker entries already carry
@@ -4185,11 +4274,13 @@ impl App {
                         // so re-prefixing would produce nonsense like
                         // `free/free/auto`.
                         let provider = self.config.provider.as_deref().unwrap_or("anthropic");
-                        let full_model = if provider == "anthropic" || provider == "free" {
-                            model_id.clone()
-                        } else {
-                            format!("{}/{}", provider, model_id)
-                        };
+                        let already_qualified = model_id.starts_with(&format!("{provider}/"));
+                        let full_model =
+                            if provider == "anthropic" || provider == "free" || already_qualified {
+                                model_id.clone()
+                            } else {
+                                format!("{}/{}", provider, model_id)
+                            };
                         self.set_model(full_model.clone());
                         self.persist_provider_and_model();
                         let effort_hint = effort

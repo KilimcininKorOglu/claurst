@@ -3863,17 +3863,34 @@ async fn run_interactive(
                     // empty because that can mean authentication failed. Local
                     // discovery reports failures separately, so empty means no
                     // models are loaded.
-                    if provider == "anthropic" {
-                        if !entries.is_empty() {
+                    //
+                    // When the picker spans several providers the fetch only
+                    // speaks for one of them, so the provider-scoped variants
+                    // rewrite that section and leave the others standing.
+                    let cross_provider = app.model_picker.is_cross_provider();
+                    let authoritative = provider == "anthropic"
+                        || claurst_tui::model_picker::provider_has_authoritative_live_models(
+                            &provider,
+                        );
+                    let keep_projection_when_empty = provider == "anthropic";
+                    if authoritative && !(entries.is_empty() && keep_projection_when_empty) {
+                        if cross_provider {
+                            app.model_picker.replace_provider_models(&provider, entries);
+                        } else {
                             app.model_picker.set_models(entries);
                         }
-                    } else if claurst_tui::model_picker::provider_has_authoritative_live_models(
-                        &provider,
-                    ) {
-                        app.model_picker.set_models(entries);
-                    } else {
-                        app.model_picker.merge_models(entries);
+                    } else if !authoritative {
+                        if cross_provider {
+                            app.model_picker.merge_provider_models(&provider, entries);
+                        } else {
+                            app.model_picker.merge_models(entries);
+                        }
                     }
+                    let current = if cross_provider {
+                        format!("{}{}", provider_prefix, current)
+                    } else {
+                        current
+                    };
                     for m in &mut app.model_picker.models {
                         m.is_current = m.id == current;
                     }
@@ -3977,6 +3994,7 @@ async fn run_interactive(
                                                                 ctx_for(&id, m.context_window),
                                                             ),
                                                         is_current: false,
+                                                        provider_id: None,
                                                     }
                                                 })
                                             })
@@ -3994,6 +4012,7 @@ async fn run_interactive(
                                                         ),
                                                     id,
                                                     is_current: false,
+                                                    provider_id: None,
                                                 }
                                             })
                                             .collect()

@@ -184,27 +184,22 @@ impl ModelPickerState {
             by_provider.entry(provider).or_default().push(m.clone());
         }
 
-        // Define display order
-        let order = ["anthropic", "openai", "google", "ollama", "other"];
         let mut sections = Vec::new();
-        for provider in order {
-            if let Some(models) = by_provider.remove(provider) {
+        for provider in PROVIDER_DISPLAY_ORDER {
+            if let Some(models) = by_provider.remove(*provider) {
                 sections.push(ProviderSection {
-                    provider_name: match provider {
-                        "anthropic" => "ANTHROPIC".to_string(),
-                        "openai" => "OPENAI".to_string(),
-                        "google" => "GOOGLE".to_string(),
-                        "ollama" => "OLLAMA".to_string(),
-                        _ => provider.to_uppercase(),
-                    },
+                    provider_name: provider_display_name(provider),
                     models,
                 });
             }
         }
-        // Add any remaining providers not in the order list
-        for (provider, models) in by_provider {
+        // Any provider outside the preferred order, in a stable order so the
+        // list does not reshuffle between openings.
+        let mut rest: Vec<(String, Vec<String>)> = by_provider.into_iter().collect();
+        rest.sort_by(|a, b| a.0.cmp(&b.0));
+        for (provider, models) in rest {
             sections.push(ProviderSection {
-                provider_name: provider.to_uppercase(),
+                provider_name: provider_display_name(&provider),
                 models,
             });
         }
@@ -212,18 +207,78 @@ impl ModelPickerState {
     }
 }
 
+/// Providers shown first, in this order. Anything else follows alphabetically.
+const PROVIDER_DISPLAY_ORDER: &[&str] = &["anthropic", "openai", "google", "ollama", "other"];
+
+/// Heading text for a provider section.
+fn provider_display_name(provider_id: &str) -> String {
+    provider_id.to_uppercase()
+}
+
+/// Rows the provider headings will occupy: one per group, plus one blank line
+/// between consecutive groups.
+fn provider_heading_rows(entries: &[&ModelEntry]) -> u16 {
+    let mut groups: u16 = 0;
+    let mut current: Option<&str> = None;
+    for entry in entries {
+        let Some(provider_id) = entry.provider_id.as_deref() else {
+            continue;
+        };
+        if current != Some(provider_id) {
+            groups += 1;
+            current = Some(provider_id);
+        }
+    }
+    groups + groups.saturating_sub(1)
+}
+
+/// Order `provider_ids` for display: the preferred providers first, then the
+/// rest alphabetically.
+fn sort_providers_for_display(provider_ids: &mut [String]) {
+    provider_ids.sort_by(|a, b| {
+        let rank = |id: &String| {
+            PROVIDER_DISPLAY_ORDER
+                .iter()
+                .position(|known| known == id)
+                .unwrap_or(PROVIDER_DISPLAY_ORDER.len())
+        };
+        rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /// A single model entry shown in the picker.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ModelEntry {
     pub id: String,
     pub display_name: String,
     pub description: String,
     /// Whether this is the currently active model.
     pub is_current: bool,
+    /// Provider this model belongs to, set only when the picker spans more
+    /// than one provider.
+    ///
+    /// `None` means the picker is showing a single provider, so `id` is a bare
+    /// model id and no section headings are drawn. `Some` means `id` is in
+    /// `provider/model` form and the row sits under that provider's heading.
+    pub provider_id: Option<String>,
+}
+
+impl ModelEntry {
+    /// Move this entry into a cross-provider list under `provider_id`.
+    ///
+    /// Qualifies `id` so selecting the row identifies the provider as well as
+    /// the model, which a bare id cannot do once several providers are listed.
+    pub fn into_provider_scoped(mut self, provider_id: &str) -> Self {
+        if !self.id.starts_with(&format!("{provider_id}/")) {
+            self.id = format!("{provider_id}/{}", self.id);
+        }
+        self.provider_id = Some(provider_id.to_string());
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +292,7 @@ fn model_entry(id: &str, name: &str, desc: &str) -> ModelEntry {
         display_name: name.to_string(),
         description: desc.to_string(),
         is_current: false,
+        provider_id: None,
     }
 }
 
@@ -310,7 +366,35 @@ pub fn models_for_provider_from_registry(
                 display_name: e.info.name.clone(),
                 description: cost_str,
                 is_current: false,
+                provider_id: None,
             }
+        })
+        .collect()
+}
+
+/// Build one picker list covering several providers, grouped by provider.
+///
+/// Each provider contributes its own models under its own heading; the list is
+/// never grouped by model, because two providers can serve the same model id
+/// through different credentials and endpoints.
+///
+/// Every id comes back in `provider/model` form so a selection identifies the
+/// provider too.
+pub fn models_for_all_providers_from_registry(
+    provider_ids: &[String],
+    registry: &claurst_api::ModelRegistry,
+) -> Vec<ModelEntry> {
+    let mut ordered: Vec<String> = provider_ids.to_vec();
+    ordered.sort();
+    ordered.dedup();
+    sort_providers_for_display(&mut ordered);
+
+    ordered
+        .iter()
+        .flat_map(|provider_id| {
+            models_for_provider_from_registry(provider_id, registry)
+                .into_iter()
+                .map(|entry| entry.into_provider_scoped(provider_id))
         })
         .collect()
 }
@@ -453,6 +537,7 @@ fn codex_provider_models(registry: &claurst_api::ModelRegistry) -> Vec<ModelEntr
                     format_context_window(ctx)
                 ),
                 is_current: false,
+                provider_id: None,
             }
         })
         .collect()
@@ -475,6 +560,7 @@ fn codex_fallback_models() -> Vec<ModelEntry> {
                     format_context_window(ctx)
                 ),
                 is_current: false,
+                provider_id: None,
             }
         })
         .collect()
@@ -489,6 +575,7 @@ fn free_provider_models() -> Vec<ModelEntry> {
         display_name: "Auto (round-robin across configured providers)".to_string(),
         description: "stacks every free-tier key you've added · $0.00 per M".to_string(),
         is_current: false,
+        provider_id: None,
     }];
 
     for upstream in claurst_api::FREE_CATALOG {
@@ -497,6 +584,7 @@ fn free_provider_models() -> Vec<ModelEntry> {
             display_name: format!("{} \u{2014} {}", upstream.title, upstream.default_model),
             description: format!("{} · $0.00 per M", upstream.note),
             is_current: false,
+            provider_id: None,
         });
     }
 
@@ -521,6 +609,9 @@ pub struct ModelPickerState {
     pub models_loaded: bool,
     /// `true` while the background fetch is in flight.
     pub loading_models: bool,
+    /// Provider of the entry chosen by the most recent `confirm`, when the
+    /// list spanned several providers.
+    confirmed_provider_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +640,7 @@ impl ModelPickerState {
             fast_mode_model: None,
             models_loaded: false,
             loading_models: false,
+            confirmed_provider_id: None,
         }
     }
 
@@ -661,6 +753,15 @@ impl ModelPickerState {
         }
     }
 
+    /// Take the provider of the last confirmed selection, if the list was
+    /// showing more than one.
+    ///
+    /// Recorded during `confirm` rather than read afterwards, because `confirm`
+    /// clears the filter and `selected_idx` indexes the filtered list.
+    pub fn take_confirmed_provider_id(&mut self) -> Option<String> {
+        self.confirmed_provider_id.take()
+    }
+
     /// Confirm the current selection.
     ///
     /// Returns `(model_id, effort)` where `effort` is `None` for models that
@@ -669,6 +770,7 @@ impl ModelPickerState {
     /// Returns the selected model; the caller is responsible for persisting it
     /// in the correct provider-aware format.
     pub fn confirm(&mut self) -> Option<(String, Option<EffortLevel>)> {
+        self.confirmed_provider_id = None;
         let filtered = self.filtered_models();
         let custom = self.filter.trim();
         if filtered.is_empty() {
@@ -681,6 +783,7 @@ impl ModelPickerState {
         }
         let entry = filtered.get(self.selected_idx)?;
         let id = entry.id.clone();
+        let confirmed_provider = entry.provider_id.clone();
         let ladder = picker_variant_ladder(&id);
         let effort = if ladder.len() > 1 {
             Some(clamp_to_ladder(&ladder, self.effort_level))
@@ -690,6 +793,7 @@ impl ModelPickerState {
         // If user chose a model other than the fast-mode model while fast mode is
         // active, the caller should turn off fast mode (mirrors TS behaviour).
         self.close();
+        self.confirmed_provider_id = confirmed_provider;
         Some((id, effort))
     }
 
@@ -730,6 +834,80 @@ impl ModelPickerState {
         self.loading_models = false;
         self.models_loaded = true;
         // Keep selected_idx in bounds.
+        let count = self.filtered_models().len();
+        if count > 0 && self.selected_idx >= count {
+            self.selected_idx = count - 1;
+        }
+    }
+
+    /// True when the list spans more than one provider.
+    ///
+    /// A live fetch covers one provider, so it must not replace the whole list
+    /// in this mode.
+    pub fn is_cross_provider(&self) -> bool {
+        self.models.iter().any(|m| m.provider_id.is_some())
+    }
+
+    /// Restore per-provider grouping after rows were added or replaced.
+    ///
+    /// The sort is stable, so each provider keeps the order its rows arrived in.
+    fn regroup_by_provider(&mut self) {
+        self.models.sort_by_key(|m| {
+            let provider = m.provider_id.clone().unwrap_or_default();
+            let rank = PROVIDER_DISPLAY_ORDER
+                .iter()
+                .position(|known| *known == provider)
+                .unwrap_or(PROVIDER_DISPLAY_ORDER.len());
+            (rank, provider)
+        });
+    }
+
+    /// Replace one provider's rows, leaving every other section untouched.
+    ///
+    /// Used when that provider's live list is authoritative. `set_models` would
+    /// wipe the other providers.
+    pub fn replace_provider_models(&mut self, provider_id: &str, entries: Vec<ModelEntry>) {
+        self.models
+            .retain(|m| m.provider_id.as_deref() != Some(provider_id));
+        self.models.extend(
+            entries
+                .into_iter()
+                .map(|entry| entry.into_provider_scoped(provider_id)),
+        );
+        self.regroup_by_provider();
+        self.loading_models = false;
+        self.models_loaded = true;
+        self.clamp_selection();
+    }
+
+    /// Merge live entries into one provider's rows, leaving the rest alone.
+    pub fn merge_provider_models(&mut self, provider_id: &str, entries: Vec<ModelEntry>) {
+        if entries.is_empty() {
+            self.loading_models = false;
+            return;
+        }
+        // A real list supersedes the synthetic "no catalog" placeholder, but
+        // only this provider's copy of it.
+        self.models.retain(|m| {
+            !(m.provider_id.as_deref() == Some(provider_id)
+                && m.display_name == "Default model"
+                && m.id == format!("{provider_id}/default"))
+        });
+        let existing: std::collections::HashSet<String> =
+            self.models.iter().map(|m| m.id.clone()).collect();
+        for entry in entries {
+            let entry = entry.into_provider_scoped(provider_id);
+            if !existing.contains(&entry.id) {
+                self.models.push(entry);
+            }
+        }
+        self.regroup_by_provider();
+        self.loading_models = false;
+        self.models_loaded = true;
+        self.clamp_selection();
+    }
+
+    fn clamp_selection(&mut self) {
         let count = self.filtered_models().len();
         if count > 0 && self.selected_idx >= count {
             self.selected_idx = count - 1;
@@ -821,7 +999,12 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
     let width = 65u16.min(area.width.saturating_sub(6));
     let max_height = (area.height as f32 * 0.75) as u16;
     let filtered = state.filtered_models();
-    let content_h = (filtered.len() as u16 + 6).min(max_height).max(8);
+    // Provider headings and the blank line between groups take rows too, so the
+    // dialog has to grow for them or the body scrolls the first section away.
+    let heading_rows = provider_heading_rows(&filtered);
+    let content_h = (filtered.len() as u16 + heading_rows + 6)
+        .min(max_height)
+        .max(8);
     let dialog_area = centered_rect(width, content_h, area);
 
     // ── Fill dialog bg (no border) ──
@@ -934,9 +1117,27 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
             )]));
         }
     } else {
+        // Provider heading, redrawn whenever the provider changes between two
+        // consecutive rows. Headings are decoration only, so `selected_idx`
+        // still indexes `filtered` and needs no adjustment.
+        let mut heading_shown: Option<&str> = None;
+
         for (i, model) in filtered.iter().enumerate() {
             let is_selected = i == state.selected_idx;
             let supports_effort = model_supports_effort(&model.id);
+
+            if let Some(provider_id) = model.provider_id.as_deref() {
+                if heading_shown != Some(provider_id) {
+                    if heading_shown.is_some() {
+                        lines.push(Line::from(""));
+                    }
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(" {}", provider_display_name(provider_id)),
+                        Style::default().fg(dim).add_modifier(Modifier::BOLD),
+                    )]));
+                    heading_shown = Some(provider_id);
+                }
+            }
 
             if is_selected {
                 selected_line_idx = lines.len() as u16;
@@ -1060,18 +1261,21 @@ mod tests {
                 display_name: "Claude Opus 4.6".to_string(),
                 description: "200K context".to_string(),
                 is_current: false,
+                provider_id: None,
             },
             ModelEntry {
                 id: "claude-sonnet-4-6".to_string(),
                 display_name: "Claude Sonnet 4.6".to_string(),
                 description: "200K context".to_string(),
                 is_current: false,
+                provider_id: None,
             },
             ModelEntry {
                 id: "claude-haiku-4-5".to_string(),
                 display_name: "Claude Haiku 4.5".to_string(),
                 description: "200K context".to_string(),
                 is_current: false,
+                provider_id: None,
             },
         ]
     }
@@ -1578,6 +1782,7 @@ mod tests {
                 display_name: "LIVE OVERWRITE".to_string(),
                 description: "live desc".to_string(),
                 is_current: false,
+                provider_id: None,
             },
             // A brand-new live id absent from the catalog — must be appended.
             ModelEntry {
@@ -1585,6 +1790,7 @@ mod tests {
                 display_name: "GPT-5.5 (live)".to_string(),
                 description: "live only".to_string(),
                 is_current: false,
+                provider_id: None,
             },
         ];
         p.merge_models(live);
@@ -1644,6 +1850,7 @@ mod tests {
             display_name: "Llama 3.3".to_string(),
             description: "local".to_string(),
             is_current: false,
+            provider_id: None,
         }]);
         assert!(
             !p.models.iter().any(|m| m.id == "default"),
@@ -1689,5 +1896,262 @@ mod tests {
         }
         assert!(!provider_has_authoritative_live_models("github-copilot"));
         assert!(!provider_has_authoritative_live_models("openrouter"));
+    }
+}
+
+#[cfg(test)]
+mod cross_provider_tests {
+    //! `/model` lists every reachable provider at once. Rows are grouped by
+    //! provider, never by model, because two providers can serve the same model
+    //! id through different credentials.
+    use super::*;
+
+    fn entry(id: &str) -> ModelEntry {
+        ModelEntry {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn scoped(provider: &str, ids: &[&str]) -> Vec<ModelEntry> {
+        ids.iter()
+            .map(|id| entry(id).into_provider_scoped(provider))
+            .collect()
+    }
+
+    fn picker(models: Vec<ModelEntry>) -> ModelPickerState {
+        let mut state = ModelPickerState::new();
+        state.set_models(models);
+        state
+    }
+
+    #[test]
+    fn scoping_qualifies_the_id_once() {
+        let scoped = entry("sonnet").into_provider_scoped("anthropic");
+        assert_eq!(scoped.id, "anthropic/sonnet");
+        assert_eq!(scoped.provider_id.as_deref(), Some("anthropic"));
+
+        // Already-qualified ids must not gain a second prefix.
+        let twice = scoped.into_provider_scoped("anthropic");
+        assert_eq!(twice.id, "anthropic/sonnet");
+    }
+
+    #[test]
+    fn a_single_provider_list_is_not_cross_provider() {
+        let state = picker(vec![entry("sonnet"), entry("opus")]);
+        assert!(!state.is_cross_provider());
+    }
+
+    #[test]
+    fn preferred_providers_come_first_then_the_rest_alphabetically() {
+        let mut ids = vec![
+            "zhipu".to_string(),
+            "ollama".to_string(),
+            "custom-openai".to_string(),
+            "anthropic".to_string(),
+            "openai".to_string(),
+        ];
+        sort_providers_for_display(&mut ids);
+        assert_eq!(
+            ids,
+            vec!["anthropic", "openai", "ollama", "custom-openai", "zhipu"]
+        );
+    }
+
+    #[test]
+    fn confirm_reports_the_provider_of_the_chosen_row() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("ollama", &["qwen3"]));
+        let mut state = picker(models);
+        state.open_with_title(
+            "Select model",
+            "anthropic/sonnet",
+            EffortLevel::Medium,
+            false,
+        );
+        state.selected_idx = 1;
+
+        let (id, _) = state.confirm().expect("a row is selected");
+
+        assert_eq!(id, "ollama/qwen3");
+        assert_eq!(
+            state.take_confirmed_provider_id().as_deref(),
+            Some("ollama")
+        );
+    }
+
+    #[test]
+    fn confirm_reports_the_provider_under_an_active_filter() {
+        // `confirm` clears the filter, so reading the provider afterwards would
+        // index the wrong row.
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("ollama", &["qwen3"]));
+        let mut state = picker(models);
+        state.open_with_title(
+            "Select model",
+            "anthropic/sonnet",
+            EffortLevel::Medium,
+            false,
+        );
+        for c in "qwen".chars() {
+            state.push_filter_char(c);
+        }
+
+        let (id, _) = state.confirm().expect("the filter matches one row");
+
+        assert_eq!(id, "ollama/qwen3");
+        assert_eq!(
+            state.take_confirmed_provider_id().as_deref(),
+            Some("ollama")
+        );
+    }
+
+    #[test]
+    fn a_typed_custom_model_reports_no_provider() {
+        let mut state = picker(scoped("anthropic", &["sonnet"]));
+        state.open_with_title(
+            "Select model",
+            "anthropic/sonnet",
+            EffortLevel::Medium,
+            false,
+        );
+        for c in "nothing-matches-this".chars() {
+            state.push_filter_char(c);
+        }
+
+        let (id, _) = state.confirm().expect("a custom id is accepted");
+
+        assert_eq!(id, "nothing-matches-this");
+        assert_eq!(state.take_confirmed_provider_id(), None);
+    }
+
+    #[test]
+    fn replacing_one_provider_leaves_the_others_standing() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("ollama", &["stale"]));
+        let mut state = picker(models);
+
+        state.replace_provider_models("ollama", vec![entry("qwen3"), entry("llama3")]);
+
+        let ids: Vec<&str> = state.models.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.contains(&"anthropic/sonnet"),
+            "other sections must survive"
+        );
+        assert!(!ids.contains(&"ollama/stale"));
+        assert!(ids.contains(&"ollama/qwen3"));
+    }
+
+    #[test]
+    fn merging_keeps_rows_grouped_by_provider() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("ollama", &["qwen3"]));
+        let mut state = picker(models);
+
+        state.merge_provider_models("anthropic", vec![entry("opus")]);
+
+        let providers: Vec<&str> = state
+            .models
+            .iter()
+            .map(|m| m.provider_id.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            providers,
+            vec!["anthropic", "anthropic", "ollama"],
+            "a merged row must join its own section, not land at the tail"
+        );
+    }
+
+    #[test]
+    fn merging_does_not_duplicate_a_row_already_listed() {
+        let mut state = picker(scoped("ollama", &["qwen3"]));
+
+        state.merge_provider_models("ollama", vec![entry("qwen3"), entry("llama3")]);
+
+        let ids: Vec<&str> = state.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["ollama/qwen3", "ollama/llama3"]);
+    }
+
+    fn rendered_text(state: &ModelPickerState) -> String {
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        render_model_picker(state, area, &mut buf);
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn each_provider_gets_its_own_heading() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("ollama", &["qwen3"]));
+        let mut state = picker(models);
+        state.open_with_title(
+            "Select model",
+            "anthropic/sonnet",
+            EffortLevel::Medium,
+            false,
+        );
+
+        let text = rendered_text(&state);
+
+        assert!(
+            text.contains("ANTHROPIC"),
+            "missing anthropic heading:\n{text}"
+        );
+        assert!(text.contains("OLLAMA"), "missing ollama heading:\n{text}");
+    }
+
+    #[test]
+    fn a_single_provider_list_draws_no_heading() {
+        let mut state = picker(vec![entry("sonnet")]);
+        state.open_with_title("Select model", "sonnet", EffortLevel::Medium, false);
+
+        let text = rendered_text(&state);
+
+        assert!(
+            !text.contains("ANTHROPIC"),
+            "a one-provider picker must look exactly as before:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_heading_is_drawn_once_per_run_of_rows() {
+        let mut state = picker(scoped("anthropic", &["sonnet", "opus", "haiku"]));
+        state.open_with_title(
+            "Select model",
+            "anthropic/sonnet",
+            EffortLevel::Medium,
+            false,
+        );
+
+        let text = rendered_text(&state);
+
+        assert_eq!(
+            text.matches("ANTHROPIC").count(),
+            1,
+            "the heading must not repeat per row:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merging_clears_only_its_own_placeholder() {
+        let mut models = vec![entry("default").into_provider_scoped("custom-openai")];
+        models[0].display_name = "Default model".to_string();
+        models.extend(scoped("ollama", &["qwen3"]));
+        let mut state = picker(models);
+
+        state.merge_provider_models("custom-openai", vec![entry("my-llm")]);
+
+        let ids: Vec<&str> = state.models.iter().map(|m| m.id.as_str()).collect();
+        assert!(!ids.contains(&"custom-openai/default"));
+        assert!(ids.contains(&"custom-openai/my-llm"));
+        assert!(ids.contains(&"ollama/qwen3"));
     }
 }
