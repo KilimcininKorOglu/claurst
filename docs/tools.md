@@ -592,6 +592,8 @@ The advisor has no access to the conversation, so the caller must include everyt
 
 The tool is only registered when `advisorModel` is configured (see [`/advisor`](commands.md#advisor)), so a session without an advisor pays neither the schema cost nor the system-prompt guideline. Calls are capped at two per turn; beyond that the tool returns an error telling the model to decide with what it has.
 
+Which credentials the call uses follows `advisorModel`. By default it is the same provider and account as the session. When the setting names an account (`anthropic:personal/sonnet`), the advisor authenticates as that stored login instead, leaving the session on its own.
+
 Advisor tokens are added to the session cost. `CostTracker` prices every token at the session model's rate, so the figure drifts when the advisor model is priced differently.
 
 ---

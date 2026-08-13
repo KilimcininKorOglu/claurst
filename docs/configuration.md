@@ -75,7 +75,7 @@ and render without one.
 
 | Key            | Type   | Default | Description                                                                                                                                       |
 |----------------|--------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `advisorModel` | string | unset   | Second model consulted for a review. A bare ID runs against the active provider; `provider/model` targets a specific one. Unset disables the advisor. |
+| `advisorModel` | string | unset   | Second model consulted for a review. A bare ID runs against the active provider; `provider/model` targets a specific one; `provider:account/model` also targets a specific stored login. Unset disables the advisor. |
 
 Set it with [`/advisor <model>`](commands.md#advisor) rather than by hand. When
 unset, the `Advisor` tool is not offered to the model at all.

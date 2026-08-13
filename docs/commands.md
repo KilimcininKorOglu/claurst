@@ -266,15 +266,32 @@ Set the second model that reviews a decision on request. The advisor is a critic
 There are two ways to reach it. The main model calls the [`Advisor`](tools.md#advisor) tool itself when it judges a decision hard to reverse or a call genuinely close. You can also run it yourself over the last reply with `review`.
 
 ```
-/advisor                          show the current setting
-/advisor claude-opus-4-6          set the advisor model
-/advisor openai/gpt-4o            set a model on another provider
-/advisor review                   have the advisor review the last reply
-/advisor off                      disable the advisor
-/advisor unset                    disable the advisor
+/advisor                            show the current setting
+/advisor claude-opus-4-6            set the advisor model
+/advisor openai/gpt-4o              set a model on another provider
+/advisor anthropic:personal/sonnet  run the advisor on another account
+/advisor review                     have the advisor review the last reply
+/advisor off                        disable the advisor
+/advisor unset                      disable the advisor
 ```
 
 Any non-empty model ID is accepted. The advisor runs client-side, so it works on every configured provider, not only Anthropic. A bare ID runs against the session's active provider; `provider/model` targets a specific one.
+
+#### Running the advisor on a second account
+
+`provider:account/model` authenticates the advisor as one of your stored logins while the session stays on the active one. This is the only way to use two accounts at once: [`/switch`](#switch) moves a single pointer, so it changes the main model and the advisor together.
+
+```
+/accounts                           list stored accounts and their IDs
+/advisor anthropic:personal/sonnet  main model on the active account,
+                                    advisor on "personal"
+```
+
+Only `anthropic` and `codex` keep separate accounts; every other provider stores a single credential, and naming an account for one is rejected. The account ID is checked when you set it, so a typo is reported straight away rather than surfacing later as a failed advisor call.
+
+Accounts do not pool quota. Each one keeps its own rate limit, so this splits usage between them rather than combining them.
+
+A colon inside a model ID is not read as an account: `ollama/llama3:8b` still names a model, because the account separator is only looked for before the `/`.
 
 The setting persists to `~/.claurst/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
 
