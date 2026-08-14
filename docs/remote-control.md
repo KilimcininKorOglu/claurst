@@ -101,6 +101,19 @@ The layout starts at phone width and adapts upward, so a phone, a tablet and a d
 
 ## Permissions
 
+Two settings sit on different axes, and it is worth being clear about which does what.
+
+| Setting                          | Question it answers               |
+|----------------------------------|-----------------------------------|
+| `config.permission_mode`         | Does a tool ask at all?           |
+| `remoteControl.permissionMode`   | Who may answer, when one asks?    |
+
+`config.permission_mode` runs first. In `bypassPermissions` (`--dangerously-skip-permissions`) every tool is allowed outright, and in `plan` every write is refused outright. Neither ever produces a prompt, so `remoteControl.permissionMode` is never consulted in those two modes. It cannot tighten anything: setting `local-only` under `bypassPermissions` protects you from nothing.
+
+It matters in `default` and in `acceptEdits`, where tools still ask. `/remote-control` says which of the two situations you are in.
+
+Note that sending a prompt is not a permission at all. Anything holding the relay token can start a turn regardless of the mode. Combined with `bypassPermissions` that means the token alone runs arbitrary tools on your machine with no approval step anywhere.
+
 `permissionMode` decides who may answer when a tool asks for approval.
 
 | Value          | Behaviour                                                                                   |

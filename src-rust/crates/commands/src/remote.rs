@@ -72,15 +72,7 @@ impl SlashCommand for RemoteControlCommand {
                 let fingerprint = claurst_bridge::device_fingerprint();
                 let fp_short = &fingerprint[..fingerprint.len().min(12)];
 
-                let permission_note = match settings.remote_control.as_ref() {
-                    Some(remote)
-                        if remote.permission_mode
-                            == claurst_core::config::RemotePermissionMode::LocalOnly =>
-                    {
-                        "local-only (a remote answer is refused)"
-                    }
-                    _ => "ask (a remote client may approve a tool)",
-                };
+                let permission_note = permission_note(&settings, &ctx.config.permission_mode);
 
                 CommandResult::Message(format!(
                     "Remote Control (Bridge)\n\
@@ -154,6 +146,37 @@ impl SlashCommand for RemoteControlCommand {
                 other
             )),
         }
+    }
+}
+
+/// Describe who may answer a permission request.
+///
+/// `remoteControl.permissionMode` only decides *who* answers; the session's own
+/// `permission_mode` decides *whether* anything asks at all. In
+/// `bypassPermissions` and `plan` nothing ever reaches a prompt, so the remote
+/// setting is never consulted and saying "local-only" there would read as a
+/// protection that is not in force.
+fn permission_note(
+    settings: &claurst_core::config::Settings,
+    session_mode: &claurst_core::config::PermissionMode,
+) -> String {
+    use claurst_core::config::PermissionMode;
+
+    let remote_may_answer = settings
+        .remote_control
+        .as_ref()
+        .map(|remote| remote.permission_mode)
+        .unwrap_or_default()
+        == claurst_core::config::RemotePermissionMode::Ask;
+
+    match session_mode {
+        PermissionMode::BypassPermissions => "no tool asks in bypassPermissions, so remoteControl.permissionMode is not consulted; anything holding the relay token runs tools unattended"
+            .to_string(),
+        PermissionMode::Plan => {
+            "no tool asks in plan mode, so remoteControl.permissionMode is not consulted".to_string()
+        }
+        _ if remote_may_answer => "ask (a remote client may approve a tool)".to_string(),
+        _ => "local-only (a remote answer is refused)".to_string(),
     }
 }
 
@@ -379,5 +402,75 @@ mod resolved_relay_tests {
 
         assert_eq!(url, "https://dev.example (from the environment)");
         assert!(token.contains("environment"));
+    }
+}
+
+#[cfg(test)]
+mod permission_note_tests {
+    use super::*;
+    use claurst_core::config::{
+        PermissionMode, RemoteControlSettings, RemotePermissionMode, Settings,
+    };
+
+    fn settings_with(mode: RemotePermissionMode) -> Settings {
+        Settings {
+            remote_control: Some(RemoteControlSettings {
+                url: "https://relay.example".to_string(),
+                token: "a".repeat(claurst_core::config::MIN_REMOTE_TOKEN_LEN),
+                permission_mode: mode,
+                label: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn bypass_permissions_says_the_remote_setting_does_not_apply() {
+        let note = permission_note(
+            &settings_with(RemotePermissionMode::LocalOnly),
+            &PermissionMode::BypassPermissions,
+        );
+
+        assert!(
+            note.contains("not consulted"),
+            "local-only must not read as a protection that is not in force, got: {note}"
+        );
+    }
+
+    #[test]
+    fn plan_mode_says_the_remote_setting_does_not_apply() {
+        let note = permission_note(
+            &settings_with(RemotePermissionMode::Ask),
+            &PermissionMode::Plan,
+        );
+
+        assert!(note.contains("not consulted"));
+    }
+
+    #[test]
+    fn default_mode_reports_the_configured_remote_setting() {
+        assert!(permission_note(
+            &settings_with(RemotePermissionMode::Ask),
+            &PermissionMode::Default
+        )
+        .starts_with("ask"));
+        assert!(permission_note(
+            &settings_with(RemotePermissionMode::LocalOnly),
+            &PermissionMode::Default
+        )
+        .starts_with("local-only"));
+    }
+
+    #[test]
+    fn accept_edits_still_reports_the_remote_setting() {
+        let note = permission_note(
+            &settings_with(RemotePermissionMode::Ask),
+            &PermissionMode::AcceptEdits,
+        );
+
+        assert!(
+            note.starts_with("ask"),
+            "acceptEdits auto-allows Edit only, so other tools still ask, got: {note}"
+        );
     }
 }

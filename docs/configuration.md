@@ -89,7 +89,7 @@ Points the bridge at a relay you host yourself, so a phone or browser can drive 
 |-----------------|----------------|---------|-------------------------------------------------------------------------------------------------------------------|
 | `url`           | string         | unset   | Base address of your relay, for example `https://relay.example`. A trailing slash is trimmed.                     |
 | `token`         | string         | unset   | Shared secret, at least 32 characters. Shorter values are refused and the bridge does not start.                  |
-| `permissionMode`| string         | `"ask"` | `"ask"` lets a remote client approve a tool. `"local-only"` refuses a remote answer, so only the keyboard decides. |
+| `permissionMode`| string         | `"ask"` | `"ask"` lets a remote client approve a tool. `"local-only"` refuses a remote answer, so only the keyboard decides. Consulted only when `config.permission_mode` still asks, so it has no effect under `bypassPermissions` or `plan`. |
 | `label`         | string \| null | unset   | Name shown in the session list. Falls back to the machine's hostname.                                             |
 
 ```json
