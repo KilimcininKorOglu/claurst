@@ -4401,7 +4401,10 @@ async fn run_interactive(
                     app.pending_auto_submit = true;
                     remote_submit = true;
                 } else {
-                    app.set_prompt_text(content.clone());
+                    // The prompt box stays empty on purpose. The turn is
+                    // already visible in the transcript below, and a turn only
+                    // starts while the box is empty: text left here would
+                    // queue every later remote prompt for good.
                     let message = remote_user_message(&content, &attachments);
                     messages.push(message.clone());
                     app.push_message(message);
