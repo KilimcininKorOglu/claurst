@@ -175,6 +175,26 @@ async function loadSessions() {
     const button = document.createElement('button');
     button.type = 'button';
     button.append(label, meta);
+
+    // Third line only when the runner reports these; an older one sends
+    // nothing and its card should look exactly as it did before.
+    const facts = [session.model, session.permission_mode].filter(Boolean);
+    const spent = typeof session.cost_usd === 'number' ? money(session.cost_usd) : '';
+    if (facts.length > 0 || spent) {
+      const row = document.createElement('span');
+      row.className = 'facts';
+
+      const left = document.createElement('span');
+      left.textContent = facts.join(' · ');
+
+      const right = document.createElement('span');
+      right.className = 'spent';
+      right.textContent = spent;
+
+      row.append(left, right);
+      button.append(row);
+    }
+
     if (session.session_id === live.sessionId) {
       button.setAttribute('aria-current', 'true');
     }

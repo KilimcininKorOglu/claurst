@@ -252,6 +252,21 @@ input, textarea {
 
 .sessions .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
+/* Model and mode on the left, cost pinned right. Both quiet: the label is
+   what identifies the session, these only separate two that look alike. */
+.sessions .facts {
+  display: flex;
+  justify-content: space-between;
+  /* The card sets align-items: flex-start, so this row would shrink to its
+     content and the cost would float mid-card instead of ending it. */
+  width: 100%;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.sessions .spent { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
 #sessions-empty {
   margin: 0 auto;
   padding: 0 var(--gutter) var(--gutter);
