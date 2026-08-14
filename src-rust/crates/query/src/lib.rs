@@ -384,15 +384,6 @@ fn effective_output_style_for_turn(
     (config.output_style, config.output_style_prompt.clone())
 }
 
-/// Whether a fallback model could rescue this failure.
-///
-/// Only capacity problems qualify. A bad key or a malformed request fails the
-/// same way on any model, and retrying it there only doubles the wait.
-fn is_fallback_worthy(error: &str) -> bool {
-    let error = error.to_lowercase();
-    error.contains("overloaded") || error.contains("529") || error.contains("rate_limit")
-}
-
 /// Run the agentic query loop.
 ///
 /// This sends the conversation to the API, handles tool calls in a loop, and
@@ -820,9 +811,15 @@ pub async fn run_query_loop(
         // dispatch path, and the provider and model IDs are re-derived from
         // `effective_model` at the top of the loop, so the retry goes out as
         // the fallback. Defined as a macro because it must `continue`.
+        //
+        // Which failures qualify is the error type's own classification, not
+        // its prose. `ProviderError` and `ClaudeError` both answer
+        // `is_retryable`, and both are the capacity cases a second model can
+        // serve: a rate limit, an overload, a 5xx. Reading the message instead
+        // missed a 429, which renders as "Rate limited".
         macro_rules! try_fallback_model {
             ($err:expr) => {
-                if !used_fallback && is_fallback_worthy(&$err.to_string()) {
+                if !used_fallback && $err.is_retryable() {
                     if let Some(ref fb) = config.fallback_model {
                         warn!(
                             primary = %effective_model,
@@ -2206,28 +2203,58 @@ mod tests {
     use super::*;
     use claurst_api::SystemPrompt;
 
+    // The fallback switch fires on `is_retryable`. These pin that contract:
+    // narrowing either classification for some other reason would kill
+    // `--fallback-model` silently.
+
     #[test]
-    fn a_busy_model_is_worth_a_fallback() {
-        assert!(is_fallback_worthy("overloaded_error"));
-        assert!(is_fallback_worthy(
-            "[openai] Server error 529: 529 overloaded"
-        ));
-        assert!(is_fallback_worthy("rate_limit_exceeded"));
+    fn a_busy_provider_is_worth_a_fallback() {
+        use claurst_api::provider_error::ProviderError;
+        use claurst_core::provider_id::ProviderId;
+
+        assert!(ProviderError::RateLimited {
+            provider: ProviderId::new("openai"),
+            retry_after: None,
+        }
+        .is_retryable());
+        assert!(ProviderError::ServerError {
+            provider: ProviderId::new("openai"),
+            status: Some(529),
+            message: "overloaded".to_string(),
+            is_retryable: true,
+        }
+        .is_retryable());
     }
 
     #[test]
-    fn the_provider_s_capitalisation_does_not_matter() {
-        assert!(is_fallback_worthy("Overloaded"));
-        assert!(is_fallback_worthy("RATE_LIMIT"));
+    fn a_busy_anthropic_endpoint_is_worth_a_fallback() {
+        assert!(ClaudeError::RateLimit.is_retryable());
+        assert!(ClaudeError::ApiStatus {
+            status: 529,
+            message: "Overloaded".to_string(),
+        }
+        .is_retryable());
     }
 
     #[test]
     fn a_failure_the_fallback_would_share_is_not_worth_it() {
-        // A bad key or a malformed request fails the same way on any model,
+        use claurst_api::provider_error::ProviderError;
+        use claurst_core::provider_id::ProviderId;
+
+        // A bad key or a missing model fails the same way on the second model,
         // so switching only doubles the wait before the same error.
-        assert!(!is_fallback_worthy("500 internal server error"));
-        assert!(!is_fallback_worthy("invalid_api_key"));
-        assert!(!is_fallback_worthy("context length exceeded"));
+        assert!(!ProviderError::AuthFailed {
+            provider: ProviderId::new("openai"),
+            message: "invalid api key".to_string(),
+        }
+        .is_retryable());
+        assert!(!ProviderError::ModelNotFound {
+            provider: ProviderId::new("openai"),
+            model: "nope".to_string(),
+            suggestions: vec![],
+        }
+        .is_retryable());
+        assert!(!ClaudeError::Auth("invalid api key".to_string()).is_retryable());
     }
 
     #[test]
