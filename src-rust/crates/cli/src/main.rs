@@ -2703,6 +2703,10 @@ async fn run_interactive(
                             // anyone remembering to wire it up.
                             let status_before = app.status_message.clone();
                             let mut command_failed = false;
+                            // Raised by any arm that swaps the conversation out
+                            // from under the client, which then has to be told
+                            // what the transcript is now.
+                            let mut transcript_replaced = false;
 
                             // ── Step 1: TUI-layer intercept (overlays, toggles) ────────
                             // Run first so we know whether a UI overlay opened, which
@@ -2765,6 +2769,7 @@ async fn run_interactive(
                                     session.messages.clear();
                                     session.updated_at = chrono::Utc::now();
                                     app.status_message = Some("Conversation cleared.".to_string());
+                                    transcript_replaced = true;
                                 }
                                 Some(CommandResult::NewSession) => {
                                     // Fresh lazy-home session (opencode /new):
@@ -2799,6 +2804,7 @@ async fn run_interactive(
                                     );
                                     claurst_tui::update_terminal_title(None);
                                     app.status_message = Some("Started a new session.".to_string());
+                                    transcript_replaced = true;
                                 }
                                 Some(CommandResult::MoveSession {
                                     destination,
@@ -2850,6 +2856,7 @@ async fn run_interactive(
                                         removed,
                                         if removed == 1 { "" } else { "s" }
                                     ));
+                                    transcript_replaced = true;
                                 }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());
@@ -2903,6 +2910,7 @@ async fn run_interactive(
                                     claurst_tui::update_terminal_title(session.title.as_deref());
                                     app.status_message =
                                         Some(format!("Resumed session {}.", &session.id[..8]));
+                                    transcript_replaced = true;
                                 }
                                 Some(CommandResult::RenameSession(title)) => {
                                     session.title = Some(title.clone());
@@ -3180,6 +3188,22 @@ async fn run_interactive(
                                 app.status_message =
                                     Some(format!("Unknown command: /{}", cmd_name));
                                 command_failed = true;
+                            }
+
+                            // Ahead of the notice below, because a client treats
+                            // History as the whole transcript and replaces what
+                            // it has. Sent the other way round, it would wipe
+                            // the very notice explaining what just happened.
+                            //
+                            // Unconditional, unlike the connect-time send: an
+                            // empty transcript is exactly the message here.
+                            if transcript_replaced {
+                                if let Some(runtime) = bridge_runtime.as_ref() {
+                                    let (entries, omitted) = history_for_bridge(&messages);
+                                    let _ = runtime
+                                        .outbound_tx
+                                        .try_send(BridgeOutbound::History { entries, omitted });
+                                }
                             }
 
                             // The single point where a command's outcome leaves

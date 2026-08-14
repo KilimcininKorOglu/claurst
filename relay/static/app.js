@@ -515,8 +515,16 @@ function render(event) {
     }
 
     case 'history': {
-      // Sent once when the bridge connects. It describes what happened before
-      // this client could see anything, so it goes in ahead of live events.
+      // Authoritative: this is the transcript, not an addition to it. Sent on
+      // connect and again whenever the machine swaps the conversation out, so
+      // /clear, /new, /rewind and /resume all land here.
+      //
+      // Replacing rather than appending also makes a replay from the ring
+      // buffer harmless; appending would duplicate the whole transcript.
+      el.stream.replaceChildren();
+      live.bubbles.clear();
+      live.tools.clear();
+
       if (event.omitted > 0) {
         append(notice(`${event.omitted} earlier turn(s) not shown`));
       }
