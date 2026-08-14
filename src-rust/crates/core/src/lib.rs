@@ -4203,18 +4203,34 @@ pub mod cost {
                 .fetch_add(cache_read, Ordering::Relaxed);
         }
 
-        pub fn total_cost_usd(&self) -> f64 {
+        /// Price one usage sample at the tracker's current rates, without
+        /// touching the running totals.
+        ///
+        /// The remote client needs the cost of a single turn, and diffing the
+        /// running total across a turn misattributes cost whenever two turns
+        /// finish between reads.
+        pub fn cost_for(
+            &self,
+            input: u64,
+            output: u64,
+            cache_creation: u64,
+            cache_read: u64,
+        ) -> f64 {
             let pricing = *self.pricing.read();
-            let input = self.input_tokens.load(Ordering::Relaxed) as f64;
-            let output = self.output_tokens.load(Ordering::Relaxed) as f64;
-            let cache_creation = self.cache_creation_tokens.load(Ordering::Relaxed) as f64;
-            let cache_read = self.cache_read_tokens.load(Ordering::Relaxed) as f64;
-
-            (input * pricing.input_per_mtk
-                + output * pricing.output_per_mtk
-                + cache_creation * pricing.cache_creation_per_mtk
-                + cache_read * pricing.cache_read_per_mtk)
+            (input as f64 * pricing.input_per_mtk
+                + output as f64 * pricing.output_per_mtk
+                + cache_creation as f64 * pricing.cache_creation_per_mtk
+                + cache_read as f64 * pricing.cache_read_per_mtk)
                 / 1_000_000.0
+        }
+
+        pub fn total_cost_usd(&self) -> f64 {
+            self.cost_for(
+                self.input_tokens.load(Ordering::Relaxed),
+                self.output_tokens.load(Ordering::Relaxed),
+                self.cache_creation_tokens.load(Ordering::Relaxed),
+                self.cache_read_tokens.load(Ordering::Relaxed),
+            )
         }
 
         pub fn total_tokens(&self) -> u64 {
@@ -5725,6 +5741,31 @@ mod tests {
         let tracker = CostTracker::new();
         assert_eq!(tracker.input_tokens(), 0);
         assert_eq!(tracker.output_tokens(), 0);
+        assert_eq!(tracker.total_cost_usd(), 0.0);
+    }
+
+    #[test]
+    fn pricing_one_sample_matches_accumulating_it() {
+        // The remote client prices a single turn through `cost_for`. If that
+        // ever diverged from the running total, the per-turn figures on a
+        // phone would not add up to the session figure beside them.
+        let tracker = CostTracker::with_model("claude-sonnet-4-5");
+        let sample = tracker.cost_for(1000, 500, 200, 100);
+        tracker.add_usage(1000, 500, 200, 100);
+        assert_eq!(sample, tracker.total_cost_usd());
+    }
+
+    #[test]
+    fn pricing_no_tokens_costs_nothing() {
+        let tracker = CostTracker::with_model("claude-sonnet-4-5");
+        assert_eq!(tracker.cost_for(0, 0, 0, 0), 0.0);
+    }
+
+    #[test]
+    fn pricing_one_sample_leaves_the_running_total_alone() {
+        let tracker = CostTracker::with_model("claude-sonnet-4-5");
+        tracker.cost_for(9_000, 9_000, 9_000, 9_000);
+        assert_eq!(tracker.total_tokens(), 0);
         assert_eq!(tracker.total_cost_usd(), 0.0);
     }
 

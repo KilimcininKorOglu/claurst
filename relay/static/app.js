@@ -367,6 +367,56 @@ function notice(text, bad) {
   return node;
 }
 
+/** Format a cost with enough precision that a cheap turn is not shown as $0.00. */
+function money(value) {
+  return `$${value.toFixed(4)}`;
+}
+
+/**
+ * Bind a figure to its label with a non-breaking space.
+ *
+ * The usage line wraps on a phone. Without this it breaks between the two and
+ * leaves a bare "total" alone on the second row.
+ */
+function labelled(figure, label) {
+  // U+00A0 written as an escape: an invisible byte here would defeat a
+  // later grep for this line.
+  return `${figure}\u00a0${label}`;
+}
+
+/**
+ * Build the token and cost line shown under a finished turn.
+ *
+ * Returns null when the turn spent nothing, so a slash-command reply does not
+ * get a row of zeroes claiming it cost something to run.
+ */
+function usageLine(usage) {
+  if (!usage) {
+    return null;
+  }
+  const parts = [
+    labelled((usage.input_tokens || 0).toLocaleString(), 'in'),
+    labelled((usage.output_tokens || 0).toLocaleString(), 'out'),
+  ];
+  // Creation and read are priced differently but read as one number here; the
+  // wire keeps them apart so a future view can split them.
+  const cached = (usage.cache_creation_tokens || 0) + (usage.cache_read_tokens || 0);
+  if (cached > 0) {
+    parts.push(labelled(cached.toLocaleString(), 'cached'));
+  }
+  if (typeof usage.cost_usd === 'number') {
+    parts.push(labelled(money(usage.cost_usd), 'turn'));
+  }
+  if (typeof usage.session_cost_usd === 'number') {
+    parts.push(labelled(money(usage.session_cost_usd), 'total'));
+  }
+
+  const node = document.createElement('p');
+  node.className = 'usage';
+  node.textContent = parts.join(' · ');
+  return node;
+}
+
 function render(event) {
   switch (event.type) {
     case 'text_delta': {
@@ -464,11 +514,18 @@ function render(event) {
       showQuestion(event);
       break;
 
-    case 'turn_complete':
+    case 'turn_complete': {
       // A new turn must not append to the finished bubble.
       live.bubbles.delete(event.message_id);
       el.send.disabled = false;
+      // A sibling, not a child: the bubble accumulates through
+      // `textContent +=`, which would wipe any element inside it.
+      const spent = usageLine(event.usage);
+      if (spent) {
+        append(spent);
+      }
       break;
+    }
 
     case 'error':
       append(notice(event.message, true));

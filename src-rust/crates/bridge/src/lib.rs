@@ -342,9 +342,19 @@ pub struct BridgeHistoryEntry {
 /// Token-budget / cost summary attached to `TurnComplete`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeUsage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Kept apart from `cache_read_tokens` because the two are priced
+    /// differently, even though a client may show them as one figure.
+    #[serde(default)]
+    pub cache_creation_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    /// Cost of this turn alone.
     pub cost_usd: Option<f64>,
+    /// Cost of the whole session up to and including this turn.
+    #[serde(default)]
+    pub session_cost_usd: Option<f64>,
 }
 
 /// Session connection state broadcast to the web UI.
@@ -1390,6 +1400,9 @@ pub enum BridgeOutbound {
     TurnComplete {
         message_id: String,
         stop_reason: String,
+        /// Absent for a turn that spent no tokens, such as the reply to a
+        /// slash command.
+        usage: Option<BridgeUsage>,
     },
     Error {
         message: String,
@@ -1691,12 +1704,16 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
-                    Some(BridgeOutbound::TurnComplete { message_id, stop_reason }) => {
+                    Some(BridgeOutbound::TurnComplete {
+                        message_id,
+                        stop_reason,
+                        usage,
+                    }) => {
                         let _ = bridge_ev_tx
                             .send(BridgeEvent::TurnComplete {
                                 message_id,
                                 stop_reason,
-                                usage: None,
+                                usage,
                             })
                             .await;
                     }
@@ -1944,5 +1961,61 @@ mod tests {
         };
         let j = serde_json::to_string(&ev).unwrap();
         assert!(j.contains(r#""type":"pong""#));
+    }
+
+    #[test]
+    fn a_completed_turn_carries_every_usage_figure() {
+        let ev = BridgeEvent::TurnComplete {
+            message_id: "turn-3".into(),
+            stop_reason: "end_turn".into(),
+            usage: Some(BridgeUsage {
+                input_tokens: 1_240,
+                output_tokens: 380,
+                cache_creation_tokens: 2_048,
+                cache_read_tokens: 10_752,
+                cost_usd: Some(0.0038),
+                session_cost_usd: Some(0.0421),
+            }),
+        };
+        let j = serde_json::to_string(&ev).unwrap();
+        assert!(j.contains(r#""type":"turn_complete""#));
+        for field in [
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_tokens",
+            "cache_read_tokens",
+            "cost_usd",
+            "session_cost_usd",
+        ] {
+            assert!(j.contains(field), "{field} missing from {j}");
+        }
+
+        // The client keys off the presence of `usage`, so it has to survive a
+        // round trip rather than be reconstructed from defaults.
+        let back: BridgeEvent = serde_json::from_str(&j).unwrap();
+        match back {
+            BridgeEvent::TurnComplete { usage: Some(u), .. } => {
+                assert_eq!(u.cache_read_tokens, 10_752);
+                assert_eq!(u.session_cost_usd, Some(0.0421));
+            }
+            other => panic!("expected a turn_complete carrying usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_turn_that_spent_nothing_reports_no_usage() {
+        // A slash-command reply takes this path. Sending zeroed figures would
+        // claim the turn cost nothing when it was never a model turn at all.
+        let ev = BridgeEvent::TurnComplete {
+            message_id: "cmd-1".into(),
+            stop_reason: "command".into(),
+            usage: None,
+        };
+        let j = serde_json::to_string(&ev).unwrap();
+        let back: BridgeEvent = serde_json::from_str(&j).unwrap();
+        assert!(matches!(
+            back,
+            BridgeEvent::TurnComplete { usage: None, .. }
+        ));
     }
 }

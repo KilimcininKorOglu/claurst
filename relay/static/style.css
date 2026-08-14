@@ -332,6 +332,18 @@ input, textarea {
 .notice { color: var(--muted); font-size: 13px; text-align: center; }
 .notice.bad { color: var(--danger); }
 
+/* Token and cost figures under a finished turn. Quieter than a notice and
+   right-aligned, so it reads as a footnote to the answer above it rather
+   than as something the session is telling you. */
+.usage {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  margin: -4px 0 0;
+  overflow-wrap: anywhere;
+}
+
 /* Permission card */
 
 .permission {

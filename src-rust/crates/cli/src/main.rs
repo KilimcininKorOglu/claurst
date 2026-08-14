@@ -2979,6 +2979,10 @@ async fn run_interactive(
                                                 BridgeOutbound::TurnComplete {
                                                     message_id: id,
                                                     stop_reason: "command".to_string(),
+                                                    // A command reply is not a
+                                                    // model turn and spends no
+                                                    // tokens.
+                                                    usage: None,
                                                 },
                                             );
                                         }
@@ -3661,10 +3665,25 @@ async fn run_interactive(
                         is_error: *is_error,
                     }),
                     QueryEvent::TurnComplete {
-                        stop_reason, turn, ..
+                        stop_reason,
+                        turn,
+                        usage,
                     } => Some(BridgeOutbound::TurnComplete {
                         message_id: format!("turn-{}", turn),
                         stop_reason: stop_reason.clone(),
+                        usage: usage.as_ref().map(|u| claurst_bridge::BridgeUsage {
+                            input_tokens: u.input_tokens,
+                            output_tokens: u.output_tokens,
+                            cache_creation_tokens: u.cache_creation_input_tokens,
+                            cache_read_tokens: u.cache_read_input_tokens,
+                            cost_usd: Some(cost_tracker.cost_for(
+                                u.input_tokens,
+                                u.output_tokens,
+                                u.cache_creation_input_tokens,
+                                u.cache_read_input_tokens,
+                            )),
+                            session_cost_usd: Some(cost_tracker.total_cost_usd()),
+                        }),
                     }),
                     QueryEvent::Error(msg) => Some(BridgeOutbound::Error {
                         message: msg.clone(),
