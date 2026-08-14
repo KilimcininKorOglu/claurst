@@ -1918,6 +1918,23 @@ const BRIDGE_HISTORY_TURNS: usize = 40;
 /// Characters kept per turn in the backfill.
 const BRIDGE_HISTORY_CHARS: usize = 4_000;
 
+/// Whether the session can turn a queued remote prompt into a turn right now.
+///
+/// Kept as a free function over plain booleans so the rule can be tested
+/// without standing up an `App`, and so both the decision and its reasons stay
+/// in one place rather than being spelled out at the call site.
+fn remote_turn_can_start(
+    is_streaming: bool,
+    query_in_flight: bool,
+    blocking_modal: bool,
+    prompt_box_empty: bool,
+) -> bool {
+    // `query_in_flight` is checked separately from `is_streaming`: the flag is
+    // cleared as soon as the last event arrives, while the task is still being
+    // joined, and starting a turn in that window would leak the handle.
+    !is_streaming && !query_in_flight && !blocking_modal && prompt_box_empty
+}
+
 /// Describe a project MCP server awaiting trust, for a remote client.
 ///
 /// Sent both when the prompt opens and again when a client connects to a
@@ -2409,6 +2426,17 @@ async fn run_interactive(
     // Same correlation for the project-MCP trust prompt, which has its own
     // dialog and settle path rather than going through `PermissionManager`.
     let mut pending_mcp_approval_id: Option<String> = None;
+
+    // Remote prompts waiting for the session to be able to take one.
+    //
+    // Both inbound paths park here rather than starting a turn themselves.
+    // They used to each carry their own copy of the spawn code, and the copies
+    // had drifted: one started a second concurrent query on top of a running
+    // one, the other dropped the prompt without a trace.
+    let mut deferred_remote_prompts: std::collections::VecDeque<(
+        String,
+        Vec<claurst_bridge::BridgeAttachment>,
+    )> = std::collections::VecDeque::new();
 
     // Last busy state pushed to the remote client, so only transitions are
     // sent rather than one event per loop iteration.
@@ -4052,67 +4080,10 @@ async fn run_interactive(
                         attachments,
                         ..
                     }) => {
-                        // A slash command has to go through the keyboard submit
-                        // path, or it reaches the model as plain text. That path
-                        // runs on a synthesised Enter, so hand the text over and
-                        // let it fire rather than reimplementing 400 lines of
-                        // command handling that would then drift.
-                        if content.trim_start().starts_with('/') {
-                            if app.is_streaming || !app.prompt_input.text.is_empty() {
-                                // Busy, or the local user is mid-sentence. Queue it
-                                // exactly as a local message typed during a turn.
-                                app.queued_messages.push_back(content);
-                            } else {
-                                app.set_prompt_text(content);
-                                app.pending_auto_submit = true;
-                            }
-                            continue;
-                        }
-
-                        // Inject the remote prompt as if the user typed it, then
-                        // trigger submission automatically.
-                        app.set_prompt_text(content.clone());
-                        // Push as a user message and fire a query immediately.
-                        let message = remote_user_message(&content, &attachments);
-                        messages.push(message.clone());
-                        app.push_message(message);
-                        session.messages = messages.clone();
-                        session.updated_at = chrono::Utc::now();
-                        app.is_streaming = true;
-                        app.streaming_text.clear();
-                        let ct = CancellationToken::new();
-                        cancel = Some(ct.clone());
-                        let msgs_arc = Arc::new(tokio::sync::Mutex::new(messages.clone()));
-                        let msgs_arc_clone = msgs_arc.clone();
-                        let tools_arc_clone = tools_arc.clone();
-                        let ctx_clone = tool_ctx.clone();
-                        let mut qcfg = base_query_config.clone();
-                        qcfg.model = claurst_api::effective_model_for_config(
-                            &cmd_ctx.config,
-                            &model_registry,
-                        );
-                        qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
-                        let tracker = cost_tracker.clone();
-                        let tx = event_tx.clone();
-                        let client_clone = client.clone();
-                        let handle = tokio::spawn(async move {
-                            let mut msgs = msgs_arc_clone.lock().await.clone();
-                            let outcome = claurst_query::run_query_loop(
-                                client_clone.as_ref(),
-                                &mut msgs,
-                                tools_arc_clone.as_slice(),
-                                &ctx_clone,
-                                &qcfg,
-                                tracker,
-                                Some(tx),
-                                ct,
-                                None,
-                            )
-                            .await;
-                            *msgs_arc_clone.lock().await = msgs;
-                            outcome
-                        });
-                        current_query = Some((handle, msgs_arc));
+                        // Park it. Starting the turn from here is what let a
+                        // prompt arriving mid-turn spawn a second query on top
+                        // of the running one.
+                        deferred_remote_prompts.push_back((content, attachments));
                     }
                     Ok(TuiBridgeEvent::Cancelled) => {
                         if app.is_streaming {
@@ -4217,50 +4188,72 @@ async fn run_interactive(
             bridge_runtime = None;
         }
 
-        // Drain inbound prompts from the BridgeSessionInfo poll task.
-        // These are user messages received from the web UI via poll_bridge_messages
-        // and injected here just like TuiBridgeEvent::InboundPrompt.
+        // Prompts from the supplementary `/api/bridge/sessions` poll task join
+        // the same queue as the primary protocol's. This path used to drop a
+        // prompt with no trace whenever a turn was already running.
         while let Ok(content) = remote_prompt_rx.try_recv() {
-            if !app.is_streaming {
-                app.set_prompt_text(content.clone());
-                messages.push(claurst_core::types::Message::user(content.clone()));
-                app.push_message(claurst_core::types::Message::user(content.clone()));
-                session.messages = messages.clone();
-                session.updated_at = chrono::Utc::now();
-                app.is_streaming = true;
-                app.streaming_text.clear();
-                let ct = CancellationToken::new();
-                cancel = Some(ct.clone());
-                let msgs_arc = Arc::new(tokio::sync::Mutex::new(messages.clone()));
-                let msgs_arc_clone = msgs_arc.clone();
-                let tools_arc_clone = tools_arc.clone();
-                let ctx_clone = tool_ctx.clone();
-                let mut qcfg = base_query_config.clone();
-                qcfg.model =
-                    claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
-                qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
-                let tracker = cost_tracker.clone();
-                let tx = event_tx.clone();
-                let client_clone = client.clone();
-                let handle = tokio::spawn(async move {
-                    let mut msgs = msgs_arc_clone.lock().await.clone();
-                    let outcome = claurst_query::run_query_loop(
-                        client_clone.as_ref(),
-                        &mut msgs,
-                        tools_arc_clone.as_slice(),
-                        &ctx_clone,
-                        &qcfg,
-                        tracker,
-                        Some(tx),
-                        ct,
-                        None,
-                    )
-                    .await;
-                    *msgs_arc_clone.lock().await = msgs;
-                    outcome
-                });
-                current_query = Some((handle, msgs_arc));
-                break; // process one prompt per frame
+            deferred_remote_prompts.push_back((content, Vec::new()));
+        }
+
+        // The one place a remote prompt becomes a turn.
+        if !deferred_remote_prompts.is_empty()
+            && remote_turn_can_start(
+                app.is_streaming,
+                current_query.is_some(),
+                app.blocking_modal_open(),
+                app.prompt_input.text.is_empty(),
+            )
+        {
+            if let Some((content, attachments)) = deferred_remote_prompts.pop_front() {
+                if content.trim_start().starts_with('/') {
+                    // A slash command has to go through the keyboard submit
+                    // path, or it reaches the model as plain text. That path
+                    // runs on a synthesised Enter, so hand the text over and
+                    // let it fire rather than reimplementing 400 lines of
+                    // command handling that would then drift.
+                    app.set_prompt_text(content);
+                    app.pending_auto_submit = true;
+                } else {
+                    app.set_prompt_text(content.clone());
+                    let message = remote_user_message(&content, &attachments);
+                    messages.push(message.clone());
+                    app.push_message(message);
+                    session.messages = messages.clone();
+                    session.updated_at = chrono::Utc::now();
+                    app.is_streaming = true;
+                    app.streaming_text.clear();
+                    let ct = CancellationToken::new();
+                    cancel = Some(ct.clone());
+                    let msgs_arc = Arc::new(tokio::sync::Mutex::new(messages.clone()));
+                    let msgs_arc_clone = msgs_arc.clone();
+                    let tools_arc_clone = tools_arc.clone();
+                    let ctx_clone = tool_ctx.clone();
+                    let mut qcfg = base_query_config.clone();
+                    qcfg.model =
+                        claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
+                    qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
+                    let tracker = cost_tracker.clone();
+                    let tx = event_tx.clone();
+                    let client_clone = client.clone();
+                    let handle = tokio::spawn(async move {
+                        let mut msgs = msgs_arc_clone.lock().await.clone();
+                        let outcome = claurst_query::run_query_loop(
+                            client_clone.as_ref(),
+                            &mut msgs,
+                            tools_arc_clone.as_slice(),
+                            &ctx_clone,
+                            &qcfg,
+                            tracker,
+                            Some(tx),
+                            ct,
+                            None,
+                        )
+                        .await;
+                        *msgs_arc_clone.lock().await = msgs;
+                        outcome
+                    });
+                    current_query = Some((handle, msgs_arc));
+                }
             }
         }
 
@@ -5887,6 +5880,29 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_turn_gate_tests {
+    use super::remote_turn_can_start;
+
+    #[test]
+    fn an_idle_session_with_an_empty_prompt_box_starts_the_turn() {
+        assert!(remote_turn_can_start(false, false, false, true));
+    }
+
+    #[test]
+    fn each_condition_alone_is_enough_to_hold_the_prompt() {
+        // Streaming: a second query would run alongside the first and both
+        // would write to the same event channel.
+        assert!(!remote_turn_can_start(true, false, false, true));
+        // Still joining the previous task: starting now leaks its handle.
+        assert!(!remote_turn_can_start(false, true, false, true));
+        // Something on screen is waiting for a decision.
+        assert!(!remote_turn_can_start(false, false, true, true));
+        // The local user is mid-sentence; submitting would discard their text.
+        assert!(!remote_turn_can_start(false, false, false, false));
     }
 }
 

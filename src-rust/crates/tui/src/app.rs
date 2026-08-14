@@ -2827,6 +2827,24 @@ impl App {
         self.theme_screen.close();
     }
 
+    /// Whether something on screen is waiting for a decision before the
+    /// session can move on.
+    ///
+    /// Narrower than [`Self::any_modal_open`] on purpose. That one counts every
+    /// overlay, including toggles like the context visualiser that a user can
+    /// leave open indefinitely; gating remote work on it would let an open
+    /// picker silently kill remote control until someone returns to the
+    /// terminal. Only prompts that block progress belong here.
+    pub fn blocking_modal_open(&self) -> bool {
+        self.permission_request.is_some()
+            || self.ask_user_dialog.visible
+            || self.mcp_approval.visible
+            || self.bypass_permissions_dialog.visible
+            || self.onboarding_dialog.visible
+            || self.invalid_config_dialog.visible
+            || self.elicitation.visible
+    }
+
     pub fn any_modal_open(&self) -> bool {
         self.permission_request.is_some()
             || self.rewind_flow.visible
