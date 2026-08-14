@@ -1,5 +1,11 @@
 services:
   relay:
+    # Built from the source beside this file on purpose. The token this service
+    # accepts is a remote command-execution credential, so running a binary you
+    # compiled from source you can read is the safer default.
+    #
+    # To pull a prebuilt image instead, comment out `build` and swap `image`:
+    #   image: ghcr.io/kilimcininkoroglu/claurst-relay:main
     build: .
     image: claurst-relay:local
     container_name: claurst-relay
