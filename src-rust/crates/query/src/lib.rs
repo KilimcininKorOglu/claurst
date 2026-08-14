@@ -384,6 +384,15 @@ fn effective_output_style_for_turn(
     (config.output_style, config.output_style_prompt.clone())
 }
 
+/// Whether a fallback model could rescue this failure.
+///
+/// Only capacity problems qualify. A bad key or a malformed request fails the
+/// same way on any model, and retrying it there only doubles the wait.
+fn is_fallback_worthy(error: &str) -> bool {
+    let error = error.to_lowercase();
+    error.contains("overloaded") || error.contains("529") || error.contains("rate_limit")
+}
+
 /// Run the agentic query loop.
 ///
 /// This sends the conversation to the API, handles tool calls in a loop, and
@@ -807,6 +816,34 @@ pub async fn run_query_loop(
             Arc::new(claurst_api::streaming::NullStreamHandler)
         };
 
+        // Switching to the fallback model is the same decision on either
+        // dispatch path, and the provider and model IDs are re-derived from
+        // `effective_model` at the top of the loop, so the retry goes out as
+        // the fallback. Defined as a macro because it must `continue`.
+        macro_rules! try_fallback_model {
+            ($err:expr) => {
+                if !used_fallback && is_fallback_worthy(&$err.to_string()) {
+                    if let Some(ref fb) = config.fallback_model {
+                        warn!(
+                            primary = %effective_model,
+                            fallback = %fb,
+                            "Primary model unavailable — switching to fallback"
+                        );
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(QueryEvent::Status(format!(
+                                "Model unavailable — switching to fallback ({})",
+                                fb
+                            )));
+                        }
+                        effective_model = fb.clone();
+                        used_fallback = true;
+                        turn -= 1; // don't count this attempt against max_turns
+                        continue;
+                    }
+                }
+            };
+        }
+
         // Non-Anthropic provider dispatch: if the model is "provider/model"
         // format and the registry has that provider, use it directly.
         //
@@ -1071,6 +1108,7 @@ pub async fn run_query_loop(
                     let mut stream = match provider.create_message_stream(provider_request).await {
                         Ok(s) => s,
                         Err(e) => {
+                            try_fallback_model!(e);
                             error!(provider = %provider_id_str, error = %e, "Provider stream failed");
                             return QueryOutcome::Error(claurst_core::error::ClaudeError::Api(
                                 e.to_string(),
@@ -1469,31 +1507,7 @@ pub async fn run_query_loop(
         let mut stream_rx = match client.create_message_stream(request, handler).await {
             Ok(rx) => rx,
             Err(e) => {
-                // On overloaded/rate-limit errors, attempt one switch to the fallback model.
-                let err_str = e.to_string().to_lowercase();
-                if !used_fallback
-                    && (err_str.contains("overloaded")
-                        || err_str.contains("529")
-                        || err_str.contains("rate_limit"))
-                {
-                    if let Some(ref fb) = config.fallback_model {
-                        warn!(
-                            primary = %effective_model,
-                            fallback = %fb,
-                            "Primary model unavailable — switching to fallback"
-                        );
-                        if let Some(ref tx) = event_tx {
-                            let _ = tx.send(QueryEvent::Status(format!(
-                                "Model unavailable — switching to fallback ({})",
-                                fb
-                            )));
-                        }
-                        effective_model = fb.clone();
-                        used_fallback = true;
-                        turn -= 1; // don't count this attempt against max_turns
-                        continue;
-                    }
-                }
+                try_fallback_model!(e);
                 error!(error = %e, "API request failed");
                 return QueryOutcome::Error(e);
             }
@@ -2191,6 +2205,30 @@ impl StreamHandler for ChannelStreamHandler {
 mod tests {
     use super::*;
     use claurst_api::SystemPrompt;
+
+    #[test]
+    fn a_busy_model_is_worth_a_fallback() {
+        assert!(is_fallback_worthy("overloaded_error"));
+        assert!(is_fallback_worthy(
+            "[openai] Server error 529: 529 overloaded"
+        ));
+        assert!(is_fallback_worthy("rate_limit_exceeded"));
+    }
+
+    #[test]
+    fn the_provider_s_capitalisation_does_not_matter() {
+        assert!(is_fallback_worthy("Overloaded"));
+        assert!(is_fallback_worthy("RATE_LIMIT"));
+    }
+
+    #[test]
+    fn a_failure_the_fallback_would_share_is_not_worth_it() {
+        // A bad key or a malformed request fails the same way on any model,
+        // so switching only doubles the wait before the same error.
+        assert!(!is_fallback_worthy("500 internal server error"));
+        assert!(!is_fallback_worthy("invalid_api_key"));
+        assert!(!is_fallback_worthy("context length exceeded"));
+    }
 
     #[test]
     fn final_stream_usage_supplies_prompt_tokens_to_turn_usage() {
