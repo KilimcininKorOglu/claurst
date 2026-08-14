@@ -984,6 +984,19 @@ pub fn get_companion(user_id: &str, config_dir: &Path) -> Companion {
 // Intro / prompt helpers (mirrors prompt.ts)
 // ---------------------------------------------------------------------------
 
+/// The system-prompt block describing a companion, or `None` when it has not
+/// hatched yet.
+///
+/// An unhatched companion is never described: its name is what the model is
+/// told to watch for, and before the first hatch there is no name.
+pub fn intro_for(companion: &Companion) -> Option<String> {
+    let soul = companion.soul.as_ref()?;
+    Some(companion_intro_text(
+        &soul.name,
+        companion.bones.species.as_str(),
+    ))
+}
+
 /// System-prompt fragment injected when a companion is active.
 pub fn companion_intro_text(name: &str, species: &str) -> String {
     format!(

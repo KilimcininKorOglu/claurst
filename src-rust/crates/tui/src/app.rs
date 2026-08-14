@@ -1283,6 +1283,19 @@ pub struct App {
     pub rustle_temp_pose: Option<crate::rustle::RustlePose>,
     /// Frame counter at which the next random eye-shift should fire.
     pub rustle_next_blink: u64,
+    /// The companion shown beside the input box, or `None` when `/buddy` is
+    /// off or the companion has never been hatched.
+    ///
+    /// Not the same creature as `rustle_current_pose` above: that is the
+    /// welcome-screen mascot, this one is per-user and comes from
+    /// `claurst-buddy`.
+    pub companion: Option<claurst_buddy::Companion>,
+    /// What the companion is saying right now, shown above the prompt box.
+    ///
+    /// Set only when the user addressed the companion by name, and cleared on
+    /// the next submit. There is no idle chatter: every line costs a model
+    /// call, so the companion speaks when spoken to.
+    pub companion_bubble: Option<String>,
     /// Instant the current turn's streaming began (reset each time streaming starts).
     pub turn_start: Option<std::time::Instant>,
     /// Elapsed time string for the last completed turn, e.g. "2m 5s".
@@ -1721,6 +1734,8 @@ impl App {
                     .unwrap_or_default()
                     .subsec_nanos() as u64
                     % 300),
+            companion: None,
+            companion_bubble: None,
             turn_start: None,
             last_turn_elapsed: None,
             last_turn_verb: None,
@@ -2393,6 +2408,55 @@ impl App {
         }
 
         self.rustle_current_pose = crate::rustle::RustlePose::Default;
+    }
+
+    /// Read the companion from settings and disk into [`App::companion`].
+    ///
+    /// Called at startup and whenever a command reports a config change, so
+    /// `/buddy on` and a first hatch both take effect without a restart. Reads
+    /// two files, so it must not be called per frame.
+    ///
+    /// An unhatched companion is not shown. Its body exists, but the sprite
+    /// beside the input box with no name behind it invites the user to talk to
+    /// something that cannot answer.
+    pub fn reload_companion(&mut self) {
+        self.companion = None;
+        if !self.config.companion.as_ref().is_some_and(|c| c.enabled) {
+            return;
+        }
+        let identity = claurst_core::accounts::stable_identity();
+        let companion = claurst_buddy::get_companion(&identity, &claurst_core::claurst_home());
+        if companion.soul.is_some() {
+            self.companion = Some(companion);
+        }
+    }
+
+    /// Describe the companion to the model, or `None` when there is none.
+    ///
+    /// The model has to know the companion exists. Without this it narrates
+    /// what the companion might say while the bubble is saying it.
+    pub fn companion_addendum(&self) -> Option<String> {
+        claurst_buddy::intro_for(self.companion.as_ref()?)
+    }
+
+    /// The companion's name when the given text addresses it, else `None`.
+    ///
+    /// The name has to be a word of its own, so surrounding punctuation is
+    /// stripped but the rest of the word is not. Checking for a bare substring
+    /// would have a companion called Mossback answer every message that
+    /// mentions `src/mossback.rs`, and each answer is a model call the user
+    /// pays for.
+    pub fn companion_addressed_in(&self, text: &str) -> Option<&str> {
+        let name = self.companion.as_ref()?.soul.as_ref()?.name.as_str();
+        if name.trim().is_empty() {
+            return None;
+        }
+        let needle = name.to_lowercase();
+
+        text.split_whitespace()
+            .map(|word| word.trim_matches(|c: char| !c.is_alphanumeric()))
+            .any(|word| word.to_lowercase() == needle)
+            .then_some(name)
     }
 
     /// Trigger Rustle looking down briefly (called on Tab / mode switch).
@@ -7678,6 +7742,78 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    // ---- companion (the /buddy creature beside the input box) ----
+
+    fn app_with_companion_named(name: &str) -> App {
+        let mut app = make_app();
+        let mut companion = claurst_buddy::Companion::new("app-test", None);
+        companion.soul = Some(claurst_buddy::CompanionSoul {
+            name: name.to_string(),
+            personality: "naps through every outage".to_string(),
+            hatched_at: chrono::Utc::now(),
+        });
+        app.companion = Some(companion);
+        app
+    }
+
+    #[test]
+    fn the_companion_answers_when_it_is_named() {
+        let app = app_with_companion_named("Mossback");
+        for prompt in [
+            "mossback, what do you think?",
+            "Mossback what do you think",
+            "hey MOSSBACK",
+            "what does mossback say?",
+            "(mossback)",
+            "mossback!",
+            "ask mossback.",
+        ] {
+            assert_eq!(
+                app.companion_addressed_in(prompt),
+                Some("Mossback"),
+                "should have answered: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_prompt_that_does_not_name_the_companion_costs_nothing() {
+        let app = app_with_companion_named("Mossback");
+        for prompt in [
+            "fix the failing test",
+            "read src/mossback.rs",
+            "the mossbacks are wrong",
+            "unmossback the config",
+            "",
+        ] {
+            assert_eq!(
+                app.companion_addressed_in(prompt),
+                None,
+                "should have stayed quiet: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_buried_in_a_word_is_found_only_where_it_stands_alone() {
+        // A short name is the hard case: it appears inside longer words all
+        // the time, and each false hit costs a model call.
+        let app = app_with_companion_named("Moss");
+        assert_eq!(app.companion_addressed_in("mossback mossy"), None);
+        assert_eq!(app.companion_addressed_in("mossback moss"), Some("Moss"));
+    }
+
+    #[test]
+    fn no_companion_means_no_trigger() {
+        let app = make_app();
+        assert_eq!(app.companion_addressed_in("mossback are you there"), None);
+
+        // Hatched but nameless cannot be addressed either.
+        let mut unnamed = make_app();
+        unnamed.companion = Some(claurst_buddy::Companion::new("app-test", None));
+        assert_eq!(unnamed.companion_addressed_in("anything"), None);
     }
 
     // ---- recent-activity label (issue #277) ----

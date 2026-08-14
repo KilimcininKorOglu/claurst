@@ -32,6 +32,7 @@ pub fn build_system_prompt(config: &QueryConfig) -> SystemPrompt {
         // Forward the session's enabled tool set so per-tool guideline blocks
         // are only emitted for tools that are actually loaded (issue #233).
         enabled_tools: config.enabled_tools.clone(),
+        companion_addendum: config.companion_addendum.clone(),
         ..Default::default()
     };
 

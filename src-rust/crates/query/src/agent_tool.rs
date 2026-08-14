@@ -377,6 +377,9 @@ impl Tool for AgentTool {
             // Sub-agents run to their own completion and never drive goal
             // continuation — stop after one turn like every non-goal run.
             continuation: crate::continuation::ContinuationMode::Default,
+            // The companion sits beside the user's input box. A sub-agent has
+            // no input box, so describing it would only spend tokens.
+            companion_addendum: None,
         };
         // -----------------------------------------------------------------------
         // Background mode: spawn and return agent_id immediately.

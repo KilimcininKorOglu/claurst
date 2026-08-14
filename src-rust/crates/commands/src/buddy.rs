@@ -68,18 +68,24 @@ fn set_enabled(ctx: &CommandContext, enabled: bool) -> CommandResult {
 
     let mut companion = settings.companion.take().unwrap_or_default();
     companion.enabled = enabled;
-    settings.companion = Some(companion);
+    settings.companion = Some(companion.clone());
 
     if let Err(e) = settings.save_sync() {
         return CommandResult::Error(format!("Could not save settings: {e}"));
     }
+
+    // The live `Config` carries the same value, and the running session reads
+    // it from there. Writing only the settings file would leave the companion
+    // off until the next launch.
+    let mut config = ctx.config.clone();
+    config.companion = Some(companion);
 
     let message = if enabled {
         "Companion on. It appears beside the input box, and the model is told it is there."
     } else {
         "Companion off."
     };
-    CommandResult::ConfigChangeMessage(ctx.config.clone(), message.to_string())
+    CommandResult::ConfigChangeMessage(config, message.to_string())
 }
 
 /// Discard the stored soul. The bones are untouched because they are not
@@ -108,6 +114,7 @@ async fn show(ctx: &CommandContext) -> CommandResult {
     // An unhatched companion is shown either way. The bones exist without the
     // model, so a provider that is not reachable costs the name, not the card.
     let mut note = String::new();
+    let mut hatched = false;
     if companion.soul.is_none() {
         match hatch(ctx, &companion).await {
             Ok(soul) => {
@@ -115,6 +122,7 @@ async fn show(ctx: &CommandContext) -> CommandResult {
                     note = format!("\n\nHatched, but could not save companion.json: {e}");
                 }
                 companion.soul = Some(soul);
+                hatched = true;
             }
             Err(e) => {
                 note = format!(
@@ -125,7 +133,15 @@ async fn show(ctx: &CommandContext) -> CommandResult {
         }
     }
 
-    CommandResult::Message(format!("{}{note}", card(&companion)))
+    let card = format!("{}{note}", card(&companion));
+    if hatched {
+        // A hatch changes what the session caches: the sprite beside the input
+        // box and the name the model is told to watch for. Report it as a
+        // config change so both are picked up without a restart.
+        CommandResult::ConfigChangeMessage(ctx.config.clone(), card)
+    } else {
+        CommandResult::Message(card)
+    }
 }
 
 /// Render the companion card: sprite, identity line, and stats.
@@ -273,6 +289,92 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
     parse_soul(&text).ok_or_else(|| format!("model '{model}' returned no name"))
 }
 
+/// Write one line for the companion to say, in reply to the user's message.
+///
+/// Called only when the user addressed the companion by name; there is no
+/// idle chatter, because every line here is a model call the user pays for.
+/// The companion is a watcher, not the agent: it is told what was said, not
+/// given the transcript or any tools.
+pub async fn companion_reply(
+    config: &Config,
+    cost_tracker: &std::sync::Arc<CostTracker>,
+    companion: &Companion,
+    user_message: &str,
+) -> Result<String, String> {
+    let soul = companion
+        .soul
+        .as_ref()
+        .ok_or("the companion has no name yet")?;
+    let model = companion_model(config);
+
+    let provider = claurst_api::provider_for_config(config)
+        .await
+        .ok_or("no provider is configured")?;
+
+    let request = claurst_api::ProviderRequest {
+        model: model.clone(),
+        messages: vec![Message::user(format!(
+            "The user just said:\n\n{}",
+            truncate_for_bubble(user_message)
+        ))],
+        system_prompt: Some(claurst_api::SystemPrompt::Text(format!(
+            "You are {}, a small {} sitting beside a programmer's terminal. You are \
+             {}. The user said something to you. Answer in ONE short line, under 15 \
+             words, lower case, no quotes and no preamble. You are not the coding \
+             assistant and you do not do the work: you watch, and you have opinions.",
+            soul.name,
+            companion.bones.species.as_str(),
+            soul.personality,
+        ))),
+        tools: vec![],
+        max_tokens: 96,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: vec![],
+        thinking: None,
+        provider_options: serde_json::Value::Object(Default::default()),
+    };
+
+    let response = provider
+        .create_message(request)
+        .await
+        .map_err(|e| format!("the companion could not answer: {e}"))?;
+
+    cost_tracker.add_usage(
+        &model,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+        response.usage.cache_creation_input_tokens,
+        response.usage.cache_read_input_tokens,
+    );
+
+    let text = text_from_content_blocks(&response.content);
+    first_line(&text).ok_or_else(|| format!("model '{model}' said nothing"))
+}
+
+/// Keep the prompt small: the companion reacts to what was said, and a pasted
+/// stack trace would cost far more than the line it produces is worth.
+fn truncate_for_bubble(message: &str) -> String {
+    const LIMIT: usize = 600;
+    if message.chars().count() <= LIMIT {
+        return message.to_string();
+    }
+    let head: String = message.chars().take(LIMIT).collect();
+    format!("{head}…")
+}
+
+/// The first non-empty line, stripped of the quoting a model tends to add.
+fn first_line(text: &str) -> Option<String> {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .trim_matches(['"', '\'', '*'])
+        .trim();
+    (!line.is_empty()).then(|| line.to_string())
+}
+
 /// The model that hatches the companion and writes its bubble lines.
 pub(crate) fn companion_model(config: &Config) -> String {
     config
@@ -323,6 +425,32 @@ fn parse_soul(text: &str) -> Option<CompanionSoul> {
 mod tests {
     use super::*;
     use claurst_core::cost::CostTracker;
+
+    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// at a time and put it back afterwards. Async-aware because those tests
+    /// hold it across the model call.
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn pointing_at(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
 
     /// Serve exactly one OpenAI-shaped chat completion, then stop.
     ///
@@ -405,6 +533,135 @@ mod tests {
             mcp_manager: None,
             mcp_auth_runner: None,
         }
+    }
+
+    fn hatched(name: &str) -> Companion {
+        let mut companion = Companion::new("test-identity", None);
+        companion.soul = Some(CompanionSoul {
+            name: name.to_string(),
+            personality: "naps through every outage".to_string(),
+            hatched_at: chrono::Utc::now(),
+        });
+        companion
+    }
+
+    #[tokio::test]
+    async fn a_reply_is_one_line_and_is_billed_to_the_companion_model() {
+        let base_url = one_shot_openai("\"you broke it again\"\nand another line").await;
+        let ctx = ctx_pointing_at(base_url);
+
+        let line = claurst_commands_reply(&ctx, &hatched("Mossback"), "mossback, thoughts?")
+            .await
+            .expect("the mock answers");
+        // Quotes stripped, second line dropped: the bubble is one row and the
+        // model habitually wraps short replies in quotes.
+        assert_eq!(line, "you broke it again");
+
+        let spend = ctx.cost_tracker.by_model();
+        assert_eq!(spend.len(), 1);
+        assert_eq!(spend[0].model, "mock-model");
+    }
+
+    #[tokio::test]
+    async fn an_unhatched_companion_cannot_answer() {
+        // No socket is opened: this must fail before any provider call.
+        let ctx = ctx_pointing_at("http://127.0.0.1:1/v1".to_string());
+        let error = claurst_commands_reply(&ctx, &Companion::new("test-identity", None), "hello")
+            .await
+            .expect_err("nameless companions stay quiet");
+        assert!(error.contains("no name"), "unhelpful error: {error}");
+    }
+
+    /// Thin wrapper so the tests read the same as the call site.
+    async fn claurst_commands_reply(
+        ctx: &CommandContext,
+        companion: &Companion,
+        said: &str,
+    ) -> Result<String, String> {
+        companion_reply(&ctx.config, &ctx.cost_tracker, companion, said).await
+    }
+
+    #[tokio::test]
+    async fn the_command_hatches_once_and_reads_from_disk_after_that() {
+        let home = tempfile::tempdir().expect("temp home");
+        let _lock = HOME_LOCK.lock().await;
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        // One socket, so a second model call would fail outright.
+        let base_url = one_shot_openai("Mossback\nnaps through every outage").await;
+        let mut ctx = ctx_pointing_at(base_url);
+
+        let first = BuddyCommand.execute("", &mut ctx).await;
+        let first = match first {
+            // A hatch changes cached session state, so it reports a config change.
+            CommandResult::ConfigChangeMessage(_, text) => text,
+            other => panic!("expected a hatch, got {other:?}"),
+        };
+        assert!(first.contains("Mossback the"), "not hatched: {first}");
+        assert!(home.path().join("companion.json").exists());
+
+        // Second call: the dead socket proves this came off disk.
+        let second = BuddyCommand.execute("", &mut ctx).await;
+        let second = match second {
+            CommandResult::Message(text) => text,
+            other => panic!("expected a plain card, got {other:?}"),
+        };
+        assert!(second.contains("Mossback the"), "not re-read: {second}");
+        assert_eq!(ctx.cost_tracker.by_model().len(), 1, "hatched twice");
+
+        // Forgetting removes the name and leaves the body alone.
+        let forgotten = BuddyCommand.execute("forget", &mut ctx).await;
+        assert!(matches!(forgotten, CommandResult::Message(_)));
+        assert!(!home.path().join("companion.json").exists());
+    }
+
+    #[tokio::test]
+    async fn on_and_off_are_written_where_the_session_and_the_next_launch_both_read() {
+        let home = tempfile::tempdir().expect("temp home");
+        let _lock = HOME_LOCK.lock().await;
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let mut ctx = ctx_pointing_at("http://127.0.0.1:1/v1".to_string());
+
+        match BuddyCommand.execute("on", &mut ctx).await {
+            CommandResult::ConfigChangeMessage(config, _) => {
+                // The live config, so the running session sees it.
+                assert!(config.companion.expect("set on Config").enabled);
+            }
+            other => panic!("expected a config change, got {other:?}"),
+        }
+        // And the settings file, so the next launch sees it too.
+        let settings = claurst_core::config::Settings::load_sync().expect("read back");
+        assert!(settings.companion.expect("written to disk").enabled);
+
+        match BuddyCommand.execute("off", &mut ctx).await {
+            CommandResult::ConfigChangeMessage(config, _) => {
+                assert!(!config.companion.expect("set on Config").enabled);
+            }
+            other => panic!("expected a config change, got {other:?}"),
+        }
+        let settings = claurst_core::config::Settings::load_sync().expect("read back");
+        assert!(!settings.companion.expect("written to disk").enabled);
+    }
+
+    #[test]
+    fn a_long_message_is_cut_before_it_is_sent() {
+        // A pasted stack trace would cost more than the one line it buys.
+        let long = "x".repeat(5_000);
+        let sent = truncate_for_bubble(&long);
+        assert!(sent.chars().count() < 700);
+        assert!(sent.ends_with('…'));
+
+        let short = "mossback, thoughts?";
+        assert_eq!(truncate_for_bubble(short), short);
+    }
+
+    #[test]
+    fn a_reply_wrapped_in_chatter_is_reduced_to_its_first_line() {
+        assert_eq!(first_line("  \n\n  hm.  \nmore"), Some("hm.".to_string()));
+        assert_eq!(first_line("*sighs*"), Some("sighs".to_string()));
+        assert_eq!(first_line("   \n  "), None);
+        assert_eq!(first_line(""), None);
     }
 
     #[tokio::test]

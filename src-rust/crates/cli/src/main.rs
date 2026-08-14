@@ -684,6 +684,14 @@ async fn main() -> anyhow::Result<()> {
                 .map(|tool| tool.name().to_string())
                 .collect(),
         );
+        // The REPL sets this per turn from the companion it loaded at startup.
+        // The dump has no REPL, so it reads the same files itself — otherwise
+        // this output silently omits a block a real run sends.
+        if config.companion.as_ref().is_some_and(|c| c.enabled) {
+            let identity = claurst_core::accounts::stable_identity();
+            let companion = claurst_buddy::get_companion(&identity, &claurst_core::claurst_home());
+            dump_config.companion_addendum = claurst_buddy::intro_for(&companion);
+        }
 
         match claurst_query::build_system_prompt(&dump_config) {
             claurst_api::SystemPrompt::Text(text) => println!("{text}"),
@@ -2411,6 +2419,9 @@ async fn run_interactive(
     // arrive as their final character, so re-shifting them would corrupt input
     // (issue #183: typing `/` produced `?`).
     app.kitty_keyboard_active = claurst_tui::keyboard_enhancement_active();
+    // The companion reads two files, so it is loaded once here rather than
+    // per frame. `/buddy` reports a config change and the loop reloads it.
+    app.reload_companion();
     // Seed the project-MCP approval queue: untrusted project servers that the
     // user must approve before they are allowed to launch (issue #123).
     app.mcp_project_root = mcp_project_root;
@@ -2673,6 +2684,11 @@ async fn run_interactive(
     // Current cancel token (replaced each turn)
     let mut cancel: Option<CancellationToken> = None;
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<QueryEvent>();
+    // The companion's line arrives on its own channel rather than as a
+    // `QueryEvent`: it is not part of the turn, and a new `QueryEvent` variant
+    // would also have to be given a meaning on the bridge, where the companion
+    // does not exist.
+    let (bubble_tx, mut bubble_rx) = mpsc::unbounded_channel::<String>();
     type MessagesArc = Arc<tokio::sync::Mutex<Vec<claurst_core::types::Message>>>;
     let mut current_query: Option<(tokio::task::JoinHandle<QueryOutcome>, MessagesArc)> = None;
     // Background update check: spawned once at startup; result delivered via channel.
@@ -3271,6 +3287,7 @@ async fn run_interactive(
                                         applied_cfg.permission_mode,
                                         claurst_core::config::PermissionMode::Plan
                                     );
+                                    app.reload_companion();
                                     session.model = claurst_api::effective_model_for_config(
                                         &cmd_ctx.config,
                                         &model_registry,
@@ -3291,6 +3308,7 @@ async fn run_interactive(
                                         app.fast_mode = false;
                                     }
                                     app.config = applied_cfg.clone();
+                                    app.reload_companion();
                                     session.model = claurst_api::effective_model_for_config(
                                         &cmd_ctx.config,
                                         &model_registry,
@@ -3653,6 +3671,30 @@ async fn run_interactive(
                             claurst_tui::update_terminal_title(Some(&topic));
                         }
 
+                        // The companion answers only when addressed by name.
+                        // The previous line goes now either way, so a stale
+                        // reply never sits above a new question.
+                        app.companion_bubble = None;
+                        if app.companion_addressed_in(&input).is_some() {
+                            if let Some(companion) = app.companion.clone() {
+                                let cfg = cmd_ctx.config.clone();
+                                let tracker = cost_tracker.clone();
+                                let tx = bubble_tx.clone();
+                                let said = input.clone();
+                                // Spawned rather than awaited: the turn must
+                                // not wait on a decoration.
+                                tokio::spawn(async move {
+                                    if let Ok(line) = claurst_commands::companion_reply(
+                                        &cfg, &tracker, &companion, &said,
+                                    )
+                                    .await
+                                    {
+                                        let _ = tx.send(line);
+                                    }
+                                });
+                            }
+                        }
+
                         // Start async query
                         app.is_streaming = true;
                         app.streaming_text.clear();
@@ -3678,6 +3720,9 @@ async fn run_interactive(
                         qcfg.output_style = cmd_ctx.config.effective_output_style();
                         qcfg.output_style_prompt = cmd_ctx.config.resolve_output_style_prompt();
                         qcfg.working_directory = Some(tool_ctx.working_dir.display().to_string());
+                        // Read per turn rather than once at startup: `/buddy`
+                        // can turn the companion on, off, or hatch it mid-session.
+                        qcfg.companion_addendum = app.companion_addendum();
                         // The active-goal system-prompt addendum is now injected
                         // inside run_query_loop per turn (issue #230 / MI-3), so
                         // it also covers in-loop continuation turns.
@@ -3922,6 +3967,12 @@ async fn run_interactive(
                     }
                 }
             }
+        }
+
+        // Drain the companion's replies. Keeping only the last one means a
+        // burst can never queue lines the user has already moved past.
+        while let Ok(line) = bubble_rx.try_recv() {
+            app.companion_bubble = Some(line);
         }
 
         // Drain query events — also forward relevant ones to the bridge as outbound.
@@ -4434,10 +4485,12 @@ async fn run_interactive(
                         claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
                     qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
                     // A prompt from a phone is the same turn as one typed
-                    // here, so it runs at the same effort.
+                    // here, so it runs at the same effort, and the model is
+                    // told about the same companion.
                     if app.effort_explicit {
                         qcfg.effort_level = Some(app.effort_level);
                     }
+                    qcfg.companion_addendum = app.companion_addendum();
                     let tracker = cost_tracker.clone();
                     let tx = event_tx.clone();
                     let client_clone = client.clone();

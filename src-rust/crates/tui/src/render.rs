@@ -623,7 +623,10 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     let prompt_height = if app.effort_picker.visible {
         crate::effort_picker::DOCK_HEIGHT
     } else {
-        input_height(&app.prompt_input, prompt_text_width) + 1 // +1 for model/mode status line
+        // +1 for the model/mode status line, +1 more while the companion has
+        // something to say.
+        let bubble = u16::from(app.companion_bubble.is_some());
+        input_height(&app.prompt_input, prompt_text_width) + 1 + bubble
     };
 
     let chunks = Layout::default()
@@ -2409,7 +2412,31 @@ fn render_todo_block(
 // Input pane
 // -----------------------------------------------------------------------
 
+/// Width of a companion sprite, plus one column of breathing room.
+///
+/// Every sprite in `claurst-buddy` pads its rows to exactly 12 columns.
+const COMPANION_COLUMN: u16 = 13;
+
+/// Narrowest the prompt may become before the companion is dropped.
+///
+/// The companion is decoration; the input box is the product.
+const MIN_INPUT_WIDTH: u16 = 40;
+
 fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
+    // The companion's line goes above everything else, including the status
+    // line, so it reads as the companion talking rather than as chrome.
+    let area = match (&app.companion_bubble, &app.companion) {
+        (Some(line), Some(companion)) if area.height > 3 => {
+            let splits = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .split(area);
+            render_companion_bubble(frame, companion, line, splits[0]);
+            splits[1]
+        }
+        _ => area,
+    };
+
     // Split: 1-row model/mode status line + remaining rows for the prompt input.
     let (status_area, input_area) = if area.height > 2 {
         let splits = Layout::default()
@@ -2420,6 +2447,22 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     } else {
         // Not enough room for the extra line — skip the status row.
         (None, area)
+    };
+
+    // Give the companion a column beside the prompt box, but only when the
+    // prompt can spare the width. The status line above keeps its full width
+    // either way: it already truncates the model name at 80 columns, and
+    // taking 13 more would cut it to nothing.
+    let input_area = match &app.companion {
+        Some(companion) if input_area.width >= COMPANION_COLUMN + MIN_INPUT_WIDTH => {
+            let splits = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(COMPANION_COLUMN), Constraint::Min(1)])
+                .split(input_area);
+            render_companion(frame, companion, app, splits[0]);
+            splits[1]
+        }
+        _ => input_area,
     };
 
     // Render model + agent mode status line above the prompt.
@@ -2538,6 +2581,76 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         app.accent_color,
         app.settings_screen.cursor_blink_enabled,
     );
+}
+
+/// Draw the companion sprite in its own column, bottom-aligned so it stands on
+/// the same line as the bottom of the prompt box rather than floating.
+///
+/// Rows that do not fit are dropped from the top, which is where the sprites
+/// keep their hat and their per-frame flourishes.
+fn render_companion(
+    frame: &mut Frame,
+    companion: &claurst_buddy::Companion,
+    app: &App,
+    area: Rect,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // The sprite animates on a 500 ms cycle. Derived from elapsed time rather
+    // than the frame counter so the pace does not follow the redraw rate.
+    let tick = app.session_start.elapsed().as_millis() as u64 / 500;
+    let sprite = claurst_buddy::render(companion, tick);
+
+    let rows: Vec<&str> = sprite.lines().collect();
+    let shown = rows.len().min(area.height as usize);
+    let lines: Vec<Line> = rows[rows.len() - shown..]
+        .iter()
+        .map(|row| {
+            Line::from(Span::styled(
+                row.to_string(),
+                Style::default().fg(Color::Rgb(150, 150, 164)),
+            ))
+        })
+        .collect();
+
+    let sprite_area = Rect {
+        x: area.x,
+        y: area.y + area.height - shown as u16,
+        width: area.width,
+        height: shown as u16,
+    };
+    frame.render_widget(Paragraph::new(lines), sprite_area);
+}
+
+/// Draw the companion's line: its face, then what it said.
+///
+/// One row, truncated rather than wrapped. The companion is asked for a single
+/// short line, and a bubble that grows to three rows would push the prompt box
+/// around while the user is typing.
+fn render_companion_bubble(
+    frame: &mut Frame,
+    companion: &claurst_buddy::Companion,
+    line: &str,
+    area: Rect,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let dim = Color::Rgb(150, 150, 164);
+    let spans = vec![
+        Span::styled(
+            format!("  {} ", claurst_buddy::render_face(&companion.bones)),
+            Style::default().fg(dim),
+        ),
+        Span::styled(
+            line.replace('\n', " "),
+            Style::default().fg(dim).add_modifier(Modifier::ITALIC),
+        ),
+    ];
+    frame.render_widget(Paragraph::new(vec![Line::from(spans)]), area);
 }
 
 fn should_render_status_row(app: &App) -> bool {
@@ -4213,6 +4326,171 @@ mod effort_dock_tests {
             !open.contains(PROMPT_POINTER),
             "prompt input must NOT be drawn while the picker is open"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Companion column beside the input box
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod companion_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    const PROMPT_POINTER: char = '\u{276f}';
+
+    fn app_with_companion() -> App {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        let mut companion = claurst_buddy::Companion::new("render-test", None);
+        companion.soul = Some(claurst_buddy::CompanionSoul {
+            name: "Quackers".to_string(),
+            personality: "chaotic, helpful, slightly damp".to_string(),
+            hatched_at: chrono::Utc::now(),
+        });
+        app.companion = Some(companion);
+        app
+    }
+
+    /// Render the whole screen at a given size and return the row containing
+    /// the prompt pointer, plus the full screen text.
+    fn render_at(app: &App, width: u16, height: u16) -> (String, Vec<String>) {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render_app(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut rows = Vec::new();
+        for y in 0..buf.area.height {
+            let mut row = String::new();
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    row.push_str(cell.symbol());
+                }
+            }
+            rows.push(row);
+        }
+        (rows.join("\n"), rows)
+    }
+
+    #[test]
+    fn a_wide_terminal_puts_the_companion_left_of_the_prompt() {
+        let app = app_with_companion();
+        let (_, rows) = render_at(&app, 100, 24);
+
+        let prompt_row = rows
+            .iter()
+            .find(|row| row.contains(PROMPT_POINTER))
+            .expect("the prompt box is drawn");
+        let pointer_at = prompt_row
+            .chars()
+            .position(|c| c == PROMPT_POINTER)
+            .expect("found above");
+        assert!(
+            pointer_at >= COMPANION_COLUMN as usize,
+            "the prompt should start after the companion column, not at {pointer_at}"
+        );
+    }
+
+    #[test]
+    fn a_narrow_terminal_drops_the_companion_and_returns_the_width() {
+        let app = app_with_companion();
+        // Below COMPANION_COLUMN + MIN_INPUT_WIDTH.
+        let (_, narrow) = render_at(&app, 50, 24);
+        let (_, wide) = render_at(&app, 100, 24);
+
+        let pointer_column = |rows: &[String]| {
+            rows.iter()
+                .find(|row| row.contains(PROMPT_POINTER))
+                .and_then(|row| row.chars().position(|c| c == PROMPT_POINTER))
+                .expect("the prompt box is drawn")
+        };
+
+        let narrow_at = pointer_column(&narrow);
+        assert!(
+            narrow_at < COMPANION_COLUMN as usize,
+            "a narrow terminal must give the width back to the prompt, got {narrow_at}"
+        );
+        assert!(pointer_column(&wide) > narrow_at);
+    }
+
+    #[test]
+    fn no_companion_means_no_reserved_column() {
+        let with = app_with_companion();
+        let without = App::new(Config::default(), CostTracker::new());
+
+        let pointer_column = |app: &App| {
+            let (_, rows) = render_at(app, 100, 24);
+            rows.iter()
+                .find(|row| row.contains(PROMPT_POINTER))
+                .and_then(|row| row.chars().position(|c| c == PROMPT_POINTER))
+                .expect("the prompt box is drawn")
+        };
+
+        assert!(pointer_column(&with) > pointer_column(&without));
+    }
+
+    #[test]
+    fn a_bubble_takes_a_row_above_the_prompt_without_shrinking_it() {
+        let quiet = app_with_companion();
+        let mut talking = app_with_companion();
+        talking.companion_bubble = Some("you broke it again".to_string());
+
+        let (quiet_screen, quiet_rows) = render_at(&quiet, 100, 24);
+        let (talking_screen, talking_rows) = render_at(&talking, 100, 24);
+
+        assert!(!quiet_screen.contains("you broke it again"));
+        assert!(talking_screen.contains("you broke it again"));
+
+        // The line sits above the status line, and the prompt box keeps its
+        // own row rather than giving one up.
+        let row_of = |rows: &[String], needle: &str| {
+            rows.iter()
+                .position(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("not drawn: {needle}"))
+        };
+        assert!(row_of(&talking_rows, "you broke it again") < row_of(&talking_rows, "BUILD"));
+        assert_eq!(
+            quiet_rows[row_of(&quiet_rows, "BUILD")],
+            talking_rows[row_of(&talking_rows, "BUILD")],
+        );
+    }
+
+    #[test]
+    fn a_multi_line_reply_is_flattened_into_the_single_bubble_row() {
+        // The companion is asked for one line; a model that sends three must
+        // not push the prompt box around.
+        let mut app = app_with_companion();
+        app.companion_bubble = Some("first\nsecond\nthird".to_string());
+        let (_, rows) = render_at(&app, 100, 24);
+
+        let bubble = rows
+            .iter()
+            .find(|row| row.contains("first"))
+            .expect("the bubble is drawn");
+        assert!(bubble.contains("second"), "lines should be joined, not cut");
+        assert_eq!(rows.iter().filter(|row| row.contains("first")).count(), 1);
+    }
+
+    #[test]
+    fn the_companion_does_not_eat_the_status_line() {
+        // The status line already truncates the model name at 80 columns.
+        // Taking the companion's column out of it too cut "claude-opus-4-6"
+        // down to "claude-o", so the companion sits beside the prompt box
+        // only, not beside the line above it.
+        let with = app_with_companion();
+        let without = App::new(Config::default(), CostTracker::new());
+
+        let status_line = |app: &App| {
+            let (_, rows) = render_at(app, 80, 24);
+            rows.iter()
+                .find(|row| row.contains("BUILD"))
+                .cloned()
+                .expect("the status line is drawn")
+        };
+
+        assert_eq!(status_line(&with), status_line(&without));
     }
 }
 

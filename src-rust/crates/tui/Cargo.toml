@@ -54,6 +54,7 @@ claurst-api = { workspace = true }
 claurst-tools = { workspace = true }
 claurst-query = { workspace = true }
 claurst-mcp = { workspace = true }
+claurst-buddy = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

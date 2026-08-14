@@ -21,6 +21,7 @@ claurst-tui = { workspace = true }
 claurst-commands = { workspace = true }
 claurst-mcp = { workspace = true }
 claurst-bridge = { workspace = true }
+claurst-buddy = { workspace = true }
 claurst-plugins = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }

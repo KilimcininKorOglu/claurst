@@ -224,6 +224,11 @@ pub struct SystemPromptOptions {
     pub skip_env_info: bool,
     /// Active goal addendum (injected in dynamic section when a goal is running).
     pub active_goal_addendum: Option<String>,
+    /// Companion addendum (injected in the dynamic section when `/buddy` is on).
+    ///
+    /// Dynamic rather than cacheable because the companion can be turned on,
+    /// off, or renamed between turns.
+    pub companion_addendum: Option<String>,
     /// Names of the tools actually enabled for this session (issue #233).
     ///
     /// When `Some`, the "Tool use guidelines" section only emits the
@@ -324,7 +329,12 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         parts.push(goal_text.clone());
     }
 
-    // 14. Appended system prompt (--append-system-prompt)
+    // 14. Companion addendum (dynamic — `/buddy on` must take effect mid-session)
+    if let Some(companion_text) = &opts.companion_addendum {
+        parts.push(format!("\n{companion_text}"));
+    }
+
+    // 15. Appended system prompt (--append-system-prompt)
     if let Some(append) = &opts.append_system_prompt {
         parts.push(format!("\n{}", append));
     }
@@ -777,6 +787,28 @@ mod tests {
             with.contains("Call Advisor"),
             "advisor guidance should be emitted when the tool is loaded"
         );
+    }
+
+    #[test]
+    fn the_companion_is_described_once_and_only_when_it_is_there() {
+        let with = build_system_prompt(&SystemPromptOptions {
+            companion_addendum: Some("# Companion\n\nA small duck named Quackers".to_string()),
+            skip_env_info: true,
+            ..Default::default()
+        });
+        assert_eq!(with.matches("named Quackers").count(), 1);
+        // After the boundary: the companion can be turned on mid-session, so
+        // its description must not sit in the cached prefix.
+        let boundary = with
+            .find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            .expect("the boundary is emitted");
+        assert!(with.find("named Quackers").is_some_and(|at| at > boundary));
+
+        let without = build_system_prompt(&SystemPromptOptions {
+            skip_env_info: true,
+            ..Default::default()
+        });
+        assert!(!without.contains("Companion"));
     }
 
     #[test]

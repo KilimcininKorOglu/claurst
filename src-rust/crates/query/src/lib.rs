@@ -169,6 +169,16 @@ pub struct QueryConfig {
     /// goal's guards allow, injecting the goal continuation message as the next
     /// user turn — instead of the CLI REPL re-dispatching a fresh turn.
     pub continuation: crate::continuation::ContinuationMode,
+    /// Text describing the companion sitting beside the input box, forwarded
+    /// to `SystemPromptOptions::companion_addendum`.
+    ///
+    /// The model has to know the companion exists, or it narrates what the
+    /// companion might say and the bubble says it too.
+    ///
+    /// Set only by the interactive REPL. Headless runs and sub-agents have no
+    /// input box for the companion to sit beside, so describing it there would
+    /// spend tokens on something the user cannot see.
+    pub companion_addendum: Option<String>,
 }
 
 impl Default for QueryConfig {
@@ -197,6 +207,7 @@ impl Default for QueryConfig {
             managed_agents: None,
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
+            companion_addendum: None,
         }
     }
 }
@@ -2324,6 +2335,7 @@ mod tests {
             managed_agents: None,
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
+            companion_addendum: None,
         }
     }
 
