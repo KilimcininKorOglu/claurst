@@ -584,6 +584,39 @@ fn fmt_cost(usd: f64) -> String {
     }
 }
 
+/// Render what each model spent, dearest first, as a block to append to a
+/// session report. Empty when nothing was spent.
+///
+/// A session is not one model: the advisor and any subagent can run on
+/// another, and each is priced at its own rates. A single total hides that,
+/// so the report shows where the money went.
+pub(crate) fn by_model_block(tracker: &claurst_core::CostTracker) -> String {
+    let rows = tracker.by_model();
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let name_width = rows.iter().map(|r| r.model.len()).max().unwrap_or(0);
+    let token_width = rows
+        .iter()
+        .map(|r| fmt_num(r.tokens).len())
+        .max()
+        .unwrap_or(0);
+
+    let mut block = String::from("\nBy model:\n");
+    for row in rows {
+        block.push_str(&format!(
+            "  {:<name_width$}  {:>token_width$} tokens   {}\n",
+            row.model,
+            fmt_num(row.tokens),
+            fmt_cost(row.cost_usd),
+            name_width = name_width,
+            token_width = token_width,
+        ));
+    }
+    block
+}
+
 fn fmt_duration_secs(secs: i64) -> String {
     if secs >= 3600 {
         format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
@@ -1202,6 +1235,33 @@ mod tests {
     };
     use claurst_core::types::{Message, MessageContent, MessageCost, Role};
     use tempfile::TempDir;
+
+    #[test]
+    fn the_model_breakdown_lines_up_in_columns() {
+        let tracker = claurst_core::CostTracker::new();
+        tracker.add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+        tracker.add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+
+        let block = by_model_block(&tracker);
+        let lines: Vec<&str> = block.lines().collect();
+
+        assert_eq!(lines[0], "", "the block opens with a blank separator line");
+        assert_eq!(lines[1], "By model:");
+        assert_eq!(lines.len(), 4, "one header and two rows:\n{block}");
+
+        // Dearest first, and the columns share a width, so the two rows have
+        // the same length even though the model names differ.
+        assert!(lines[2].starts_with("  claude-opus-4-6"));
+        assert!(lines[3].starts_with("  claude-haiku-4-5"));
+        assert_eq!(lines[2].len(), lines[3].len(), "columns must line up");
+        assert!(lines[2].contains("1.5K tokens"), "row was: {}", lines[2]);
+        assert!(lines[3].contains("6.0K tokens"), "row was: {}", lines[3]);
+    }
+
+    #[test]
+    fn nothing_spent_renders_nothing() {
+        assert!(by_model_block(&claurst_core::CostTracker::new()).is_empty());
+    }
 
     fn make_assistant_with_cost(
         tokens_in: u64,

@@ -689,6 +689,11 @@ impl SlashCommand for CostCommand {
             String::new()
         };
 
+        // The per-category rows above are priced at the session model's rates,
+        // which is what the header says. The block below is the honest total:
+        // every model that ran, at its own rates.
+        let by_model = stats::by_model_block(tracker);
+
         CommandResult::Message(format!(
             "Session Cost — {model}\n\
              ──────────────────────────────\n\
@@ -699,10 +704,12 @@ impl SlashCommand for CostCommand {
                Cache read:     {cache_read:>10}   ${cr_cost:.4}\n\
              ─────────────────────────────\n\
                Total tokens:   {total:>10}\n\
-               Total cost:              ${cost:.4}{savings}\n\n\
+               Total cost:              ${cost:.4}{savings}\n\
+             {by_model}\n\
              Use /usage for quota info · /extra-usage for per-call breakdown",
             model = model,
             pricing_line = pricing_line,
+            by_model = by_model,
             input = input,
             input_cost = input_cost,
             output = output,
@@ -1756,6 +1763,63 @@ mod tests {
 
         cmd.execute("xhigh", &mut ctx).await;
         assert_eq!(ctx.config.max_tokens, None, "xhigh must leave it alone");
+    }
+
+    // ---- per-model cost reporting ------------------------------------------
+
+    #[tokio::test]
+    async fn cost_lists_every_model_that_spent() {
+        let mut ctx = make_ctx();
+        ctx.cost_tracker
+            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+        ctx.cost_tracker
+            .add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+
+        let cmd = find_command("cost").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/cost should report");
+        };
+
+        assert!(text.contains("By model:"), "no breakdown in:\n{text}");
+        assert!(text.contains("claude-opus-4-6"), "missing Opus in:\n{text}");
+        assert!(
+            text.contains("claude-haiku-4-5"),
+            "missing Haiku in:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stats_lists_every_model_that_spent() {
+        let mut ctx = make_ctx();
+        ctx.cost_tracker
+            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+        ctx.cost_tracker
+            .add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+
+        let cmd = find_command("stats").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/stats should report");
+        };
+
+        assert!(text.contains("By model:"), "no breakdown in:\n{text}");
+        assert!(text.contains("claude-opus-4-6"), "missing Opus in:\n{text}");
+        assert!(
+            text.contains("claude-haiku-4-5"),
+            "missing Haiku in:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_that_spent_nothing_gets_no_breakdown() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("cost").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/cost should report");
+        };
+        assert!(
+            !text.contains("By model:"),
+            "an empty breakdown is noise:\n{text}"
+        );
     }
 
     #[tokio::test]

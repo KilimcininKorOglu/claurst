@@ -210,6 +210,8 @@ impl SlashCommand for StatsCommand {
             String::new()
         };
 
+        let by_model = crate::stats::by_model_block(&ctx.cost_tracker);
+
         CommandResult::Message(format!(
             "Session Statistics\n\
              ══════════════════\n\
@@ -226,9 +228,10 @@ impl SlashCommand for StatsCommand {
                Total:          {total:>10}{cache_note}\n\
              \n\
              Estimated cost:   ${cost:.4}\n\
-             \n\
+             {by_model}\n\
              Use /usage for quota info · /cost for quick cost · /extra-usage for per-call breakdown",
             model = model,
+            by_model = by_model,
             user_turns = user_turns,
             assistant_turns = assistant_turns,
             tool_calls = tool_calls,
