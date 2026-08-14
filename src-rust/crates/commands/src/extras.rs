@@ -214,6 +214,7 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
         Err(e) => CommandResult::Error(format!("Advisor call failed: {e}")),
         Ok(response) => {
             ctx.cost_tracker.add_usage(
+                model,
                 response.usage.input_tokens,
                 response.usage.output_tokens,
                 response.usage.cache_creation_input_tokens,

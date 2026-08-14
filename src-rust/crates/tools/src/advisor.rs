@@ -225,10 +225,10 @@ impl Tool for AdvisorTool {
             Err(e) => return ToolResult::error(format!("Advisor call failed: {e}")),
         };
 
-        // Advisor tokens are billed to the session. `CostTracker` prices every
-        // token at the session model's rate, so the figure drifts when the
-        // advisor model costs differently.
+        // Advisor tokens are billed to the session, priced at the advisor
+        // model's own rates.
         ctx.cost_tracker.add_usage(
+            model,
             response.usage.input_tokens,
             response.usage.output_tokens,
             response.usage.cache_creation_input_tokens,

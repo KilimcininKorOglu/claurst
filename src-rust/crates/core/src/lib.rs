@@ -4173,6 +4173,21 @@ pub mod cost {
                 Self::SONNET
             }
         }
+
+        /// Price one usage sample at these rates.
+        pub fn cost_of(
+            &self,
+            input: u64,
+            output: u64,
+            cache_creation: u64,
+            cache_read: u64,
+        ) -> f64 {
+            (input as f64 * self.input_per_mtk
+                + output as f64 * self.output_per_mtk
+                + cache_creation as f64 * self.cache_creation_per_mtk
+                + cache_read as f64 * self.cache_read_per_mtk)
+                / 1_000_000.0
+        }
     }
 
     impl Default for ModelPricing {
@@ -4181,73 +4196,114 @@ pub mod cost {
         }
     }
 
-    /// Thread-safe, lock-free cost tracker that accumulates token usage.
+    /// Tokens one model spent, and what they cost at that model's rates.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ModelSpend {
+        pub model: String,
+        pub tokens: u64,
+        pub cost_usd: f64,
+    }
+
+    /// Tokens accumulated for one model.
+    #[derive(Debug, Clone, Copy, Default)]
+    struct Totals {
+        input: u64,
+        output: u64,
+        cache_creation: u64,
+        cache_read: u64,
+    }
+
+    /// Thread-safe cost tracker that accumulates token usage per model.
+    ///
+    /// Per model, because a session is not one model: the advisor and any
+    /// subagent can run on another. Pricing the whole session at the session
+    /// model's rates counted Haiku tokens at Opus rates.
     #[derive(Debug, Default)]
     pub struct CostTracker {
         input_tokens: AtomicU64,
         output_tokens: AtomicU64,
         cache_creation_tokens: AtomicU64,
         cache_read_tokens: AtomicU64,
-        pricing: parking_lot::RwLock<ModelPricing>,
+        per_model: parking_lot::RwLock<std::collections::HashMap<String, Totals>>,
     }
 
-    // We need a default for RwLock<ModelPricing> -- use Opus as default.
     impl CostTracker {
         pub fn new() -> Arc<Self> {
-            Arc::new(Self {
-                pricing: parking_lot::RwLock::new(ModelPricing::OPUS),
-                ..Default::default()
-            })
+            Arc::new(Self::default())
         }
 
-        pub fn with_model(model: &str) -> Arc<Self> {
-            Arc::new(Self {
-                pricing: parking_lot::RwLock::new(ModelPricing::for_model(model)),
-                ..Default::default()
-            })
-        }
-
-        pub fn set_model(&self, model: &str) {
-            *self.pricing.write() = ModelPricing::for_model(model);
-        }
-
-        pub fn add_usage(&self, input: u64, output: u64, cache_creation: u64, cache_read: u64) {
+        /// Record what one model spent.
+        ///
+        /// The model is named at the call site rather than remembered here,
+        /// because a stored "current model" is wrong the moment two models run
+        /// in the same session.
+        pub fn add_usage(
+            &self,
+            model: &str,
+            input: u64,
+            output: u64,
+            cache_creation: u64,
+            cache_read: u64,
+        ) {
             self.input_tokens.fetch_add(input, Ordering::Relaxed);
             self.output_tokens.fetch_add(output, Ordering::Relaxed);
             self.cache_creation_tokens
                 .fetch_add(cache_creation, Ordering::Relaxed);
             self.cache_read_tokens
                 .fetch_add(cache_read, Ordering::Relaxed);
-        }
 
-        /// Price one usage sample at the tracker's current rates, without
-        /// touching the running totals.
-        ///
-        /// The remote client needs the cost of a single turn, and diffing the
-        /// running total across a turn misattributes cost whenever two turns
-        /// finish between reads.
-        pub fn cost_for(
-            &self,
-            input: u64,
-            output: u64,
-            cache_creation: u64,
-            cache_read: u64,
-        ) -> f64 {
-            let pricing = *self.pricing.read();
-            (input as f64 * pricing.input_per_mtk
-                + output as f64 * pricing.output_per_mtk
-                + cache_creation as f64 * pricing.cache_creation_per_mtk
-                + cache_read as f64 * pricing.cache_read_per_mtk)
-                / 1_000_000.0
+            let mut per_model = self.per_model.write();
+            let totals = per_model.entry(model.to_string()).or_default();
+            totals.input += input;
+            totals.output += output;
+            totals.cache_creation += cache_creation;
+            totals.cache_read += cache_read;
         }
 
         pub fn total_cost_usd(&self) -> f64 {
-            self.cost_for(
-                self.input_tokens.load(Ordering::Relaxed),
-                self.output_tokens.load(Ordering::Relaxed),
-                self.cache_creation_tokens.load(Ordering::Relaxed),
-                self.cache_read_tokens.load(Ordering::Relaxed),
-            )
+            self.per_model
+                .read()
+                .iter()
+                .map(|(model, totals)| {
+                    ModelPricing::for_model(model).cost_of(
+                        totals.input,
+                        totals.output,
+                        totals.cache_creation,
+                        totals.cache_read,
+                    )
+                })
+                .sum()
+        }
+
+        /// What each model spent, dearest first.
+        pub fn by_model(&self) -> Vec<ModelSpend> {
+            let mut spend: Vec<ModelSpend> = self
+                .per_model
+                .read()
+                .iter()
+                .map(|(model, totals)| ModelSpend {
+                    model: model.clone(),
+                    tokens: totals.input
+                        + totals.output
+                        + totals.cache_creation
+                        + totals.cache_read,
+                    cost_usd: ModelPricing::for_model(model).cost_of(
+                        totals.input,
+                        totals.output,
+                        totals.cache_creation,
+                        totals.cache_read,
+                    ),
+                })
+                .collect();
+            // Ties broken by name so the order is stable across reads; a
+            // HashMap would otherwise shuffle equal rows.
+            spend.sort_by(|a, b| {
+                b.cost_usd
+                    .partial_cmp(&a.cost_usd)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.model.cmp(&b.model))
+            });
+            spend
         }
 
         pub fn total_tokens(&self) -> u64 {
@@ -5210,7 +5266,7 @@ mod tests {
     #[test]
     fn test_cost_tracker() {
         let tracker = CostTracker::new();
-        tracker.add_usage(1000, 500, 200, 100);
+        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 200, 100);
         assert_eq!(tracker.input_tokens(), 1000);
         assert_eq!(tracker.output_tokens(), 500);
         assert!(tracker.total_cost_usd() > 0.0);
@@ -5789,8 +5845,8 @@ mod tests {
     #[test]
     fn test_cost_tracker_cumulative() {
         let tracker = CostTracker::new();
-        tracker.add_usage(1000, 500, 100, 50);
-        tracker.add_usage(200, 100, 0, 0);
+        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 100, 50);
+        tracker.add_usage("claude-sonnet-4-5", 200, 100, 0, 0);
         assert_eq!(tracker.input_tokens(), 1200);
         assert_eq!(tracker.output_tokens(), 600);
     }
@@ -5805,35 +5861,76 @@ mod tests {
 
     #[test]
     fn pricing_one_sample_matches_accumulating_it() {
-        // The remote client prices a single turn through `cost_for`. If that
-        // ever diverged from the running total, the per-turn figures on a
+        // The remote client prices a single turn straight off `ModelPricing`.
+        // If that diverged from the running total, the per-turn figures on a
         // phone would not add up to the session figure beside them.
-        let tracker = CostTracker::with_model("claude-sonnet-4-5");
-        let sample = tracker.cost_for(1000, 500, 200, 100);
-        tracker.add_usage(1000, 500, 200, 100);
+        let tracker = CostTracker::new();
+        let sample =
+            cost::ModelPricing::for_model("claude-sonnet-4-5").cost_of(1000, 500, 200, 100);
+        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 200, 100);
         assert_eq!(sample, tracker.total_cost_usd());
     }
 
     #[test]
     fn pricing_no_tokens_costs_nothing() {
-        let tracker = CostTracker::with_model("claude-sonnet-4-5");
-        assert_eq!(tracker.cost_for(0, 0, 0, 0), 0.0);
-    }
-
-    #[test]
-    fn pricing_one_sample_leaves_the_running_total_alone() {
-        let tracker = CostTracker::with_model("claude-sonnet-4-5");
-        tracker.cost_for(9_000, 9_000, 9_000, 9_000);
-        assert_eq!(tracker.total_tokens(), 0);
-        assert_eq!(tracker.total_cost_usd(), 0.0);
+        assert_eq!(
+            cost::ModelPricing::for_model("claude-sonnet-4-5").cost_of(0, 0, 0, 0),
+            0.0
+        );
     }
 
     #[test]
     fn test_cost_tracker_free_model() {
-        let tracker = CostTracker::with_model("deepseek-v4-flash-free");
-        tracker.add_usage(1000, 500, 200, 100);
+        let tracker = CostTracker::new();
+        tracker.add_usage("deepseek-v4-flash-free", 1000, 500, 200, 100);
         // Free models should have zero cost even with token usage
         assert_eq!(tracker.total_cost_usd(), 0.0);
+    }
+
+    #[test]
+    fn each_model_is_priced_at_its_own_rates() {
+        // The regression: a Haiku advisor call inside an Opus session used to
+        // be billed at Opus rates, which inflated the session figure.
+        let tracker = CostTracker::new();
+        tracker.add_usage("claude-opus-4-6", 1000, 500, 200, 100);
+        tracker.add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+
+        let expected = cost::ModelPricing::for_model("claude-opus-4-6")
+            .cost_of(1000, 500, 200, 100)
+            + cost::ModelPricing::for_model("claude-haiku-4-5").cost_of(4000, 2000, 0, 0);
+        assert_eq!(tracker.total_cost_usd(), expected);
+
+        let one_rate =
+            cost::ModelPricing::for_model("claude-opus-4-6").cost_of(5000, 2500, 200, 100);
+        assert!(
+            tracker.total_cost_usd() < one_rate,
+            "the cheaper model's tokens must not be billed at the session model's rates"
+        );
+    }
+
+    #[test]
+    fn by_model_lists_the_dearest_first() {
+        let tracker = CostTracker::new();
+        tracker.add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
+        tracker.add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+
+        let rows = tracker.by_model();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].model, "claude-opus-4-6");
+        assert_eq!(rows[1].model, "claude-haiku-4-5");
+        assert_eq!(rows[1].tokens, 1500);
+    }
+
+    #[test]
+    fn by_model_folds_repeat_use_of_one_model_into_one_row() {
+        let tracker = CostTracker::new();
+        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 0, 0);
+        tracker.add_usage("claude-sonnet-4-5", 200, 100, 0, 0);
+
+        let rows = tracker.by_model();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tokens, 1800);
+        assert_eq!(rows[0].cost_usd, tracker.total_cost_usd());
     }
 
     #[test]

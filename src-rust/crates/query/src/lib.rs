@@ -1298,6 +1298,7 @@ pub async fn run_query_loop(
                     };
 
                     cost_tracker.add_usage(
+                        &effective_model,
                         usage.input_tokens,
                         usage.output_tokens,
                         usage.cache_creation_input_tokens,
@@ -1547,8 +1548,10 @@ pub async fn run_query_loop(
 
         let (mut assistant_msg, usage, stop_reason) = accumulator.finish();
 
-        // Track costs
+        // Priced at the model that actually ran: `effective_model` follows an
+        // agent override and a fallback switch, which `config.model` does not.
         cost_tracker.add_usage(
+            &effective_model,
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_creation_input_tokens,

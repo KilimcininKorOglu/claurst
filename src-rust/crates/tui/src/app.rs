@@ -1973,7 +1973,6 @@ impl App {
                 let imported_mcp = result.imported_fields.iter().any(|f| f == "mcpServers");
                 self.config = new_config.clone();
                 self.model_name = self.config.effective_model().to_string();
-                self.cost_tracker.set_model(&self.model_name);
                 self.refresh_context_window_size();
                 self.context_used_tokens = 0;
                 self.has_credentials = self.config.resolve_api_key().is_some();
@@ -2346,7 +2345,6 @@ impl App {
         self.config.model = None;
 
         let model = self.display_default_model_for_provider(&provider_id);
-        self.cost_tracker.set_model(&model);
         self.model_name = model;
         self.refresh_context_window_size();
         self.context_used_tokens = 0;
@@ -2458,9 +2456,8 @@ impl App {
         self.effort_explicit = true;
     }
 
-    /// Update the active model name (also updates config + cost tracker).
+    /// Update the active model name (also updates config).
     pub fn set_model(&mut self, model: String) {
-        self.cost_tracker.set_model(&model);
         self.model_name = model.clone();
         self.config.model = Some(model.clone());
         if let Some(provider) = Self::infer_provider_from_model(&model) {
@@ -2521,7 +2518,6 @@ impl App {
         self.has_credentials = has_credentials;
         self.fast_mode = false;
         self.model_name = self.config.effective_model().to_string();
-        self.cost_tracker.set_model(&self.model_name);
         self.status_message = Some(status_message);
         self.clear_prompt();
     }

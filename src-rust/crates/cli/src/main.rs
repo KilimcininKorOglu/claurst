@@ -3950,12 +3950,18 @@ async fn run_interactive(
                             output_tokens: u.output_tokens,
                             cache_creation_tokens: u.cache_creation_input_tokens,
                             cache_read_tokens: u.cache_read_input_tokens,
-                            cost_usd: Some(cost_tracker.cost_for(
-                                u.input_tokens,
-                                u.output_tokens,
-                                u.cache_creation_input_tokens,
-                                u.cache_read_input_tokens,
-                            )),
+                            // Priced here rather than diffed from the running
+                            // total: two turns finishing between reads would
+                            // otherwise misattribute the cost.
+                            cost_usd: Some(
+                                claurst_core::cost::ModelPricing::for_model(&app.model_name)
+                                    .cost_of(
+                                        u.input_tokens,
+                                        u.output_tokens,
+                                        u.cache_creation_input_tokens,
+                                        u.cache_read_input_tokens,
+                                    ),
+                            ),
                             session_cost_usd: Some(cost_tracker.total_cost_usd()),
                         }),
                     }),
