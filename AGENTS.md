@@ -11,7 +11,8 @@ Claurst is an open-source, multi-provider terminal coding agent written in Rust.
 
 | Path | Contents |
 |------|----------|
-| `src-rust/` | The Cargo workspace. **All cargo commands run from here.** |
+| `src-rust/` | The Cargo workspace (12 `claurst-*` crates). **All cargo commands for the CLI run from here.** |
+| `relay/` | The self-hosted relay that carries remote-control sessions: axum + tokio, plus the `static/` web client. A **separate Cargo project with its own `Cargo.lock`**, deliberately not a workspace member, so cargo run from `src-rust/` never builds or tests it. |
 | `spec/` | Clean-room behavioral specification (`00_overview.md` … `13_rust_codebase.md`). Reference only, not code. |
 | `docs/`, `index.html`, `session/`, `public/`, `CNAME` | GitHub Pages site (`claurst.kuber.studio`), deployed by `.github/workflows/pages.yml`. |
 | `npm/` | The `claurst` npm wrapper; `install.js` postinstall downloads the prebuilt binary. |
@@ -19,7 +20,9 @@ Claurst is an open-source, multi-provider terminal coding agent written in Rust.
 | `scripts/bump-version.py` | The only supported way to change the version. |
 | `.devcontainer/` | VS Code devcontainer (`rust:1-bullseye` base). |
 
-There is no Makefile and no JS/TS build step; `npm/` is packaged as-is.
+There is no Makefile and no JS/TS build step; `npm/` is packaged as-is, and the relay's web client is plain HTML/CSS/JS served straight from `relay/static/`.
+
+Two Cargo projects means two lockfiles and two `target/` directories. A change under `relay/` never affects a `src-rust/` build and vice versa. `.github/workflows/ci.yml` covers both: the `test` job builds the workspace on three platforms, and a separate `relay` job runs the relay's tests, clippy and rustfmt on Linux.
 
 ## Build & Run Commands
 
@@ -47,13 +50,32 @@ Run from `src-rust/` unless noted.
 - Prefer `--print` mode for verifying non-TUI logic; it is faster and does not block.
 - Don't run blocking interactive commands you can't exit — the agent will hang. If you must, capture output with `--print` mode or pipe into `head`.
 
+### Relay commands
+
+Run from `relay/`. The relay has no `--workspace` because it is a single crate.
+
+| Task | Command |
+|------|---------|
+| Lint | `cargo clippy --all-targets -- -D warnings` |
+| Test | `cargo test -- --test-threads=1` |
+| Run locally | `RELAY_TOKEN=<32+ chars> RELAY_BIND=127.0.0.1:8350 cargo run` |
+| Run in Docker | `cp .env.example .env`, set `RELAY_TOKEN`, then `docker compose up -d` |
+
+- `RELAY_TOKEN` must be at least 32 characters; the relay refuses to start below that, and `claurst_core::config::MIN_REMOTE_TOKEN_LEN` enforces the same bound on the client side.
+- `relay/src/web.rs` embeds `relay/static/` with `include_str!`. After editing any static file you must rebuild, restart the process, **and** reload the browser page — the running process keeps serving the assets it was compiled with, which makes a stale page look like a failed change.
+- `docker-compose.yml` publishes on `127.0.0.1` on purpose: the relay does not terminate TLS. Do not change it to `0.0.0.0` without a TLS-terminating proxy in front.
+
 ### CI expectations
 
-`.github/workflows/ci.yml` runs on `ubuntu-latest`, `windows-latest`, and `macos-latest` for any change under `src-rust/**`:
+`.github/workflows/ci.yml` triggers on any change under `src-rust/**` or `relay/**` and runs two jobs.
+
+`test`, on `ubuntu-latest`, `windows-latest`, and `macos-latest`:
 
 - Tests: `cargo test --workspace --locked -- --test-threads=1`. **Serial execution is required** — several tests mutate process-global state (`HOME`, `ANTHROPIC_API_KEY`, `XDG_CONFIG_HOME`) and race under parallelism.
 - Clippy: enforced with `-D warnings`, Linux only.
-- rustfmt: `cargo fmt --all --check` is **advisory** (`continue-on-error`). The tree is intentionally not fmt-clean because of CRLF-terminated files and pre-existing drift, so do not treat a global fmt diff as a defect to fix.
+- rustfmt: `cargo fmt --all --check` is **advisory** in CI (`continue-on-error`), because CRLF-terminated files can make it disagree across runners. The tree itself is fmt-clean, so run `cargo fmt --all` before committing and treat any remaining diff as yours.
+
+`relay`, on `ubuntu-latest` only, because the relay is a plain axum service with no platform-conditional code: `cargo test --locked -- --test-threads=1`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --all --check` **enforced** rather than advisory.
 
 ### Testing the TUI in a controlled terminal
 
@@ -124,7 +146,12 @@ Files that are large enough to need a map before editing:
 - **Memory files.** `crates/core/src/claudemd.rs` loads enterprise → user → project → `{project_root}/.claurst/`. At each scope `AGENTS.md` loads first and `CLAUDE.md` second; both may exist and are additive.
 - **Keybindings.** Never hardcode a key check inline (e.g. `key == KeyCode::Char('s') && mods.ctrl()`). All keybindings flow through `crates/core/src/keybindings.rs` — add a default there.
 - **Two independent flag systems.** Compile-time Cargo features declared in `crates/core/Cargo.toml` and forwarded by `crates/tui/Cargo.toml` (`ultraplan`, `teammem`, `bridge_mode`, `voice`, …), *and* runtime env gates in `crates/core/src/feature_gates.rs` (`CLAURST_FEATURE_<NAME>`, `CLAURST_DYNAMIC_CONFIG_<NAME>`). Know which one you are touching.
+- **The turn loop has two dispatch arms.** `run_query_loop` in `crates/query/src/lib.rs` chooses with `use_provider_dispatch` (`provider_id != "anthropic" || client.api_key_is_empty()`): one arm goes through the `LlmProvider` registry and fails with `ProviderError`, the other uses the raw Anthropic client and fails with `ClaudeError`. Each builds its own request and handles its own errors, so a turn-level policy — fallback switching, retries, budgets — must be added to **both** or it silently applies to only some providers.
+- **Classify an API failure by its error type, never by its message.** `ProviderError` and `ClaudeError` both answer `is_retryable`. Matching on `Display` text is how a 429 was missed for a long time: it renders as `[openai] Rate limited` and `Rate limit exceeded`, neither of which contains the substring `rate_limit`.
+- **`QueryEvent` has two consumers.** `crates/tui/src/app.rs` renders them; `crates/cli/src/main.rs` maps them onto `BridgeOutbound` for remote clients. Adding a variant or a field means touching both, and a remote client only learns what that mapping forwards.
+- **Remote and keyboard answers must share one settle point.** A permission goes through `settle_pending_permission`, a question through `AskUserDialogState::answer_externally`, an MCP trust decision through `app.handle_mcp_approval_decision`, a rename through `apply_session_rename` — all in `crates/cli/src/main.rs` unless noted. Never answer one of these from a second place; the two paths drift.
 - **ACP logging.** Write ACP logs to stderr only; anything on stdout corrupts the JSON-RPC protocol. `CLAURST_ACP_LOG=debug` enables verbose output.
+- **Relay web client.** Render agent output with `textContent`, never `innerHTML`. Report a failure through `setStatus` and an in-turn message through `notice`; never call `alert`, `confirm`, or `prompt`, because a modal browser dialog is unusable on iOS. Serve any dependency the client needs from `relay/static/`, never a CDN — the relay is self-hosted and often reached over a VPN or LAN.
 - **Generated files — never modify directly.** `src-rust/Cargo.lock` (regenerated by cargo; version bumps go through `scripts/bump-version.py`) and the `version` field in `npm/package.json` (also stamped by `bump-version.py`).
 
 ## Code Quality
@@ -255,7 +282,7 @@ git status
 git add src-rust/crates/api/src/providers/foo.rs
 git add docs/providers.md
 
-# 3. Commit (only when the user has asked)
+# 3. Commit as soon as this slice is verified
 git commit -m "feat(api): add foo provider"
 
 # 4. Push (pull --rebase if needed, but NEVER reset/checkout)
