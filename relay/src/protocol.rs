@@ -67,6 +67,9 @@ pub enum BridgeMessage {
     RenameSession {
         title: String,
     },
+    /// Queued by the relay itself when a client opens the event stream, so the
+    /// runner can re-announce whatever the session is waiting on.
+    ClientAttached,
     Cancel {
         session_id: String,
         reason: Option<String>,

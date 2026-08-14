@@ -113,6 +113,15 @@ async fn stream(
         return Err(StatusCode::NOT_FOUND);
     }
 
+    // The ring buffer only holds the last few hundred events, so a client
+    // attaching to a long session can miss the prompt that is blocking it.
+    // Telling the runner someone is watching is the only way it can say again
+    // what the session is waiting on.
+    info!(session_id = %session_id, "client attached to the stream");
+    relay
+        .push_inbound(&session_id, BridgeMessage::ClientAttached)
+        .await;
+
     struct StreamState {
         relay: Arc<Relay>,
         session_id: String,
@@ -671,6 +680,48 @@ mod tests {
             .expect("response");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(relay.take_inbound("s1").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn attaching_to_the_stream_tells_the_runner() {
+        // Everything the session is waiting on was announced once, when it
+        // happened. A client that was not there then has no other way to hear
+        // about it once the ring buffer has moved on.
+        let relay = relay();
+        relay.register(&RegisterBody::new("s1")).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                authed("GET", "/api/client/sessions/s1/stream")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let queued = relay.take_inbound("s1").await;
+        match &queued[..] {
+            [BridgeMessage::ClientAttached] => {}
+            other => panic!("expected one attach, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn attaching_to_a_session_that_is_gone_queues_nothing() {
+        let relay = relay();
+
+        let response = app(relay.clone())
+            .oneshot(
+                authed("GET", "/api/client/sessions/s1/stream")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert!(relay.take_inbound("s1").await.is_empty());
     }
 

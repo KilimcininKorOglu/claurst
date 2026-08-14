@@ -334,6 +334,12 @@ pub enum BridgeMessage {
     },
     /// The web UI gave the session a new title.
     RenameSession { title: String },
+    /// A client opened the event stream.
+    ///
+    /// The relay sends this, not the client. Nothing else tells the runner
+    /// that someone is watching, so without it a client attaching late sees
+    /// only what the relay's ring buffer still holds.
+    ClientAttached,
     /// Cancel the in-progress operation for a session.
     Cancel {
         session_id: String,
@@ -341,6 +347,13 @@ pub enum BridgeMessage {
     },
     /// Keepalive — the CLI should respond with a `Pong` event.
     Ping,
+    /// A message this build does not know.
+    ///
+    /// Without it one unrecognised `type` fails the whole poll body and takes
+    /// the channel down with it, so a relay newer than the CLI could not talk
+    /// to it at all.
+    #[serde(other)]
+    Unknown,
 }
 
 // ---------------------------------------------------------------------------
@@ -1560,6 +1573,8 @@ pub enum TuiBridgeEvent {
     },
     /// The web UI gave the session a new title.
     SessionRename { title: String },
+    /// A client opened the event stream and needs the session as it stands.
+    ClientAttached,
     /// A non-fatal diagnostic from the bridge worker.
     Error(String),
     /// Keepalive ping — no TUI action required.
@@ -1878,6 +1893,15 @@ pub async fn run_bridge_loop(
                     }
                     Some(BridgeMessage::RenameSession { title }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::SessionRename { title }).await;
+                    }
+                    Some(BridgeMessage::ClientAttached) => {
+                        let _ = tui_tx.send(TuiBridgeEvent::ClientAttached).await;
+                    }
+                    Some(BridgeMessage::Unknown) => {
+                        debug!(
+                            session_id = %session_id,
+                            "ignoring a bridge message this build does not know"
+                        );
                     }
                     Some(BridgeMessage::Cancel { .. }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::Cancelled).await;
@@ -2379,6 +2403,18 @@ mod tests {
         assert_eq!(partial["cost_usd"], 0.0421);
         assert_eq!(partial["title"], "refactor the parser");
         assert!(partial.get("permission_mode").is_none());
+    }
+
+    #[test]
+    fn a_message_type_this_build_does_not_know_is_ignored() {
+        // The poll body is parsed as a whole, so an unrecognised variant used
+        // to fail every message in the batch and stall the channel. A relay
+        // newer than the CLI is the ordinary way that happens.
+        let batch = r#"[{"type":"client_attached"},{"type":"invented_later"},{"type":"ping"}]"#;
+        let parsed: Vec<BridgeMessage> = serde_json::from_str(batch).expect("batch should parse");
+        assert!(matches!(parsed[0], BridgeMessage::ClientAttached));
+        assert!(matches!(parsed[1], BridgeMessage::Unknown));
+        assert!(matches!(parsed[2], BridgeMessage::Ping));
     }
 
     #[test]

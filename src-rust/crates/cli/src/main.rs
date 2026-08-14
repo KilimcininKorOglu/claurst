@@ -2014,6 +2014,65 @@ fn mcp_approval_request(
     }
 }
 
+/// Everything a client needs to see the session as it stands.
+///
+/// Both the runner's own connect and a client attaching later go through here,
+/// so a prompt that only one of those paths knew about cannot exist. Every
+/// entry is rebuilt from what is on screen, which is the only state that
+/// outlives the relay's ring buffer.
+fn session_snapshot(
+    app: &claurst_tui::App,
+    question_id: Option<&str>,
+    mcp_request_id: Option<&str>,
+    messages: &[claurst_core::types::Message],
+) -> Vec<claurst_bridge::BridgeOutbound> {
+    let mut snapshot = Vec::new();
+
+    // First, because a client treats History as the whole transcript and
+    // replaces what it has; sent after the prompts it would wipe them.
+    //
+    // Only while idle: mid-turn it would also wipe the bubble the deltas are
+    // still filling, and the deltas that follow would have nowhere to land.
+    if !app.is_streaming {
+        let (entries, omitted) = history_for_bridge(messages);
+        if !entries.is_empty() || omitted > 0 {
+            snapshot.push(claurst_bridge::BridgeOutbound::History { entries, omitted });
+        }
+    }
+
+    if let Some(request) = app.permission_request.as_ref() {
+        snapshot.push(claurst_bridge::BridgeOutbound::PermissionRequest {
+            request_id: request.tool_use_id.clone(),
+            tool_use_id: request.tool_use_id.clone(),
+            tool_name: request.tool_name.clone(),
+            description: request.description.clone(),
+            options: request
+                .options
+                .iter()
+                .map(|option| option.label.clone())
+                .collect(),
+        });
+    }
+
+    if app.ask_user_dialog.visible {
+        if let Some(question_id) = question_id {
+            snapshot.push(claurst_bridge::BridgeOutbound::UserQuestion {
+                question_id: question_id.to_string(),
+                question: app.ask_user_dialog.question.clone(),
+                options: app.ask_user_dialog.options.clone().unwrap_or_default(),
+            });
+        }
+    }
+
+    if app.mcp_approval.visible {
+        if let (Some(request_id), Some(server)) = (mcp_request_id, app.mcp_prompting.as_ref()) {
+            snapshot.push(mcp_approval_request(request_id, server));
+        }
+    }
+
+    snapshot
+}
+
 /// Translate a remote decision into the choice the TUI dialog settles with.
 ///
 /// Kept separate from the dialog so a remote answer and a keyboard answer end
@@ -4073,27 +4132,16 @@ async fn run_interactive(
                             Some(5),
                         );
                         // Send what has already happened, or a client attaching
-                        // to a session in progress sees an empty screen.
-                        let (entries, omitted) = history_for_bridge(&messages);
-                        if !entries.is_empty() || omitted > 0 {
-                            let _ = runtime
-                                .outbound_tx
-                                .try_send(BridgeOutbound::History { entries, omitted });
-                        }
-
-                        // The MCP trust queue fills at startup, so a prompt is
-                        // usually already on screen by the time a client
-                        // connects. Without this it would never learn about the
-                        // thing blocking the session.
-                        if app.mcp_approval.visible {
-                            if let (Some(id), Some(server)) = (
-                                pending_mcp_approval_id.as_deref(),
-                                app.mcp_prompting.as_ref(),
-                            ) {
-                                let _ = runtime
-                                    .outbound_tx
-                                    .try_send(mcp_approval_request(id, server));
-                            }
+                        // to a session in progress sees an empty screen. The
+                        // MCP trust queue fills at startup, so a prompt is
+                        // usually already on screen by this point too.
+                        for event in session_snapshot(
+                            &app,
+                            pending_question_id.as_deref(),
+                            pending_mcp_approval_id.as_deref(),
+                            &messages,
+                        ) {
+                            let _ = runtime.outbound_tx.try_send(event);
                         }
 
                         // Persist the session URL into the saved session record.
@@ -4245,6 +4293,19 @@ async fn run_interactive(
                             app.mcp_approval.close();
                             app.handle_mcp_approval_decision(mcp_choice_for(decision));
                             pending_mcp_approval_id = None;
+                        }
+                    }
+                    Ok(TuiBridgeEvent::ClientAttached) => {
+                        // Whatever the session is waiting on was announced
+                        // once, when it happened. A client that was not there
+                        // then has no other way to hear about it.
+                        for event in session_snapshot(
+                            &app,
+                            pending_question_id.as_deref(),
+                            pending_mcp_approval_id.as_deref(),
+                            &messages,
+                        ) {
+                            let _ = runtime.outbound_tx.try_send(event);
                         }
                     }
                     Ok(TuiBridgeEvent::SessionRename { title }) => {
@@ -6111,6 +6172,123 @@ mod remote_slash_routing_tests {
         assert_eq!(
             super::terminal_only_notice("survey"),
             "/survey answers with a view on the terminal."
+        );
+    }
+}
+
+#[cfg(test)]
+mod session_snapshot_tests {
+    use super::*;
+    use claurst_bridge::BridgeOutbound;
+    use claurst_core::types::Message;
+
+    fn app() -> claurst_tui::App {
+        claurst_tui::App::new(
+            claurst_core::config::Config::default(),
+            claurst_core::cost::CostTracker::new(),
+        )
+    }
+
+    #[test]
+    fn a_waiting_permission_is_announced_again() {
+        // The one that matters most: a permission blocks its tool on a channel
+        // with no timeout, so a client that cannot see the card cannot get the
+        // session moving again.
+        let mut app = app();
+        app.permission_request = Some(claurst_tui::dialogs::PermissionRequest::standard(
+            "tool-1".into(),
+            "Bash".into(),
+            "rm -rf build".into(),
+        ));
+
+        let snapshot = session_snapshot(&app, None, None, &[]);
+        match &snapshot[..] {
+            [BridgeOutbound::PermissionRequest {
+                request_id,
+                tool_name,
+                options,
+                ..
+            }] => {
+                assert_eq!(request_id, "tool-1");
+                assert_eq!(tool_name, "Bash");
+                assert!(!options.is_empty(), "an answerable card needs options");
+            }
+            other => panic!("expected one permission, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_waiting_question_is_announced_again_with_its_id() {
+        let mut app = app();
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+        app.ask_user_dialog.open(
+            "Which branch?".into(),
+            Some(vec!["main".into(), "dev".into()]),
+            reply_tx,
+        );
+
+        let snapshot = session_snapshot(&app, Some("q-1"), None, &[]);
+        match &snapshot[..] {
+            [BridgeOutbound::UserQuestion {
+                question_id,
+                question,
+                options,
+            }] => {
+                assert_eq!(question_id, "q-1");
+                assert_eq!(question, "Which branch?");
+                assert_eq!(options.len(), 2);
+            }
+            other => panic!("expected one question, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_question_with_no_id_is_left_out() {
+        // The id correlates the answer. Announcing a question the runner
+        // cannot match an answer to would offer a card that settles nothing.
+        let mut app = app();
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+        app.ask_user_dialog
+            .open("Which branch?".into(), None, reply_tx);
+
+        assert!(session_snapshot(&app, None, None, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_streaming_turn_holds_the_transcript_back() {
+        // History replaces the transcript wholesale. Sent mid-turn it wipes
+        // the bubble the deltas are still filling, and the deltas that follow
+        // have nowhere to land.
+        let mut app = app();
+        app.is_streaming = true;
+
+        let messages = vec![Message::user("hello"), Message::assistant("hi")];
+        assert!(session_snapshot(&app, None, None, &messages).is_empty());
+
+        app.is_streaming = false;
+        let idle = session_snapshot(&app, None, None, &messages);
+        assert!(matches!(idle[..], [BridgeOutbound::History { .. }]));
+    }
+
+    #[test]
+    fn the_transcript_comes_before_the_prompt_it_would_wipe() {
+        let mut app = app();
+        app.permission_request = Some(claurst_tui::dialogs::PermissionRequest::standard(
+            "tool-1".into(),
+            "Bash".into(),
+            "ls".into(),
+        ));
+
+        let snapshot = session_snapshot(&app, None, None, &[Message::user("hello")]);
+        assert!(
+            matches!(
+                snapshot[..],
+                [
+                    BridgeOutbound::History { .. },
+                    BridgeOutbound::PermissionRequest { .. }
+                ]
+            ),
+            "history must lead, or it replaces the card behind it"
         );
     }
 }
