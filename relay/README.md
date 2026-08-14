@@ -73,7 +73,7 @@ The CLI also runs a second, best-effort path under `/api/bridge/sessions`. It ca
 | `POST` | `/api/client/auth`                               | Sets an `HttpOnly` cookie                 |
 | `GET`  | `/api/client/sessions`                           | Open sessions, most recently active first |
 | `GET`  | `/api/client/sessions/{id}/stream?since=<seq>`   | SSE; resumes from the ring buffer         |
-| `POST` | `/api/client/sessions/{id}/prompt`               | `{"content": "..."}`                      |
+| `POST` | `/api/client/sessions/{id}/prompt`               | `{"content", "attachments"}`; 5 MB total  |
 | `POST` | `/api/client/sessions/{id}/permission`           | `{"request_id", "tool_use_id", "decision"}` |
 | `POST` | `/api/client/sessions/{id}/answer`               | `{"question_id", "answer"}`                 |
 | `POST` | `/api/client/sessions/{id}/cancel`               | Body optional                             |

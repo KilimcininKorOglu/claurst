@@ -94,6 +94,8 @@ Point a browser at the relay address and enter the token. Three views:
 - **Session list** — every connected machine, most recently active first, with its label and working directory.
 - **Session screen** — the live transcript, a prompt box, a stop button, and the cards for anything the session is waiting on.
 
+On opening a session you get the conversation so far, not just what happens next: the newest 40 turns are sent on connect, and the client says how many earlier ones were left out. Tool output is there too, folded into each tool row and opened on demand; a failed tool opens on its own. Extended thinking renders separately from the answer, and a "Working…" line shows while a turn runs.
+
 The layout starts at phone width and adapts upward, so a phone, a tablet and a desktop browser all get a usable screen. Session cards fill a grid once there is room for it, and the transcript stops widening past a readable measure instead of running the width of a monitor.
 
 ---
@@ -130,6 +132,21 @@ Two consequences worth stating plainly:
 
 ---
 
+## What you can do from a remote client
+
+| Action | Notes |
+|---|---|
+| Send a prompt | Enter sends, Shift+Enter inserts a newline |
+| Attach files | Images become something the model can look at; text is folded into the prompt. 5 MB per prompt |
+| Run a slash command | Takes the same route as one typed at the keyboard, so `/compact`, `/clear` and `/model <id>` behave identically. Commands that open a picker still render on the terminal |
+| Answer a permission request | Either side may answer |
+| Answer a question | Either side may answer |
+| Stop the current turn | Same as Ctrl+C at the keyboard |
+
+A command sent while a turn is running is queued and runs when the turn ends, exactly as a message typed at the keyboard during a turn.
+
+---
+
 ## Questions
 
 The model can call `AskUserQuestion` to ask you something mid-turn. That also blocks the turn, and it can be answered from either side.
@@ -163,7 +180,7 @@ The **client surface** is ours, and a native app should use it:
 | `POST` | `/api/client/auth`                             | Sets the cookie                             |
 | `GET`  | `/api/client/sessions`                         | Open sessions, most recently active first   |
 | `GET`  | `/api/client/sessions/{id}/stream?since=<seq>` | SSE; resumes from the ring buffer           |
-| `POST` | `/api/client/sessions/{id}/prompt`             | `{"content": "..."}`                        |
+| `POST` | `/api/client/sessions/{id}/prompt`             | `{"content", "attachments"}`; 5 MB total    |
 | `POST` | `/api/client/sessions/{id}/permission`         | `{"request_id", "tool_use_id", "decision"}` |
 | `POST` | `/api/client/sessions/{id}/answer`             | `{"question_id", "answer"}`                 |
 | `POST` | `/api/client/sessions/{id}/cancel`             | Body optional                               |
