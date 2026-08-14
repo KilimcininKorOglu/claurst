@@ -332,6 +332,8 @@ pub enum BridgeMessage {
         request_id: String,
         decision: McpApprovalDecision,
     },
+    /// The web UI gave the session a new title.
+    RenameSession { title: String },
     /// Cancel the in-progress operation for a session.
     Cancel {
         session_id: String,
@@ -515,6 +517,8 @@ pub struct SessionInfo {
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub cost_usd: Option<f64>,
+    /// Session title, which a client may also set.
+    pub title: Option<String>,
 }
 
 /// The body of a registration POST.
@@ -554,6 +558,9 @@ fn registration_body(
         }
         if let Some(cost) = info.cost_usd {
             map.insert("cost_usd".into(), serde_json::Value::from(cost));
+        }
+        if let Some(title) = &info.title {
+            map.insert("title".into(), serde_json::Value::from(title.clone()));
         }
     }
     body
@@ -1464,8 +1471,8 @@ pub enum TuiBridgeEvent {
         request_id: String,
         decision: McpApprovalDecision,
     },
-    /// The web UI requested a session title change.
-    SessionNameUpdate { title: String },
+    /// The web UI gave the session a new title.
+    SessionRename { title: String },
     /// A non-fatal diagnostic from the bridge worker.
     Error(String),
     /// Keepalive ping — no TUI action required.
@@ -1786,6 +1793,9 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
+                    Some(BridgeMessage::RenameSession { title }) => {
+                        let _ = tui_tx.send(TuiBridgeEvent::SessionRename { title }).await;
+                    }
                     Some(BridgeMessage::Cancel { .. }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::Cancelled).await;
                     }
@@ -1958,9 +1968,7 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                         if let Some(t) = title {
-                            let _ = tui_tx
-                                .send(TuiBridgeEvent::SessionNameUpdate { title: t })
-                                .await;
+                            let _ = tui_tx.send(TuiBridgeEvent::SessionRename { title: t }).await;
                         }
                     }
                 }
@@ -2186,11 +2194,25 @@ mod tests {
                 model: Some("claude-sonnet-4-5".into()),
                 permission_mode: None,
                 cost_usd: Some(0.0421),
+                title: Some("refactor the parser".into()),
             }),
         );
         assert_eq!(partial["model"], "claude-sonnet-4-5");
         assert_eq!(partial["cost_usd"], 0.0421);
+        assert_eq!(partial["title"], "refactor the parser");
         assert!(partial.get("permission_mode").is_none());
+    }
+
+    #[test]
+    fn a_rename_survives_the_wire() {
+        let msg = BridgeMessage::RenameSession {
+            title: "parser rewrite".into(),
+        };
+        let encoded = serde_json::to_string(&msg).expect("serialise");
+        match serde_json::from_str::<BridgeMessage>(&encoded).expect("deserialise") {
+            BridgeMessage::RenameSession { title } => assert_eq!(title, "parser rewrite"),
+            other => panic!("wrong variant: {other:?}"),
+        }
     }
 
     #[test]

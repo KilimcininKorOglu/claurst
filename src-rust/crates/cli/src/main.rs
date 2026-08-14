@@ -4200,12 +4200,13 @@ async fn run_interactive(
                             pending_mcp_approval_id = None;
                         }
                     }
-                    Ok(TuiBridgeEvent::SessionNameUpdate { title }) => {
-                        session.title = Some(title.clone());
-                        session.updated_at = chrono::Utc::now();
-                        cmd_ctx.session_title = Some(title.clone());
-                        app.session_title = Some(title);
-                        let _ = claurst_core::history::save_session(&session).await;
+                    Ok(TuiBridgeEvent::SessionRename { title }) => {
+                        // Same settle path as `/rename`, so the two entries
+                        // cannot leave different surfaces stale.
+                        let title = title.trim().to_string();
+                        if !title.is_empty() {
+                            apply_session_rename(title, &mut session, &mut cmd_ctx, &mut app).await;
+                        }
                     }
                     Ok(TuiBridgeEvent::Error(msg)) => {
                         app.bridge_state = BridgeConnectionState::Failed {
@@ -4438,6 +4439,7 @@ async fn run_interactive(
                     format!("{:?}", cmd_ctx.config.permission_mode).to_lowercase(),
                 ),
                 cost_usd: Some((cost_tracker.total_cost_usd() * 10_000.0).round() / 10_000.0),
+                title: session.title.clone(),
             };
             if bridge_info_sent.as_ref() != Some(&info) {
                 let _ = runtime

@@ -64,6 +64,9 @@ pub enum BridgeMessage {
         request_id: String,
         decision: McpApprovalDecision,
     },
+    RenameSession {
+        title: String,
+    },
     Cancel {
         session_id: String,
         reason: Option<String>,
@@ -102,6 +105,11 @@ pub struct RegisterBody {
     pub permission_mode: Option<String>,
     #[serde(default)]
     pub cost_usd: Option<f64>,
+    /// Session title, which the client can also set through the rename
+    /// endpoint. The runner is the authority: it re-registers after applying
+    /// a rename, so a stale title cannot survive a reconnect.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 impl RegisterBody {

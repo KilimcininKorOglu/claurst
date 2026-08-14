@@ -40,6 +40,8 @@ pub struct Session {
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub cost_usd: Option<f64>,
+    /// Title the operator gave the session, shown instead of the label.
+    pub title: Option<String>,
     /// Woken when either queue gains an entry, so pollers do not spin.
     notify: Arc<Notify>,
 }
@@ -58,6 +60,8 @@ pub struct SessionSummary {
     pub permission_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Seconds since the runner last talked to the relay.
     pub idle_secs: u64,
     /// Highest sequence number issued so far, so a client can resume from it.
@@ -100,6 +104,7 @@ impl Session {
             model: None,
             permission_mode: None,
             cost_usd: None,
+            title: None,
             notify: Arc::new(Notify::new()),
         }
     }
@@ -160,6 +165,9 @@ impl Relay {
         }
         if body.cost_usd.is_some() {
             session.cost_usd = body.cost_usd;
+        }
+        if body.title.is_some() {
+            session.title = body.title.clone();
         }
     }
 
@@ -270,6 +278,7 @@ impl Relay {
                 model: session.model.clone(),
                 permission_mode: session.permission_mode.clone(),
                 cost_usd: session.cost_usd,
+                title: session.title.clone(),
                 idle_secs: session.last_seen.elapsed().as_secs(),
                 latest_seq: session.next_seq.saturating_sub(1),
             })
@@ -424,6 +433,7 @@ mod tests {
                 model: Some("claude-sonnet-4-5".into()),
                 permission_mode: Some("plan".into()),
                 cost_usd: Some(0.0421),
+                title: Some("parser rewrite".into()),
                 ..Default::default()
             })
             .await;
@@ -440,6 +450,7 @@ mod tests {
         assert_eq!(summaries[0].model.as_deref(), Some("claude-sonnet-4-5"));
         assert_eq!(summaries[0].permission_mode.as_deref(), Some("plan"));
         assert_eq!(summaries[0].cost_usd, Some(0.0833));
+        assert_eq!(summaries[0].title.as_deref(), Some("parser rewrite"));
     }
 
     #[tokio::test]

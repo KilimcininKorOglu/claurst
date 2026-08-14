@@ -51,6 +51,7 @@ pub fn routes() -> Router<Arc<Relay>> {
             "/api/client/sessions/{session_id}/mcp-approval",
             post(mcp_approval),
         )
+        .route("/api/client/sessions/{session_id}/rename", post(rename))
         .route("/api/client/sessions/{session_id}/cancel", post(cancel))
 }
 
@@ -315,6 +316,29 @@ async fn mcp_approval(
         },
     )
     .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameBody {
+    pub title: String,
+}
+
+/// Give the session a new title.
+///
+/// The relay does not store the title here: the runner applies the rename and
+/// re-registers with it, so the stored value always reflects what the terminal
+/// actually shows.
+async fn rename(
+    State(relay): State<Arc<Relay>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<Accepted>, StatusCode> {
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    info!(session_id = %session_id, "client renamed a session");
+    enqueue(&relay, &session_id, BridgeMessage::RenameSession { title }).await
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -641,6 +665,72 @@ mod tests {
                     .body(Body::from(
                         json!({ "request_id": "r1", "decision": "allow_always" }).to_string(),
                     ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(relay.take_inbound("s1").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_rename_reaches_the_runner_queue_trimmed() {
+        let relay = relay();
+        relay.register(&RegisterBody::new("s1")).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                authed("POST", "/api/client/sessions/s1/rename")
+                    .body(Body::from(
+                        json!({ "title": "  parser rewrite  " }).to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let queued = relay.take_inbound("s1").await;
+        match &queued[..] {
+            [BridgeMessage::RenameSession { title }] => assert_eq!(title, "parser rewrite"),
+            other => panic!("expected one rename, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_blank_rename_is_refused() {
+        // Whitespace only is the same as empty: accepting it would blank the
+        // session name on every surface, which is not something a client can
+        // undo from the web UI.
+        let relay = relay();
+        relay.register(&RegisterBody::new("s1")).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                authed("POST", "/api/client/sessions/s1/rename")
+                    .body(Body::from(json!({ "title": "   " }).to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(relay.take_inbound("s1").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_rename_needs_a_token() {
+        let relay = relay();
+        relay.register(&RegisterBody::new("s1")).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/client/sessions/s1/rename")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "title": "hijack" }).to_string()))
                     .expect("request"),
             )
             .await
