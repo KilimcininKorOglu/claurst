@@ -1935,6 +1935,28 @@ fn remote_turn_can_start(
     !is_streaming && !query_in_flight && !blocking_modal && prompt_box_empty
 }
 
+/// Why a queued remote prompt has not started yet, phrased for the sender.
+///
+/// `None` when nothing is holding it, which is the caller's signal that the
+/// wait is over rather than a reason worth reporting.
+fn remote_wait_reason(
+    busy: bool,
+    blocking_modal: bool,
+    prompt_box_empty: bool,
+) -> Option<&'static str> {
+    // Order matters: a turn can be running *and* be blocked on a dialog, and
+    // the dialog is the thing the operator has to act on.
+    if blocking_modal {
+        Some("Queued: the terminal is waiting on a dialog.")
+    } else if busy {
+        Some("Queued: a turn is already running.")
+    } else if !prompt_box_empty {
+        Some("Queued: someone is typing at the terminal.")
+    } else {
+        None
+    }
+}
+
 /// Describe a project MCP server awaiting trust, for a remote client.
 ///
 /// Sent both when the prompt opens and again when a client connects to a
@@ -2437,6 +2459,11 @@ async fn run_interactive(
         String,
         Vec<claurst_bridge::BridgeAttachment>,
     )> = std::collections::VecDeque::new();
+
+    // Whether the client has already been told why its prompt is waiting. One
+    // notice per spell of waiting; repeating it every frame would bury the
+    // transcript.
+    let mut deferred_notice_sent = false;
 
     // Last busy state pushed to the remote client, so only transitions are
     // sent rather than one event per loop iteration.
@@ -4195,6 +4222,24 @@ async fn run_interactive(
             deferred_remote_prompts.push_back((content, Vec::new()));
         }
 
+        // Say why a prompt is sitting there, once per spell of waiting. Without
+        // it the sender sees nothing happen and sends the same thing again.
+        if !deferred_remote_prompts.is_empty() && !deferred_notice_sent {
+            if let Some(reason) = remote_wait_reason(
+                app.is_streaming || current_query.is_some(),
+                app.blocking_modal_open(),
+                app.prompt_input.text.is_empty(),
+            ) {
+                if let Some(runtime) = bridge_runtime.as_ref() {
+                    let _ = runtime.outbound_tx.try_send(BridgeOutbound::Notice {
+                        message: reason.to_string(),
+                        is_error: false,
+                    });
+                }
+                deferred_notice_sent = true;
+            }
+        }
+
         // The one place a remote prompt becomes a turn.
         if !deferred_remote_prompts.is_empty()
             && remote_turn_can_start(
@@ -4204,6 +4249,7 @@ async fn run_interactive(
                 app.prompt_input.text.is_empty(),
             )
         {
+            deferred_notice_sent = false;
             if let Some((content, attachments)) = deferred_remote_prompts.pop_front() {
                 if content.trim_start().starts_with('/') {
                     // A slash command has to go through the keyboard submit
@@ -5890,6 +5936,26 @@ mod remote_turn_gate_tests {
     #[test]
     fn an_idle_session_with_an_empty_prompt_box_starts_the_turn() {
         assert!(remote_turn_can_start(false, false, false, true));
+    }
+
+    #[test]
+    fn the_dialog_is_reported_ahead_of_the_running_turn() {
+        use super::remote_wait_reason;
+        // A turn blocked on a permission prompt is both busy and blocked. The
+        // operator can only act on the dialog, so that is what to say.
+        assert_eq!(
+            remote_wait_reason(true, true, true),
+            Some("Queued: the terminal is waiting on a dialog.")
+        );
+        assert_eq!(
+            remote_wait_reason(true, false, true),
+            Some("Queued: a turn is already running.")
+        );
+        assert_eq!(
+            remote_wait_reason(false, false, false),
+            Some("Queued: someone is typing at the terminal.")
+        );
+        assert_eq!(remote_wait_reason(false, false, true), None);
     }
 
     #[test]
