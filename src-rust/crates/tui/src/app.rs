@@ -2513,6 +2513,49 @@ impl App {
         self.intercept_slash_command(cmd)
     }
 
+    /// Whether [`Self::intercept_slash_command`] answers this command by
+    /// opening a view on the terminal.
+    ///
+    /// A caller that is not at the keyboard uses this to stay out of the
+    /// intercept: a picker nobody can see helps nobody, and the command layer
+    /// usually has a text answer for the same question that would otherwise be
+    /// thrown away.
+    ///
+    /// Only the arms that open something. `clear`, `vim`, `fast` and the other
+    /// toggles change state and report it in the status line, which travels
+    /// anywhere. `keybindings` opens an external editor rather than a view.
+    pub fn opens_terminal_view(cmd: &str) -> bool {
+        matches!(
+            cmd,
+            "config"
+                | "settings"
+                | "theme"
+                | "stats"
+                | "cost"
+                | "mcp"
+                | "agents"
+                | "diff"
+                | "review"
+                | "changes"
+                | "search"
+                | "find"
+                | "survey"
+                | "memory"
+                | "hooks"
+                | "import-config"
+                | "connect"
+                | "model"
+                | "session"
+                | "resume"
+                | "rename"
+                | "effort"
+                | "export"
+                | "rewind"
+                | "context"
+                | "help"
+        )
+    }
+
     pub fn intercept_slash_command(&mut self, cmd: &str) -> bool {
         self.close_secondary_views();
         self.dismiss_error_notifications();
@@ -8087,6 +8130,72 @@ mod tests {
         }
         assert_eq!(app.prompt_input.text, "line1\nline2");
         assert!(app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
+    /// Every name the predicate claims opens a view really does open one.
+    ///
+    /// The predicate is a second list of the same arms, and a caller acts on
+    /// it instead of running the intercept. Left unchecked, an arm renamed on
+    /// one side would send a remote client to a picker it cannot see, which is
+    /// exactly the silence this predicate exists to end.
+    #[test]
+    fn every_name_that_claims_a_view_opens_one() {
+        for cmd in [
+            "config",
+            "settings",
+            "theme",
+            "stats",
+            "cost",
+            "mcp",
+            "agents",
+            "diff",
+            "review",
+            "changes",
+            "search",
+            "find",
+            "survey",
+            "memory",
+            "hooks",
+            "import-config",
+            "connect",
+            "model",
+            "session",
+            "resume",
+            "rename",
+            "effort",
+            "export",
+            "rewind",
+            "context",
+            "help",
+        ] {
+            assert!(App::opens_terminal_view(cmd), "{cmd} is not in the list");
+
+            let mut app = make_app();
+            assert!(
+                app.intercept_slash_command(cmd),
+                "/{cmd} was not intercepted"
+            );
+            assert!(app.any_modal_open(), "/{cmd} opened no view");
+        }
+    }
+
+    /// A command that only flips state is not a view.
+    ///
+    /// These stay on the intercept path wherever they come from: they take
+    /// effect and say so in the status line, which reaches a remote client
+    /// already.
+    #[test]
+    fn a_toggle_is_not_a_view() {
+        for cmd in ["clear", "new", "vim", "fast", "output-style", "exit"] {
+            assert!(
+                !App::opens_terminal_view(cmd),
+                "/{cmd} is listed as a view but only changes state"
+            );
+
+            let mut app = make_app();
+            assert!(app.intercept_slash_command(cmd));
+            assert!(!app.any_modal_open(), "/{cmd} opened a view after all");
+        }
     }
 
     #[test]
