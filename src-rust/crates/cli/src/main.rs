@@ -2469,6 +2469,10 @@ async fn run_interactive(
     // sent rather than one event per loop iteration.
     let mut bridge_busy_sent = false;
 
+    // Last session facts pushed to the relay, so a re-registration only goes
+    // out when one of them actually changed.
+    let mut bridge_info_sent: Option<claurst_bridge::SessionInfo> = None;
+
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
     let bridge_token: Option<String> = bridge_config.as_ref().and_then(|c| c.session_token.clone());
@@ -4397,6 +4401,26 @@ async fn run_interactive(
                     busy: app.is_streaming,
                 });
                 bridge_busy_sent = app.is_streaming;
+            }
+
+            // Facts the session list shows, refreshed only when they move.
+            // Cost is rounded first: it creeps with every model call, and
+            // comparing the raw float would re-register on each one.
+            let info = claurst_bridge::SessionInfo {
+                model: Some(claurst_api::effective_model_for_config(
+                    &cmd_ctx.config,
+                    &model_registry,
+                )),
+                permission_mode: Some(
+                    format!("{:?}", cmd_ctx.config.permission_mode).to_lowercase(),
+                ),
+                cost_usd: Some((cost_tracker.total_cost_usd() * 10_000.0).round() / 10_000.0),
+            };
+            if bridge_info_sent.as_ref() != Some(&info) {
+                let _ = runtime
+                    .outbound_tx
+                    .try_send(BridgeOutbound::SessionInfo(info.clone()));
+                bridge_info_sent = Some(info);
             }
         }
 

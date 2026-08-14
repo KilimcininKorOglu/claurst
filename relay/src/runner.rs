@@ -62,15 +62,7 @@ async fn register(State(relay): State<Arc<Relay>>, Json(body): Json<RegisterBody
         label = ?body.label,
         "runner registered"
     );
-    relay
-        .register(
-            &body.session_id,
-            body.device_id,
-            body.client_version,
-            body.label,
-            body.cwd,
-        )
-        .await;
+    relay.register(&body).await;
     StatusCode::CREATED
 }
 

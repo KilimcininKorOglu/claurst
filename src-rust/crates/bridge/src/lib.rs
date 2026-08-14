@@ -1511,6 +1511,12 @@ pub enum BridgeOutbound {
         message: String,
         is_error: bool,
     },
+    /// Session facts worth showing before a client attaches.
+    ///
+    /// Re-registers rather than joining the event stream: the relay keeps
+    /// events opaque on purpose, and folding these in would make it parse
+    /// them.
+    SessionInfo(SessionInfo),
     SessionMeta {
         title: Option<String>,
         session_id: String,
@@ -1696,6 +1702,10 @@ pub async fn run_bridge_loop(
     // Build incoming message channel.
     let (msg_tx, mut msg_rx) = mpsc::channel::<BridgeMessage>(64);
 
+    // Kept before the session moves into the poll task, so a later
+    // re-registration reuses the same connection pool.
+    let meta_http = session.http.clone();
+
     // Spawn the low-level poll loop in its own task.
     let poll_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -1846,6 +1856,16 @@ pub async fn run_bridge_loop(
                                 code: None,
                             })
                             .await;
+                    }
+                    Some(BridgeOutbound::SessionInfo(info)) => {
+                        // Not an event: it updates the session record so a
+                        // client can tell two sessions apart in the list,
+                        // before attaching to either.
+                        if let Err(e) =
+                            post_registration(&meta_http, &config, &session_id, Some(&info)).await
+                        {
+                            debug!(error = %e, "Session info update failed (ignored)");
+                        }
                     }
                     Some(BridgeOutbound::Notice { message, is_error }) => {
                         let _ = bridge_ev_tx
@@ -2142,6 +2162,35 @@ mod tests {
             }
             other => panic!("expected a turn_complete carrying usage, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_registration_omits_facts_it_does_not_know() {
+        // Absent, not null: the relay merges a registration over what it
+        // already holds, so a null would erase the value instead of leaving
+        // it alone.
+        let config = BridgeConfig {
+            label: Some("workstation".into()),
+            ..Default::default()
+        };
+
+        let plain = registration_body(&config, "s1", None);
+        assert_eq!(plain["label"], "workstation");
+        assert!(plain.get("model").is_none());
+        assert!(plain.get("cost_usd").is_none());
+
+        let partial = registration_body(
+            &config,
+            "s1",
+            Some(&SessionInfo {
+                model: Some("claude-sonnet-4-5".into()),
+                permission_mode: None,
+                cost_usd: Some(0.0421),
+            }),
+        );
+        assert_eq!(partial["model"], "claude-sonnet-4-5");
+        assert_eq!(partial["cost_usd"], 0.0421);
+        assert!(partial.get("permission_mode").is_none());
     }
 
     #[test]

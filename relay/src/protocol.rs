@@ -79,7 +79,7 @@ pub enum BridgeMessage {
 pub type BridgeEvent = serde_json::Value;
 
 /// Body of `POST /api/claude_code/sessions`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct RegisterBody {
     pub session_id: String,
     #[serde(default)]
@@ -93,6 +93,25 @@ pub struct RegisterBody {
     /// Working directory of the session, used as a fallback label.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Facts that change while the session runs, so the runner re-registers
+    /// when they do. Absent rather than null when unknown, which is what lets
+    /// a re-registration leave the stored value alone.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+}
+
+impl RegisterBody {
+    /// The minimal valid registration: an id and nothing else.
+    pub fn new(session_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 /// Body of `POST /api/claude_code/sessions/{id}/events`.

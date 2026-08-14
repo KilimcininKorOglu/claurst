@@ -370,6 +370,7 @@ async fn enqueue(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::RegisterBody;
     use crate::state::Limits;
     use axum::body::Body;
     use axum::http::{header, Request as HttpRequest};
@@ -434,7 +435,7 @@ mod tests {
         // The SSE endpoint is only reachable this way, because EventSource
         // cannot set headers.
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay)
             .oneshot(
@@ -470,13 +471,14 @@ mod tests {
     async fn the_session_list_carries_the_label_the_runner_registered() {
         let relay = relay();
         relay
-            .register(
-                "s1",
-                Some("dev".into()),
-                Some("0.1.7".into()),
-                Some("claurst".into()),
-                Some("/home/k/claurst".into()),
-            )
+            .register(&RegisterBody {
+                session_id: "s1".into(),
+                device_id: Some("dev".into()),
+                client_version: Some("0.1.7".into()),
+                label: Some("claurst".into()),
+                cwd: Some("/home/k/claurst".into()),
+                ..Default::default()
+            })
             .await;
 
         let response = app(relay)
@@ -497,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn a_prompt_reaches_the_runner_queue() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay.clone())
             .oneshot(
@@ -519,7 +521,7 @@ mod tests {
     #[tokio::test]
     async fn an_empty_prompt_is_refused() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay.clone())
             .oneshot(
@@ -553,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn a_permission_answer_reaches_the_runner_queue() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay.clone())
             .oneshot(
@@ -597,7 +599,7 @@ mod tests {
             ("deny", McpApprovalDecision::Deny),
         ] {
             let relay = relay();
-            relay.register("s1", None, None, None, None).await;
+            relay.register(&RegisterBody::new("s1")).await;
 
             let response = app(relay.clone())
                 .oneshot(
@@ -628,7 +630,7 @@ mod tests {
     #[tokio::test]
     async fn an_mcp_trust_answer_needs_a_token() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay.clone())
             .oneshot(
@@ -651,7 +653,7 @@ mod tests {
     #[tokio::test]
     async fn a_cancel_needs_no_body() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let response = app(relay.clone())
             .oneshot(
@@ -686,7 +688,7 @@ mod tests {
     #[tokio::test]
     async fn the_stream_replays_buffered_events_from_since() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         relay
             .push_events(
                 "s1",
@@ -723,6 +725,7 @@ mod tests {
 #[cfg(test)]
 mod answer_tests {
     use super::*;
+    use crate::protocol::RegisterBody;
     use crate::state::{Limits, Relay};
     use axum::body::Body;
     use axum::http::Request;
@@ -756,7 +759,7 @@ mod answer_tests {
     #[tokio::test]
     async fn an_answer_reaches_the_runner_queue() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let status = post(
             relay.clone(),
@@ -785,7 +788,7 @@ mod answer_tests {
     #[tokio::test]
     async fn an_empty_answer_is_accepted_but_a_missing_id_is_not() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         assert_eq!(
             post(

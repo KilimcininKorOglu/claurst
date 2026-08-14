@@ -217,6 +217,7 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::RegisterBody;
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
     use http_body_util::BodyExt;
@@ -384,7 +385,7 @@ mod tests {
             session_ttl: Duration::from_secs(60),
             ..Limits::default()
         }));
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         let router = app(relay, Arc::new(TOKEN.to_string()));
 
         // The handler holds the request for POLL_HOLD; pause the clock so the
@@ -421,7 +422,7 @@ mod tests {
     #[tokio::test]
     async fn deregistering_removes_the_session() {
         let relay = Arc::new(Relay::new(Limits::default()));
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         let router = app(relay.clone(), Arc::new(TOKEN.to_string()));
 
         let response = router

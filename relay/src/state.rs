@@ -13,7 +13,7 @@ use serde::Serialize;
 use tokio::sync::{Notify, RwLock};
 use tracing::warn;
 
-use crate::protocol::{BridgeEvent, BridgeMessage};
+use crate::protocol::{BridgeEvent, BridgeMessage, RegisterBody};
 
 /// An event as stored, tagged with the sequence number a client resumes from.
 #[derive(Debug, Clone, Serialize)]
@@ -35,6 +35,11 @@ pub struct Session {
     /// Display name for the session list.
     pub label: Option<String>,
     pub cwd: Option<String>,
+    /// Facts that change while the session runs, refreshed by re-registration
+    /// so the list can tell two sessions apart before either is opened.
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub cost_usd: Option<f64>,
     /// Woken when either queue gains an entry, so pollers do not spin.
     notify: Arc<Notify>,
 }
@@ -47,6 +52,12 @@ pub struct SessionSummary {
     pub cwd: Option<String>,
     pub device_id: Option<String>,
     pub client_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
     /// Seconds since the runner last talked to the relay.
     pub idle_secs: u64,
     /// Highest sequence number issued so far, so a client can resume from it.
@@ -86,6 +97,9 @@ impl Session {
             client_version: None,
             label: None,
             cwd: None,
+            model: None,
+            permission_mode: None,
+            cost_usd: None,
             notify: Arc::new(Notify::new()),
         }
     }
@@ -115,30 +129,37 @@ impl Relay {
 
     /// Create or refresh a session. Re-registering keeps the event buffer, so a
     /// runner that reconnects does not blank the client's view.
-    pub async fn register(
-        &self,
-        session_id: &str,
-        device_id: Option<String>,
-        client_version: Option<String>,
-        label: Option<String>,
-        cwd: Option<String>,
-    ) {
+    /// Record a registration, merging over whatever is already stored.
+    ///
+    /// A field left absent keeps its previous value: the runner re-registers
+    /// when the model, mode or cost changes and does not resend the rest, so
+    /// overwriting unconditionally would blank the label on every update.
+    pub async fn register(&self, body: &RegisterBody) {
         let mut sessions = self.sessions.write().await;
         let session = sessions
-            .entry(session_id.to_string())
+            .entry(body.session_id.clone())
             .or_insert_with(|| Session::new(self.limits));
         session.touch();
-        if device_id.is_some() {
-            session.device_id = device_id;
+        if body.device_id.is_some() {
+            session.device_id = body.device_id.clone();
         }
-        if client_version.is_some() {
-            session.client_version = client_version;
+        if body.client_version.is_some() {
+            session.client_version = body.client_version.clone();
         }
-        if label.is_some() {
-            session.label = label;
+        if body.label.is_some() {
+            session.label = body.label.clone();
         }
-        if cwd.is_some() {
-            session.cwd = cwd;
+        if body.cwd.is_some() {
+            session.cwd = body.cwd.clone();
+        }
+        if body.model.is_some() {
+            session.model = body.model.clone();
+        }
+        if body.permission_mode.is_some() {
+            session.permission_mode = body.permission_mode.clone();
+        }
+        if body.cost_usd.is_some() {
+            session.cost_usd = body.cost_usd;
         }
     }
 
@@ -246,6 +267,9 @@ impl Relay {
                 cwd: session.cwd.clone(),
                 device_id: session.device_id.clone(),
                 client_version: session.client_version.clone(),
+                model: session.model.clone(),
+                permission_mode: session.permission_mode.clone(),
+                cost_usd: session.cost_usd,
                 idle_secs: session.last_seen.elapsed().as_secs(),
                 latest_seq: session.next_seq.saturating_sub(1),
             })
@@ -300,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn the_runner_collects_what_a_client_queued() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         assert!(relay.push_inbound("s1", ping()).await);
 
         let taken = relay.take_inbound("s1").await;
@@ -314,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn a_full_inbound_queue_drops_the_oldest() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         for _ in 0..5 {
             relay.push_inbound("s1", ping()).await;
         }
@@ -324,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn the_event_buffer_keeps_the_newest_and_its_sequence_numbers() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         relay
             .push_events("s1", (1..=5).map(|n| json!({ "n": n })).collect())
             .await;
@@ -339,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn a_client_resumes_from_its_last_sequence_number() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         relay
             .push_events("s1", vec![json!({ "n": 1 }), json!({ "n": 2 })])
             .await;
@@ -352,10 +376,15 @@ mod tests {
     #[tokio::test]
     async fn reregistering_keeps_the_events_already_buffered() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         relay.push_events("s1", vec![json!({ "n": 1 })]).await;
         relay
-            .register("s1", Some("dev".into()), None, Some("work".into()), None)
+            .register(&RegisterBody {
+                session_id: "s1".into(),
+                device_id: Some("dev".into()),
+                label: Some("work".into()),
+                ..Default::default()
+            })
             .await;
 
         let (events, _) = relay.events_since("s1", 0).await.expect("session");
@@ -370,18 +399,53 @@ mod tests {
     async fn registering_again_without_a_label_keeps_the_old_one() {
         let relay = relay();
         relay
-            .register("s1", None, None, Some("work".into()), None)
+            .register(&RegisterBody {
+                session_id: "s1".into(),
+                label: Some("work".into()),
+                ..Default::default()
+            })
             .await;
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
 
         let summaries = relay.summaries().await;
         assert_eq!(summaries[0].label.as_deref(), Some("work"));
     }
 
     #[tokio::test]
+    async fn a_reregistration_updates_only_what_it_carries() {
+        // The runner re-registers whenever the model, mode or cost changes and
+        // does not resend the rest. If absent fields overwrote, every update
+        // would blank the label and cwd the list is built from.
+        let relay = relay();
+        relay
+            .register(&RegisterBody {
+                session_id: "s1".into(),
+                label: Some("work".into()),
+                model: Some("claude-sonnet-4-5".into()),
+                permission_mode: Some("plan".into()),
+                cost_usd: Some(0.0421),
+                ..Default::default()
+            })
+            .await;
+        relay
+            .register(&RegisterBody {
+                session_id: "s1".into(),
+                cost_usd: Some(0.0833),
+                ..Default::default()
+            })
+            .await;
+
+        let summaries = relay.summaries().await;
+        assert_eq!(summaries[0].label.as_deref(), Some("work"));
+        assert_eq!(summaries[0].model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(summaries[0].permission_mode.as_deref(), Some("plan"));
+        assert_eq!(summaries[0].cost_usd, Some(0.0833));
+    }
+
+    #[tokio::test]
     async fn deregistering_removes_the_session() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         relay.deregister("s1").await;
         assert!(!relay.exists("s1").await);
         assert!(relay.events_since("s1", 0).await.is_none());
@@ -393,7 +457,7 @@ mod tests {
             session_ttl: Duration::from_millis(1),
             ..Limits::default()
         });
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         tokio::time::sleep(Duration::from_millis(5)).await;
 
         assert_eq!(relay.sweep_expired().await, 1);
@@ -403,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn an_active_session_survives_the_sweep() {
         let relay = relay();
-        relay.register("s1", None, None, None, None).await;
+        relay.register(&RegisterBody::new("s1")).await;
         assert_eq!(relay.sweep_expired().await, 0);
         assert!(relay.exists("s1").await);
     }
@@ -411,9 +475,9 @@ mod tests {
     #[tokio::test]
     async fn summaries_list_the_most_recently_active_first() {
         let relay = relay();
-        relay.register("old", None, None, None, None).await;
+        relay.register(&RegisterBody::new("old")).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        relay.register("new", None, None, None, None).await;
+        relay.register(&RegisterBody::new("new")).await;
 
         let summaries = relay.summaries().await;
         assert_eq!(summaries[0].session_id, "new");
