@@ -151,6 +151,16 @@ See [Permission Modes](#permission-modes) for a full description of each value.
 | `custom_system_prompt` | string \| null | null    | Replace the default Claurst system prompt entirely with this text.                    |
 | `append_system_prompt` | string \| null | null    | Append this text to the end of the assembled system prompt (after AGENTS.md content). |
 
+The same two can be set per run from the command line, which overrides the settings file:
+
+| Flag                              | Effect                                                              |
+|-----------------------------------|---------------------------------------------------------------------|
+| `--system-prompt <TEXT>`, `-s`    | Replace the base prompt with `TEXT`.                                |
+| `--system-prompt-file <PATH>`     | Replace the base prompt with the file's contents. Fails if unreadable. |
+| `--append-system-prompt <TEXT>`   | Append `TEXT` after the assembled prompt.                            |
+
+`--system-prompt` and `--system-prompt-file` are mutually exclusive. Run `claurst --dump-system-prompt` with the same flags to see exactly what a run would send.
+
 ### Tool access
 
 | Key                | Type             | Default  | Description                                                                                |

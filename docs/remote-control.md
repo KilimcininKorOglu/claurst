@@ -92,7 +92,7 @@ Point a browser at the relay address and enter the token. Three views:
 
 - **Token entry** — once per browser. The token goes into an `HttpOnly` cookie, so the page cannot read it back.
 - **Session list** — every connected machine, most recently active first, with its label and working directory.
-- **Session screen** — the live transcript, a prompt box, a stop button, and the permission card.
+- **Session screen** — the live transcript, a prompt box, a stop button, and the cards for anything the session is waiting on.
 
 The layout starts at phone width and adapts upward, so a phone, a tablet and a desktop browser all get a usable screen. Session cards fill a grid once there is room for it, and the transcript stops widening past a readable measure instead of running the width of a monitor.
 
@@ -130,6 +130,16 @@ Two consequences worth stating plainly:
 
 ---
 
+## Questions
+
+The model can call `AskUserQuestion` to ask you something mid-turn. That also blocks the turn, and it can be answered from either side.
+
+The card shows the question, the model's suggested answers as buttons, and a free-text field for anything else. Submitting an empty answer counts as dismissing it, which the model sees as "the user dismissed the question without answering".
+
+Whichever side answers first wins; the other side's card stops accepting input for that question.
+
+---
+
 ## What survives a restart
 
 Nothing on the relay. Sessions, queues and buffers are in memory, so a relay restart drops them and the CLI re-registers on its next poll.
@@ -155,6 +165,7 @@ The **client surface** is ours, and a native app should use it:
 | `GET`  | `/api/client/sessions/{id}/stream?since=<seq>` | SSE; resumes from the ring buffer           |
 | `POST` | `/api/client/sessions/{id}/prompt`             | `{"content": "..."}`                        |
 | `POST` | `/api/client/sessions/{id}/permission`         | `{"request_id", "tool_use_id", "decision"}` |
+| `POST` | `/api/client/sessions/{id}/answer`             | `{"question_id", "answer"}`                 |
 | `POST` | `/api/client/sessions/{id}/cancel`             | Body optional                               |
 
 Authentication accepts a bearer token or the cookie. A native client should use the bearer token; the cookie exists because a browser `EventSource` cannot set request headers.
@@ -169,6 +180,6 @@ Authentication accepts a bearer token or the cookie. A native client should use 
 
 **The stream reconnects in a loop.** The session was swept for going quiet, or the relay restarted. Go back to the session list and reopen it.
 
-**A prompt is accepted but nothing happens.** The session is waiting on a permission request. The card appears at the bottom of the session screen; answer it there or at the terminal.
+**A prompt is accepted but nothing happens.** The session is waiting on a permission request or a question. The card appears at the bottom of the session screen; answer it there or at the terminal.
 
 **Nothing loads over HTTPS.** The relay does not terminate TLS. The reverse proxy in front of it must, and should set `X-Forwarded-Proto: https` so the session cookie is marked `Secure`.

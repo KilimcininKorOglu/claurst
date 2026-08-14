@@ -75,6 +75,7 @@ The CLI also runs a second, best-effort path under `/api/bridge/sessions`. It ca
 | `GET`  | `/api/client/sessions/{id}/stream?since=<seq>`   | SSE; resumes from the ring buffer         |
 | `POST` | `/api/client/sessions/{id}/prompt`               | `{"content": "..."}`                      |
 | `POST` | `/api/client/sessions/{id}/permission`           | `{"request_id", "tool_use_id", "decision"}` |
+| `POST` | `/api/client/sessions/{id}/answer`               | `{"question_id", "answer"}`                 |
 | `POST` | `/api/client/sessions/{id}/cancel`               | Body optional                             |
 
 `GET /healthz` needs no token.
@@ -85,7 +86,7 @@ Authentication accepts either a bearer token or the cookie. The cookie exists be
 
 Open the relay in a browser and enter the token. The page is compiled into the binary, so there is nothing to serve separately and no asset directory to mount.
 
-Three views: token entry, the list of connected sessions, and the session screen with the live transcript, a prompt box and the permission card.
+Three views: token entry, the list of connected sessions, and the session screen with the live transcript, a prompt box, and cards for anything the session is waiting on: a tool permission, or a question the model asked.
 
 The layout starts at phone width and adapts upward. Session cards sit one per row on a phone and fill a grid on a tablet or desktop. The transcript is capped at a readable measure from 700px up rather than stretching across a wide monitor, and a phone held sideways gets its chrome trimmed so the transcript keeps the vertical room. Touch targets are 44px until the browser reports a mouse. Safe-area insets keep controls clear of a notch or a home indicator.
 
