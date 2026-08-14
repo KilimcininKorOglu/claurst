@@ -25,6 +25,10 @@ const el = {
   back: document.getElementById('back'),
   cancel: document.getElementById('cancel'),
   sessionTitle: document.getElementById('session-title'),
+  rename: document.getElementById('rename'),
+  renameForm: document.getElementById('rename-form'),
+  renameInput: document.getElementById('rename-input'),
+  renameCancel: document.getElementById('rename-cancel'),
   stream: document.getElementById('stream'),
   permission: document.getElementById('permission'),
   permissionTool: document.getElementById('permission-tool'),
@@ -166,6 +170,12 @@ async function loadSessions() {
     label.className = 'label';
     label.textContent = session.label || session.session_id;
 
+    // Only when the operator named it. Without a title the card is exactly
+    // what it was, rather than gaining an empty line.
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.textContent = session.title || '';
+
     const meta = document.createElement('span');
     meta.className = 'meta';
     meta.textContent = [session.cwd, describeIdle(session.idle_secs)]
@@ -174,7 +184,11 @@ async function loadSessions() {
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.append(label, meta);
+    button.append(label);
+    if (session.title) {
+      button.append(title);
+    }
+    button.append(meta);
 
     // Third line only when the runner reports these; an older one sends
     // nothing and its card should look exactly as it did before.
@@ -238,6 +252,7 @@ function leaveSession() {
   el.permission.hidden = true;
   el.mcp.hidden = true;
   el.question.hidden = true;
+  closeRename();
   el.stream.replaceChildren();
   el.status.hidden = true;
   el.busy.hidden = true;
@@ -259,7 +274,7 @@ function openSession(session) {
   }
   leaveSession();
   live.sessionId = session.session_id;
-  el.sessionTitle.textContent = session.label || session.session_id;
+  el.sessionTitle.textContent = session.title || session.label || session.session_id;
   show('session');
   markCurrentSession();
   connectStream();
@@ -277,6 +292,72 @@ function markCurrentSession() {
     el.sessionList.children[index].firstElementChild.setAttribute('aria-current', 'true');
   }
 }
+
+/**
+ * Show the rename field, seeded with the name on screen.
+ *
+ * The runner owns the title: this only sends a request, and the sidebar shows
+ * the new name once the runner has applied it and re-registered.
+ */
+function openRename() {
+  if (!live.sessionId) return;
+  el.renameInput.value = el.sessionTitle.textContent;
+  el.renameForm.hidden = false;
+  el.renameInput.focus();
+  el.renameInput.select();
+}
+
+function closeRename() {
+  el.renameForm.hidden = true;
+  el.renameInput.value = '';
+}
+
+el.rename.addEventListener('click', () => {
+  if (el.renameForm.hidden) {
+    openRename();
+  } else {
+    closeRename();
+  }
+});
+
+el.renameCancel.addEventListener('click', closeRename);
+
+el.renameInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeRename();
+  }
+});
+
+el.renameForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const title = el.renameInput.value.trim();
+  // The relay refuses a blank title; catching it here keeps the field open
+  // with what was typed instead of reporting a failure the user cannot read.
+  if (!title) {
+    el.renameInput.focus();
+    return;
+  }
+
+  const sessionId = live.sessionId;
+  try {
+    await api(`/api/client/sessions/${encodeURIComponent(sessionId)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+  } catch (error) {
+    reportFailure(error);
+    return;
+  }
+
+  // Only if the session is still the open one: the request is in flight long
+  // enough for a tap on another card to land first.
+  if (live.sessionId === sessionId) {
+    el.sessionTitle.textContent = title;
+    closeRename();
+  }
+  loadSessions().catch(reportFailure);
+});
 
 /**
  * Attach to the session's event stream.

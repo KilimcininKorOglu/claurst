@@ -39,8 +39,17 @@
   <header class="bar">
     <button id="back" type="button" class="ghost">Back</button>
     <h1 id="session-title">Session</h1>
+    <button id="rename" type="button" class="ghost icon" title="Rename this session" aria-label="Rename this session">&#9998;</button>
     <button id="cancel" type="button" class="ghost danger">Stop</button>
   </header>
+
+  <!-- Inline rather than a prompt() dialog: a modal prompt is unusable on iOS
+       Safari, where it steals focus and cannot be styled or dismissed by tap. -->
+  <form id="rename-form" class="rename-form" hidden>
+    <input id="rename-input" type="text" placeholder="Session name" autocomplete="off" maxlength="120" required>
+    <button type="submit">Save</button>
+    <button type="button" id="rename-cancel" class="ghost">Cancel</button>
+  </form>
 
   <div id="stream" class="stream" aria-live="polite"></div>
 

@@ -149,6 +149,9 @@ button.ghost {
   min-height: 40px;
 }
 
+/* Square, so a glyph-only control does not read as a word-sized button. */
+button.ghost.icon { padding-inline: 0; width: 40px; flex: 0 0 auto; }
+
 button.danger { background: var(--danger); }
 button.ghost.danger { background: transparent; color: var(--danger); }
 
@@ -251,6 +254,10 @@ input, textarea {
 }
 
 .sessions .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+/* The name the operator gave the session, under the machine label: the label
+   says which machine, the title says which piece of work. */
+.sessions .title { font-size: 13px; overflow-wrap: anywhere; }
 
 /* Model and mode on the left, cost pinned right. Both quiet: the label is
    what identifies the session, these only separate two that look alike. */
@@ -397,6 +404,21 @@ input, textarea {
 .question .permission-actions { margin-bottom: 8px; }
 .question .permission-actions:empty { display: none; }
 
+/* Sits directly under the bar, so it reads as an edit of the title above it
+   rather than as another card in the transcript. */
+.rename-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px var(--gutter);
+  padding-left: max(var(--gutter), var(--safe-l));
+  padding-right: max(var(--gutter), var(--safe-r));
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.rename-form[hidden] { display: none; }
+.rename-form input { flex: 1; }
+.rename-form button { flex: 0 0 auto; }
+
 .question-form { display: flex; gap: 8px; }
 .question-form input { flex: 1; }
 .question-form button { flex: 0 0 auto; }
@@ -470,7 +492,8 @@ input, textarea {
   h1 { font-size: 18px; }
   /* Centred with the transcript, so the pane reads as one column rather than
      a full-bleed header over a narrow body. */
-  .chat > .bar {
+  .chat > .bar,
+  .chat > .rename-form {
     width: var(--measure);
     margin-inline: auto;
   }
