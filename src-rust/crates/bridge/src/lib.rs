@@ -272,6 +272,22 @@ pub enum PermissionDecision {
     DenyPermanently,
 }
 
+/// What a client decided about a project-defined MCP server.
+///
+/// Mirrors `claurst_tui::dialogs::McpApprovalChoice`, which this crate cannot
+/// name: `tui` and `bridge` are siblings. The CLI translates between the two,
+/// the same way it does for `PermissionDecision`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpApprovalDecision {
+    /// Run the server for this session only.
+    AllowSession,
+    /// Persist the approval so it survives a restart.
+    AllowAlways,
+    /// Leave the server unlaunched.
+    Deny,
+}
+
 // ---------------------------------------------------------------------------
 // Bridge message types (web UI → CLI)
 // ---------------------------------------------------------------------------
@@ -310,6 +326,11 @@ pub enum BridgeMessage {
         question_id: String,
         /// The chosen option, or free text. Empty means "dismissed".
         answer: String,
+    },
+    /// The web UI decided whether to trust a project MCP server.
+    McpApprovalResponse {
+        request_id: String,
+        decision: McpApprovalDecision,
     },
     /// Cancel the in-progress operation for a session.
     Cancel {
@@ -399,6 +420,19 @@ pub enum BridgeEvent {
         tool_name: String,
         description: String,
         options: Vec<String>,
+    },
+    /// A project-defined MCP server is waiting to be trusted.
+    ///
+    /// Its own event rather than a `UserQuestion`: approving one launches a
+    /// command on the operator's machine, and a client has to be able to
+    /// present that differently from the model asking something.
+    McpApprovalRequest {
+        request_id: String,
+        server_name: String,
+        /// The command the server would run, when it is a stdio server.
+        command: Option<String>,
+        /// The endpoint it would talk to, when it is an HTTP server.
+        url: Option<String>,
     },
     /// The model asked the user a question and the turn is waiting on it.
     UserQuestion {
@@ -1375,6 +1409,11 @@ pub enum TuiBridgeEvent {
     },
     /// The web UI answered a pending `AskUserQuestion` prompt.
     QuestionAnswer { question_id: String, answer: String },
+    /// The web UI decided whether to trust a project MCP server.
+    McpApproval {
+        request_id: String,
+        decision: McpApprovalDecision,
+    },
     /// The web UI requested a session title change.
     SessionNameUpdate { title: String },
     /// A non-fatal diagnostic from the bridge worker.
@@ -1446,6 +1485,13 @@ pub enum BridgeOutbound {
         question_id: String,
         question: String,
         options: Vec<String>,
+    },
+    /// A project-defined MCP server is waiting to be trusted.
+    McpApprovalRequest {
+        request_id: String,
+        server_name: String,
+        command: Option<String>,
+        url: Option<String>,
     },
     /// Extended-thinking text, kept separate from the answer.
     ///
@@ -1669,6 +1715,17 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
+                    Some(BridgeMessage::McpApprovalResponse {
+                        request_id,
+                        decision,
+                    }) => {
+                        let _ = tui_tx
+                            .send(TuiBridgeEvent::McpApproval {
+                                request_id,
+                                decision,
+                            })
+                            .await;
+                    }
                     Some(BridgeMessage::Cancel { .. }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::Cancelled).await;
                     }
@@ -1805,6 +1862,21 @@ pub async fn run_bridge_loop(
                                 question_id,
                                 question,
                                 options,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::McpApprovalRequest {
+                        request_id,
+                        server_name,
+                        command,
+                        url,
+                    }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::McpApprovalRequest {
+                                request_id,
+                                server_name,
+                                command,
+                                url,
                             })
                             .await;
                     }
@@ -2019,6 +2091,59 @@ mod tests {
                 assert_eq!(u.session_cost_usd, Some(0.0421));
             }
             other => panic!("expected a turn_complete carrying usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_mcp_trust_prompt_carries_what_would_run() {
+        // The command line is the whole basis for the decision. A client that
+        // received only the server name would be asking the operator to trust
+        // something they cannot see.
+        let ev = BridgeEvent::McpApprovalRequest {
+            request_id: "r1".into(),
+            server_name: "github".into(),
+            command: Some("npx -y @scope/server-github".into()),
+            url: None,
+        };
+        let j = serde_json::to_string(&ev).unwrap();
+        assert!(j.contains(r#""type":"mcp_approval_request""#));
+
+        let back: BridgeEvent = serde_json::from_str(&j).unwrap();
+        match back {
+            BridgeEvent::McpApprovalRequest {
+                server_name,
+                command,
+                ..
+            } => {
+                assert_eq!(server_name, "github");
+                assert_eq!(command.as_deref(), Some("npx -y @scope/server-github"));
+            }
+            other => panic!("expected an mcp approval request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_mcp_trust_decision_survives_the_wire() {
+        // Each decision does something different on the machine, so a value
+        // mangled in transit would launch a refused server or persist trust
+        // that was granted for one session only.
+        for decision in [
+            McpApprovalDecision::AllowSession,
+            McpApprovalDecision::AllowAlways,
+            McpApprovalDecision::Deny,
+        ] {
+            let msg = BridgeMessage::McpApprovalResponse {
+                request_id: "r1".into(),
+                decision,
+            };
+            let j = serde_json::to_string(&msg).unwrap();
+            let back: BridgeMessage = serde_json::from_str(&j).unwrap();
+            match back {
+                BridgeMessage::McpApprovalResponse { decision: got, .. } => {
+                    assert_eq!(got, decision)
+                }
+                other => panic!("expected an mcp approval response, got {other:?}"),
+            }
         }
     }
 

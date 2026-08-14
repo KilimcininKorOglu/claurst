@@ -1918,6 +1918,40 @@ const BRIDGE_HISTORY_TURNS: usize = 40;
 /// Characters kept per turn in the backfill.
 const BRIDGE_HISTORY_CHARS: usize = 4_000;
 
+/// Describe a project MCP server awaiting trust, for a remote client.
+///
+/// Sent both when the prompt opens and again when a client connects to a
+/// session that already has one on screen, which is why the request id is
+/// passed in rather than generated here: both announcements have to name the
+/// same prompt.
+fn mcp_approval_request(
+    request_id: &str,
+    server: &claurst_core::config::McpServerConfig,
+) -> claurst_bridge::BridgeOutbound {
+    claurst_bridge::BridgeOutbound::McpApprovalRequest {
+        request_id: request_id.to_string(),
+        server_name: server.name.clone(),
+        command: server.command_line(),
+        url: server.url.clone(),
+    }
+}
+
+/// Translate a remote decision into the choice the TUI dialog settles with.
+///
+/// Kept separate from the dialog so a remote answer and a keyboard answer end
+/// up at the same `handle_mcp_approval_decision` call.
+fn mcp_choice_for(
+    decision: claurst_bridge::McpApprovalDecision,
+) -> claurst_tui::dialogs::McpApprovalChoice {
+    use claurst_bridge::McpApprovalDecision;
+    use claurst_tui::dialogs::McpApprovalChoice;
+    match decision {
+        McpApprovalDecision::AllowSession => McpApprovalChoice::AllowSession,
+        McpApprovalDecision::AllowAlways => McpApprovalChoice::AllowAlways,
+        McpApprovalDecision::Deny => McpApprovalChoice::Deny,
+    }
+}
+
 /// Build the conversation backfill for a remote client.
 ///
 /// Returns the kept turns plus how many earlier ones were left out, so the
@@ -2371,6 +2405,10 @@ async fn run_interactive(
     // arriving over the bridge can be matched to it. `None` when no question is
     // open.
     let mut pending_question_id: Option<String> = None;
+
+    // Same correlation for the project-MCP trust prompt, which has its own
+    // dialog and settle path rather than going through `PermissionManager`.
+    let mut pending_mcp_approval_id: Option<String> = None;
 
     // Last busy state pushed to the remote client, so only transitions are
     // sent rather than one event per loop iteration.
@@ -3914,6 +3952,21 @@ async fn run_interactive(
                                 .try_send(BridgeOutbound::History { entries, omitted });
                         }
 
+                        // The MCP trust queue fills at startup, so a prompt is
+                        // usually already on screen by the time a client
+                        // connects. Without this it would never learn about the
+                        // thing blocking the session.
+                        if app.mcp_approval.visible {
+                            if let (Some(id), Some(server)) = (
+                                pending_mcp_approval_id.as_deref(),
+                                app.mcp_prompting.as_ref(),
+                            ) {
+                                let _ = runtime
+                                    .outbound_tx
+                                    .try_send(mcp_approval_request(id, server));
+                            }
+                        }
+
                         // Persist the session URL into the saved session record.
                         session.remote_session_url = Some(session_url.clone());
                         session.updated_at = chrono::Utc::now();
@@ -4108,6 +4161,18 @@ async fn run_interactive(
                             && app.ask_user_dialog.answer_externally(answer)
                         {
                             pending_question_id = None;
+                        }
+                    }
+                    Ok(TuiBridgeEvent::McpApproval {
+                        request_id,
+                        decision,
+                    }) => {
+                        // Route through the dialog's own settle path so a
+                        // remote answer and a keyboard answer cannot diverge.
+                        if pending_mcp_approval_id.as_deref() == Some(request_id.as_str()) {
+                            app.mcp_approval.close();
+                            app.handle_mcp_approval_decision(mcp_choice_for(decision));
+                            pending_mcp_approval_id = None;
                         }
                     }
                     Ok(TuiBridgeEvent::SessionNameUpdate { title }) => {
@@ -4846,8 +4911,29 @@ async fn run_interactive(
         // Prompt for any project-defined MCP servers awaiting approval (#123).
         // Hold off while the startup bypass-permissions dialog is up so the two
         // modals don't fight over the screen.
-        if !app.is_streaming && current_query.is_none() && !app.bypass_permissions_dialog.visible {
-            app.maybe_prompt_next_mcp_server();
+        if !app.is_streaming
+            && current_query.is_none()
+            && !app.bypass_permissions_dialog.visible
+            && app.maybe_prompt_next_mcp_server()
+        {
+            // Approving one of these launches a command on this machine, and
+            // the dialog blocks the queue until it is answered, so a remote
+            // client has to be able to answer it too.
+            let request_id = uuid::Uuid::new_v4().to_string();
+            if let (Some(runtime), Some(server)) =
+                (bridge_runtime.as_ref(), app.mcp_prompting.as_ref())
+            {
+                let _ = runtime
+                    .outbound_tx
+                    .try_send(mcp_approval_request(&request_id, server));
+            }
+            pending_mcp_approval_id = Some(request_id);
+        }
+
+        // The dialog also closes on a keyboard answer. Drop the correlation id
+        // so a late remote answer cannot settle a prompt already dealt with.
+        if pending_mcp_approval_id.is_some() && !app.mcp_approval.visible {
+            pending_mcp_approval_id = None;
         }
 
         if app.should_exit {

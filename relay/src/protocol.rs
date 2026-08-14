@@ -28,6 +28,18 @@ pub enum PermissionDecision {
     DenyPermanently,
 }
 
+/// What a client decided about a project-defined MCP server.
+///
+/// Kept apart from `PermissionDecision`: approving one of these launches a
+/// command on the runner's machine rather than allowing a single tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpApprovalDecision {
+    AllowSession,
+    AllowAlways,
+    Deny,
+}
+
 /// Messages flowing from the client into the CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -47,6 +59,10 @@ pub enum BridgeMessage {
     QuestionResponse {
         question_id: String,
         answer: String,
+    },
+    McpApprovalResponse {
+        request_id: String,
+        decision: McpApprovalDecision,
     },
     Cancel {
         session_id: String,

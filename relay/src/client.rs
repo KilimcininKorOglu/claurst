@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::protocol::{BridgeAttachment, BridgeMessage, PermissionDecision};
+use crate::protocol::{BridgeAttachment, BridgeMessage, McpApprovalDecision, PermissionDecision};
 use crate::state::{Relay, SeqEvent, SessionSummary};
 
 /// How long the stream waits for new events before looping.
@@ -47,6 +47,10 @@ pub fn routes() -> Router<Arc<Relay>> {
             post(permission),
         )
         .route("/api/client/sessions/{session_id}/answer", post(answer))
+        .route(
+            "/api/client/sessions/{session_id}/mcp-approval",
+            post(mcp_approval),
+        )
         .route("/api/client/sessions/{session_id}/cancel", post(cancel))
 }
 
@@ -278,6 +282,35 @@ async fn permission(
         BridgeMessage::PermissionResponse {
             request_id: body.request_id,
             tool_use_id: body.tool_use_id,
+            decision: body.decision,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct McpApprovalBody {
+    pub request_id: String,
+    pub decision: McpApprovalDecision,
+}
+
+/// Separate from `permission`: trusting a project MCP server launches a
+/// command on the runner's machine and is not a tool-use approval.
+async fn mcp_approval(
+    State(relay): State<Arc<Relay>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<McpApprovalBody>,
+) -> Result<Json<Accepted>, StatusCode> {
+    info!(
+        session_id = %session_id,
+        decision = ?body.decision,
+        "client answered an MCP trust prompt"
+    );
+    enqueue(
+        &relay,
+        &session_id,
+        BridgeMessage::McpApprovalResponse {
+            request_id: body.request_id,
             decision: body.decision,
         },
     )
@@ -551,6 +584,68 @@ mod tests {
             }
             other => panic!("expected one permission response, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn an_mcp_trust_answer_reaches_the_runner_queue() {
+        // Every decision, because the runner acts on each differently and a
+        // decision mangled in transit would either launch a server the user
+        // refused or persist trust they only granted once.
+        for (wire, expected) in [
+            ("allow_session", McpApprovalDecision::AllowSession),
+            ("allow_always", McpApprovalDecision::AllowAlways),
+            ("deny", McpApprovalDecision::Deny),
+        ] {
+            let relay = relay();
+            relay.register("s1", None, None, None, None).await;
+
+            let response = app(relay.clone())
+                .oneshot(
+                    authed("POST", "/api/client/sessions/s1/mcp-approval")
+                        .body(Body::from(
+                            json!({ "request_id": "r1", "decision": wire }).to_string(),
+                        ))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let queued = relay.take_inbound("s1").await;
+            match &queued[..] {
+                [BridgeMessage::McpApprovalResponse {
+                    request_id,
+                    decision,
+                }] => {
+                    assert_eq!(request_id, "r1");
+                    assert_eq!(*decision, expected);
+                }
+                other => panic!("expected one mcp approval, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_mcp_trust_answer_needs_a_token() {
+        let relay = relay();
+        relay.register("s1", None, None, None, None).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/client/sessions/s1/mcp-approval")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "request_id": "r1", "decision": "allow_always" }).to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(relay.take_inbound("s1").await.is_empty());
     }
 
     #[tokio::test]
