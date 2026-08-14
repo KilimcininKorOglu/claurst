@@ -2319,6 +2319,10 @@ async fn run_interactive(
     // open.
     let mut pending_question_id: Option<String> = None;
 
+    // Last busy state pushed to the remote client, so only transitions are
+    // sent rather than one event per loop iteration.
+    let mut bridge_busy_sent = false;
+
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
     let bridge_token: Option<String> = bridge_config.as_ref().and_then(|c| c.session_token.clone());
@@ -3594,6 +3598,25 @@ async fn run_interactive(
                     QueryEvent::Error(msg) => Some(BridgeOutbound::Error {
                         message: msg.clone(),
                     }),
+                    QueryEvent::Status(msg) => Some(BridgeOutbound::Status {
+                        message: msg.clone(),
+                    }),
+                    QueryEvent::TokenWarning { state, pct_used } => {
+                        use claurst_query::compact::TokenWarningState;
+                        // `Ok` is the absence of a warning, so sending it would
+                        // put a reassurance on screen that was never asked for.
+                        match state {
+                            TokenWarningState::Ok => None,
+                            TokenWarningState::Warning => Some(BridgeOutbound::TokenWarning {
+                                level: "warning".to_string(),
+                                pct_used: *pct_used,
+                            }),
+                            TokenWarningState::Critical => Some(BridgeOutbound::TokenWarning {
+                                level: "critical".to_string(),
+                                pct_used: *pct_used,
+                            }),
+                        }
+                    }
                     _ => None,
                 };
                 if let Some(ob) = outbound {
@@ -4096,6 +4119,18 @@ async fn run_interactive(
                     app.model_fetch_rx = None;
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            }
+        }
+
+        // Tell the remote client when a turn starts or stops. Without it the
+        // only clue is the delta stream, so a turn that is thinking or running
+        // a slow tool looks identical to an idle session.
+        if let Some(runtime) = bridge_runtime.as_ref() {
+            if app.is_streaming != bridge_busy_sent {
+                let _ = runtime.outbound_tx.try_send(BridgeOutbound::SessionBusy {
+                    busy: app.is_streaming,
+                });
+                bridge_busy_sent = app.is_streaming;
             }
         }
 

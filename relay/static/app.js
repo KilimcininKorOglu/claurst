@@ -41,6 +41,7 @@ const el = {
   promptInput: document.getElementById('prompt-input'),
   send: document.getElementById('send'),
   status: document.getElementById('session-status'),
+  busy: document.getElementById('session-busy'),
 };
 
 /** Live session view state. Reset whenever a session is opened or left. */
@@ -184,6 +185,7 @@ function leaveSession() {
   el.question.hidden = true;
   el.stream.replaceChildren();
   el.status.hidden = true;
+  el.busy.hidden = true;
 }
 
 el.back.addEventListener('click', () => {
@@ -244,6 +246,19 @@ function connectStream() {
   source.addEventListener('open', () => {
     el.status.hidden = true;
   });
+}
+
+/**
+ * Reflect whether a turn is running.
+ *
+ * The send button stays usable: queuing the next prompt while the model works
+ * is normal, and disabling it would be a worse lie than the spinner.
+ */
+function setBusy(busy) {
+  el.busy.hidden = !busy;
+  if (!busy) {
+    el.status.hidden = true;
+  }
 }
 
 function setStatus(text) {
@@ -403,9 +418,29 @@ function render(event) {
       append(notice(event.message, true));
       break;
 
+    case 'status':
+      // Transient by nature: it is replaced by the next one and cleared when
+      // the turn ends, so it does not belong in the transcript.
+      setStatus(event.message);
+      break;
+
+    case 'token_warning':
+      append(
+        notice(
+          `Context window ${Math.round(event.pct_used * 100)}% full` +
+            (event.level === 'critical' ? ' — compact now' : ' — consider /compact'),
+          event.level === 'critical',
+        ),
+      );
+      break;
+
     case 'session_state':
       if (event.state === 'disconnected') {
         setStatus('The machine disconnected.');
+      } else if (event.state === 'processing') {
+        setBusy(true);
+      } else if (event.state === 'idle' || event.state === 'connected') {
+        setBusy(false);
       }
       break;
 

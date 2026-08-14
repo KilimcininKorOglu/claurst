@@ -333,6 +333,8 @@ input, textarea {
 
 .status[hidden] { display: none; }
 
+.status.busy { color: var(--accent); }
+
 /* A phone held sideways has almost no vertical room; give it back to the
    transcript by shrinking the chrome rather than letting it scroll away. */
 @media (max-height: 480px) and (orientation: landscape) {

@@ -399,6 +399,14 @@ pub enum BridgeEvent {
     },
     /// Extended-thinking text for the current turn.
     ThinkingDelta { text: String, message_id: String },
+    /// A transient status line, the same text the TUI shows while working.
+    Status { message: String },
+    /// The context window is filling up.
+    TokenWarning {
+        /// `warning` at 80 %, `critical` at 95 %.
+        level: String,
+        pct_used: f64,
+    },
     /// The conversation so far, sent once when the bridge connects.
     History {
         entries: Vec<BridgeHistoryEntry>,
@@ -1416,6 +1424,19 @@ pub enum BridgeOutbound {
         delta: String,
         message_id: String,
     },
+    /// A transient status line.
+    Status {
+        message: String,
+    },
+    /// The context window is filling up.
+    TokenWarning {
+        level: String,
+        pct_used: f64,
+    },
+    /// Whether a turn is running, so a client can show a busy indicator.
+    SessionBusy {
+        busy: bool,
+    },
     /// The conversation that happened before the bridge connected.
     ///
     /// Without it a client attaching to a session already in progress sees an
@@ -1693,6 +1714,26 @@ pub async fn run_bridge_loop(
                                 tool_name,
                                 description,
                                 options,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::Status { message }) => {
+                        let _ = bridge_ev_tx.send(BridgeEvent::Status { message }).await;
+                    }
+                    Some(BridgeOutbound::TokenWarning { level, pct_used }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::TokenWarning { level, pct_used })
+                            .await;
+                    }
+                    Some(BridgeOutbound::SessionBusy { busy }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::SessionState {
+                                session_id: session_id.clone(),
+                                state: if busy {
+                                    BridgeSessionState::Processing
+                                } else {
+                                    BridgeSessionState::Idle
+                                },
                             })
                             .await;
                     }
