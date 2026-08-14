@@ -1958,6 +1958,22 @@ fn remote_turn_can_start(
     !is_streaming && !query_in_flight && !blocking_modal && prompt_box_empty
 }
 
+/// What to tell a caller who asked for something only the terminal can show.
+///
+/// The command's own help text comes along because that is where the argument
+/// form lives: `/model` answers with the way to set a model outright, which is
+/// the thing the picker would have done.
+fn terminal_only_notice(cmd: &str) -> String {
+    let usage = claurst_commands::find_command(cmd)
+        .map(|command| command.help().to_string())
+        .unwrap_or_default();
+    if usage.is_empty() {
+        format!("/{cmd} answers with a view on the terminal.")
+    } else {
+        format!("/{cmd} answers with a view on the terminal.\n{usage}")
+    }
+}
+
 /// Why a queued remote prompt has not started yet, phrased for the sender.
 ///
 /// `None` when nothing is holding it, which is the caller's signal that the
@@ -2488,6 +2504,11 @@ async fn run_interactive(
     // transcript.
     let mut deferred_notice_sent = false;
 
+    // Whether the submit about to happen came from a remote client. Set when a
+    // queued prompt is handed to the prompt box and consumed one iteration
+    // later, where the synthesised Enter lands.
+    let mut remote_submit = false;
+
     // Last busy state pushed to the remote client, so only transitions are
     // sent rather than one event per loop iteration.
     let mut bridge_busy_sent = false;
@@ -2823,6 +2844,10 @@ async fn run_interactive(
                             // anyone remembering to wire it up.
                             let status_before = app.status_message.clone();
                             let mut command_failed = false;
+                            // Taken, not read: the flag is set one iteration
+                            // earlier by the queue drain and must not survive
+                            // into whatever the operator types next.
+                            let from_remote = std::mem::take(&mut remote_submit);
                             // Raised by any arm that swaps the conversation out
                             // from under the client, which then has to be told
                             // what the transcript is now.
@@ -2852,7 +2877,14 @@ async fn run_interactive(
                                         | "fast"
                                         | "speed"
                                 );
-                            let handled_by_tui = if skip_tui_for_args {
+                            // A view opened for someone who is not at the
+                            // keyboard helps nobody: they cannot see it, and
+                            // the command layer's text answer is thrown away
+                            // to make room for it. Let that text through
+                            // instead.
+                            let remote_wants_text =
+                                from_remote && claurst_tui::App::opens_terminal_view(&cmd_name);
+                            let handled_by_tui = if skip_tui_for_args || remote_wants_text {
                                 false
                             } else {
                                 app.intercept_slash_command_with_args(&cmd_name, &cmd_args)
@@ -2978,11 +3010,20 @@ async fn run_interactive(
                                     ));
                                     transcript_replaced = true;
                                 }
+                                Some(CommandResult::OpenRewindOverlay) if from_remote => {
+                                    app.status_message = Some(terminal_only_notice(&cmd_name));
+                                }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());
                                     app.open_rewind_flow();
                                     app.status_message =
                                         Some("Select a message to rewind to.".to_string());
+                                }
+                                Some(CommandResult::OpenHooksOverlay)
+                                | Some(CommandResult::OpenImportConfigOverlay)
+                                    if from_remote =>
+                                {
+                                    app.status_message = Some(terminal_only_notice(&cmd_name));
                                 }
                                 Some(CommandResult::OpenHooksOverlay) => {
                                     // Open the 4-screen hooks configuration browser.
@@ -3305,9 +3346,15 @@ async fn run_interactive(
                             }
 
                             if !handled_by_cli && !handled_by_tui {
-                                app.status_message =
-                                    Some(format!("Unknown command: /{}", cmd_name));
-                                command_failed = true;
+                                if remote_wants_text {
+                                    // The command layer had nothing to say, so
+                                    // the view really was the whole answer.
+                                    app.status_message = Some(terminal_only_notice(&cmd_name));
+                                } else if claurst_commands::find_command(&cmd_name).is_none() {
+                                    app.status_message =
+                                        Some(format!("Unknown command: /{}", cmd_name));
+                                    command_failed = true;
+                                }
                             }
 
                             // Ahead of the notice below, because a client treats
@@ -4287,6 +4334,7 @@ async fn run_interactive(
                     // command handling that would then drift.
                     app.set_prompt_text(content);
                     app.pending_auto_submit = true;
+                    remote_submit = true;
                 } else {
                     app.set_prompt_text(content.clone());
                     let message = remote_user_message(&content, &attachments);
@@ -6041,6 +6089,29 @@ mod remote_slash_routing_tests {
         assert!(!is_slash("look at src/main.rs"));
         assert!(!is_slash("what does / mean here"));
         assert!(!is_slash(""));
+    }
+
+    /// The refusal has to carry the way out, or it is only a "no".
+    ///
+    /// `/model` is the case that matters: the picker it would have opened
+    /// exists to set a model, and the usage line is how to do that without it.
+    #[test]
+    fn a_terminal_only_answer_says_what_to_send_instead() {
+        let notice = super::terminal_only_notice("model");
+        assert!(notice.starts_with("/model answers with a view on the terminal."));
+        assert!(notice.contains("/model"));
+        assert!(notice.lines().count() > 1, "no usage came with it");
+    }
+
+    /// A view with no command behind it still gets a straight answer rather
+    /// than the "Unknown command" it would otherwise collect.
+    #[test]
+    fn a_view_with_no_command_still_answers() {
+        assert!(claurst_commands::find_command("survey").is_none());
+        assert_eq!(
+            super::terminal_only_notice("survey"),
+            "/survey answers with a view on the terminal."
+        );
     }
 }
 
