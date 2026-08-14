@@ -1279,6 +1279,11 @@ pub mod config {
         pub remote_control_at_startup: bool,
         /// Connection details for a self-hosted remote-control relay.
         ///
+        /// There is no separate remote permission policy. Whether a tool asks at
+        /// all is decided by `Config::permission_mode`; once it does ask, the
+        /// answer may come from the keyboard or from the remote client. The token
+        /// is the boundary, and it already gates prompting.
+        ///
         /// SECURITY: this is set only from the user's global settings, never
         /// from a project's settings file. A repository that could point the
         /// bridge at its own relay would gain a channel for driving the agent
@@ -1441,20 +1446,6 @@ pub mod config {
         pub disabled: bool,
     }
 
-    /// How a session reached over the relay handles tool permissions.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-    #[serde(rename_all = "kebab-case")]
-    pub enum RemotePermissionMode {
-        /// Every tool asks, and the answer may come from the remote client.
-        #[default]
-        Ask,
-        /// Every tool asks, but only the machine's own operator may answer.
-        ///
-        /// Safer, at the cost of the agent stalling on its first tool call
-        /// while nobody is at the keyboard.
-        LocalOnly,
-    }
-
     /// Connection details for a self-hosted remote-control relay.
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct RemoteControlSettings {
@@ -1464,9 +1455,6 @@ pub mod config {
         /// Shared secret. Must satisfy [`validate_remote_token`].
         #[serde(default)]
         pub token: String,
-        /// Who may answer a permission prompt for a remote session.
-        #[serde(default, rename = "permissionMode")]
-        pub permission_mode: RemotePermissionMode,
         /// Human-readable name for this machine, shown in the client's session
         /// list. Without it the client can only show an opaque session id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2390,7 +2378,6 @@ pub mod config {
             RemoteControlSettings {
                 url: "https://relay.example".to_string(),
                 token: "a".repeat(MIN_REMOTE_TOKEN_LEN),
-                permission_mode: RemotePermissionMode::Ask,
                 label: None,
             }
         }
@@ -6102,10 +6089,7 @@ mod remote_control_settings_tests {
     //! `remoteControl` carries a credential that lets a remote client run tools
     //! on this machine, so it is validated before it can reach the network and
     //! it never comes from a project's settings file.
-    use crate::config::{
-        RemoteConfigError, RemoteControlSettings, RemotePermissionMode, Settings,
-        MIN_REMOTE_TOKEN_LEN,
-    };
+    use crate::config::{RemoteConfigError, RemoteControlSettings, Settings, MIN_REMOTE_TOKEN_LEN};
 
     fn good_token() -> String {
         "a".repeat(MIN_REMOTE_TOKEN_LEN)
@@ -6115,7 +6099,6 @@ mod remote_control_settings_tests {
         RemoteControlSettings {
             url: "https://relay.example".to_string(),
             token: good_token(),
-            permission_mode: RemotePermissionMode::Ask,
             label: Some("workstation".to_string()),
         }
     }
@@ -6170,12 +6153,10 @@ mod remote_control_settings_tests {
 
         let json = serde_json::to_string(&original).expect("serialise");
         assert!(json.contains("\"remoteControl\""));
-        assert!(json.contains("\"permissionMode\":\"ask\""));
 
         let restored: Settings = serde_json::from_str(&json).expect("deserialise");
         let restored = restored.remote_control.expect("section survives");
         assert_eq!(restored.url, "https://relay.example");
-        assert_eq!(restored.permission_mode, RemotePermissionMode::Ask);
         assert_eq!(restored.label.as_deref(), Some("workstation"));
     }
 
@@ -6185,17 +6166,6 @@ mod remote_control_settings_tests {
         assert!(
             !json.contains("remoteControl\""),
             "an unconfigured user must not gain an empty key: {json}"
-        );
-    }
-
-    #[test]
-    fn local_only_mode_round_trips_in_kebab_case() {
-        let mode = RemotePermissionMode::LocalOnly;
-        let json = serde_json::to_string(&mode).expect("serialise");
-        assert_eq!(json, "\"local-only\"");
-        assert_eq!(
-            serde_json::from_str::<RemotePermissionMode>(&json).expect("deserialise"),
-            RemotePermissionMode::LocalOnly
         );
     }
 }

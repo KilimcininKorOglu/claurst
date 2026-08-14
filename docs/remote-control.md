@@ -61,7 +61,6 @@ In your user settings file (`~/.claurst/settings.json`, or wherever `CLAURST_HOM
   "remoteControl": {
     "url": "https://relay.example",
     "token": "the same token you put in RELAY_TOKEN",
-    "permissionMode": "ask",
     "label": "workstation"
   }
 }
@@ -101,27 +100,16 @@ The layout starts at phone width and adapts upward, so a phone, a tablet and a d
 
 ## Permissions
 
-Two settings sit on different axes, and it is worth being clear about which does what.
+Whether a tool asks for approval is decided entirely by the local session, before the relay is involved at all. That is `config.permission_mode`:
 
-| Setting                          | Question it answers               |
-|----------------------------------|-----------------------------------|
-| `config.permission_mode`         | Does a tool ask at all?           |
-| `remoteControl.permissionMode`   | Who may answer, when one asks?    |
+| Mode                                        | Does a tool ask?                                    |
+|---------------------------------------------|-----------------------------------------------------|
+| `default`                                   | Yes, by the tool's danger level                     |
+| `acceptEdits`                               | Yes, except `Edit`, which is allowed outright       |
+| `plan`                                      | No. Reads are allowed, writes are refused           |
+| `bypassPermissions` (`--dangerously-skip-permissions`) | No. Everything is allowed outright        |
 
-`config.permission_mode` runs first. In `bypassPermissions` (`--dangerously-skip-permissions`) every tool is allowed outright, and in `plan` every write is refused outright. Neither ever produces a prompt, so `remoteControl.permissionMode` is never consulted in those two modes. It cannot tighten anything: setting `local-only` under `bypassPermissions` protects you from nothing.
-
-It matters in `default` and in `acceptEdits`, where tools still ask. `/remote-control` says which of the two situations you are in.
-
-Note that sending a prompt is not a permission at all. Anything holding the relay token can start a turn regardless of the mode. Combined with `bypassPermissions` that means the token alone runs arbitrary tools on your machine with no approval step anywhere.
-
-`permissionMode` decides who may answer when a tool asks for approval.
-
-| Value          | Behaviour                                                                                   |
-|----------------|---------------------------------------------------------------------------------------------|
-| `ask`          | The request appears both in the terminal and on the phone. Either side may answer. Default.  |
-| `local-only`   | The request appears in both places, but a remote answer is refused. Only the keyboard decides. |
-
-Under `ask`, the phone is a security boundary. Anyone holding your unlocked phone can approve a tool call on your machine.
+Once a tool does ask, the request appears in the terminal and on the remote client, and either side may answer. There is no separate remote permission policy: the token is the boundary, and it already gates prompting.
 
 The card offers three answers:
 
@@ -132,6 +120,13 @@ The card offers three answers:
 | Deny                | Refuse the call.                                                       |
 
 A remote tap never writes a permanent rule into your settings file. Persistent allows are a keyboard-only decision.
+
+Two consequences worth stating plainly:
+
+- The remote client is a security boundary. Anyone holding your unlocked phone can approve a tool call on your machine.
+- Sending a prompt is not a permission at all. Anything holding the relay token can start a turn regardless of the mode. Under `bypassPermissions` that means the token alone runs arbitrary tools with no approval step anywhere.
+
+`/remote-control` reports which of these situations the session is in.
 
 ---
 
@@ -174,6 +169,6 @@ Authentication accepts a bearer token or the cookie. A native client should use 
 
 **The stream reconnects in a loop.** The session was swept for going quiet, or the relay restarted. Go back to the session list and reopen it.
 
-**A prompt is accepted but nothing happens.** The session is waiting on a permission request. Under `local-only`, only the terminal can clear it.
+**A prompt is accepted but nothing happens.** The session is waiting on a permission request. The card appears at the bottom of the session screen; answer it there or at the terminal.
 
 **Nothing loads over HTTPS.** The relay does not terminate TLS. The reverse proxy in front of it must, and should set `X-Forwarded-Proto: https` so the session cookie is marked `Secure`.

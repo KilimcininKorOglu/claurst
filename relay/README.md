@@ -31,7 +31,6 @@ Then point claurst at it, in `~/.claurst/settings.json`:
   "remoteControl": {
     "url": "https://relay.example",
     "token": "the same token",
-    "permissionMode": "ask",
     "label": "workstation"
   }
 }

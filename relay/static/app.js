@@ -344,9 +344,10 @@ function render(event) {
 // ---------------------------------------------------------------------------
 
 function showPermission(request) {
-  // No options means the machine is running in local-only mode and will refuse
-  // an answer from here. Show the request anyway, so the reason the session
-  // stopped is visible, but offer no button that would do nothing.
+  // A request with no options cannot be answered from here. The relay forwards
+  // events verbatim from whatever runner registered, so an older or mismatched
+  // one could still send that; show the request without buttons rather than
+  // offering a tap that does nothing.
   const answerable = Array.isArray(request.options) && request.options.length > 0;
 
   live.permission = answerable ? request : null;

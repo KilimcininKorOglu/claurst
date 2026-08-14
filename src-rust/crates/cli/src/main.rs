@@ -1897,25 +1897,6 @@ fn permission_request_from_core(
     }
 }
 
-/// The answers a remote client may give for a pending permission request.
-///
-/// Empty when the remote client may not answer. The request is still sent, so
-/// the remote user learns why the session stopped, but offering buttons that
-/// the CLI will refuse would leave a tap with no visible effect.
-fn remote_permission_options(
-    dialog: &claurst_tui::dialogs::PermissionRequest,
-    remote_may_answer: bool,
-) -> Vec<String> {
-    if !remote_may_answer {
-        return Vec::new();
-    }
-    dialog
-        .options
-        .iter()
-        .map(|option| option.label.clone())
-        .collect()
-}
-
 /// Settle a waiting permission request and release the blocked tool.
 ///
 /// `selected_key` uses the dialog's own option keys: `y` allow once, `Y` allow
@@ -2256,16 +2237,6 @@ async fn run_interactive(
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
     let bridge_token: Option<String> = bridge_config.as_ref().and_then(|c| c.session_token.clone());
-
-    // Whether a permission answer arriving over the relay is honoured. Absent
-    // configuration means the documented default, which is to honour it; the
-    // feature is off entirely unless the user configured a relay.
-    let remote_permission_ask = settings
-        .remote_control
-        .as_ref()
-        .map(|rc| rc.permission_mode)
-        .unwrap_or_default()
-        == claurst_core::config::RemotePermissionMode::Ask;
 
     let mut bridge_runtime: Option<BridgeRuntime> = if let Some(cfg) = bridge_config {
         let bridge_cancel = CancellationToken::new();
@@ -3466,10 +3437,11 @@ async fn run_interactive(
                                         tool_use_id: tool_use_id.clone(),
                                         tool_name: dialog.tool_name.clone(),
                                         description: dialog.description.clone(),
-                                        options: remote_permission_options(
-                                            &dialog,
-                                            remote_permission_ask,
-                                        ),
+                                        options: dialog
+                                            .options
+                                            .iter()
+                                            .map(|option| option.label.clone())
+                                            .collect(),
                                     });
                         }
                         app.permission_request = Some(dialog);
@@ -3818,34 +3790,25 @@ async fn run_interactive(
                         // A remote answer must take the same route as a keyboard
                         // answer, otherwise the blocked tool never learns the
                         // outcome and the dialog only appears to close.
-                        if remote_permission_ask {
-                            use claurst_bridge::PermissionResponseKind;
-                            let selected_key = match response {
-                                PermissionResponseKind::Allow => 'y',
-                                PermissionResponseKind::AllowSession => 'Y',
-                                PermissionResponseKind::Deny => 'n',
-                            };
-                            let settled = settle_pending_permission(
-                                &pending_permissions,
-                                tool_ctx.permission_manager.as_ref(),
-                                &tool_use_id,
-                                Some(selected_key),
-                            );
-                            if settled
-                                && app
-                                    .permission_request
-                                    .as_ref()
-                                    .is_some_and(|pr| pr.tool_use_id == tool_use_id)
-                            {
-                                app.permission_request = None;
-                            }
-                        } else {
-                            app.notifications.push(
-                                NotificationKind::Warning,
-                                "Remote permission answer ignored: permissionMode is local-only."
-                                    .to_string(),
-                                Some(5),
-                            );
+                        use claurst_bridge::PermissionResponseKind;
+                        let selected_key = match response {
+                            PermissionResponseKind::Allow => 'y',
+                            PermissionResponseKind::AllowSession => 'Y',
+                            PermissionResponseKind::Deny => 'n',
+                        };
+                        let settled = settle_pending_permission(
+                            &pending_permissions,
+                            tool_ctx.permission_manager.as_ref(),
+                            &tool_use_id,
+                            Some(selected_key),
+                        );
+                        if settled
+                            && app
+                                .permission_request
+                                .as_ref()
+                                .is_some_and(|pr| pr.tool_use_id == tool_use_id)
+                        {
+                            app.permission_request = None;
                         }
                     }
                     Ok(TuiBridgeEvent::SessionNameUpdate { title }) => {
@@ -5336,7 +5299,7 @@ mod remote_control_config_tests {
     //! The relay token is what stops an outsider from running tools on this
     //! machine, so a half-configured relay must not start the bridge.
     use super::*;
-    use claurst_core::config::{RemoteControlSettings, RemotePermissionMode, MIN_REMOTE_TOKEN_LEN};
+    use claurst_core::config::{RemoteControlSettings, MIN_REMOTE_TOKEN_LEN};
     use std::sync::Mutex;
 
     // `resolve_bridge_config` reads process-global env.
@@ -5387,7 +5350,6 @@ mod remote_control_config_tests {
         RemoteControlSettings {
             url: "https://relay.example/".to_string(),
             token: "a".repeat(MIN_REMOTE_TOKEN_LEN),
-            permission_mode: RemotePermissionMode::Ask,
             label: Some("workstation".to_string()),
         }
     }
@@ -5475,37 +5437,6 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
-    }
-}
-
-#[cfg(test)]
-mod remote_permission_option_tests {
-    use super::*;
-
-    fn dialog() -> claurst_tui::dialogs::PermissionRequest {
-        claurst_tui::dialogs::PermissionRequest::bash(
-            "tool-1".to_string(),
-            "Bash".to_string(),
-            "needs approval".to_string(),
-            "ls -la".to_string(),
-            None,
-        )
-    }
-
-    #[test]
-    fn a_remote_client_that_may_answer_gets_the_dialog_labels() {
-        let options = remote_permission_options(&dialog(), true);
-
-        assert!(!options.is_empty());
-        assert_eq!(options.len(), dialog().options.len());
-    }
-
-    #[test]
-    fn local_only_offers_no_answer_at_all() {
-        assert!(
-            remote_permission_options(&dialog(), false).is_empty(),
-            "a button the CLI will refuse leaves a tap with no visible effect"
-        );
     }
 }
 

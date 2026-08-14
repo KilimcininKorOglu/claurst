@@ -85,18 +85,18 @@ unset, the `Advisor` tool is not offered to the model at all.
 
 Points the bridge at a relay you host yourself, so a phone or browser can drive a running session. See [Remote Control](remote-control) for the full setup.
 
+There is no separate remote permission policy. `config.permission_mode` decides whether a tool asks at all; once it asks, the answer may come from the terminal or the remote client.
+
 | Key             | Type           | Default | Description                                                                                                       |
 |-----------------|----------------|---------|-------------------------------------------------------------------------------------------------------------------|
 | `url`           | string         | unset   | Base address of your relay, for example `https://relay.example`. A trailing slash is trimmed.                     |
 | `token`         | string         | unset   | Shared secret, at least 32 characters. Shorter values are refused and the bridge does not start.                  |
-| `permissionMode`| string         | `"ask"` | `"ask"` lets a remote client approve a tool. `"local-only"` refuses a remote answer, so only the keyboard decides. Consulted only when `config.permission_mode` still asks, so it has no effect under `bypassPermissions` or `plan`. |
 | `label`         | string \| null | unset   | Name shown in the session list. Falls back to the machine's hostname.                                             |
 
 ```json
 "remoteControl": {
   "url": "https://relay.example",
   "token": "a-generated-token-of-at-least-32-characters",
-  "permissionMode": "ask",
   "label": "workstation"
 }
 ```
