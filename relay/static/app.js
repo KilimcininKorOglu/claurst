@@ -57,6 +57,7 @@ const live = {
   permission: null,    // the request currently shown on the card
   question: null,      // the AskUserQuestion currently shown on the card
   attachments: [],     // staged files, sent with the next prompt
+  retryDelay: 0,       // grows while the stream cannot be reached
 };
 
 /**
@@ -208,6 +209,7 @@ function leaveSession() {
   live.permission = null;
   live.question = null;
   live.attachments = [];
+  live.retryDelay = 0;
   el.permission.hidden = true;
   el.question.hidden = true;
   el.stream.replaceChildren();
@@ -285,15 +287,19 @@ function connectStream() {
     if (live.source !== source) {
       return;
     }
-    setStatus('Reconnecting…');
+    // Back off rather than hammering a relay that is down; a fixed retry
+    // spins forever at full rate when the machine is simply off.
+    live.retryDelay = Math.min((live.retryDelay || 1000) * 2, 30000);
+    setStatus(`Reconnecting in ${Math.round(live.retryDelay / 1000)}s…`);
     setTimeout(() => {
       if (live.sessionId) {
         connectStream();
       }
-    }, 2000);
+    }, live.retryDelay);
   });
 
   source.addEventListener('open', () => {
+    live.retryDelay = 0;
     el.status.hidden = true;
   });
 }
