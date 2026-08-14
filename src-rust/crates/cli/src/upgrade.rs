@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const REPO: &str = "Kuberwastaken/claurst";
+const REPO: &str = "KilimcininKorOglu/claurst";
 const APP: &str = "claurst";
 
 pub async fn run_upgrade(args: &[String]) -> Result<()> {

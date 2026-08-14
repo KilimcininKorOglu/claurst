@@ -22,7 +22,7 @@ impl SlashCommand for ShareCommand {
         "Usage: /share\n\n\
          Renders the current session as a single self-contained HTML file,\n\
          uploads it as a secret GitHub gist via the `gh` CLI, and prints a\n\
-         viewer URL of the form https://claurst.kuber.studio/session/#<gist-id>.\n\n\
+         viewer URL of the form https://kilimcininkoroglu.github.io/claurst/session/#<gist-id>.\n\n\
          Requirements:\n  \
            - GitHub CLI (gh) installed and logged in (`gh auth login`).\n\n\
          The viewer base URL can be overridden with CLAURST_SHARE_VIEWER_URL.\n\

@@ -5,9 +5,9 @@
 <img src="public/Ship.png" alt="Rustle on the ship" width="350" />
 
 <p>
-    <a href="https://github.com/kuberwastaken/claurst"><img src="https://img.shields.io/badge/Built_with-Rust-CE4D2B?style=for-the-badge&logo=rust&logoColor=white" alt="Built with Rust"></a>
-    <a href="https://github.com/kuberwastaken/claurst"><img src="https://img.shields.io/badge/Version-0.1.7-2E8B57?style=for-the-badge" alt="Version 0.1.7"></a>
-    <a href="https://github.com/kuberwastaken/claurst/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge" alt="GPL-3.0 License"></a>
+    <a href="https://github.com/KilimcininKorOglu/claurst"><img src="https://img.shields.io/badge/Built_with-Rust-CE4D2B?style=for-the-badge&logo=rust&logoColor=white" alt="Built with Rust"></a>
+    <a href="https://github.com/KilimcininKorOglu/claurst"><img src="https://img.shields.io/badge/Version-0.1.7-2E8B57?style=for-the-badge" alt="Version 0.1.7"></a>
+    <a href="https://github.com/KilimcininKorOglu/claurst/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge" alt="GPL-3.0 License"></a>
 </p>
 
 <br />
@@ -17,7 +17,7 @@
 
 ---
 
-Claurst is an **open-source, multi-provider terminal coding agent** built from the ground up in Rust. It started as a clean-room reimplementation of Claude Code's behavior (from [spec](https://github.com/kuberwastaken/claurst/tree/main/spec)) and has since evolved into an amazing TUI pair programmer with multi-provider support, a rich UI, plugin system, a companion named Rustle, chat forking, memory consolidation, and much more.
+Claurst is an **open-source, multi-provider terminal coding agent** built from the ground up in Rust. It started as a clean-room reimplementation of Claude Code's behavior (from [spec](https://github.com/KilimcininKorOglu/claurst/tree/main/spec)) and has since evolved into an amazing TUI pair programmer with multi-provider support, a rich UI, plugin system, a companion named Rustle, chat forking, memory consolidation, and much more.
 
 It's fast, it's memory-efficient, it's yours to run however you want, and there's no tracking or telemetry.
 
@@ -48,13 +48,13 @@ It's fast, it's memory-efficient, it's yours to run however you want, and there'
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://github.com/kuberwastaken/claurst/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://github.com/kuberwastaken/claurst/releases/latest/download/install.ps1 | iex
+irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
 ```
 
 This drops `claurst` into `~/.claurst/bin` (or `%USERPROFILE%\.claurst\bin` on Windows) and adds it to your `PATH` automatically. Open a new terminal and run `claurst`.
@@ -85,7 +85,7 @@ claurst upgrade
 
 ## Manual download
 
-If you'd rather grab the binary yourself, the latest archives are on [**GitHub Releases**](https://github.com/kuberwastaken/claurst/releases):
+If you'd rather grab the binary yourself, the latest archives are on [**GitHub Releases**](https://github.com/KilimcininKorOglu/claurst/releases):
 
 | Platform                | Archive                        |
 |-------------------------|--------------------------------|
@@ -100,7 +100,7 @@ Each archive contains a single `claurst` (or `claurst.exe`) binary. Extract it a
 ## Build from source
 
 ```bash
-git clone https://github.com/kuberwastaken/claurst.git
+git clone https://github.com/KilimcininKorOglu/claurst.git
 cd claurst/src-rust
 cargo build --release --package claurst
 
@@ -214,7 +214,7 @@ Setup instructions, env vars and `settings.json` shapes are in [docs/providers.m
 
 ## Documentation
 
-For more info on how to configure Claurst, [head over to our docs](https://claurst.kuber.studio/docs).
+For more info on how to configure Claurst, [head over to our docs](https://kilimcininkoroglu.github.io/claurst/docs).
 
 | Page | Covers |
 |------|--------|
@@ -247,7 +247,7 @@ cargo fmt --all
 
 If you touched `relay/`, run its own `cargo test -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` from that directory; it is a separate Cargo project with its own lockfile.
 
-[Open an issue](https://github.com/Kuberwastaken/claurst/issues/new) for bugs, ideas, or questions, or [Raise a PR](https://github.com/Kuberwastaken/claurst/pulls/new) to fix bugs, add features, or improve documentation.
+[Open an issue](https://github.com/KilimcininKorOglu/claurst/issues/new) for bugs, ideas, or questions, or [Raise a PR](https://github.com/KilimcininKorOglu/claurst/pulls/new) to fix bugs, add features, or improve documentation.
 
 ---
 
@@ -258,9 +258,9 @@ This is a **clean-room Rust reimplementation** of Claude Code's behavior.
 
 The process was explicitly two-phase:
 
-**Specification** [`spec/`](https://github.com/kuberwastaken/claurst/tree/main/spec) — An AI agent analyzed the source and produced exhaustive behavioral specifications and improvements, deviated from the original: architecture, data flows, tool contracts, system designs. No source code was carried forward.
+**Specification** [`spec/`](https://github.com/KilimcininKorOglu/claurst/tree/main/spec) — An AI agent analyzed the source and produced exhaustive behavioral specifications and improvements, deviated from the original: architecture, data flows, tool contracts, system designs. No source code was carried forward.
 
-**Implementation** [`src-rust/`](https://github.com/kuberwastaken/claurst/tree/main/src-rust) — A separate AI agent implemented from the spec alone, never referencing the original TypeScript. The output is idiomatic Rust that reproduces the behavior, not the expression.
+**Implementation** [`src-rust/`](https://github.com/KilimcininKorOglu/claurst/tree/main/src-rust) — A separate AI agent implemented from the spec alone, never referencing the original TypeScript. The output is idiomatic Rust that reproduces the behavior, not the expression.
 
 This mirrors the legal precedent established by Phoenix Technologies v. IBM (1984) — clean-room engineering of the BIOS — and the principle from Baker v. Selden (1879) that copyright protects expression, not ideas or behavior.
 

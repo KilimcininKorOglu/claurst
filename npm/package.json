@@ -5,11 +5,11 @@
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kuberwastaken/claurst.git"
+    "url": "git+https://github.com/KilimcininKorOglu/claurst.git"
   },
-  "homepage": "https://claurst.kuber.studio",
+  "homepage": "https://kilimcininkoroglu.github.io/claurst",
   "bugs": {
-    "url": "https://github.com/kuberwastaken/claurst/issues"
+    "url": "https://github.com/KilimcininKorOglu/claurst/issues"
   },
   "keywords": [
     "ai",

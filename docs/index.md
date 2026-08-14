@@ -6,7 +6,7 @@
 
 Claurst is a high-performance Rust reimplementation of Claude Code — a terminal-native AI coding agent with streaming responses, 40+ built-in tools, 15+ LLM provider integrations, a full ratatui TUI, and an extensible plugin system.
 
-**Version:** 0.1.7 (Beta) · **License:** GPL-3.0 · [GitHub](https://github.com/Kuberwastaken/claurst)
+**Version:** 0.1.7 (Beta) · **License:** GPL-3.0 · [GitHub](https://github.com/KilimcininKorOglu/claurst)
 
 </div>
 
@@ -73,12 +73,12 @@ Activate `/caveman` or `/rocky` to compress model responses by 40–85%, saving 
 
 ```bash
 # Linux / macOS
-curl -fsSL https://github.com/Kuberwastaken/claurst/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/Kuberwastaken/claurst/releases/latest/download/install.ps1 | iex
+irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
 ```
 
 The installer auto-detects your platform/arch, drops `claurst` into
