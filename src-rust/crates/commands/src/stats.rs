@@ -603,15 +603,34 @@ pub(crate) fn by_model_block(tracker: &claurst_core::CostTracker) -> String {
         .max()
         .unwrap_or(0);
 
+    // One precision for the whole column, so the decimal points line up.
+    // `fmt_cost` picks per value, which puts $3.00 beside $0.7200. Four places
+    // matches the totals these rows sit under; six only when a row would
+    // otherwise round away to nothing.
+    let precision = if rows
+        .iter()
+        .any(|r| r.cost_usd > 0.0 && r.cost_usd < 0.00005)
+    {
+        6
+    } else {
+        4
+    };
+    let costs: Vec<String> = rows
+        .iter()
+        .map(|r| format!("${:.*}", precision, r.cost_usd))
+        .collect();
+    let cost_width = costs.iter().map(String::len).max().unwrap_or(0);
+
     let mut block = String::from("\nBy model:\n");
-    for row in rows {
+    for (row, cost) in rows.iter().zip(costs) {
         block.push_str(&format!(
-            "  {:<name_width$}  {:>token_width$} tokens   {}\n",
+            "  {:<name_width$}  {:>token_width$} tokens   {:>cost_width$}\n",
             row.model,
             fmt_num(row.tokens),
-            fmt_cost(row.cost_usd),
+            cost,
             name_width = name_width,
             token_width = token_width,
+            cost_width = cost_width,
         ));
     }
     block
@@ -1256,6 +1275,41 @@ mod tests {
         assert_eq!(lines[2].len(), lines[3].len(), "columns must line up");
         assert!(lines[2].contains("1.5K tokens"), "row was: {}", lines[2]);
         assert!(lines[3].contains("6.0K tokens"), "row was: {}", lines[3]);
+    }
+
+    #[test]
+    fn one_cost_column_uses_one_number_format() {
+        // Per-value precision printed "$3.00" beside "$0.7200" in one column.
+        let tracker = claurst_core::CostTracker::new();
+        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
+        tracker.add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 0);
+
+        let block = by_model_block(&tracker);
+        for line in block.lines().skip(2) {
+            let cost = line.rsplit('$').next().unwrap_or_default();
+            assert_eq!(
+                cost.split('.').next_back().map(str::len),
+                Some(4),
+                "row {line:?} broke the column in:\n{block}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_too_small_for_four_places_widens_the_whole_column() {
+        let tracker = claurst_core::CostTracker::new();
+        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
+        tracker.add_usage("claude-haiku-4-5", 1, 0, 0, 0);
+
+        let block = by_model_block(&tracker);
+        assert!(
+            block.contains("$3.000000"),
+            "the dear row must widen too:\n{block}"
+        );
+        assert!(
+            !block.contains("$0.000000\n"),
+            "the small row must still show a figure:\n{block}"
+        );
     }
 
     #[test]
