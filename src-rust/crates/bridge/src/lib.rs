@@ -380,16 +380,19 @@ pub struct BridgeUsage {
     pub session_cost_usd: Option<f64>,
 }
 
-/// Session connection state broadcast to the web UI.
+/// Whether the session is working, broadcast to the web UI.
+///
+/// Deliberately narrow. A client cannot observe a session before it registers,
+/// so there is no "connecting" it could ever receive; a failure already
+/// travels as [`BridgeEvent::Error`]; and a runner cannot report its own
+/// departure, because the event would be uploaded to a session the relay is
+/// about to delete. The client works out that the machine is gone by asking
+/// whether the session is still listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeSessionState {
-    Connecting,
-    Connected,
     Idle,
     Processing,
-    Disconnected,
-    Error,
 }
 
 /// Events flowing from the CLI up to the web UI.
@@ -1524,10 +1527,6 @@ pub enum BridgeOutbound {
     /// events opaque on purpose, and folding these in would make it parse
     /// them.
     SessionInfo(SessionInfo),
-    SessionMeta {
-        title: Option<String>,
-        session_id: String,
-    },
     /// A tool is waiting on approval that the remote client may give.
     ///
     /// Without this the remote client never learns a prompt is pending, so a
@@ -1960,17 +1959,6 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
-                    Some(BridgeOutbound::SessionMeta { title, session_id: sid }) => {
-                        let _ = bridge_ev_tx
-                            .send(BridgeEvent::SessionState {
-                                session_id: sid,
-                                state: BridgeSessionState::Connected,
-                            })
-                            .await;
-                        if let Some(t) = title {
-                            let _ = tui_tx.send(TuiBridgeEvent::SessionRename { title: t }).await;
-                        }
-                    }
                 }
             }
 
@@ -2095,9 +2083,16 @@ mod tests {
 
     #[test]
     fn test_bridge_session_state_serde() {
-        let s = BridgeSessionState::Processing;
-        let j = serde_json::to_string(&s).unwrap();
-        assert_eq!(j, r#""processing""#);
+        // Both, because the client reads the wire word rather than a boolean
+        // and either one spelled differently would silently stop the spinner
+        // or leave it on forever.
+        for (state, wire) in [
+            (BridgeSessionState::Processing, r#""processing""#),
+            (BridgeSessionState::Idle, r#""idle""#),
+        ] {
+            let encoded = serde_json::to_string(&state).expect("serialise");
+            assert_eq!(encoded, wire);
+        }
     }
 
     #[test]
