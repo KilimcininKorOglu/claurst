@@ -14,7 +14,7 @@ Claurst is an open-source, multi-provider terminal coding agent written in Rust.
 | `src-rust/` | The Cargo workspace (12 `claurst-*` crates). **All cargo commands for the CLI run from here.** |
 | `relay/` | The self-hosted relay that carries remote-control sessions: axum + tokio, plus the `static/` web client. A **separate Cargo project with its own `Cargo.lock`**, deliberately not a workspace member, so cargo run from `src-rust/` never builds or tests it. |
 | `spec/` | Clean-room behavioral specification (`00_overview.md` … `13_rust_codebase.md`). Reference only, not code. |
-| `docs/`, `index.html`, `session/`, `public/`, `CNAME` | GitHub Pages site (`claurst.kuber.studio`), deployed by `.github/workflows/pages.yml`. |
+| `docs/`, `index.html`, `session/`, `public/` | GitHub Pages site (`kilimcininkoroglu.github.io/claurst`), deployed by `.github/workflows/pages.yml`. No `CNAME`: the site is served from the default Pages domain. |
 | `npm/` | The `claurst` npm wrapper; `install.js` postinstall downloads the prebuilt binary. |
 | `install.sh`, `install.ps1` | One-liner installers served from GitHub Releases. |
 | `scripts/bump-version.py` | The only supported way to change the version. |
