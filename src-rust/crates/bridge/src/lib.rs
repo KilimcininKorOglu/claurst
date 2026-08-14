@@ -766,53 +766,17 @@ impl BridgeSession {
     // Event upload
     // -----------------------------------------------------------------------
 
-    /// Batch-upload outgoing events to the web UI.
+    /// Everything the upload task needs, owned.
     ///
-    /// POST `/api/claude_code/sessions/{id}/events`
-    async fn upload_events(&self, events: Vec<BridgeEvent>) -> anyhow::Result<()> {
-        if events.is_empty() {
-            return Ok(());
+    /// The session itself stays with the poll task, so the uploader cannot
+    /// borrow from it.
+    fn event_uploader(&self) -> EventUploader {
+        EventUploader {
+            http: self.http.clone(),
+            server_url: self.config.server_url.clone(),
+            session_id: self.session_id.clone(),
+            token: self.config.session_token.clone(),
         }
-
-        let token = self
-            .config
-            .session_token
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Upload: no token"))?;
-
-        let url = format!(
-            "{}/api/claude_code/sessions/{}/events",
-            self.config.server_url, self.session_id
-        );
-
-        let body = serde_json::json!({ "events": events });
-
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(token)
-            .json(&body)
-            .send()
-            .await
-            .context("Bridge upload: HTTP send failed")?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            warn!(
-                session_id = %self.session_id,
-                status,
-                count = events.len(),
-                "Bridge event upload failed"
-            );
-            anyhow::bail!("Bridge upload: server returned {}", status);
-        }
-
-        debug!(
-            session_id = %self.session_id,
-            count = events.len(),
-            "Bridge events uploaded"
-        );
-        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -822,19 +786,32 @@ impl BridgeSession {
     /// Run the bridge poll loop until `cancel` is triggered or a fatal error
     /// occurs.
     ///
+    /// Outgoing events leave through a task of their own, spawned here, so a
+    /// poll held open by the server cannot delay them.
+    ///
     /// On each iteration:
-    /// 1. Drain any pending outgoing events and upload them in a batch.
-    /// 2. Long-poll for incoming messages and forward them to `msg_tx`.
-    /// 3. Back off exponentially on consecutive errors; give up after
+    /// 1. Long-poll for incoming messages and forward them to `msg_tx`.
+    /// 2. Back off exponentially on consecutive errors; give up after
     ///    `config.max_reconnect_attempts`.
-    /// 4. Sleep `polling_interval_ms` between successful cycles.
+    /// 3. Sleep `polling_interval_ms` between successful cycles.
     pub async fn run_poll_loop(
         mut self,
         msg_tx: mpsc::Sender<BridgeMessage>,
-        mut event_rx: mpsc::Receiver<BridgeEvent>,
+        event_rx: mpsc::Receiver<BridgeEvent>,
         cancel: CancellationToken,
     ) {
         info!(session_id = %self.session_id, "Bridge poll loop started");
+
+        // A child token, so every way out of the loop below can stop the
+        // uploader. Waiting on the caller's token alone would hang the join on
+        // an exit the caller did not ask for, such as the message receiver
+        // going away.
+        let upload_cancel = cancel.child_token();
+        let uploads = tokio::spawn(run_upload_loop(
+            self.event_uploader(),
+            event_rx,
+            upload_cancel.clone(),
+        ));
 
         let base_interval =
             std::time::Duration::from_millis(self.config.polling_interval_ms.max(500));
@@ -847,31 +824,28 @@ impl BridgeSession {
                 break;
             }
 
-            // --- Drain and upload pending events ---
-            let mut events: Vec<BridgeEvent> = Vec::new();
-            while let Ok(ev) = event_rx.try_recv() {
-                events.push(ev);
-            }
-            if !events.is_empty() {
-                if let Err(e) = self.upload_events(events).await {
-                    warn!(session_id = %self.session_id, error = %e, "Event upload error");
-                }
-            }
-
             // --- Poll for incoming messages ---
             match self.poll_messages().await {
                 Ok(messages) => {
                     // Successful poll — reset reconnect counter.
                     self.reconnect_count = 0;
 
+                    let mut receiver_gone = false;
                     for msg in messages {
                         if msg_tx.send(msg).await.is_err() {
                             debug!(
                                 session_id = %self.session_id,
                                 "Incoming message channel closed; stopping poll loop"
                             );
-                            return;
+                            receiver_gone = true;
+                            break;
                         }
+                    }
+                    // Leaves through the shutdown path rather than returning,
+                    // so the session is still deregistered and the upload task
+                    // is still joined.
+                    if receiver_gone {
+                        break;
                     }
                 }
                 Err(e) => {
@@ -928,9 +902,119 @@ impl BridgeSession {
             }
         }
 
+        // Before deregistering, not after: the relay drops the session and
+        // everything buffered for it, so an event still waiting to upload
+        // would die with it.
+        upload_cancel.cancel();
+        let _ = uploads.await;
+
         // Best-effort deregister on shutdown.
         self.deregister().await;
         info!(session_id = %self.session_id, "Bridge poll loop terminated");
+    }
+}
+
+/// Everything the upload task needs to reach the relay, owned.
+struct EventUploader {
+    http: reqwest::Client,
+    server_url: String,
+    session_id: String,
+    token: Option<String>,
+}
+
+impl EventUploader {
+    /// Batch-upload outgoing events to the web UI.
+    ///
+    /// POST `/api/claude_code/sessions/{id}/events`
+    async fn post(&self, events: Vec<BridgeEvent>) -> anyhow::Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Upload: no token"))?;
+
+        let url = format!(
+            "{}/api/claude_code/sessions/{}/events",
+            self.server_url, self.session_id
+        );
+
+        let body = serde_json::json!({ "events": events });
+
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .context("Bridge upload: HTTP send failed")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            warn!(
+                session_id = %self.session_id,
+                status,
+                count = events.len(),
+                "Bridge event upload failed"
+            );
+            anyhow::bail!("Bridge upload: server returned {}", status);
+        }
+
+        debug!(
+            session_id = %self.session_id,
+            count = events.len(),
+            "Bridge events uploaded"
+        );
+        Ok(())
+    }
+}
+
+/// Upload outgoing events as they are produced.
+///
+/// Its own task, because the poll it would otherwise share a loop with holds
+/// its request open for as long as the server chooses. Streaming text produced
+/// mid-poll used to wait that long before anyone remote could see it.
+///
+/// Batching survives the split: a wait for one event is followed by a drain of
+/// whatever else is ready, so a busy turn still uploads in batches while an
+/// idle session sends one event on its own.
+async fn run_upload_loop(
+    uploader: EventUploader,
+    mut event_rx: mpsc::Receiver<BridgeEvent>,
+    cancel: CancellationToken,
+) {
+    loop {
+        let first = tokio::select! {
+            event = event_rx.recv() => event,
+            _ = cancel.cancelled() => break,
+        };
+        let Some(first) = first else { break };
+
+        let mut batch = vec![first];
+        while let Ok(event) = event_rx.try_recv() {
+            batch.push(event);
+        }
+
+        // A failed batch is dropped rather than retried, so a relay that is
+        // down cannot build a backlog that arrives out of order later.
+        if let Err(e) = uploader.post(batch).await {
+            warn!(session_id = %uploader.session_id, error = %e, "Event upload error");
+        }
+    }
+
+    // Cancellation arrives while a turn may still be finishing, so take one
+    // last look before the session is deregistered.
+    let mut tail = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        tail.push(event);
+    }
+    if !tail.is_empty() {
+        if let Err(e) = uploader.post(tail).await {
+            warn!(session_id = %uploader.session_id, error = %e, "Final event upload error");
+        }
     }
 }
 
@@ -2001,6 +2085,105 @@ pub use reqwest;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A relay that holds every poll open, and reports when an upload lands.
+    ///
+    /// Hand-rolled because the workspace carries no HTTP mocking crate;
+    /// `crates/api/src/providers/minimax.rs` stubs a provider the same way.
+    /// Each connection is served in its own task, because the poll and the
+    /// upload are meant to be in flight at the same time.
+    async fn holding_relay(
+        hold: std::time::Duration,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        let (uploads_tx, uploads_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let uploads_tx = uploads_tx.clone();
+                tokio::spawn(async move {
+                    let mut head = Vec::new();
+                    let mut buffer = [0_u8; 2048];
+                    // The request line is all this stub reads; the body is
+                    // left in the socket, which the client does not mind.
+                    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+                        match socket.read(&mut buffer).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(read) => head.extend_from_slice(&buffer[..read]),
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&head).to_string();
+
+                    let response: &[u8] = if request.starts_with("GET") {
+                        tokio::time::sleep(hold).await;
+                        b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]"
+                    } else {
+                        let _ = uploads_tx.send(request);
+                        b"HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                    };
+                    let _ = socket.write_all(response).await;
+                    let _ = socket.flush().await;
+                });
+            }
+        });
+
+        (format!("http://{address}"), uploads_rx)
+    }
+
+    #[tokio::test]
+    async fn an_event_uploads_while_a_poll_is_held_open() {
+        // The poll holds far longer than the assertion window, so this cannot
+        // pass while uploads share the poll's turn. Before the split an event
+        // produced mid-poll waited for the server to let the poll go, which is
+        // 25 seconds against our own relay.
+        let hold = std::time::Duration::from_secs(5);
+        let (server_url, mut uploads) = holding_relay(hold).await;
+
+        let session = BridgeSession::new(BridgeConfig {
+            enabled: true,
+            server_url,
+            session_token: Some("test-token".into()),
+            polling_interval_ms: 50,
+            ..Default::default()
+        });
+
+        let (msg_tx, _msg_rx) = mpsc::channel::<BridgeMessage>(8);
+        let (event_tx, event_rx) = mpsc::channel::<BridgeEvent>(8);
+        let cancel = CancellationToken::new();
+        let loop_cancel = cancel.clone();
+        let poll_loop = tokio::spawn(async move {
+            session.run_poll_loop(msg_tx, event_rx, loop_cancel).await;
+        });
+
+        // Long enough for the poll to be in flight, short enough to be well
+        // inside the hold.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        event_tx
+            .send(BridgeEvent::Status {
+                message: "mid-poll".into(),
+            })
+            .await
+            .expect("event channel should accept");
+
+        let seen = tokio::time::timeout(std::time::Duration::from_secs(2), uploads.recv())
+            .await
+            .expect("the upload should not wait for the poll to return")
+            .expect("the stub should report the upload");
+        assert!(seen.starts_with("POST"), "unexpected request: {seen}");
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), poll_loop).await;
+    }
 
     #[test]
     fn test_device_fingerprint_is_non_empty() {
