@@ -400,6 +400,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("."),
             session_id: "test-session".to_string(),
             session_title: None,
+            effort_level: None,
             remote_session_url: None,
             mcp_manager: None,
             mcp_auth_runner: None,

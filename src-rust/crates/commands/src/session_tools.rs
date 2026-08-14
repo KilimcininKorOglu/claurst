@@ -429,37 +429,48 @@ impl SlashCommand for EffortCommand {
         "effort"
     }
     fn description(&self) -> &str {
-        "Set the model's thinking effort (low | normal | high)"
+        "Set the model's reasoning effort"
     }
     fn help(&self) -> &str {
-        "Usage: /effort [low|normal|high]\n\
-         Sets how much computation the model uses for reasoning.\n\
-         'high' enables extended thinking with a larger budget."
+        "Usage: /effort [none|minimal|low|medium|high|xhigh|max|ultracode]\n\
+         Sets how much reasoning the model spends before answering.\n\n\
+         `low`, `normal` and `high` also set the output limit, to 4096, the\n\
+         default, and 32768 tokens. The other levels leave it alone."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        match args.trim() {
-            "" => CommandResult::Message(
-                "Current effort: normal\nUse /effort [low|normal|high] to change.".to_string(),
-            ),
-            "low" => {
-                // Low effort: smaller max_tokens
-                ctx.config.max_tokens = Some(4096);
-                CommandResult::ConfigChange(ctx.config.clone())
-            }
-            "normal" => {
-                ctx.config.max_tokens = None; // use default
-                CommandResult::ConfigChange(ctx.config.clone())
-            }
-            "high" => {
-                ctx.config.max_tokens = Some(32768);
-                CommandResult::ConfigChange(ctx.config.clone())
-            }
-            other => CommandResult::Error(format!(
-                "Unknown effort level '{}'. Use: low | normal | high",
-                other
-            )),
+        let args = args.trim();
+        if args.is_empty() {
+            // Read from the context rather than naming a level here. This line
+            // used to say "normal" whatever the session was actually doing,
+            // and a remote client has no picker to check it against.
+            let current = match ctx.effort_level {
+                Some(level) => level.as_str(),
+                None => "unset (the model's own default)",
+            };
+            return CommandResult::Message(format!(
+                "Current effort: {current}\nUse /effort [none|minimal|low|medium|high|xhigh|max|ultracode] to change."
+            ));
         }
+
+        let Some(level) = claurst_core::effort::EffortLevel::from_str(args) else {
+            return CommandResult::Error(format!(
+                "Unknown effort level '{args}'. Use: none | minimal | low | medium | high | xhigh | max | ultracode"
+            ));
+        };
+
+        // The output limit rides along for the three original words only.
+        // Widening it to the whole ladder would silently change the limit for
+        // levels that never touched it.
+        match args.to_ascii_lowercase().as_str() {
+            "low" => ctx.config.max_tokens = Some(4096),
+            "normal" => ctx.config.max_tokens = None,
+            "high" => ctx.config.max_tokens = Some(32768),
+            _ => {}
+        }
+
+        ctx.effort_level = Some(level);
+        CommandResult::ConfigChange(ctx.config.clone())
     }
 }
 

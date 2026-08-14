@@ -25,6 +25,11 @@ pub struct CommandContext {
     pub working_dir: std::path::PathBuf,
     pub session_id: String,
     pub session_title: Option<String>,
+    /// The effort level in force, and whether anyone chose it.
+    ///
+    /// `None` means nothing was chosen, which is not the same as choosing the
+    /// default: an unset effort sends no reasoning configuration at all.
+    pub effort_level: Option<claurst_core::effort::EffortLevel>,
     /// Remote session URL set when a bridge connection is active.
     pub remote_session_url: Option<String>,
     // Note: config already contains hooks, mcp_servers, etc.
@@ -1574,6 +1579,7 @@ mod tests {
             working_dir: std::path::PathBuf::from("."),
             session_id: "test-session".to_string(),
             session_title: None,
+            effort_level: None,
             remote_session_url: None,
             mcp_manager: None,
             mcp_auth_runner: None,
@@ -1683,6 +1689,74 @@ mod tests {
     }
 
     // ---- Command execution tests --------------------------------------------
+
+    /// The report has to read the session, not name a level.
+    ///
+    /// It used to answer "normal" whatever the session was doing, and a remote
+    /// client has no picker to check that against.
+    #[tokio::test]
+    async fn effort_reports_the_level_in_force() {
+        let mut ctx = make_ctx();
+        ctx.effort_level = Some(claurst_core::effort::EffortLevel::XHigh);
+        let cmd = find_command("effort").expect("the command exists");
+
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("an argument-less /effort should report");
+        };
+        assert!(text.contains("xhigh"), "{text}");
+        assert!(!text.contains("normal"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn effort_says_so_when_nothing_was_chosen() {
+        // Unset is not the same as the default: it sends no reasoning
+        // configuration at all, so the report must not invent a level.
+        let mut ctx = make_ctx();
+        let cmd = find_command("effort").expect("the command exists");
+
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("an argument-less /effort should report");
+        };
+        assert!(text.contains("unset"), "{text}");
+    }
+
+    /// The picker offers the whole ladder, and a remote client cannot open the
+    /// picker, so the command has to reach every level too.
+    #[tokio::test]
+    async fn effort_accepts_the_whole_ladder() {
+        let mut ctx = make_ctx();
+        let cmd = find_command("effort").expect("the command exists");
+
+        for level in ["none", "minimal", "low", "medium", "high", "xhigh", "max"] {
+            let result = cmd.execute(level, &mut ctx).await;
+            assert!(
+                matches!(result, CommandResult::ConfigChange(_)),
+                "/effort {level} was refused: {result:?}"
+            );
+            assert_eq!(
+                ctx.effort_level,
+                claurst_core::effort::EffortLevel::from_str(level)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_three_original_words_still_move_the_output_limit() {
+        // Kept on purpose. Widening it to the rest of the ladder would change
+        // the limit for levels that never touched it.
+        let mut ctx = make_ctx();
+        let cmd = find_command("effort").expect("the command exists");
+
+        cmd.execute("low", &mut ctx).await;
+        assert_eq!(ctx.config.max_tokens, Some(4096));
+        cmd.execute("high", &mut ctx).await;
+        assert_eq!(ctx.config.max_tokens, Some(32768));
+        cmd.execute("normal", &mut ctx).await;
+        assert_eq!(ctx.config.max_tokens, None);
+
+        cmd.execute("xhigh", &mut ctx).await;
+        assert_eq!(ctx.config.max_tokens, None, "xhigh must leave it alone");
+    }
 
     #[tokio::test]
     async fn test_clear_command_returns_clear_conversation() {

@@ -482,6 +482,7 @@ async fn main() -> anyhow::Result<()> {
                     working_dir: cwd,
                     session_id: "pre-session".to_string(),
                     session_title: None,
+                    effort_level: None,
                     remote_session_url: None,
                     mcp_manager: None,
                     mcp_auth_runner: None,
@@ -2631,6 +2632,7 @@ async fn run_interactive(
         working_dir: tool_ctx.working_dir.clone(),
         session_id: session.id.clone(),
         session_title: session.title.clone(),
+        effort_level: app.effort_explicit.then_some(app.effort_level),
         remote_session_url: session.remote_session_url.clone(),
         mcp_manager: tool_ctx.mcp_manager.clone(),
         mcp_auth_runner: None,
@@ -2924,6 +2926,7 @@ async fn run_interactive(
                                     cmd_name.as_str(),
                                     "model"
                                         | "theme"
+                                        | "effort"
                                         | "resume"
                                         | "session"
                                         | "vim"
@@ -2955,6 +2958,9 @@ async fn run_interactive(
                             // Always runs — some commands need BOTH (e.g. /clear clears
                             // app state via TUI AND the messages vec via CLI).
                             cmd_ctx.messages = messages.clone();
+                            // The app owns the level; a picker can have moved
+                            // it since the last command ran.
+                            cmd_ctx.effort_level = app.effort_explicit.then_some(app.effort_level);
                             let cli_result = execute_command(&input, &mut cmd_ctx).await;
                             // Start optimistically true; set false for Silent/None below.
                             let mut handled_by_cli = cli_result.is_some();
