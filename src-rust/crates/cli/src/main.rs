@@ -2155,6 +2155,32 @@ fn history_for_bridge(
 /// folded into the prompt under its filename. Anything else is named and
 /// skipped rather than pushed through as base64, which would be noise to the
 /// model and would hide the fact that the file never arrived.
+/// Describe one finished turn for a remote client.
+///
+/// `model` is the model that ran the turn, which an agent definition or a
+/// fallback switch can make different from the session model. The turn is
+/// priced here rather than diffed from the running total, because two turns
+/// finishing between reads would misattribute the cost.
+fn bridge_usage(
+    model: &str,
+    usage: &claurst_core::types::UsageInfo,
+    session_cost_usd: f64,
+) -> claurst_bridge::BridgeUsage {
+    claurst_bridge::BridgeUsage {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_creation_tokens: usage.cache_creation_input_tokens,
+        cache_read_tokens: usage.cache_read_input_tokens,
+        cost_usd: Some(claurst_core::cost::ModelPricing::for_model(model).cost_of(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
+        )),
+        session_cost_usd: Some(session_cost_usd),
+    }
+}
+
 fn remote_user_message(
     content: &str,
     attachments: &[claurst_bridge::BridgeAttachment],
@@ -3942,28 +3968,13 @@ async fn run_interactive(
                         stop_reason,
                         turn,
                         usage,
+                        model,
                     } => Some(BridgeOutbound::TurnComplete {
                         message_id: format!("turn-{}", turn),
                         stop_reason: stop_reason.clone(),
-                        usage: usage.as_ref().map(|u| claurst_bridge::BridgeUsage {
-                            input_tokens: u.input_tokens,
-                            output_tokens: u.output_tokens,
-                            cache_creation_tokens: u.cache_creation_input_tokens,
-                            cache_read_tokens: u.cache_read_input_tokens,
-                            // Priced here rather than diffed from the running
-                            // total: two turns finishing between reads would
-                            // otherwise misattribute the cost.
-                            cost_usd: Some(
-                                claurst_core::cost::ModelPricing::for_model(&app.model_name)
-                                    .cost_of(
-                                        u.input_tokens,
-                                        u.output_tokens,
-                                        u.cache_creation_input_tokens,
-                                        u.cache_read_input_tokens,
-                                    ),
-                            ),
-                            session_cost_usd: Some(cost_tracker.total_cost_usd()),
-                        }),
+                        usage: usage
+                            .as_ref()
+                            .map(|u| bridge_usage(model, u, cost_tracker.total_cost_usd())),
                     }),
                     QueryEvent::Error(msg) => Some(BridgeOutbound::Error {
                         message: msg.clone(),
@@ -6185,6 +6196,63 @@ mod remote_slash_routing_tests {
             super::terminal_only_notice("survey"),
             "/survey answers with a view on the terminal."
         );
+    }
+}
+
+#[cfg(test)]
+mod bridge_usage_tests {
+    use super::bridge_usage;
+    use claurst_core::types::UsageInfo;
+
+    fn sample() -> UsageInfo {
+        UsageInfo {
+            input_tokens: 100_000,
+            output_tokens: 20_000,
+            cache_creation_input_tokens: 5_000,
+            cache_read_input_tokens: 40_000,
+        }
+    }
+
+    #[test]
+    fn a_turn_is_priced_at_the_model_it_names() {
+        // The regression: the turn was priced at the session model, so a turn
+        // an agent definition or a fallback switch moved elsewhere reported a
+        // cost that did not belong to it.
+        let haiku = bridge_usage("claude-haiku-4-5", &sample(), 0.0);
+        let opus = bridge_usage("claude-opus-4-6", &sample(), 0.0);
+        assert!(
+            haiku.cost_usd < opus.cost_usd,
+            "haiku {:?} against opus {:?}",
+            haiku.cost_usd,
+            opus.cost_usd
+        );
+    }
+
+    #[test]
+    fn one_turn_costs_what_the_session_costs() {
+        // On the first turn the two figures sit side by side on a phone. They
+        // have to agree, or neither is believable.
+        let tracker = claurst_core::cost::CostTracker::new();
+        let usage = sample();
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
+        );
+
+        let reported = bridge_usage("claude-haiku-4-5", &usage, tracker.total_cost_usd());
+        assert_eq!(reported.cost_usd, reported.session_cost_usd);
+    }
+
+    #[test]
+    fn the_token_counts_pass_through_unchanged() {
+        let reported = bridge_usage("claude-sonnet-4-5", &sample(), 0.0);
+        assert_eq!(reported.input_tokens, 100_000);
+        assert_eq!(reported.output_tokens, 20_000);
+        assert_eq!(reported.cache_creation_tokens, 5_000);
+        assert_eq!(reported.cache_read_tokens, 40_000);
     }
 }
 

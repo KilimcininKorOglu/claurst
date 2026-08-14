@@ -1468,6 +1468,7 @@ mod tests {
             turn: 1,
             stop_reason: "end_turn".to_string(),
             usage: None,
+            model: "claude-sonnet-4-5".to_string(),
         });
         assert!(!app.is_streaming);
         assert!(app.streaming_text.is_empty());
@@ -1484,6 +1485,7 @@ mod tests {
             turn: 1,
             stop_reason: "end_turn".to_string(),
             usage: None,
+            model: "claude-sonnet-4-5".to_string(),
         });
 
         let blocks = app.messages[0].content_blocks();

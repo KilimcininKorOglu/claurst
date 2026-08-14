@@ -256,6 +256,11 @@ pub enum QueryEvent {
         turn: u32,
         stop_reason: String,
         usage: Option<UsageInfo>,
+        /// The model that ran this turn. It is not always the session model:
+        /// an agent definition can override it and a fallback switch can
+        /// replace it mid-turn, and the usage above must be priced at its
+        /// rates.
+        model: String,
     },
     /// An informational status message.
     Status(String),
@@ -1415,6 +1420,7 @@ pub async fn run_query_loop(
                             stop_reason: stop_str.clone(),
                             turn,
                             usage: Some(usage.clone()),
+                            model: effective_model.clone(),
                         });
                     }
 
@@ -1751,6 +1757,7 @@ pub async fn run_query_loop(
                 turn,
                 stop_reason: stop.to_string(),
                 usage: Some(usage.clone()),
+                model: effective_model.clone(),
             });
         }
 
