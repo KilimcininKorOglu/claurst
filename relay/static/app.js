@@ -270,6 +270,18 @@ function append(node) {
   }
 }
 
+/// Longest tool output rendered. A build log can run to megabytes, and the
+/// transcript is not the place to read one.
+const TOOL_OUTPUT_LIMIT = 4000;
+
+function truncate(text, limit) {
+  if (text.length <= limit) {
+    return text;
+  }
+  const dropped = text.length - limit;
+  return `${text.slice(0, limit)}\n… ${dropped} more character(s) not shown`;
+}
+
 function bubble(kind, text) {
   const node = document.createElement('div');
   node.className = `msg ${kind}`;
@@ -302,11 +314,17 @@ function render(event) {
     }
 
     case 'tool_start': {
-      const node = document.createElement('div');
+      // <details> so a long result can be opened on demand without a click
+      // handler, and stays collapsed until then.
+      const node = document.createElement('details');
       node.className = 'tool running';
-      node.textContent = event.input_preview
+
+      const summary = document.createElement('summary');
+      summary.textContent = event.input_preview
         ? `${event.tool_name}: ${event.input_preview}`
         : event.tool_name;
+      node.append(summary);
+
       live.tools.set(event.tool_id, node);
       append(node);
       break;
@@ -314,11 +332,19 @@ function render(event) {
 
     case 'tool_end': {
       const node = live.tools.get(event.tool_id);
-      if (node) {
-        node.className = event.is_error ? 'tool failed' : 'tool done';
-      } else {
+      if (!node) {
         append(notice(`${event.tool_name} finished`, event.is_error));
+        break;
       }
+      node.className = event.is_error ? 'tool failed' : 'tool done';
+
+      const output = document.createElement('pre');
+      output.className = 'tool-output';
+      output.textContent = truncate(event.result || '', TOOL_OUTPUT_LIMIT);
+      node.append(output);
+
+      // A failure is the one result worth seeing without asking for it.
+      node.open = Boolean(event.is_error);
       break;
     }
 

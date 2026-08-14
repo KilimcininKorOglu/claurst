@@ -230,6 +230,27 @@ input, textarea {
   overflow-wrap: anywhere;
 }
 
+.tool > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+/* The disclosure triangle is redundant next to the coloured status rail. */
+.tool > summary::-webkit-details-marker { display: none; }
+
+.tool-output {
+  margin: 8px 0 2px;
+  padding: 8px;
+  background: #000;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 .tool.running { border-left-color: var(--accent); }
 .tool.failed { border-left-color: var(--danger); color: var(--danger); }
 .tool.done { border-left-color: var(--ok); }
