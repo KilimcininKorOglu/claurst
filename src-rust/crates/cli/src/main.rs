@@ -2964,6 +2964,24 @@ async fn run_interactive(
                                     // overlay for this command (e.g. /stats opens dialog
                                     // AND would push a text message — drop the text).
                                     if !handled_by_tui {
+                                        // The remote client sees only query events, so
+                                        // without this a command it sent appears to do
+                                        // nothing at all.
+                                        if let Some(runtime) = bridge_runtime.as_ref() {
+                                            let id = format!("cmd-{}", uuid::Uuid::new_v4());
+                                            let _ = runtime.outbound_tx.try_send(
+                                                BridgeOutbound::TextDelta {
+                                                    delta: msg.clone(),
+                                                    message_id: id.clone(),
+                                                },
+                                            );
+                                            let _ = runtime.outbound_tx.try_send(
+                                                BridgeOutbound::TurnComplete {
+                                                    message_id: id,
+                                                    stop_reason: "command".to_string(),
+                                                },
+                                            );
+                                        }
                                         app.push_message(claurst_core::types::Message::assistant(
                                             msg,
                                         ));
@@ -3912,6 +3930,23 @@ async fn run_interactive(
                         attachments,
                         ..
                     }) => {
+                        // A slash command has to go through the keyboard submit
+                        // path, or it reaches the model as plain text. That path
+                        // runs on a synthesised Enter, so hand the text over and
+                        // let it fire rather than reimplementing 400 lines of
+                        // command handling that would then drift.
+                        if content.trim_start().starts_with('/') {
+                            if app.is_streaming || !app.prompt_input.text.is_empty() {
+                                // Busy, or the local user is mid-sentence. Queue it
+                                // exactly as a local message typed during a turn.
+                                app.queued_messages.push_back(content);
+                            } else {
+                                app.set_prompt_text(content);
+                                app.pending_auto_submit = true;
+                            }
+                            continue;
+                        }
+
                         // Inject the remote prompt as if the user typed it, then
                         // trigger submission automatically.
                         app.set_prompt_text(content.clone());
@@ -5697,6 +5732,29 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_slash_routing_tests {
+    /// A remote prompt has to be recognised as a slash command by exactly the
+    /// same rule the keyboard uses, or the two paths diverge on the edges.
+    fn is_slash(content: &str) -> bool {
+        content.trim_start().starts_with('/')
+    }
+
+    #[test]
+    fn a_command_is_recognised_with_or_without_leading_space() {
+        assert!(is_slash("/compact"));
+        assert!(is_slash("  /model claude-haiku"));
+        assert!(is_slash("\n/clear"));
+    }
+
+    #[test]
+    fn a_prompt_that_merely_mentions_a_path_is_not_a_command() {
+        assert!(!is_slash("look at src/main.rs"));
+        assert!(!is_slash("what does / mean here"));
+        assert!(!is_slash(""));
     }
 }
 
