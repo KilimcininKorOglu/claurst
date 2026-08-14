@@ -147,7 +147,11 @@ struct Cli {
     max_turns: u32,
 
     /// Custom system prompt
-    #[arg(long = "system-prompt", short = 's')]
+    #[arg(
+        long = "system-prompt",
+        short = 's',
+        conflicts_with = "system_prompt_file"
+    )]
     system_prompt: Option<String>,
 
     /// Append to system prompt
@@ -586,6 +590,14 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(sp) = cli.system_prompt.clone() {
         config.custom_system_prompt = Some(sp);
+    }
+    if let Some(ref path) = cli.system_prompt_file {
+        // Fail rather than fall back to the built-in prompt: a run that
+        // silently ignores the requested prompt produces work the user did not
+        // ask for.
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read --system-prompt-file {}", path.display()))?;
+        config.custom_system_prompt = Some(contents);
     }
     if let Some(asp) = cli.append_system_prompt.clone() {
         config.append_system_prompt = Some(asp);
@@ -5276,6 +5288,41 @@ mod dump_system_prompt_tests {
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
+    }
+
+    /// `--system-prompt-file` was declared in the clap struct and never read,
+    /// so it appeared in `--help` and silently did nothing.
+    #[test]
+    fn a_system_prompt_file_replaces_the_base_prompt() {
+        let dir = std::env::temp_dir().join("claurst-system-prompt-file-test");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("sp.txt");
+        std::fs::write(&path, "You are a haiku bot.").expect("write");
+
+        let contents = std::fs::read_to_string(&path).expect("read back");
+        let config = Config {
+            custom_system_prompt: Some(contents),
+            ..Default::default()
+        };
+        let model_registry = claurst_api::ModelRegistry::new();
+        let mut dump_config =
+            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+        dump_config.system_prompt = config.custom_system_prompt.clone();
+
+        let rendered = match claurst_query::build_system_prompt(&dump_config) {
+            claurst_api::SystemPrompt::Text(text) => text,
+            claurst_api::SystemPrompt::Blocks(blocks) => blocks
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            rendered.contains("You are a haiku bot."),
+            "the file's contents must reach the prompt, got: {rendered}"
+        );
     }
 
     #[test]
