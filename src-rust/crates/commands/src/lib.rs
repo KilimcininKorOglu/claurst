@@ -633,6 +633,19 @@ impl SlashCommand for CompactCommand {
 
 // ---- /cost ---------------------------------------------------------------
 
+/// The rate card for one model, named so the reader knows whose rates these
+/// are: the model that spent the tokens need not be the session model.
+fn rates_line(model: &str, pricing: claurst_core::cost::ModelPricing) -> String {
+    format!(
+        "  Rates ($/MTok) for {}: input ${:.2} | output ${:.2} | cache-write ${:.3} | cache-read ${:.3}",
+        model,
+        pricing.input_per_mtk,
+        pricing.output_per_mtk,
+        pricing.cache_creation_per_mtk,
+        pricing.cache_read_per_mtk,
+    )
+}
+
 #[async_trait]
 impl SlashCommand for CostCommand {
     fn name(&self) -> &str {
@@ -652,7 +665,6 @@ impl SlashCommand for CostCommand {
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
         let tracker = &ctx.cost_tracker;
         let model = ctx.config.effective_model();
-        let pricing = claurst_core::cost::ModelPricing::for_model(model);
 
         let input = tracker.input_tokens();
         let output = tracker.output_tokens();
@@ -661,37 +673,32 @@ impl SlashCommand for CostCommand {
         let total = tracker.total_tokens();
         let cost = tracker.total_cost_usd();
 
-        // Per-category cost breakdown.
-        let input_cost = (input as f64 * pricing.input_per_mtk) / 1_000_000.0;
-        let output_cost = (output as f64 * pricing.output_per_mtk) / 1_000_000.0;
-        let cc_cost = (cache_create as f64 * pricing.cache_creation_per_mtk) / 1_000_000.0;
-        let cr_cost = (cache_read as f64 * pricing.cache_read_per_mtk) / 1_000_000.0;
+        // Every dollar figure below comes from the same per-model source, so
+        // the rows add up to the total even when several models ran.
+        let split = tracker.cost_by_category();
+        let spenders = tracker.by_model();
 
-        // Pricing info line.
-        let pricing_line = format!(
-            "  Rates ($/MTok): input ${:.2} | output ${:.2} | cache-write ${:.3} | cache-read ${:.3}",
-            pricing.input_per_mtk,
-            pricing.output_per_mtk,
-            pricing.cache_creation_per_mtk,
-            pricing.cache_read_per_mtk,
-        );
+        // One set of rates only explains the rows when one model spent them.
+        let pricing_line = match spenders.as_slice() {
+            [only] => rates_line(
+                &only.model,
+                claurst_core::cost::ModelPricing::for_model(&only.model),
+            ),
+            [] => rates_line(model, claurst_core::cost::ModelPricing::for_model(model)),
+            _ => "  Rates ($/MTok): vary by model — see the breakdown below".to_string(),
+        };
 
         // Cache savings note: how much input cost was avoided by using cache-read
         // instead of re-sending those tokens as normal input.
         let savings = if cache_read > 0 {
-            let saved = (cache_read as f64 * (pricing.input_per_mtk - pricing.cache_read_per_mtk))
-                / 1_000_000.0;
             format!(
                 "\n  Cache savings:  ${:.4}  ({} tokens served from cache)",
-                saved, cache_read
+                split.cache_savings, cache_read
             )
         } else {
             String::new()
         };
 
-        // The per-category rows above are priced at the session model's rates,
-        // which is what the header says. The block below is the honest total:
-        // every model that ran, at its own rates.
         let by_model = stats::by_model_block(tracker);
 
         CommandResult::Message(format!(
@@ -711,13 +718,13 @@ impl SlashCommand for CostCommand {
             pricing_line = pricing_line,
             by_model = by_model,
             input = input,
-            input_cost = input_cost,
+            input_cost = split.input,
             output = output,
-            output_cost = output_cost,
+            output_cost = split.output,
             cache_create = cache_create,
-            cc_cost = cc_cost,
+            cc_cost = split.cache_creation,
             cache_read = cache_read,
-            cr_cost = cr_cost,
+            cr_cost = split.cache_read,
             total = total,
             cost = cost,
             savings = savings,
@@ -1806,6 +1813,81 @@ mod tests {
         assert!(
             text.contains("claude-haiku-4-5"),
             "missing Haiku in:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cost_rows_add_up_to_the_total_across_models() {
+        let mut ctx = make_ctx();
+        ctx.cost_tracker
+            .add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
+        ctx.cost_tracker
+            .add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 0);
+
+        let cmd = find_command("cost").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/cost should report");
+        };
+
+        let dollars = |label: &str| -> f64 {
+            let line = text
+                .lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("no {label} line in:\n{text}"));
+            let field = line
+                .rsplit('$')
+                .next()
+                .unwrap_or_else(|| panic!("no amount on: {line}"));
+            field
+                .trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("{field:?} on {line}: {e}"))
+        };
+
+        let rows = dollars("Input tokens:")
+            + dollars("Output tokens:")
+            + dollars("Cache write:")
+            + dollars("Cache read:");
+        let total = dollars("Total cost:");
+        assert!(
+            (rows - total).abs() < 1e-4,
+            "rows {rows} against total {total} in:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_rate_card_is_only_shown_when_one_model_spent() {
+        let mut ctx = make_ctx();
+        ctx.cost_tracker
+            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+        ctx.cost_tracker
+            .add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
+
+        let cmd = find_command("cost").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/cost should report");
+        };
+        assert!(
+            text.contains("vary by model"),
+            "two models need no single rate card:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_rate_card_names_the_model_that_spent() {
+        // The single spender need not be the session model; only an advisor
+        // may have run.
+        let mut ctx = make_ctx();
+        ctx.cost_tracker
+            .add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
+
+        let cmd = find_command("cost").expect("the command exists");
+        let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
+            panic!("/cost should report");
+        };
+        assert!(
+            text.contains("Rates ($/MTok) for claude-haiku-4-5:"),
+            "the rate card must name its model:\n{text}"
         );
     }
 

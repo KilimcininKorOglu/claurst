@@ -4204,6 +4204,17 @@ pub mod cost {
         pub cost_usd: f64,
     }
 
+    /// A session's cost split by token category, priced per model.
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    pub struct CostByCategory {
+        pub input: f64,
+        pub output: f64,
+        pub cache_creation: f64,
+        pub cache_read: f64,
+        /// What cache reads saved against sending the same tokens as input.
+        pub cache_savings: f64,
+    }
+
     /// Tokens accumulated for one model.
     #[derive(Debug, Clone, Copy, Default)]
     struct Totals {
@@ -4307,6 +4318,27 @@ pub mod cost {
                     .then_with(|| a.model.cmp(&b.model))
             });
             spend
+        }
+
+        /// The session cost split by category, each model at its own rates.
+        ///
+        /// The four category figures add up to `total_cost_usd`, so a report
+        /// can show the rows and the total together without them disagreeing.
+        pub fn cost_by_category(&self) -> CostByCategory {
+            let mut split = CostByCategory::default();
+            for (model, totals) in self.per_model.read().iter() {
+                let pricing = ModelPricing::for_model(model);
+                split.input += totals.input as f64 * pricing.input_per_mtk / 1_000_000.0;
+                split.output += totals.output as f64 * pricing.output_per_mtk / 1_000_000.0;
+                split.cache_creation +=
+                    totals.cache_creation as f64 * pricing.cache_creation_per_mtk / 1_000_000.0;
+                split.cache_read +=
+                    totals.cache_read as f64 * pricing.cache_read_per_mtk / 1_000_000.0;
+                split.cache_savings += totals.cache_read as f64
+                    * (pricing.input_per_mtk - pricing.cache_read_per_mtk)
+                    / 1_000_000.0;
+            }
+            split
         }
 
         pub fn total_tokens(&self) -> u64 {
@@ -5917,6 +5949,46 @@ mod tests {
             tracker.total_cost_usd() < one_rate,
             "the cheaper model's tokens must not be billed at the session model's rates"
         );
+    }
+
+    #[test]
+    fn the_category_costs_add_up_to_the_total() {
+        // The regression: /cost prints these four as rows with the total
+        // underneath. Priced at one model's rates they disagreed with it.
+        let tracker = CostTracker::new();
+        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 5_000, 40_000);
+        tracker.add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 10_000);
+
+        let split = tracker.cost_by_category();
+        let rows = split.input + split.output + split.cache_creation + split.cache_read;
+        // Not bit-identical: this sums each category across models while
+        // `total_cost_usd` sums each model across categories, so the additions
+        // associate differently. The report prints four decimals.
+        assert!(
+            (rows - tracker.total_cost_usd()).abs() < 1e-9,
+            "rows {rows} against total {}",
+            tracker.total_cost_usd()
+        );
+    }
+
+    #[test]
+    fn a_session_that_spent_nothing_has_no_category_cost() {
+        let split = CostTracker::new().cost_by_category();
+        assert_eq!(split, cost::CostByCategory::default());
+        assert!(!split.input.is_sign_negative());
+    }
+
+    #[test]
+    fn cache_savings_use_each_model_s_own_gap() {
+        let tracker = CostTracker::new();
+        tracker.add_usage("claude-opus-4-6", 0, 0, 0, 40_000);
+        tracker.add_usage("claude-haiku-4-5", 0, 0, 0, 10_000);
+
+        let opus = cost::ModelPricing::for_model("claude-opus-4-6");
+        let haiku = cost::ModelPricing::for_model("claude-haiku-4-5");
+        let expected = 40_000.0 * (opus.input_per_mtk - opus.cache_read_per_mtk) / 1_000_000.0
+            + 10_000.0 * (haiku.input_per_mtk - haiku.cache_read_per_mtk) / 1_000_000.0;
+        assert_eq!(tracker.cost_by_category().cache_savings, expected);
     }
 
     #[test]
