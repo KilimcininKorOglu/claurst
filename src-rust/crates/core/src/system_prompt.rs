@@ -310,10 +310,9 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         parts.push(build_env_info_section(opts.working_directory.as_deref()));
     }
 
-    // 11. Working directory (legacy XML tag kept for caching compat)
-    if let Some(cwd) = &opts.working_directory {
-        parts.push(format!("\n<working_directory>{}</working_directory>", cwd));
-    }
+    // 11. The working directory is in the `<env>` section above. It used to be
+    // repeated here in an XML tag as well; nothing read the tag, and the
+    // repetition only spent tokens.
 
     // 12. Memory injection (from memdir)
     if !opts.memory_content.is_empty() {
@@ -645,6 +644,19 @@ mod tests {
         assert!(prompt.starts_with("Custom only."));
         assert!(!prompt.contains("Capabilities"));
         assert!(prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY));
+    }
+
+    #[test]
+    fn the_working_directory_is_written_once() {
+        // It used to appear twice here, in the `<env>` section and again in an
+        // XML tag, and a third time through the context the CLI prepends.
+        let cwd = "/home/user/project";
+        let prompt = build_system_prompt(&SystemPromptOptions {
+            working_directory: Some(cwd.to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(prompt.matches(cwd).count(), 1, "{prompt}");
     }
 
     #[test]

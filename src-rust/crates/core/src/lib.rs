@@ -2737,13 +2737,15 @@ pub mod context {
             self
         }
 
-        /// System context (git status, platform, IDE, etc.)
+        /// System context the `<env>` section does not already carry.
+        ///
+        /// The platform and the working directory belong to
+        /// [`crate::system_prompt::build_system_prompt`], which every path goes
+        /// through. Naming them here too said the same thing twice, and said it
+        /// differently: `std::env::consts::OS` reports `macos` where the `<env>`
+        /// block reports `darwin`.
         pub async fn build_system_context(&self) -> String {
             let mut parts = vec![];
-
-            // Platform information
-            parts.push(format!("Platform: {}", std::env::consts::OS));
-            parts.push(format!("Working directory: {}", self.cwd.display()));
 
             if let Some(git_context) = self.get_git_context().await {
                 parts.push(git_context);
@@ -5074,6 +5076,25 @@ mod tests {
         let msg = Message::user("hello");
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.get_text(), Some("hello"));
+    }
+
+    #[tokio::test]
+    async fn system_context_leaves_the_platform_and_cwd_to_the_env_section() {
+        // Both used to appear here as well, and the platform disagreed with
+        // itself: this side reported `macos` where the `<env>` section reports
+        // `darwin`. The model was told the same fact twice, in two words.
+        let context = context::ContextBuilder::new(std::path::PathBuf::from("."))
+            .build_system_context()
+            .await;
+
+        assert!(
+            !context.contains("Platform:"),
+            "the platform belongs to the <env> section"
+        );
+        assert!(
+            !context.contains("Working directory:"),
+            "the working directory belongs to the <env> section"
+        );
     }
 
     #[test]
