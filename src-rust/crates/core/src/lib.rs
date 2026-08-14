@@ -4272,7 +4272,10 @@ pub mod cost {
                         totals.cache_read,
                     )
                 })
-                .sum()
+                // Folded from a positive zero rather than summed: the standard
+                // sum starts at -0.0, so a session that has spent nothing
+                // reaches the remote session list as "cost_usd":-0.0.
+                .fold(0.0, |total, cost| total + cost)
         }
 
         /// What each model spent, dearest first.
@@ -5885,6 +5888,14 @@ mod tests {
         tracker.add_usage("deepseek-v4-flash-free", 1000, 500, 200, 100);
         // Free models should have zero cost even with token usage
         assert_eq!(tracker.total_cost_usd(), 0.0);
+    }
+
+    #[test]
+    fn a_session_that_spent_nothing_reports_a_positive_zero() {
+        // This figure is serialised into the remote session list. A negative
+        // zero renders there as "-$0.00".
+        let tracker = CostTracker::new();
+        assert!(!tracker.total_cost_usd().is_sign_negative());
     }
 
     #[test]
