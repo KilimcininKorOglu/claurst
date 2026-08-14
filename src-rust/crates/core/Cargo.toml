@@ -81,6 +81,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
+hostname = "0.4"
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 dashmap = { workspace = true }

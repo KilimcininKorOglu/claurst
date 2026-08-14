@@ -1093,6 +1093,11 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub advisor_model: Option<String>,
+        /// Live copy of [`Settings::companion`], merged in by
+        /// [`Settings::effective_config`] so `/buddy on` takes effect without a
+        /// restart.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion: Option<CompanionSettings>,
         /// Per-provider configurations
         #[serde(default)]
         pub provider_configs: HashMap<String, ProviderConfig>,
@@ -1309,6 +1314,13 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub remote_control: Option<RemoteControlSettings>,
+        /// The companion that sits beside the input box, configured by `/buddy`.
+        ///
+        /// Absent means off, same as `enabled: false`. Off is the default
+        /// because an active companion costs a model call to hatch and adds a
+        /// block to every system prompt.
+        #[serde(default, rename = "companion", skip_serializing_if = "Option::is_none")]
+        pub companion: Option<CompanionSettings>,
         /// Global opt-in: trust and auto-launch project-defined MCP servers
         /// (those declared in a repository's `.claurst/settings.json`) without
         /// prompting. Defaults to `false`. Leaving it off means project servers
@@ -1474,6 +1486,18 @@ pub mod config {
         /// list. Without it the client can only show an opaque session id.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub label: Option<String>,
+    }
+
+    /// How the companion beside the input box is configured.
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    pub struct CompanionSettings {
+        /// Whether the companion is shown and described to the model.
+        #[serde(default)]
+        pub enabled: bool,
+        /// Model used to hatch the companion and to write its bubble lines.
+        /// Absent means the session model does that work too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub model: Option<String>,
     }
 
     /// Shortest remote-control token that will be accepted.
@@ -1966,6 +1990,10 @@ pub mod config {
             if config.advisor_model.is_none() {
                 config.advisor_model = self.advisor_model.clone();
             }
+            // Same precedence again for the companion.
+            if config.companion.is_none() {
+                config.companion = self.companion.clone();
+            }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
                 config
@@ -2160,6 +2188,7 @@ pub mod config {
                 hooks: merge_map(base.config.hooks, over.config.hooks),
                 provider: over.config.provider.or(base.config.provider),
                 advisor_model: over.config.advisor_model.or(base.config.advisor_model),
+                companion: over.config.companion.or(base.config.companion),
                 provider_configs: merge_map(
                     base.config.provider_configs,
                     over.config.provider_configs,
@@ -2281,6 +2310,7 @@ pub mod config {
                 show_message_timestamps: over.show_message_timestamps
                     || base.show_message_timestamps,
                 advisor_model: over.advisor_model.clone().or(base.advisor_model.clone()),
+                companion: over.companion.clone().or(base.companion.clone()),
                 reduce_motion: over.reduce_motion || base.reduce_motion,
                 terminal_progress_bar: over.terminal_progress_bar || base.terminal_progress_bar,
                 show_cwd: over.show_cwd || base.show_cwd,
@@ -5399,6 +5429,41 @@ mod tests {
         assert_eq!(settings.advisor_model, None);
         let json = serde_json::to_string(&settings).unwrap();
         assert!(!json.contains("advisorModel"));
+    }
+
+    #[test]
+    fn test_settings_companion_survives_a_round_trip() {
+        let settings: crate::config::Settings =
+            serde_json::from_str(r#"{"companion":{"enabled":true,"model":"gpt-4o-mini"}}"#)
+                .unwrap();
+        let companion = settings.companion.clone().expect("companion is read");
+        assert!(companion.enabled);
+        assert_eq!(companion.model.as_deref(), Some("gpt-4o-mini"));
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: crate::config::Settings = serde_json::from_str(&json).unwrap();
+        let back = back.companion.expect("companion survives the write");
+        assert!(back.enabled);
+        assert_eq!(back.model.as_deref(), Some("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn test_settings_omit_companion_when_unset() {
+        // Nobody who has never run /buddy should find the key in their file.
+        let settings = crate::config::Settings::default();
+        assert!(settings.companion.is_none());
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("companion"));
+    }
+
+    #[test]
+    fn test_effective_config_carries_the_companion() {
+        // `/buddy on` writes the top-level key; the running session reads it
+        // off `Config`, so the copy has to happen here.
+        let settings: crate::config::Settings =
+            serde_json::from_str(r#"{"companion":{"enabled":true}}"#).unwrap();
+        let config = settings.effective_config();
+        assert!(config.companion.expect("copied onto Config").enabled);
     }
 
     #[test]

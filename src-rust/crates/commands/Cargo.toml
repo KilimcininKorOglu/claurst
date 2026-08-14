@@ -30,6 +30,7 @@ urlencoding = { workspace = true }
 open = { workspace = true }
 qrcode = { workspace = true }
 claurst-bridge = { workspace = true }
+claurst-buddy = { workspace = true }
 hostname = "0.4"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 futures = { workspace = true }

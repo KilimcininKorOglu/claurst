@@ -238,6 +238,8 @@ mod ui_settings;
 use ui_settings::*;
 mod new_move;
 pub use new_move::*;
+mod buddy;
+pub use buddy::*;
 
 // ---------------------------------------------------------------------------
 // Built-in commands
@@ -1355,6 +1357,8 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(SandboxToggleCommand),
         // Advisor
         Box::new(AdvisorCommand),
+        // Companion
+        Box::new(BuddyCommand),
         // Diagnostics / analysis
         Box::new(HeapdumpCommand),
         Box::new(InsightsCommand),

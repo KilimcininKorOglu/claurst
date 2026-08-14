@@ -58,6 +58,7 @@ pub struct SettingsScreen {
     pub show_message_timestamps: bool,
     pub output_style: String,
     pub reduce_motion: bool,
+    pub companion_enabled: bool,
     pub terminal_progress_bar: bool,
     pub verbose: bool,
     pub cursor_blink_enabled: bool,
@@ -93,6 +94,7 @@ impl SettingsScreen {
             show_message_timestamps: false,
             output_style: "default".to_string(),
             reduce_motion: false,
+            companion_enabled: false,
             terminal_progress_bar: true,
             verbose: false,
             cursor_blink_enabled: false,
@@ -128,6 +130,11 @@ impl SettingsScreen {
             .clone()
             .unwrap_or_else(|| "default".to_string());
         self.reduce_motion = self.settings_snapshot.reduce_motion;
+        self.companion_enabled = self
+            .settings_snapshot
+            .companion
+            .as_ref()
+            .is_some_and(|companion| companion.enabled);
         self.terminal_progress_bar = self.settings_snapshot.terminal_progress_bar;
         self.verbose = self.settings_snapshot.config.verbose;
         self.cursor_blink_enabled = self.settings_snapshot.config.cursor_blink_enabled;
@@ -329,6 +336,13 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Disable UI animations.",
             kind: SettingKind::Bool,
             value: if screen.reduce_motion { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "companion_enabled",
+            label: "Companion",
+            description: "Show a small creature beside the input box. See /buddy.",
+            kind: SettingKind::Bool,
+            value: if screen.companion_enabled { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "terminal_progress_bar",
@@ -831,6 +845,17 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "reduce_motion" => {
                         screen.reduce_motion = new_value;
                         screen.settings_snapshot.reduce_motion = new_value;
+                        let _ = screen.settings_snapshot.save_sync();
+                    }
+                    "companion_enabled" => {
+                        screen.companion_enabled = new_value;
+                        let mut companion = screen
+                            .settings_snapshot
+                            .companion
+                            .take()
+                            .unwrap_or_default();
+                        companion.enabled = new_value;
+                        screen.settings_snapshot.companion = Some(companion);
                         let _ = screen.settings_snapshot.save_sync();
                     }
                     "terminal_progress_bar" => {

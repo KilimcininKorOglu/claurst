@@ -403,6 +403,53 @@ pub fn id_from_identity(identity: &JwtIdentity) -> String {
     "account".to_string()
 }
 
+/// A string that identifies this user the same way on every run.
+///
+/// Callers that derive something durable from "who is this" need an answer
+/// that survives a restart. The stored account id is preferred because it
+/// follows the user to another machine; when no account is stored, the
+/// machine itself stands in, hashed so the hostname and home path are not
+/// carried around in the open.
+///
+/// This is not a security boundary and must not be used as one. It is an
+/// identifier, not a secret: anyone on the machine can reproduce it.
+pub fn stable_identity() -> String {
+    identity_from_registry(&AccountRegistry::load()).unwrap_or_else(machine_identity)
+}
+
+/// The account half of [`stable_identity`], split out so it can be tested
+/// without a registry on disk.
+fn identity_from_registry(registry: &AccountRegistry) -> Option<String> {
+    [PROVIDER_ANTHROPIC, PROVIDER_CODEX]
+        .into_iter()
+        .find_map(|provider| {
+            registry
+                .active(provider)
+                .map(|id| format!("{provider}:{id}"))
+        })
+}
+
+/// The machine half of [`stable_identity`], used when no account is stored.
+fn machine_identity() -> String {
+    let mut input = String::with_capacity(128);
+    if let Ok(host) = hostname::get() {
+        input.push_str(&host.to_string_lossy());
+    }
+    input.push(':');
+    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
+        input.push_str(&user);
+    }
+    input.push(':');
+    if let Some(home) = dirs::home_dir() {
+        input.push_str(&home.display().to_string());
+    }
+
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("machine:{}", hex::encode(hasher.finalize()))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -580,5 +627,46 @@ mod tests {
         assert!(!provider_supports_profiles("openai"));
         assert!(!provider_supports_profiles("google"));
         assert!(!provider_supports_profiles(""));
+    }
+
+    #[test]
+    fn the_same_machine_answers_with_the_same_identity() {
+        assert_eq!(machine_identity(), machine_identity());
+        assert!(machine_identity().starts_with("machine:"));
+    }
+
+    #[test]
+    fn a_stored_account_wins_over_the_machine() {
+        let mut registry = AccountRegistry::default();
+        registry.providers.insert(
+            PROVIDER_CODEX.to_string(),
+            ProviderAccounts {
+                active: Some("work".to_string()),
+                profiles: BTreeMap::new(),
+            },
+        );
+        assert_eq!(
+            identity_from_registry(&registry).as_deref(),
+            Some("codex:work")
+        );
+
+        // Anthropic is checked first, so adding it moves the identity even
+        // though codex was there already.
+        registry.providers.insert(
+            PROVIDER_ANTHROPIC.to_string(),
+            ProviderAccounts {
+                active: Some("personal".to_string()),
+                profiles: BTreeMap::new(),
+            },
+        );
+        assert_eq!(
+            identity_from_registry(&registry).as_deref(),
+            Some("anthropic:personal")
+        );
+    }
+
+    #[test]
+    fn an_empty_registry_falls_through_to_the_machine() {
+        assert_eq!(identity_from_registry(&AccountRegistry::default()), None);
     }
 }
