@@ -1897,6 +1897,25 @@ fn permission_request_from_core(
     }
 }
 
+/// The answers a remote client may give for a pending permission request.
+///
+/// Empty when the remote client may not answer. The request is still sent, so
+/// the remote user learns why the session stopped, but offering buttons that
+/// the CLI will refuse would leave a tap with no visible effect.
+fn remote_permission_options(
+    dialog: &claurst_tui::dialogs::PermissionRequest,
+    remote_may_answer: bool,
+) -> Vec<String> {
+    if !remote_may_answer {
+        return Vec::new();
+    }
+    dialog
+        .options
+        .iter()
+        .map(|option| option.label.clone())
+        .collect()
+}
+
 /// Settle a waiting permission request and release the blocked tool.
 ///
 /// `selected_key` uses the dialog's own option keys: `y` allow once, `Y` allow
@@ -3447,11 +3466,10 @@ async fn run_interactive(
                                         tool_use_id: tool_use_id.clone(),
                                         tool_name: dialog.tool_name.clone(),
                                         description: dialog.description.clone(),
-                                        options: dialog
-                                            .options
-                                            .iter()
-                                            .map(|option| option.label.clone())
-                                            .collect(),
+                                        options: remote_permission_options(
+                                            &dialog,
+                                            remote_permission_ask,
+                                        ),
                                     });
                         }
                         app.permission_request = Some(dialog);
@@ -5457,6 +5475,37 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_permission_option_tests {
+    use super::*;
+
+    fn dialog() -> claurst_tui::dialogs::PermissionRequest {
+        claurst_tui::dialogs::PermissionRequest::bash(
+            "tool-1".to_string(),
+            "Bash".to_string(),
+            "needs approval".to_string(),
+            "ls -la".to_string(),
+            None,
+        )
+    }
+
+    #[test]
+    fn a_remote_client_that_may_answer_gets_the_dialog_labels() {
+        let options = remote_permission_options(&dialog(), true);
+
+        assert!(!options.is_empty());
+        assert_eq!(options.len(), dialog().options.len());
+    }
+
+    #[test]
+    fn local_only_offers_no_answer_at_all() {
+        assert!(
+            remote_permission_options(&dialog(), false).is_empty(),
+            "a button the CLI will refuse leaves a tap with no visible effect"
+        );
     }
 }
 

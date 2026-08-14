@@ -30,6 +30,8 @@ const el = {
   permission: document.getElementById('permission'),
   permissionTool: document.getElementById('permission-tool'),
   permissionDesc: document.getElementById('permission-desc'),
+  permissionActions: document.getElementById('permission-actions'),
+  permissionLocal: document.getElementById('permission-local'),
   promptForm: document.getElementById('prompt-form'),
   promptInput: document.getElementById('prompt-input'),
   send: document.getElementById('send'),
@@ -342,9 +344,16 @@ function render(event) {
 // ---------------------------------------------------------------------------
 
 function showPermission(request) {
-  live.permission = request;
+  // No options means the machine is running in local-only mode and will refuse
+  // an answer from here. Show the request anyway, so the reason the session
+  // stopped is visible, but offer no button that would do nothing.
+  const answerable = Array.isArray(request.options) && request.options.length > 0;
+
+  live.permission = answerable ? request : null;
   el.permissionTool.textContent = `${request.tool_name} needs approval`;
   el.permissionDesc.textContent = request.description || '';
+  el.permissionActions.hidden = !answerable;
+  el.permissionLocal.hidden = answerable;
   el.permission.hidden = false;
 }
 

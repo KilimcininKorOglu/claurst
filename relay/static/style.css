@@ -259,7 +259,11 @@ input, textarea {
 }
 
 .permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.permission-actions[hidden] { display: none; }
 .permission-actions button { flex: 1 1 140px; }
+
+.permission-local { margin: 0; color: var(--muted); font-size: 13px; }
+.permission-local[hidden] { display: none; }
 
 /* Composer */
 

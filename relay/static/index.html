@@ -42,11 +42,12 @@
   <div id="permission" class="permission" hidden>
     <p id="permission-tool" class="permission-tool"></p>
     <p id="permission-desc" class="permission-desc"></p>
-    <div class="permission-actions">
+    <div class="permission-actions" id="permission-actions">
       <button type="button" data-decision="allow">Allow once</button>
       <button type="button" data-decision="allow_permanently">Allow this session</button>
       <button type="button" data-decision="deny" class="danger">Deny</button>
     </div>
+    <p class="permission-local" id="permission-local" hidden>Waiting for an answer at the terminal. This machine runs in local-only mode, so it does not accept an answer from here.</p>
   </div>
 
   <form id="prompt-form" class="composer">
