@@ -35,6 +35,8 @@ It's fast, it's memory-efficient, it's yours to run however you want, and there'
 >
 > - **/goal support:** Try out `/goal <objective>` to see claurst keep working an objective, spanning multiple turns instead of stopping after one normal turn. `[EXPERIMENTAL]`
 >
+> - **Remote control:** Drive a running session from your phone or another browser through a relay you host yourself (`relay/`, one `docker compose up`). The CLI dials out and long-polls, so your machine needs no inbound port and no firewall change. Start it with `/remote-control`; see [docs/remote-control.md](docs/remote-control.md). `[EXPERIMENTAL]`
+>
 > - **ultracode:** The **highest effort level** — pick it in the effort selector (`/effort`, where it sits past `max` on the "Smarter" end with an animated purple spectrum) or just type **`ultracode`** anywhere in your prompt. The keyword lights up with a purple gradient (claurst's take on Claude Code's `ultrathink`) and that turn runs at the model's top reasoning **plus** a disciplined plan → delegate → integrate → verify workflow that fans bounded packets out across native subagents (`Agent`), swarms (`TeamCreate`), and background tasks (`TaskCreate`). Composes with `/goal` for sustained multi-turn objectives. `[EXPERIMENTAL]`
 
 ---
@@ -125,6 +127,8 @@ claurst
 claurst -p "explain this codebase"
 ```
 
+Claurst stores everything it persists under one directory: `$CLAURST_HOME` if set, otherwise an existing `~/.claurst`, otherwise `$XDG_CONFIG_HOME/claurst` (`~/.config/claurst`). Settings, sessions, credentials and memory all live there.
+
 ## Devcontainer setup
 
 After cloning this repository, open it in VS Code and use Reopen in Container to start the development environment.
@@ -172,7 +176,7 @@ args:    ["acp"]
 
 Claurst will run in JSON-RPC 2.0 mode over stdio. It implements `initialize`, `session/new`, `session/prompt`, and `session/cancel`, streams `session/update` notifications (text deltas, agent thinking, tool calls with their progress + results), and routes every tool permission through `session/request_permission` so the editor can show a native approval dialog.
 
-Configure your provider / API key in `~/.claurst/settings.json` (or `claurst auth login` / `claurst /connect`) before launching — the ACP agent uses the same credentials and providers as the interactive TUI.
+Configure your provider / API key before launching — run `claurst auth login`, use `/connect` inside the TUI, or edit `settings.json` directly. The ACP agent uses the same credentials and providers as the interactive TUI.
 
 Enable verbose ACP logging (to stderr — never stdout, which would corrupt the protocol) by setting `CLAURST_ACP_LOG=debug`.
 
@@ -187,9 +191,42 @@ The [Agent Client Protocol registry](https://github.com/agentclientprotocol/regi
 
 After merge, Zed and other ACP-aware editors will pick up Claurst on their next registry refresh.
 
+## Supported providers
+
+Native wire-format implementations, each with its own request shaping, streaming, and tool conversion:
+
+| Provider | Notes |
+|----------|-------|
+| **Anthropic** | Default. API key or OAuth; multi-account supported. |
+| **OpenAI** | Also the base for every OpenAI-compatible endpoint below. |
+| **Google (Gemini)** | |
+| **Azure OpenAI** | |
+| **AWS Bedrock** | |
+| **GitHub Copilot** | |
+| **Codex** | OAuth; multi-account supported. |
+| **Cohere** | |
+| **MiniMax** | |
+| **Free Mode** | Rotating free endpoints, configured through `/connect`. `[EXPERIMENTAL]` |
+
+On top of those, Claurst ships roughly a hundred **OpenAI-compatible** endpoints — Groq, DeepSeek, Mistral, xAI, OpenRouter, Together, Perplexity, DeepInfra, Cerebras, Venice, SambaNova, Fireworks, Nebius, Moonshot, Qwen and more — plus local runtimes (**Ollama**, **LM Studio**, **llama.cpp**) and two escape hatches, `custom-openai` and `custom-anthropic`, for anything not on the list.
+
+Setup instructions, env vars and `settings.json` shapes are in [docs/providers.md](docs/providers.md); local runtimes have their own page in [docs/local-models.md](docs/local-models.md). The authoritative list lives in `src-rust/crates/api/src/providers/`.
+
 ## Documentation
 
 For more info on how to configure Claurst, [head over to our docs](https://claurst.kuber.studio/docs).
+
+| Page | Covers |
+|------|--------|
+| [installation.md](docs/installation.md) | Every install path and upgrading |
+| [auth.md](docs/auth.md) | API keys, OAuth, multiple accounts |
+| [providers.md](docs/providers.md) · [local-models.md](docs/local-models.md) | Provider setup; Ollama / LM Studio / llama.cpp |
+| [commands.md](docs/commands.md) · [keybindings.md](docs/keybindings.md) | Slash commands and key bindings |
+| [configuration.md](docs/configuration.md) | `settings.json` reference |
+| [tools.md](docs/tools.md) · [agents.md](docs/agents.md) | Built-in tools; subagents and teams |
+| [mcp.md](docs/mcp.md) · [plugins.md](docs/plugins.md) · [hooks.md](docs/hooks.md) | Extending Claurst |
+| [remote-control.md](docs/remote-control.md) | Driving a session from your phone |
+| [advanced.md](docs/advanced.md) | Everything else |
 
 >**PS:** The original breakdown of the findings from Claude Code's source that started this project is on [my blog](https://kuber.studio/blog/AI/Claude-Code's-Entire-Source-Code-Got-Leaked-via-a-Sourcemap-in-npm,-Let's-Talk-About-it) - the full technical writeup of what was found, how the leak happened, and what it revealed.
 
@@ -198,7 +235,17 @@ For more info on how to configure Claurst, [head over to our docs](https://claur
 ## Contributing
 
 Claurst is built for the community, by the community and we'd love your help making it better.
-Please see and include AGENTS.md for project-specific rules (for both humans and agents).
+Please read [AGENTS.md](AGENTS.md) first — it carries the project-specific rules for both humans and agents: build and test commands, the code-quality bar, the provider-addition checklist, and the git rules.
+
+Before opening a PR, from `src-rust/`:
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace -- --test-threads=1
+cargo fmt --all
+```
+
+If you touched `relay/`, run its own `cargo test -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` from that directory; it is a separate Cargo project with its own lockfile.
 
 [Open an issue](https://github.com/Kuberwastaken/claurst/issues/new) for bugs, ideas, or questions, or [Raise a PR](https://github.com/Kuberwastaken/claurst/pulls/new) to fix bugs, add features, or improve documentation.
 
