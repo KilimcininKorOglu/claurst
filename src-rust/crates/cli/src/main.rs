@@ -1918,6 +1918,29 @@ const BRIDGE_HISTORY_TURNS: usize = 40;
 /// Characters kept per turn in the backfill.
 const BRIDGE_HISTORY_CHARS: usize = 4_000;
 
+/// Apply a new session title everywhere it is held, and persist it.
+///
+/// Four places track the title and each one is read by something different:
+/// the session record is what gets saved, the command context is what
+/// commands see, the app field is what the export writers read, and the
+/// terminal title is what the window manager shows. A rename that misses one
+/// leaves that surface stale, which is exactly how `/export` came to write
+/// the old name.
+async fn apply_session_rename(
+    title: String,
+    session: &mut claurst_core::history::ConversationSession,
+    cmd_ctx: &mut claurst_commands::CommandContext,
+    app: &mut claurst_tui::App,
+) {
+    session.title = Some(title.clone());
+    session.updated_at = chrono::Utc::now();
+    cmd_ctx.session_title = session.title.clone();
+    app.session_title = session.title.clone();
+    let _ = claurst_core::history::save_session(session).await;
+    claurst_tui::update_terminal_title(Some(&title));
+    app.status_message = Some(format!("Session renamed to \"{}\".", title));
+}
+
 /// Whether the session can turn a queued remote prompt into a turn right now.
 ///
 /// Kept as a free function over plain booleans so the rule can be tested
@@ -3010,17 +3033,13 @@ async fn run_interactive(
                                     transcript_replaced = true;
                                 }
                                 Some(CommandResult::RenameSession(title)) => {
-                                    session.title = Some(title.clone());
-                                    session.updated_at = chrono::Utc::now();
-                                    cmd_ctx.session_title = session.title.clone();
-                                    // The export writers read this one, so
-                                    // leaving it behind wrote the old title
-                                    // into the file after a rename.
-                                    app.session_title = session.title.clone();
-                                    let _ = claurst_core::history::save_session(&session).await;
-                                    claurst_tui::update_terminal_title(Some(&title));
-                                    app.status_message =
-                                        Some(format!("Session renamed to \"{}\".", title));
+                                    apply_session_rename(
+                                        title,
+                                        &mut session,
+                                        &mut cmd_ctx,
+                                        &mut app,
+                                    )
+                                    .await;
                                 }
                                 Some(CommandResult::RefreshProviderState) => {
                                     if app.is_streaming || current_query.is_some() {
