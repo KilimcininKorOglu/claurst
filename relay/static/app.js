@@ -86,15 +86,16 @@ function show(name) {
 /**
  * Call the relay, sending the session cookie.
  *
- * A 401 means the cookie is missing or stale, which drops the user back to the
- * token screen rather than leaving a screen that silently stops updating.
+ * A 401 means the cookie is missing and a 403 means it carries a token the
+ * relay no longer accepts. Both drop the user back to the token screen rather
+ * than leaving a screen that silently stops updating.
  */
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'same-origin',
     ...options,
   });
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     leaveSession();
     show('token');
     throw new Error('unauthorised');
