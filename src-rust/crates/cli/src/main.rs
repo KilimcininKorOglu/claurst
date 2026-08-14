@@ -2395,7 +2395,7 @@ async fn run_interactive(
     // The TUI and query effort types are now the same canonical enum, so this is
     // a direct assignment.
     if let Some(level) = base_query_config.effort_level {
-        app.effort_level = level;
+        app.set_effort_level(level);
     }
     app.provider_registry = base_query_config.provider_registry.clone();
     app.refresh_context_window_size();
@@ -2647,10 +2647,6 @@ async fn run_interactive(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<QueryEvent>();
     type MessagesArc = Arc<tokio::sync::Mutex<Vec<claurst_core::types::Message>>>;
     let mut current_query: Option<(tokio::task::JoinHandle<QueryOutcome>, MessagesArc)> = None;
-    // Active effort level (None = use model default / High).
-    // Tracks the user's /effort selection; flows into qcfg each turn.
-    let mut current_effort: Option<claurst_core::effort::EffortLevel> = None;
-
     // Background update check: spawned once at startup; result delivered via channel.
     let (update_tx, mut update_rx) = tokio::sync::mpsc::channel::<Option<String>>(1);
     tokio::spawn(async move {
@@ -2948,12 +2944,6 @@ async fn run_interactive(
                             } else {
                                 app.intercept_slash_command_with_args(&cmd_name, &cmd_args)
                             };
-
-                            // Sync effort level when TUI cycled the visual indicator
-                            // (no-args /effort → cycle Low→Med→High→Max→Low).
-                            if handled_by_tui && cmd_name == "effort" && cmd_args.is_empty() {
-                                current_effort = Some(app.effort_level);
-                            }
 
                             // Honour exit/quit triggered by TUI intercept immediately.
                             if app.should_exit {
@@ -3385,8 +3375,7 @@ async fn run_interactive(
                                 if let Some(level) =
                                     claurst_core::effort::EffortLevel::from_str(&cmd_args)
                                 {
-                                    current_effort = Some(level);
-                                    app.effort_level = level;
+                                    app.set_effort_level(level);
                                     app.status_message = Some(format!(
                                         "Effort: {} {}",
                                         app.effort_level.symbol(),
@@ -3660,9 +3649,12 @@ async fn run_interactive(
                         // The active-goal system-prompt addendum is now injected
                         // inside run_query_loop per turn (issue #230 / MI-3), so
                         // it also covers in-loop continuation turns.
-                        // Apply active effort level (set via /effort command).
-                        if let Some(level) = current_effort {
-                            qcfg.effort_level = Some(level);
+                        // The level the operator chose, wherever they chose it:
+                        // the picker, the model picker, `/effort` or the flag.
+                        // Left unset it stays unset, which is not the same as
+                        // sending the default.
+                        if app.effort_explicit {
+                            qcfg.effort_level = Some(app.effort_level);
                         }
                         // Wire completion_notifier if a command queue is available.
                         if let Some(ref cq) = qcfg.command_queue {
@@ -4415,6 +4407,11 @@ async fn run_interactive(
                     qcfg.model =
                         claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
                     qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
+                    // A prompt from a phone is the same turn as one typed
+                    // here, so it runs at the same effort.
+                    if app.effort_explicit {
+                        qcfg.effort_level = Some(app.effort_level);
+                    }
                     let tracker = cost_tracker.clone();
                     let tx = event_tx.clone();
                     let client_clone = client.clone();

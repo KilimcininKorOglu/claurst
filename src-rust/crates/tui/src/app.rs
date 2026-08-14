@@ -1232,7 +1232,17 @@ pub struct App {
     /// False = show the in-TUI provider setup dialog on startup.
     pub has_credentials: bool,
     /// Current effort level (controls extended-thinking budget_tokens).
+    ///
+    /// Always holds a value so the status line has something to show. Whether
+    /// anyone actually chose it is [`Self::effort_explicit`].
     pub effort_level: EffortLevel,
+    /// Whether the effort level was chosen rather than defaulted.
+    ///
+    /// The distinction reaches the wire: an unset effort sends no reasoning
+    /// configuration at all, while a chosen one sends the level, so defaulting
+    /// to `Medium` here would silently opt every session into a setting nobody
+    /// asked for.
+    pub effort_explicit: bool,
     /// Whether fast mode is currently active (model locked to FAST_MODE_MODEL).
     pub fast_mode: bool,
     /// Current agent mode name: "build", "plan".
@@ -1689,6 +1699,7 @@ impl App {
             model_name,
             has_credentials: true, // overridden by caller when no key is configured
             effort_level: EffortLevel::Medium,
+            effort_explicit: false,
             fast_mode: false,
             agent_mode: None,
             agent_mode_changed: false,
@@ -2434,6 +2445,17 @@ impl App {
                 _ => 128_000,
             };
         }
+    }
+
+    /// Record a chosen effort level.
+    ///
+    /// The only way the level should change. Writing the field directly leaves
+    /// the session looking like nobody chose anything, and the choice then
+    /// never reaches the request: that is how the picker came to change the
+    /// status line and nothing else.
+    pub fn set_effort_level(&mut self, level: EffortLevel) {
+        self.effort_level = level;
+        self.effort_explicit = true;
     }
 
     /// Update the active model name (also updates config + cost tracker).
@@ -3799,7 +3821,7 @@ impl App {
                     // Applying `Ultracode` here is equivalent to typing the
                     // `ultracode` keyword: it sets the effort to the top level.
                     let chosen = self.effort_picker.current();
-                    self.effort_level = chosen;
+                    self.set_effort_level(chosen);
                     self.effort_picker.close();
                     self.status_message = Some(format!(
                         "Effort set to {} {}.",
@@ -4330,7 +4352,7 @@ impl App {
                             self.fast_mode = false;
                         }
                         if let Some(e) = effort {
-                            self.effort_level = e;
+                            self.set_effort_level(e);
                         }
                         // A cross-provider list qualifies every id, so the
                         // selection also names the provider to switch to.
@@ -8130,6 +8152,39 @@ mod tests {
         }
         assert_eq!(app.prompt_input.text, "line1\nline2");
         assert!(app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
+    /// A level nobody chose must not look like a choice.
+    ///
+    /// The difference reaches the wire: an unset effort sends no reasoning
+    /// configuration, a chosen one sends the level. A fresh session that
+    /// claimed `Medium` would opt every request into a setting nobody asked
+    /// for.
+    #[test]
+    fn an_effort_level_counts_only_once_someone_picks_it() {
+        let mut app = make_app();
+        assert!(!app.effort_explicit);
+        assert_eq!(app.effort_level, EffortLevel::Medium);
+
+        app.set_effort_level(EffortLevel::XHigh);
+        assert!(app.effort_explicit);
+        assert_eq!(app.effort_level, EffortLevel::XHigh);
+    }
+
+    /// Confirming in the picker has to reach the request, not just the status
+    /// line. It used to write the field directly, which nothing downstream
+    /// read.
+    #[test]
+    fn confirming_in_the_effort_picker_counts_as_a_choice() {
+        let mut app = make_app();
+        app.effort_picker
+            .open(app.effort_level, vec![EffortLevel::Low, EffortLevel::High]);
+        app.handle_key_event(press_key(KeyCode::Right, KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!app.effort_picker.visible);
+        assert!(app.effort_explicit, "the choice never left the picker");
+        assert_eq!(app.effort_level, EffortLevel::High);
     }
 
     /// Every name the predicate claims opens a view really does open one.
