@@ -57,6 +57,59 @@ body {
 
 .view[hidden] { display: none; }
 
+/* Two-pane shell */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace[hidden] { display: none; }
+
+.sidebar,
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-empty {
+  display: none;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+/* Narrow: one pane at a time, or a phone would be asked to fit a sidebar and
+   a transcript side by side. */
+@media (max-width: 899px) {
+  .workspace[data-pane="sessions"] > .chat,
+  .workspace[data-pane="session"] > .sidebar,
+  .chat-empty {
+    display: none;
+  }
+}
+
+/* Wide: the list stays put and the chat fills the rest. */
+@media (min-width: 900px) {
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  }
+
+  .sidebar { border-right: 1px solid var(--line); }
+
+  .workspace[data-pane="sessions"] > .chat { display: none; }
+  .workspace[data-pane="sessions"] > .chat-empty { display: flex; }
+
+  /* The list is one click away in the sidebar, so going "back" is meaningless. */
+  #back { display: none; }
+}
+
 h1 { font-size: 17px; margin: 0; font-weight: 600; }
 
 code {
@@ -159,8 +212,14 @@ input, textarea {
   padding-left: max(var(--gutter), var(--safe-l));
   padding-right: max(var(--gutter), var(--safe-r));
   padding-bottom: max(var(--gutter), var(--safe-b));
+  /* Fill the pane so a long list scrolls inside it. Setting overflow on one
+     axis makes the other compute to `auto` as well, which draws a horizontal
+     track the list never needs. */
+  flex: 1;
   overflow-y: auto;
-  width: var(--measure);
+  overflow-x: hidden;
+  /* Fills the sidebar. The reading measure belongs to the chat pane. */
+  width: 100%;
   display: grid;
   gap: 10px;
   align-content: start;
@@ -181,6 +240,10 @@ input, textarea {
 }
 
 .sessions button:hover { border-color: var(--accent); }
+.sessions button[aria-current="true"] {
+  border-color: var(--accent);
+  background: #1d2233;
+}
 
 .sessions .label {
   font-weight: 600;
@@ -192,7 +255,8 @@ input, textarea {
 #sessions-empty {
   margin: 0 auto;
   padding: 0 var(--gutter) var(--gutter);
-  width: var(--measure);
+  /* Fills the sidebar. The reading measure belongs to the chat pane. */
+  width: 100%;
 }
 
 /* Session screen */
@@ -368,9 +432,9 @@ input, textarea {
 @media (min-width: 700px) {
   :root { --measure: min(680px, 100%); }
   h1 { font-size: 18px; }
-  /* Centred with the transcript, so the screen reads as one column rather
-     than a full-bleed header over a narrow body. */
-  .bar {
+  /* Centred with the transcript, so the pane reads as one column rather than
+     a full-bleed header over a narrow body. */
+  .chat > .bar {
     width: var(--measure);
     margin-inline: auto;
   }
@@ -393,8 +457,10 @@ input, textarea {
 
 /* The session list is a picker, not a transcript, so it keeps more of the
    window than the measure allows and fits more cards across. */
-@media (min-width: 700px) {
+/* The session list is a picker, not a transcript, so it keeps more of the
+   window than the measure allows. Inside the sidebar it simply fills it. */
+@media (min-width: 700px) and (max-width: 899px) {
   .sessions,
   #sessions-empty,
-  #view-sessions .bar { width: min(1100px, 100%); }
+  .sidebar .bar { width: min(1100px, 100%); }
 }

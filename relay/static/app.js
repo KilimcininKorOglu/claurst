@@ -12,8 +12,7 @@
 
 const views = {
   token: document.getElementById('view-token'),
-  sessions: document.getElementById('view-sessions'),
-  session: document.getElementById('view-session'),
+  workspace: document.getElementById('workspace'),
 };
 
 const el = {
@@ -41,6 +40,7 @@ const el = {
   promptInput: document.getElementById('prompt-input'),
   send: document.getElementById('send'),
   status: document.getElementById('session-status'),
+  workspace: document.getElementById('workspace'),
   busy: document.getElementById('session-busy'),
   attach: document.getElementById('attach'),
   fileInput: document.getElementById('file-input'),
@@ -59,9 +59,18 @@ const live = {
   attachments: [],     // staged files, sent with the next prompt
 };
 
+/**
+ * Switch between the token screen and the workspace.
+ *
+ * `sessions` and `session` are panes of the same workspace, not separate
+ * screens: on a wide window both are visible at once, so the pane name only
+ * decides which one a narrow window shows.
+ */
 function show(name) {
-  for (const [key, node] of Object.entries(views)) {
-    node.hidden = key !== name;
+  views.token.hidden = name !== 'token';
+  views.workspace.hidden = name === 'token';
+  if (name === 'sessions' || name === 'session') {
+    el.workspace.dataset.pane = name;
   }
 }
 
@@ -135,8 +144,13 @@ function describeIdle(seconds) {
   return `active ${minutes}m ago`;
 }
 
-async function openSessions() {
-  leaveSession();
+/**
+ * Refresh the sidebar list.
+ *
+ * Deliberately does not touch the open session: the sidebar is permanent on a
+ * wide window, so refreshing it must not tear down the transcript next to it.
+ */
+async function loadSessions() {
   const sessions = await (await api('/api/client/sessions')).json();
 
   el.sessionList.replaceChildren();
@@ -156,18 +170,26 @@ async function openSessions() {
     const button = document.createElement('button');
     button.type = 'button';
     button.append(label, meta);
+    if (session.session_id === live.sessionId) {
+      button.setAttribute('aria-current', 'true');
+    }
     button.addEventListener('click', () => openSession(session));
 
     const item = document.createElement('li');
+    item.dataset.sessionId = session.session_id;
     item.append(button);
     el.sessionList.append(item);
   }
+}
 
+/** Show the list and, on a narrow window, bring it to the front. */
+async function openSessions() {
+  await loadSessions();
   show('sessions');
 }
 
 el.refresh.addEventListener('click', () => {
-  openSessions().catch(reportFailure);
+  loadSessions().catch(reportFailure);
 });
 
 // ---------------------------------------------------------------------------
@@ -194,16 +216,38 @@ function leaveSession() {
   renderAttachments();
 }
 
+// Narrow windows only: bring the list forward without dropping the session, so
+// returning to it is instant and the transcript is not refetched.
 el.back.addEventListener('click', () => {
-  openSessions().catch(reportFailure);
+  show('sessions');
+  loadSessions().catch(reportFailure);
 });
 
 function openSession(session) {
+  if (session.session_id === live.sessionId) {
+    // Already attached; just bring the pane forward on a narrow window.
+    show('session');
+    return;
+  }
   leaveSession();
   live.sessionId = session.session_id;
   el.sessionTitle.textContent = session.label || session.session_id;
   show('session');
+  markCurrentSession();
   connectStream();
+}
+
+/** Mark the open session in the sidebar, which stays visible beside it. */
+function markCurrentSession() {
+  for (const button of el.sessionList.querySelectorAll('button')) {
+    button.removeAttribute('aria-current');
+  }
+  const index = [...el.sessionList.children].findIndex(
+    (item) => item.dataset.sessionId === live.sessionId,
+  );
+  if (index >= 0) {
+    el.sessionList.children[index].firstElementChild.setAttribute('aria-current', 'true');
+  }
 }
 
 /**
