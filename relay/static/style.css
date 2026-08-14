@@ -357,6 +357,15 @@ input, textarea {
 }
 
 .permission[hidden] { display: none; }
+
+/* Louder border than a tool approval: this one runs a command on the machine
+   and persists trust, so it should not read as routine. */
+.mcp { border-color: var(--danger); }
+.mcp .permission-desc {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+
 .permission-tool { margin: 0 0 4px; font-weight: 600; }
 .permission-desc {
   margin: 0 0 12px;

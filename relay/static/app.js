@@ -31,6 +31,9 @@ const el = {
   permissionDesc: document.getElementById('permission-desc'),
   permissionActions: document.getElementById('permission-actions'),
   permissionLocal: document.getElementById('permission-local'),
+  mcp: document.getElementById('mcp'),
+  mcpTitle: document.getElementById('mcp-title'),
+  mcpDetail: document.getElementById('mcp-detail'),
   question: document.getElementById('question'),
   questionText: document.getElementById('question-text'),
   questionOptions: document.getElementById('question-options'),
@@ -55,6 +58,7 @@ const live = {
   bubbles: new Map(),  // message_id -> assistant bubble element
   tools: new Map(),    // tool_id -> tool row element
   permission: null,    // the request currently shown on the card
+  mcp: null,           // the MCP trust prompt currently shown on the card
   question: null,      // the AskUserQuestion currently shown on the card
   attachments: [],     // staged files, sent with the next prompt
   retryDelay: 0,       // grows while the stream cannot be reached
@@ -207,10 +211,12 @@ function leaveSession() {
   live.bubbles.clear();
   live.tools.clear();
   live.permission = null;
+  live.mcp = null;
   live.question = null;
   live.attachments = [];
   live.retryDelay = 0;
   el.permission.hidden = true;
+  el.mcp.hidden = true;
   el.question.hidden = true;
   el.stream.replaceChildren();
   el.status.hidden = true;
@@ -546,6 +552,10 @@ function render(event) {
       showPermission(event);
       break;
 
+    case 'mcp_approval_request':
+      showMcpApproval(event);
+      break;
+
     case 'user_question':
       showQuestion(event);
       break;
@@ -655,6 +665,49 @@ for (const button of el.permission.querySelectorAll('button[data-decision]')) {
           request_id: request.request_id,
           tool_use_id: request.tool_use_id,
           decision: button.dataset.decision,
+        }),
+      });
+    } catch (error) {
+      reportFailure(error);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// MCP trust card
+// ---------------------------------------------------------------------------
+
+function showMcpApproval(request) {
+  live.mcp = request;
+  el.mcpTitle.textContent = `Trust the project MCP server '${request.server_name}'?`;
+  // The command line is the decision. Falling back to the url covers an HTTP
+  // server; with neither there is nothing to show beyond the name.
+  el.mcpDetail.textContent = request.command
+    ? `It would run: ${request.command}`
+    : request.url
+      ? `It would connect to: ${request.url}`
+      : '';
+  el.mcp.hidden = false;
+}
+
+for (const button of el.mcp.querySelectorAll('button[data-mcp]')) {
+  button.addEventListener('click', async () => {
+    const request = live.mcp;
+    if (!request) {
+      return;
+    }
+    // Hide first: a second tap would answer a prompt the machine has already
+    // settled, and the next server in the queue would inherit the decision.
+    live.mcp = null;
+    el.mcp.hidden = true;
+
+    try {
+      await api(`/api/client/sessions/${encodeURIComponent(live.sessionId)}/mcp-approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_id: request.request_id,
+          decision: button.dataset.mcp,
         }),
       });
     } catch (error) {

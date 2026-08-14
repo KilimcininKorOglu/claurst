@@ -55,6 +55,18 @@
     <p class="permission-local" id="permission-local" hidden>Waiting for an answer at the terminal. This request cannot be answered from here.</p>
   </div>
 
+  <!-- Trusting a project MCP server runs a command on the machine, so it gets
+       its own card rather than sharing the tool-permission one. -->
+  <div id="mcp" class="permission mcp" hidden>
+    <p id="mcp-title" class="permission-tool"></p>
+    <p id="mcp-detail" class="permission-desc"></p>
+    <div class="permission-actions">
+      <button type="button" data-mcp="allow_session">Allow this session</button>
+      <button type="button" data-mcp="allow_always">Always allow</button>
+      <button type="button" data-mcp="deny" class="danger">Deny</button>
+    </div>
+  </div>
+
   <div id="question" class="permission question" hidden>
     <p id="question-text" class="permission-tool"></p>
     <div class="permission-actions" id="question-options"></div>
