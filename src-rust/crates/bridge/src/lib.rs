@@ -430,6 +430,15 @@ pub enum BridgeEvent {
         stop_reason: String,
         usage: Option<BridgeUsage>,
     },
+    /// The outcome of a slash command, kept in the transcript.
+    ///
+    /// Distinct from `Status`, which is transient and replaced by the next
+    /// one: a client that ran a command needs the answer to stay put.
+    Notice {
+        message: String,
+        #[serde(default)]
+        is_error: bool,
+    },
     /// A non-fatal diagnostic or user-visible error message.
     Error {
         message: String,
@@ -1407,6 +1416,12 @@ pub enum BridgeOutbound {
     Error {
         message: String,
     },
+    /// The outcome of a slash command, for the transcript rather than the
+    /// transient status line.
+    Notice {
+        message: String,
+        is_error: bool,
+    },
     SessionMeta {
         title: Option<String>,
         session_id: String,
@@ -1725,6 +1740,11 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
+                    Some(BridgeOutbound::Notice { message, is_error }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::Notice { message, is_error })
+                            .await;
+                    }
                     Some(BridgeOutbound::PermissionRequest {
                         request_id,
                         tool_use_id,
@@ -1999,6 +2019,32 @@ mod tests {
                 assert_eq!(u.session_cost_usd, Some(0.0421));
             }
             other => panic!("expected a turn_complete carrying usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_command_outcome_keeps_its_severity() {
+        // The client colours on `is_error` alone. If the flag were dropped in
+        // transit a failed command would read as a normal confirmation.
+        for is_error in [true, false] {
+            let ev = BridgeEvent::Notice {
+                message: "Unknown command: /foo".into(),
+                is_error,
+            };
+            let j = serde_json::to_string(&ev).unwrap();
+            assert!(j.contains(r#""type":"notice""#));
+
+            let back: BridgeEvent = serde_json::from_str(&j).unwrap();
+            match back {
+                BridgeEvent::Notice {
+                    message,
+                    is_error: got,
+                } => {
+                    assert_eq!(got, is_error);
+                    assert_eq!(message, "Unknown command: /foo");
+                }
+                other => panic!("expected a notice, got {other:?}"),
+            }
         }
     }
 

@@ -2695,6 +2695,15 @@ async fn run_interactive(
                             let cmd_name = cmd_name.to_string();
                             let cmd_args = cmd_args.to_string();
 
+                            // A command's outcome reaches the terminal through
+                            // `status_message` and nothing else, so a remote
+                            // client sees silence. Watch the field across the
+                            // whole block instead of emitting from each arm:
+                            // an arm added later is then covered without
+                            // anyone remembering to wire it up.
+                            let status_before = app.status_message.clone();
+                            let mut command_failed = false;
+
                             // ── Step 1: TUI-layer intercept (overlays, toggles) ────────
                             // Run first so we know whether a UI overlay opened, which
                             // lets us suppress redundant CLI text output below.
@@ -3135,6 +3144,7 @@ async fn run_interactive(
                                 }
                                 Some(CommandResult::Error(e)) => {
                                     app.status_message = Some(format!("Error: {}", e));
+                                    command_failed = true;
                                 }
                                 Some(CommandResult::Silent) | None => {
                                     handled_by_cli = false;
@@ -3169,6 +3179,22 @@ async fn run_interactive(
                             if !handled_by_cli && !handled_by_tui {
                                 app.status_message =
                                     Some(format!("Unknown command: /{}", cmd_name));
+                                command_failed = true;
+                            }
+
+                            // The single point where a command's outcome leaves
+                            // for a remote client. `CommandResult::Message` is
+                            // absent on purpose: that arm already sends its own
+                            // text and never touches `status_message`.
+                            if app.status_message != status_before {
+                                if let (Some(runtime), Some(message)) =
+                                    (bridge_runtime.as_ref(), app.status_message.as_ref())
+                                {
+                                    let _ = runtime.outbound_tx.try_send(BridgeOutbound::Notice {
+                                        message: message.clone(),
+                                        is_error: command_failed,
+                                    });
+                                }
                             }
 
                             // If a UserMessage was queued (e.g. /compact), submit it.

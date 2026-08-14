@@ -571,6 +571,13 @@ function render(event) {
       append(notice(event.message, true));
       break;
 
+    case 'notice':
+      // The outcome of a slash command. Unlike `status` it stays in the
+      // transcript, because whoever ran the command needs the answer to
+      // still be there after the next event arrives.
+      append(notice(event.message, event.is_error));
+      break;
+
     case 'status':
       // Transient by nature: it is replaced by the next one and cleared when
       // the turn ends, so it does not belong in the transcript.
