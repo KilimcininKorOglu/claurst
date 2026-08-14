@@ -221,6 +221,16 @@ input, textarea {
 .msg.user { background: #23304a; align-self: flex-end; max-width: 85%; }
 .msg.assistant { background: var(--panel); }
 
+.msg.thinking {
+  background: transparent;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 4px 0 4px 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
 .tool {
   border-left: 2px solid var(--line);
   padding: 4px 0 4px 10px;

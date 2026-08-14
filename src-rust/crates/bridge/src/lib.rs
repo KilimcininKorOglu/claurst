@@ -397,6 +397,8 @@ pub enum BridgeEvent {
         /// Predefined choices. Empty means free text only.
         options: Vec<String>,
     },
+    /// Extended-thinking text for the current turn.
+    ThinkingDelta { text: String, message_id: String },
     /// The conversation so far, sent once when the bridge connects.
     History {
         entries: Vec<BridgeHistoryEntry>,
@@ -1406,6 +1408,14 @@ pub enum BridgeOutbound {
         question: String,
         options: Vec<String>,
     },
+    /// Extended-thinking text, kept separate from the answer.
+    ///
+    /// The TUI renders it; without this a remote screen sits blank for as long
+    /// as the model reasons, which reads as a hung session.
+    ThinkingDelta {
+        delta: String,
+        message_id: String,
+    },
     /// The conversation that happened before the bridge connected.
     ///
     /// Without it a client attaching to a session already in progress sees an
@@ -1683,6 +1693,14 @@ pub async fn run_bridge_loop(
                                 tool_name,
                                 description,
                                 options,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::ThinkingDelta { delta, message_id }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::ThinkingDelta {
+                                text: delta,
+                                message_id,
                             })
                             .await;
                     }

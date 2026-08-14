@@ -3558,6 +3558,14 @@ async fn run_interactive(
                         delta: text.clone(),
                         message_id: format!("msg-{}", index),
                     }),
+                    QueryEvent::Stream(claurst_api::AnthropicStreamEvent::ContentBlockDelta {
+                        delta: claurst_api::streaming::ContentDelta::ThinkingDelta { thinking },
+                        index,
+                        ..
+                    }) => Some(BridgeOutbound::ThinkingDelta {
+                        delta: thinking.clone(),
+                        message_id: format!("think-{}", index),
+                    }),
                     QueryEvent::ToolStart {
                         tool_name,
                         tool_id,

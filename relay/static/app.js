@@ -313,6 +313,23 @@ function render(event) {
       break;
     }
 
+    case 'thinking_delta': {
+      // Its own bubble, muted: it is the model reasoning, not its answer, and
+      // conflating the two would misrepresent what was said.
+      let node = live.bubbles.get(event.message_id);
+      if (!node) {
+        node = bubble('thinking', '');
+        live.bubbles.set(event.message_id, node);
+        append(node);
+      }
+      const stickThinking = atBottom();
+      node.textContent += event.text;
+      if (stickThinking) {
+        el.stream.scrollTop = el.stream.scrollHeight;
+      }
+      break;
+    }
+
     case 'tool_start': {
       // <details> so a long result can be opened on demand without a click
       // handler, and stays collapsed until then.
