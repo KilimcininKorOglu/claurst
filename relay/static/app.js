@@ -385,6 +385,34 @@ function labelled(figure, label) {
 }
 
 /**
+ * Explain why a turn ended, when the reason is worth saying out loud.
+ *
+ * Returns null for the reasons that mean "nothing went wrong": a normal
+ * finish, a slash-command reply, and a turn that ended only to run tools.
+ * That last one repeats on every tool round, so announcing it would bury the
+ * cases that matter.
+ *
+ * An unrecognised reason is shown verbatim rather than assumed benign; it
+ * comes from `StopReason::Other` and could be anything the provider invented.
+ */
+function stopNotice(stopReason) {
+  switch (stopReason) {
+    case 'end_turn':
+    case 'command':
+    case 'tool_use':
+      return null;
+    case 'max_tokens':
+      return notice('The reply hit the output limit and was cut short.', true);
+    case 'content_filtered':
+      return notice('The provider filtered this response.', true);
+    case 'stop_sequence':
+      return notice('The model stopped at a configured stop sequence.');
+    default:
+      return notice(`Turn ended: ${stopReason}`);
+  }
+}
+
+/**
  * Build the token and cost line shown under a finished turn.
  *
  * Returns null when the turn spent nothing, so a slash-command reply does not
@@ -523,8 +551,15 @@ function render(event) {
       // turn can also span several blocks, so a turn boundary ends all of them.
       live.bubbles.clear();
       el.send.disabled = false;
-      // A sibling, not a child: the bubble accumulates through
+      // Siblings, not children: the bubble accumulates through
       // `textContent +=`, which would wipe any element inside it.
+      //
+      // The reason comes first because it qualifies the answer above it; the
+      // figures are a footnote to both.
+      const why = stopNotice(event.stop_reason);
+      if (why) {
+        append(why);
+      }
       const spent = usageLine(event.usage);
       if (spent) {
         append(spent);
