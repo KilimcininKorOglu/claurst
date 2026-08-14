@@ -53,6 +53,7 @@ values. Keys absent from the project file fall back to the global value.
   "hasCompletedOnboarding": false,
   "showMessageTimestamps": false,
   "advisorModel": "claude-opus-4-6",
+  "companion": { ... },
   "remoteControl": { ... }
 }
 ```
@@ -80,6 +81,24 @@ and render without one.
 
 Set it with [`/advisor <model>`](commands.md#advisor) rather than by hand. When
 unset, the `Advisor` tool is not offered to the model at all.
+
+### Companion
+
+The small creature beside the input box. See [`/buddy`](commands.md#buddy).
+
+| Key       | Type           | Default | Description                                                                                             |
+|-----------|----------------|---------|-----------------------------------------------------------------------------------------------------------|
+| `enabled` | boolean        | false   | Show the companion and describe it to the model. Off by default: on, it costs a model call to hatch and a block in every system prompt. |
+| `model`   | string \| null | unset   | Model that hatches the companion and writes its replies. Unset uses the session model.                  |
+
+```json
+"companion": {
+  "enabled": true,
+  "model": "claude-haiku-4-5-20251001"
+}
+```
+
+Toggle it with `/buddy on` / `/buddy off`, or from `/config` → **Companion**. The generated name and personality live in `companion.json` beside this file, not here; the body is never stored, because it is re-derived from your identity on every read.
 
 ### Remote control
 

@@ -17,7 +17,7 @@ This document is the complete reference for every slash command available in Cla
 9. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
 10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
 11. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
-12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`
+12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
 13. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
 14. [Export & Sharing](#export--sharing) — `/export`, `/copy`
 15. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
@@ -1089,6 +1089,41 @@ Opens the Claurst sticker page (`stickermule.com/claudecode`) in your default br
 ```
 /stickers
 ```
+
+---
+
+### /buddy
+**Aliases:** `companion`
+
+Show the companion that sits beside the input box, hatching it on first use.
+
+```
+/buddy         show the companion, hatching it if it is new
+/buddy on      show it beside the prompt and tell the model it is there
+/buddy off     hide it and stop describing it to the model
+/buddy forget  discard the name and personality, keeping the body
+```
+
+The companion has two halves. Its body (species, rarity, eye, hat, shiny, and five stats) is rolled from your identity, so it is the same on every run and cannot be edited into something rarer by hand. That identity is your active stored account when you have one, and the machine otherwise, so logging in with the same account on a second machine gives you the same body while a machine with no stored login gets its own. Its name and personality are written once, by a model, on the first `/buddy`, and then kept in `companion.json` under the [config root](configuration.md).
+
+Off by default. Turning it on costs one model call to hatch, adds a short block to every system prompt, and takes 13 columns beside the prompt box. On a narrow terminal the sprite is dropped and the prompt keeps the full width.
+
+Address it by name in a message and it answers in one line above the prompt. That answer is a second model call, so it happens only when the name appears as a word of its own: a message about `src/mossback.rs` does not wake a companion called Mossback.
+
+The model used for both calls is the session model unless `companion.model` is set:
+
+```json
+{
+  "companion": {
+    "enabled": true,
+    "model": "claude-haiku-4-5-20251001"
+  }
+}
+```
+
+Both calls are billed to that model and appear under it in [`/cost`](#cost).
+
+The companion is decoration. Its stats are shown on the card and affect nothing.
 
 ---
 
