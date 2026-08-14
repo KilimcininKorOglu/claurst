@@ -324,6 +324,21 @@ pub enum BridgeMessage {
 // Bridge event types (CLI → web UI)
 // ---------------------------------------------------------------------------
 
+/// One turn of the conversation that happened before a remote client attached.
+///
+/// Text only, plus the names of any tools the turn called. The full tool input
+/// and output are deliberately left out: the backfill exists so a client can
+/// see what the session has been doing, not to reproduce the transcript byte
+/// for byte, and a long run would otherwise be megabytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeHistoryEntry {
+    /// `user` or `assistant`.
+    pub role: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+}
+
 /// Token-budget / cost summary attached to `TurnComplete`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeUsage {
@@ -381,6 +396,13 @@ pub enum BridgeEvent {
         question: String,
         /// Predefined choices. Empty means free text only.
         options: Vec<String>,
+    },
+    /// The conversation so far, sent once when the bridge connects.
+    History {
+        entries: Vec<BridgeHistoryEntry>,
+        /// Earlier turns left out of `entries`, so the client can say the
+        /// transcript is partial rather than imply it starts here.
+        omitted: usize,
     },
     /// The current turn has completed.
     TurnComplete {
@@ -1384,6 +1406,14 @@ pub enum BridgeOutbound {
         question: String,
         options: Vec<String>,
     },
+    /// The conversation that happened before the bridge connected.
+    ///
+    /// Without it a client attaching to a session already in progress sees an
+    /// empty screen and cannot tell what the machine has been doing.
+    History {
+        entries: Vec<BridgeHistoryEntry>,
+        omitted: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1654,6 +1684,11 @@ pub async fn run_bridge_loop(
                                 description,
                                 options,
                             })
+                            .await;
+                    }
+                    Some(BridgeOutbound::History { entries, omitted }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::History { entries, omitted })
                             .await;
                     }
                     Some(BridgeOutbound::UserQuestion {

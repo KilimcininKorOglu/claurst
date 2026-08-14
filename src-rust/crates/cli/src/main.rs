@@ -1909,6 +1909,74 @@ fn permission_request_from_core(
     }
 }
 
+/// Turns kept in the backfill sent to a remote client on connect.
+///
+/// The relay holds a bounded ring buffer, so an unbounded backfill would push
+/// the live events straight back out of it.
+const BRIDGE_HISTORY_TURNS: usize = 40;
+
+/// Characters kept per turn in the backfill.
+const BRIDGE_HISTORY_CHARS: usize = 4_000;
+
+/// Build the conversation backfill for a remote client.
+///
+/// Returns the kept turns plus how many earlier ones were left out, so the
+/// client can say the transcript is partial instead of implying it starts
+/// here.
+fn history_for_bridge(
+    messages: &[claurst_core::types::Message],
+) -> (Vec<claurst_bridge::BridgeHistoryEntry>, usize) {
+    use claurst_core::types::{ContentBlock, MessageContent, Role};
+
+    let omitted = messages.len().saturating_sub(BRIDGE_HISTORY_TURNS);
+    let entries = messages[omitted..]
+        .iter()
+        .filter_map(|message| {
+            let role: &str = match message.role {
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+
+            let mut text = String::new();
+            let mut tools = Vec::new();
+            match &message.content {
+                MessageContent::Text(body) => text.push_str(body),
+                MessageContent::Blocks(blocks) => {
+                    for block in blocks {
+                        match block {
+                            ContentBlock::Text { text: body } => {
+                                if !text.is_empty() {
+                                    text.push('\n');
+                                }
+                                text.push_str(body);
+                            }
+                            ContentBlock::ToolUse { name, .. } => tools.push(name.clone()),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            if text.chars().count() > BRIDGE_HISTORY_CHARS {
+                text = text.chars().take(BRIDGE_HISTORY_CHARS).collect::<String>();
+                text.push_str("\n… (truncated)");
+            }
+
+            if text.trim().is_empty() && tools.is_empty() {
+                return None;
+            }
+
+            Some(claurst_bridge::BridgeHistoryEntry {
+                role: role.to_string(),
+                text,
+                tools,
+            })
+        })
+        .collect();
+
+    (entries, omitted)
+}
+
 /// Settle a waiting permission request and release the blocked tool.
 ///
 /// `selected_key` uses the dialog's own option keys: `y` allow once, `Y` allow
@@ -3666,6 +3734,15 @@ async fn run_interactive(
                             format!("Remote control active: {}", short),
                             Some(5),
                         );
+                        // Send what has already happened, or a client attaching
+                        // to a session in progress sees an empty screen.
+                        let (entries, omitted) = history_for_bridge(&messages);
+                        if !entries.is_empty() || omitted > 0 {
+                            let _ = runtime
+                                .outbound_tx
+                                .try_send(BridgeOutbound::History { entries, omitted });
+                        }
+
                         // Persist the session URL into the saved session record.
                         session.remote_session_url = Some(session_url.clone());
                         session.updated_at = chrono::Utc::now();
@@ -5519,6 +5596,87 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod bridge_history_tests {
+    use super::*;
+    use claurst_core::types::{ContentBlock, Message, MessageContent};
+
+    fn assistant_with_tool(text: &str, tool: &str) -> Message {
+        let mut message = Message::assistant(String::new());
+        message.content = MessageContent::Blocks(vec![
+            ContentBlock::Text {
+                text: text.to_string(),
+            },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: tool.to_string(),
+                input: serde_json::json!({}),
+                thought_signature: None,
+            },
+        ]);
+        message
+    }
+
+    #[test]
+    fn a_short_conversation_survives_whole() {
+        let messages = vec![
+            Message::user("add a test"),
+            assistant_with_tool("On it.", "Edit"),
+        ];
+
+        let (entries, omitted) = history_for_bridge(&messages);
+
+        assert_eq!(omitted, 0);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].role, "user");
+        assert_eq!(entries[0].text, "add a test");
+        assert_eq!(entries[1].role, "assistant");
+        assert_eq!(entries[1].tools, vec!["Edit".to_string()]);
+    }
+
+    /// A long run must not push the live events out of the relay's ring
+    /// buffer, and the client has to be told the transcript is partial.
+    #[test]
+    fn a_long_conversation_is_bounded_and_reports_what_it_dropped() {
+        let messages: Vec<Message> = (0..BRIDGE_HISTORY_TURNS + 7)
+            .map(|i| Message::user(format!("turn {i}")))
+            .collect();
+
+        let (entries, omitted) = history_for_bridge(&messages);
+
+        assert_eq!(entries.len(), BRIDGE_HISTORY_TURNS);
+        assert_eq!(omitted, 7);
+        assert_eq!(
+            entries[0].text, "turn 7",
+            "the newest turns are the kept ones"
+        );
+    }
+
+    #[test]
+    fn an_overlong_turn_is_truncated_visibly() {
+        let messages = vec![Message::user("x".repeat(BRIDGE_HISTORY_CHARS + 500))];
+
+        let (entries, _) = history_for_bridge(&messages);
+
+        assert!(entries[0].text.ends_with("… (truncated)"));
+        assert!(entries[0].text.chars().count() < BRIDGE_HISTORY_CHARS + 100);
+    }
+
+    /// A turn that carries only a tool result would render as an empty bubble.
+    #[test]
+    fn a_turn_with_nothing_to_show_is_skipped() {
+        let mut message = Message::user(String::new());
+        message.content = MessageContent::Blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: "t1".to_string(),
+            content: claurst_core::types::ToolResultContent::Text("ok".to_string()),
+            is_error: None,
+        }]);
+        let messages = vec![message];
+
+        assert!(history_for_bridge(&messages).0.is_empty());
     }
 }
 

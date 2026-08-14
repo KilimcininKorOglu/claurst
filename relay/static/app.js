@@ -322,6 +322,26 @@ function render(event) {
       break;
     }
 
+    case 'history': {
+      // Sent once when the bridge connects. It describes what happened before
+      // this client could see anything, so it goes in ahead of live events.
+      if (event.omitted > 0) {
+        append(notice(`${event.omitted} earlier turn(s) not shown`));
+      }
+      for (const entry of event.entries || []) {
+        if (entry.text) {
+          append(bubble(entry.role === 'user' ? 'user' : 'assistant', entry.text));
+        }
+        for (const tool of entry.tools || []) {
+          const node = document.createElement('div');
+          node.className = 'tool done';
+          node.textContent = tool;
+          append(node);
+        }
+      }
+      break;
+    }
+
     case 'permission_request':
       showPermission(event);
       break;
