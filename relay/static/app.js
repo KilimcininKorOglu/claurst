@@ -515,8 +515,13 @@ function render(event) {
       break;
 
     case 'turn_complete': {
-      // A new turn must not append to the finished bubble.
-      live.bubbles.delete(event.message_id);
+      // Close every bubble the turn opened, not just one by id.
+      //
+      // Deltas are keyed by content-block index (`msg-0`, `think-0`) while this
+      // event is keyed by turn number, so deleting by `message_id` matched
+      // nothing and the next turn's first block reused the same bubble. One
+      // turn can also span several blocks, so a turn boundary ends all of them.
+      live.bubbles.clear();
       el.send.disabled = false;
       // A sibling, not a child: the bubble accumulates through
       // `textContent +=`, which would wipe any element inside it.
