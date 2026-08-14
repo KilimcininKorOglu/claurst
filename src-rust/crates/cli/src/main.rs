@@ -3013,6 +3013,10 @@ async fn run_interactive(
                                     session.title = Some(title.clone());
                                     session.updated_at = chrono::Utc::now();
                                     cmd_ctx.session_title = session.title.clone();
+                                    // The export writers read this one, so
+                                    // leaving it behind wrote the old title
+                                    // into the file after a rename.
+                                    app.session_title = session.title.clone();
                                     let _ = claurst_core::history::save_session(&session).await;
                                     claurst_tui::update_terminal_title(Some(&title));
                                     app.status_message =
