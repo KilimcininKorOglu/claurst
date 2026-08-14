@@ -1342,6 +1342,9 @@ pub enum TuiBridgeEvent {
     /// The web UI sent a new user prompt.
     InboundPrompt {
         content: String,
+        /// Files bundled with the prompt. Dropping these would silently lose
+        /// the screenshot a user attached.
+        attachments: Vec<BridgeAttachment>,
         sender_id: Option<String>,
     },
     /// The web UI asked to cancel the in-progress operation.
@@ -1602,10 +1605,15 @@ pub async fn run_bridge_loop(
                             .await;
                         break;
                     }
-                    Some(BridgeMessage::UserMessage { content, .. }) => {
+                    Some(BridgeMessage::UserMessage {
+                        content,
+                        attachments,
+                        ..
+                    }) => {
                         let _ = tui_tx
                             .send(TuiBridgeEvent::InboundPrompt {
                                 content,
+                                attachments,
                                 sender_id: None,
                             })
                             .await;

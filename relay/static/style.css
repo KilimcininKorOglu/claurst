@@ -320,6 +320,19 @@ input, textarea {
 }
 
 .composer textarea { resize: none; max-height: 140px; }
+.composer #attach { flex: 0 0 auto; font-size: 20px; line-height: 1; padding-inline: 14px; }
+
+.attachments {
+  margin: 0 auto;
+  padding: 0 var(--gutter) 6px;
+  width: var(--measure);
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  flex: 0 0 auto;
+}
+
+.attachments[hidden] { display: none; }
 .composer button { flex: 0 0 auto; }
 
 .status {

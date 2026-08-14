@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::protocol::{BridgeMessage, PermissionDecision};
+use crate::protocol::{BridgeAttachment, BridgeMessage, PermissionDecision};
 use crate::state::{Relay, SeqEvent, SessionSummary};
 
 /// How long the stream waits for new events before looping.
@@ -169,7 +169,16 @@ async fn stream(
 #[derive(Debug, Deserialize)]
 pub struct PromptBody {
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<BridgeAttachment>,
 }
+
+/// Largest total attachment payload accepted with one prompt.
+///
+/// Everything the relay holds is in memory and the inbound queue is bounded by
+/// count, not bytes, so an unbounded upload would be a trivial way to exhaust
+/// the host.
+const MAX_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct Accepted {
@@ -181,10 +190,25 @@ async fn prompt(
     Path(session_id): Path<String>,
     Json(body): Json<PromptBody>,
 ) -> Result<Json<Accepted>, StatusCode> {
-    if body.content.trim().is_empty() {
+    if body.content.trim().is_empty() && body.attachments.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    info!(session_id = %session_id, "client sent a prompt");
+
+    let total: usize = body
+        .attachments
+        .iter()
+        .map(|attachment| attachment.content.len())
+        .sum();
+    if total > MAX_ATTACHMENT_BYTES {
+        warn!(session_id = %session_id, total, "rejecting an oversized attachment payload");
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    info!(
+        session_id = %session_id,
+        attachments = body.attachments.len(),
+        "client sent a prompt"
+    );
     enqueue(
         &relay,
         &session_id,
@@ -192,7 +216,7 @@ async fn prompt(
             content: body.content,
             session_id: session_id.clone(),
             message_id: uuid::Uuid::new_v4().to_string(),
-            attachments: Vec::new(),
+            attachments: body.attachments,
         },
     )
     .await

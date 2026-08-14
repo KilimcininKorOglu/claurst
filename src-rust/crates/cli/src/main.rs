@@ -1977,6 +1977,59 @@ fn history_for_bridge(
     (entries, omitted)
 }
 
+/// Build the user message for a prompt that arrived over the bridge.
+///
+/// An image becomes an image block the model can actually look at. Text is
+/// folded into the prompt under its filename. Anything else is named and
+/// skipped rather than pushed through as base64, which would be noise to the
+/// model and would hide the fact that the file never arrived.
+fn remote_user_message(
+    content: &str,
+    attachments: &[claurst_bridge::BridgeAttachment],
+) -> claurst_core::types::Message {
+    use claurst_core::types::{ContentBlock, ImageSource, MessageContent};
+
+    if attachments.is_empty() {
+        return claurst_core::types::Message::user(content);
+    }
+
+    let mut text = content.to_string();
+    let mut images = Vec::new();
+
+    for attachment in attachments {
+        let mime = attachment.mime_type.as_deref().unwrap_or("");
+        if mime.starts_with("image/") {
+            images.push(ContentBlock::Image {
+                source: ImageSource {
+                    source_type: "base64".to_string(),
+                    media_type: Some(mime.to_string()),
+                    data: Some(attachment.content.clone()),
+                    url: None,
+                },
+            });
+        } else if mime.starts_with("text/") || mime.is_empty() {
+            text.push_str(&format!(
+                "\n\n--- {} ---\n{}",
+                attachment.name, attachment.content
+            ));
+        } else {
+            text.push_str(&format!(
+                "\n\n[attachment {} ({}) was not sent: unsupported type]",
+                attachment.name, mime
+            ));
+        }
+    }
+
+    let mut message = claurst_core::types::Message::user(String::new());
+    let mut blocks = Vec::with_capacity(images.len() + 1);
+    if !text.trim().is_empty() {
+        blocks.push(ContentBlock::Text { text });
+    }
+    blocks.extend(images);
+    message.content = MessageContent::Blocks(blocks);
+    message
+}
+
 /// Settle a waiting permission request and release the blocked tool.
 ///
 /// `selected_key` uses the dialog's own option keys: `y` allow once, `Y` allow
@@ -3854,13 +3907,18 @@ async fn run_interactive(
                     Ok(TuiBridgeEvent::Reconnecting { attempt }) => {
                         app.bridge_state = BridgeConnectionState::Reconnecting { attempt };
                     }
-                    Ok(TuiBridgeEvent::InboundPrompt { content, .. }) => {
+                    Ok(TuiBridgeEvent::InboundPrompt {
+                        content,
+                        attachments,
+                        ..
+                    }) => {
                         // Inject the remote prompt as if the user typed it, then
                         // trigger submission automatically.
                         app.set_prompt_text(content.clone());
                         // Push as a user message and fire a query immediately.
-                        messages.push(claurst_core::types::Message::user(content.clone()));
-                        app.push_message(claurst_core::types::Message::user(content.clone()));
+                        let message = remote_user_message(&content, &attachments);
+                        messages.push(message.clone());
+                        app.push_message(message);
                         session.messages = messages.clone();
                         session.updated_at = chrono::Utc::now();
                         app.is_streaming = true;
@@ -5639,6 +5697,92 @@ mod remote_control_config_tests {
         let _env = EnvGuard::new();
 
         assert!(resolve_bridge_config(&settings_with(None), "", false, false).is_none());
+    }
+}
+
+#[cfg(test)]
+mod remote_attachment_tests {
+    use super::*;
+    use claurst_bridge::BridgeAttachment;
+    use claurst_core::types::{ContentBlock, MessageContent};
+
+    fn attachment(name: &str, mime: &str, content: &str) -> BridgeAttachment {
+        BridgeAttachment {
+            name: name.to_string(),
+            content: content.to_string(),
+            mime_type: Some(mime.to_string()),
+        }
+    }
+
+    fn blocks(message: &claurst_core::types::Message) -> Vec<ContentBlock> {
+        match &message.content {
+            MessageContent::Blocks(blocks) => blocks.clone(),
+            MessageContent::Text(text) => vec![ContentBlock::Text { text: text.clone() }],
+        }
+    }
+
+    #[test]
+    fn a_prompt_without_attachments_stays_plain_text() {
+        let message = remote_user_message("just a prompt", &[]);
+
+        assert!(matches!(message.content, MessageContent::Text(ref t) if t == "just a prompt"));
+    }
+
+    #[test]
+    fn an_image_becomes_a_block_the_model_can_see() {
+        let message = remote_user_message(
+            "what is wrong here",
+            &[attachment("shot.png", "image/png", "aGVsbG8=")],
+        );
+
+        let blocks = blocks(&message);
+        assert_eq!(blocks.len(), 2, "text plus image");
+        match &blocks[1] {
+            ContentBlock::Image { source } => {
+                assert_eq!(source.source_type, "base64");
+                assert_eq!(source.media_type.as_deref(), Some("image/png"));
+                assert_eq!(source.data.as_deref(), Some("aGVsbG8="));
+            }
+            other => panic!("expected an image block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_text_file_is_folded_into_the_prompt_under_its_name() {
+        let message = remote_user_message(
+            "review this",
+            &[attachment("a.rs", "text/plain", "fn main() {}")],
+        );
+
+        let blocks = blocks(&message);
+        match &blocks[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("review this"));
+                assert!(text.contains("--- a.rs ---"));
+                assert!(text.contains("fn main() {}"));
+            }
+            other => panic!("expected a text block, got {other:?}"),
+        }
+    }
+
+    /// Base64 of a binary pushed through as text would be noise to the model
+    /// and would hide that the file never really arrived.
+    #[test]
+    fn an_unsupported_type_is_named_rather_than_smuggled_through() {
+        let message = remote_user_message(
+            "open this",
+            &[attachment("a.zip", "application/zip", "UEsDBA==")],
+        );
+
+        let blocks = blocks(&message);
+        match &blocks[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("a.zip"));
+                assert!(text.contains("not sent"));
+                assert!(!text.contains("UEsDBA=="));
+            }
+            other => panic!("expected a text block, got {other:?}"),
+        }
     }
 }
 

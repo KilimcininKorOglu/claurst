@@ -59,7 +59,10 @@
     </form>
   </div>
 
+  <p id="attachments" class="attachments" hidden></p>
   <form id="prompt-form" class="composer">
+    <input id="file-input" type="file" accept="image/*,text/*" multiple hidden>
+    <button type="button" id="attach" class="ghost" title="Attach a file" aria-label="Attach a file">+</button>
     <textarea id="prompt-input" rows="1" placeholder="Message" autocomplete="off"></textarea>
     <button type="submit" id="send">Send</button>
   </form>

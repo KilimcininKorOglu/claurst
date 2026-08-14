@@ -42,6 +42,9 @@ const el = {
   send: document.getElementById('send'),
   status: document.getElementById('session-status'),
   busy: document.getElementById('session-busy'),
+  attach: document.getElementById('attach'),
+  fileInput: document.getElementById('file-input'),
+  attachments: document.getElementById('attachments'),
 };
 
 /** Live session view state. Reset whenever a session is opened or left. */
@@ -53,6 +56,7 @@ const live = {
   tools: new Map(),    // tool_id -> tool row element
   permission: null,    // the request currently shown on the card
   question: null,      // the AskUserQuestion currently shown on the card
+  attachments: [],     // staged files, sent with the next prompt
 };
 
 function show(name) {
@@ -181,11 +185,13 @@ function leaveSession() {
   live.tools.clear();
   live.permission = null;
   live.question = null;
+  live.attachments = [];
   el.permission.hidden = true;
   el.question.hidden = true;
   el.stream.replaceChildren();
   el.status.hidden = true;
   el.busy.hidden = true;
+  renderAttachments();
 }
 
 el.back.addEventListener('click', () => {
@@ -549,6 +555,70 @@ el.questionForm.addEventListener('submit', (event) => {
 // Composer
 // ---------------------------------------------------------------------------
 
+/// Matches the relay's own ceiling, so an oversized file is refused here with
+/// a readable message instead of coming back as a 413.
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+/** Read a file as base64 for an image, or as text for anything else. */
+function readAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const result = reader.result;
+      resolve({
+        name: file.name,
+        mime_type: file.type || 'text/plain',
+        // A data URL is "data:<mime>;base64,<payload>"; the wire wants the
+        // payload alone.
+        content: file.type.startsWith('image/') ? String(result).split(',')[1] : String(result),
+      });
+    };
+    if (file.type.startsWith('image/')) {
+      reader.readAsDataURL(file);
+    } else {
+      reader.readAsText(file);
+    }
+  });
+}
+
+function renderAttachments() {
+  if (live.attachments.length === 0) {
+    el.attachments.hidden = true;
+    el.attachments.textContent = '';
+    return;
+  }
+  el.attachments.textContent = `Attached: ${live.attachments.map((a) => a.name).join(', ')}`;
+  el.attachments.hidden = false;
+}
+
+el.attach.addEventListener('click', () => el.fileInput.click());
+
+el.fileInput.addEventListener('change', async () => {
+  for (const file of el.fileInput.files) {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setStatus(`${file.name} is too large (limit 5 MB)`);
+      continue;
+    }
+    try {
+      live.attachments.push(await readAttachment(file));
+    } catch (error) {
+      reportFailure(error);
+    }
+  }
+  el.fileInput.value = '';
+  renderAttachments();
+});
+
+// Enter sends, Shift+Enter inserts a newline. A textarea does neither on its
+// own, so without this the box could only be submitted by tapping Send.
+el.promptInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    el.promptForm.requestSubmit();
+  }
+});
+
 el.promptInput.addEventListener('input', () => {
   el.promptInput.style.height = 'auto';
   el.promptInput.style.height = `${Math.min(el.promptInput.scrollHeight, 140)}px`;
@@ -557,21 +627,26 @@ el.promptInput.addEventListener('input', () => {
 el.promptForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const content = el.promptInput.value.trim();
-  if (!content || !live.sessionId) {
+  const attachments = live.attachments;
+  if ((!content && attachments.length === 0) || !live.sessionId) {
     return;
   }
 
   el.send.disabled = true;
   el.promptInput.value = '';
   el.promptInput.style.height = 'auto';
+  live.attachments = [];
+  renderAttachments();
+
   // The relay does not echo prompts back, so the local copy is the only one.
-  append(bubble('user', content));
+  const names = attachments.map((a) => a.name).join(', ');
+  append(bubble('user', names ? `${content}\n[${names}]` : content));
 
   try {
     await api(`/api/client/sessions/${encodeURIComponent(live.sessionId)}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachments }),
     });
   } catch (error) {
     el.send.disabled = false;
