@@ -395,21 +395,66 @@ function connectStream() {
     if (live.source !== source) {
       return;
     }
-    // Back off rather than hammering a relay that is down; a fixed retry
-    // spins forever at full rate when the machine is simply off.
-    live.retryDelay = Math.min((live.retryDelay || 1000) * 2, 30000);
-    setStatus(`Reconnecting in ${Math.round(live.retryDelay / 1000)}s…`);
-    setTimeout(() => {
-      if (live.sessionId) {
-        connectStream();
-      }
-    }, live.retryDelay);
+    handleStreamDrop(live.sessionId);
   });
 
   source.addEventListener('open', () => {
     live.retryDelay = 0;
     el.status.hidden = true;
   });
+}
+
+/**
+ * Work out whether a dropped stream means the machine went away.
+ *
+ * The runner cannot say so itself: it deregisters, and the relay drops the
+ * session along with anything buffered for it. What survives is the session
+ * list, so a stream that dropped because the session is gone looks different
+ * from one that dropped because the network did.
+ *
+ * The distinction matters because the session id is a fresh uuid per run. Once
+ * the relay has forgotten it, no reconnect can ever succeed, and counting down
+ * to the next attempt is a lie.
+ */
+async function handleStreamDrop(sessionId) {
+  let sessions;
+  try {
+    sessions = await (await api('/api/client/sessions')).json();
+  } catch {
+    // The question could not be asked, so nothing follows from it. Treat it as
+    // the network being down, which is the case it most often is.
+    scheduleReconnect(sessionId);
+    return;
+  }
+
+  // The probe is not instant, and a tap on another card during it moves the
+  // pane on. Whatever this answers is about a session no longer on screen.
+  if (live.sessionId !== sessionId) {
+    return;
+  }
+
+  if (sessions.some((session) => session.session_id === sessionId)) {
+    scheduleReconnect(sessionId);
+    return;
+  }
+
+  // The transcript stays: the conversation is still worth reading once the
+  // machine that produced it has gone.
+  live.retryDelay = 0;
+  setBusy(false);
+  setStatus('The machine disconnected.');
+  loadSessions().catch(reportFailure);
+}
+
+/** Try again later, backing off so a relay that is down is not hammered. */
+function scheduleReconnect(sessionId) {
+  live.retryDelay = Math.min((live.retryDelay || 1000) * 2, 30000);
+  setStatus(`Reconnecting in ${Math.round(live.retryDelay / 1000)}s…`);
+  setTimeout(() => {
+    if (live.sessionId === sessionId) {
+      connectStream();
+    }
+  }, live.retryDelay);
 }
 
 /**
@@ -715,13 +760,10 @@ function render(event) {
       break;
 
     case 'session_state':
-      if (event.state === 'disconnected') {
-        setStatus('The machine disconnected.');
-      } else if (event.state === 'processing') {
-        setBusy(true);
-      } else if (event.state === 'idle' || event.state === 'connected') {
-        setBusy(false);
-      }
+      // Only says whether a turn is running. Anything else clears the
+      // spinner, which is the right reading of a state this client does not
+      // know: it is not "working".
+      setBusy(event.state === 'processing');
       break;
 
     default:
