@@ -3390,10 +3390,11 @@ impl App {
             return false;
         }
         if let Some(server) = self.mcp_pending_project.pop_front() {
+            let command_line = server.command_line();
             self.mcp_approval.show(
                 &server.name,
                 server.url.as_deref(),
-                server.command.as_deref(),
+                command_line.as_deref(),
                 // Tools are unknown until the server is launched; the dialog
                 // shows the command/url so the user can judge before running it.
                 Vec::new(),

@@ -1249,6 +1249,21 @@ pub mod config {
         pub origin: McpServerOrigin,
     }
 
+    impl McpServerConfig {
+        /// The full command line this server would run, arguments included.
+        ///
+        /// A trust prompt that shows only `command` hides the part that
+        /// decides what actually executes: `npx` says nothing, `npx -y
+        /// @some/package` is the thing being approved.
+        pub fn command_line(&self) -> Option<String> {
+            let command = self.command.as_ref()?;
+            if self.args.is_empty() {
+                return Some(command.clone());
+            }
+            Some(format!("{} {}", command, self.args.join(" ")))
+        }
+    }
+
     fn default_mcp_type() -> String {
         "stdio".to_string()
     }
@@ -5059,6 +5074,29 @@ mod tests {
         let msg = Message::user("hello");
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.get_text(), Some("hello"));
+    }
+
+    #[test]
+    fn a_trust_prompt_shows_the_arguments_that_decide_what_runs() {
+        let mut server = config::McpServerConfig {
+            name: "github".to_string(),
+            command: Some("npx".to_string()),
+            args: vec!["-y".to_string(), "@scope/server-github".to_string()],
+            env: Default::default(),
+            url: None,
+            server_type: "stdio".to_string(),
+            origin: Default::default(),
+        };
+        assert_eq!(
+            server.command_line().as_deref(),
+            Some("npx -y @scope/server-github")
+        );
+
+        server.args.clear();
+        assert_eq!(server.command_line().as_deref(), Some("npx"));
+
+        server.command = None;
+        assert_eq!(server.command_line(), None);
     }
 
     #[test]
