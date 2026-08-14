@@ -223,7 +223,9 @@ This repo runs parallel agents in worktrees under `.claude/worktrees/`. Multiple
 
 ### Committing
 
-- **ONLY commit files YOU changed in THIS session.** Never commit unless the user has explicitly asked you to commit.
+- **ONLY commit files YOU changed in THIS session.** Parallel agents share the checkout, so anything else you stage is someone else's work.
+- Commit each piece of work as soon as it is complete and verified. Do not batch commits at the end of a session, and do not wait to be asked. Hold only an intermediate step that would leave the tree broken on its own.
+- One commit per logical slice. Keep a behaviour-preserving refactor out of the feature commit that needs it, and keep an incidental fix found mid-task in its own commit.
 - ALWAYS include `fixes #<number>` or `closes #<number>` in the commit message when there is a related issue or PR.
 - NEVER use `git add -A` or `git add .` — these sweep up changes from other agents.
 - ALWAYS use `git add <specific-file-paths>` listing only files you modified.
