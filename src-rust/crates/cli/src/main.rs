@@ -2246,6 +2246,11 @@ async fn run_interactive(
         cancel: CancellationToken,
     }
 
+    // Id of the question the ask-user dialog is currently showing, so an answer
+    // arriving over the bridge can be matched to it. `None` when no question is
+    // open.
+    let mut pending_question_id: Option<String> = None;
+
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
     let bridge_token: Option<String> = bridge_config.as_ref().and_then(|c| c.session_token.clone());
@@ -3823,6 +3828,18 @@ async fn run_interactive(
                             app.permission_request = None;
                         }
                     }
+                    Ok(TuiBridgeEvent::QuestionAnswer {
+                        question_id,
+                        answer,
+                    }) => {
+                        // Route through the dialog so a remote answer and a
+                        // keyboard answer take the same path to the tool.
+                        if pending_question_id.as_deref() == Some(question_id.as_str())
+                            && app.ask_user_dialog.answer_externally(answer)
+                        {
+                            pending_question_id = None;
+                        }
+                    }
                     Ok(TuiBridgeEvent::SessionNameUpdate { title }) => {
                         session.title = Some(title.clone());
                         session.updated_at = chrono::Utc::now();
@@ -3997,6 +4014,12 @@ async fn run_interactive(
             }
         }
 
+        // The dialog also closes on a keyboard answer. Drop the correlation id
+        // so a late remote answer cannot match a question already settled.
+        if pending_question_id.is_some() && !app.ask_user_dialog.visible {
+            pending_question_id = None;
+        }
+
         // Drain ask-user question events (non-blocking).
         // When the AskUserQuestion tool fires, it sends a UserQuestionEvent
         // here.  We open the dialog and the user's answer travels back via
@@ -4004,6 +4027,18 @@ async fn run_interactive(
         if let Some(ref mut rx) = app.user_question_rx {
             match rx.try_recv() {
                 Ok(event) => {
+                    // A question blocks the turn on a channel with no timeout,
+                    // exactly like a permission request, so the remote client
+                    // has to be told or a remotely-driven session stalls here.
+                    let question_id = uuid::Uuid::new_v4().to_string();
+                    if let Some(ref runtime) = bridge_runtime {
+                        let _ = runtime.outbound_tx.try_send(BridgeOutbound::UserQuestion {
+                            question_id: question_id.clone(),
+                            question: event.question.clone(),
+                            options: event.options.clone().unwrap_or_default(),
+                        });
+                    }
+                    pending_question_id = Some(question_id);
                     app.ask_user_dialog
                         .open(event.question, event.options, event.reply_tx);
                 }

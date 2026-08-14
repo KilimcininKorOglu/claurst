@@ -44,6 +44,10 @@ pub enum BridgeMessage {
         tool_use_id: Option<String>,
         decision: PermissionDecision,
     },
+    QuestionResponse {
+        question_id: String,
+        answer: String,
+    },
     Cancel {
         session_id: String,
         reason: Option<String>,

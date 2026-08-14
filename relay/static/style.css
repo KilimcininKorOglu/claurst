@@ -262,6 +262,14 @@ input, textarea {
 .permission-actions[hidden] { display: none; }
 .permission-actions button { flex: 1 1 140px; }
 
+.question { border-color: var(--ok); }
+.question .permission-actions { margin-bottom: 8px; }
+.question .permission-actions:empty { display: none; }
+
+.question-form { display: flex; gap: 8px; }
+.question-form input { flex: 1; }
+.question-form button { flex: 0 0 auto; }
+
 .permission-local { margin: 0; color: var(--muted); font-size: 13px; }
 .permission-local[hidden] { display: none; }
 

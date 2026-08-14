@@ -46,6 +46,7 @@ pub fn routes() -> Router<Arc<Relay>> {
             "/api/client/sessions/{session_id}/permission",
             post(permission),
         )
+        .route("/api/client/sessions/{session_id}/answer", post(answer))
         .route("/api/client/sessions/{session_id}/cancel", post(cancel))
 }
 
@@ -192,6 +193,38 @@ async fn prompt(
             session_id: session_id.clone(),
             message_id: uuid::Uuid::new_v4().to_string(),
             attachments: Vec::new(),
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnswerBody {
+    pub question_id: String,
+    /// The chosen option or free text. Empty means the user dismissed it.
+    #[serde(default)]
+    pub answer: String,
+}
+
+/// Answer an `AskUserQuestion` prompt.
+///
+/// Separate from `permission`: a question is not an approval, it carries free
+/// text, and a client may want to offer one without the other.
+async fn answer(
+    State(relay): State<Arc<Relay>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<AnswerBody>,
+) -> Result<Json<Accepted>, StatusCode> {
+    if body.question_id.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    info!(session_id = %session_id, "client answered a question");
+    enqueue(
+        &relay,
+        &session_id,
+        BridgeMessage::QuestionResponse {
+            question_id: body.question_id,
+            answer: body.answer,
         },
     )
     .await
@@ -565,5 +598,105 @@ mod tests {
 
         assert!(text.contains("id: 2"), "resume must skip seq 1: {text}");
         assert!(text.contains("\"text\":\"b\""), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use super::*;
+    use crate::state::{Limits, Relay};
+    use axum::body::Body;
+    use axum::http::Request;
+    use std::time::Duration;
+    use tower::ServiceExt;
+
+    fn relay() -> Arc<Relay> {
+        Arc::new(Relay::new(Limits {
+            event_buffer: 10,
+            inbound_queue: 10,
+            session_ttl: Duration::from_secs(60),
+        }))
+    }
+
+    async fn post(relay: Arc<Relay>, path: &str, body: &str) -> StatusCode {
+        let router: Router = routes().with_state(relay);
+        router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router responds")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn an_answer_reaches_the_runner_queue() {
+        let relay = relay();
+        relay.register("s1", None, None, None, None).await;
+
+        let status = post(
+            relay.clone(),
+            "/api/client/sessions/s1/answer",
+            r#"{"question_id":"q1","answer":"cargo test --workspace"}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let queued = relay.take_inbound("s1").await;
+        assert_eq!(queued.len(), 1);
+        match &queued[0] {
+            BridgeMessage::QuestionResponse {
+                question_id,
+                answer,
+            } => {
+                assert_eq!(question_id, "q1");
+                assert_eq!(answer, "cargo test --workspace");
+            }
+            other => panic!("expected a question response, got {other:?}"),
+        }
+    }
+
+    /// An empty answer is how the client says "dismissed", so it must go
+    /// through; a missing id must not, because nothing could match it.
+    #[tokio::test]
+    async fn an_empty_answer_is_accepted_but_a_missing_id_is_not() {
+        let relay = relay();
+        relay.register("s1", None, None, None, None).await;
+
+        assert_eq!(
+            post(
+                relay.clone(),
+                "/api/client/sessions/s1/answer",
+                r#"{"question_id":"q1","answer":""}"#
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            post(
+                relay.clone(),
+                "/api/client/sessions/s1/answer",
+                r#"{"question_id":"  ","answer":"x"}"#
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_for_an_unknown_session_is_refused() {
+        let status = post(
+            relay(),
+            "/api/client/sessions/nope/answer",
+            r#"{"question_id":"q1","answer":"x"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

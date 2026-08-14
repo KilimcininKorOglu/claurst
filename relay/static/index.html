@@ -50,6 +50,15 @@
     <p class="permission-local" id="permission-local" hidden>Waiting for an answer at the terminal. This request cannot be answered from here.</p>
   </div>
 
+  <div id="question" class="permission question" hidden>
+    <p id="question-text" class="permission-tool"></p>
+    <div class="permission-actions" id="question-options"></div>
+    <form id="question-form" class="question-form">
+      <input id="question-input" type="text" placeholder="Or type an answer" autocomplete="off">
+      <button type="submit">Answer</button>
+    </form>
+  </div>
+
   <form id="prompt-form" class="composer">
     <textarea id="prompt-input" rows="1" placeholder="Message" autocomplete="off"></textarea>
     <button type="submit" id="send">Send</button>

@@ -115,12 +115,6 @@ pub fn jwt_is_expired(token: &str) -> bool {
 // Device fingerprint
 // ---------------------------------------------------------------------------
 
-/// Compute a stable device fingerprint from machine-local information.
-///
-/// Combines hostname, login user name, and home directory path, then SHA-256
-/// hashes them and returns the full hex digest. Matching the TypeScript
-/// `trustedDevice.ts` algorithm so fingerprints are consistent across the
-/// two implementations.
 /// This machine's hostname, when the system will tell us.
 ///
 /// Used as the default session label so a remote client lists something a
@@ -132,6 +126,12 @@ pub fn machine_hostname() -> Option<String> {
         .filter(|host| !host.is_empty())
 }
 
+/// Compute a stable device fingerprint from machine-local information.
+///
+/// Combines hostname, login user name, and home directory path, then SHA-256
+/// hashes them and returns the full hex digest. Matching the TypeScript
+/// `trustedDevice.ts` algorithm so fingerprints are consistent across the
+/// two implementations.
 pub fn device_fingerprint() -> String {
     let mut input = String::with_capacity(128);
 
@@ -305,6 +305,12 @@ pub enum BridgeMessage {
         tool_use_id: Option<String>,
         decision: PermissionDecision,
     },
+    /// The web UI has answered an `AskUserQuestion` prompt.
+    QuestionResponse {
+        question_id: String,
+        /// The chosen option, or free text. Empty means "dismissed".
+        answer: String,
+    },
     /// Cancel the in-progress operation for a session.
     Cancel {
         session_id: String,
@@ -367,6 +373,13 @@ pub enum BridgeEvent {
         tool_use_id: String,
         tool_name: String,
         description: String,
+        options: Vec<String>,
+    },
+    /// The model asked the user a question and the turn is waiting on it.
+    UserQuestion {
+        question_id: String,
+        question: String,
+        /// Predefined choices. Empty means free text only.
         options: Vec<String>,
     },
     /// The current turn has completed.
@@ -1306,6 +1319,8 @@ pub enum TuiBridgeEvent {
         tool_use_id: String,
         response: PermissionResponseKind,
     },
+    /// The web UI answered a pending `AskUserQuestion` prompt.
+    QuestionAnswer { question_id: String, answer: String },
     /// The web UI requested a session title change.
     SessionNameUpdate { title: String },
     /// A non-fatal diagnostic from the bridge worker.
@@ -1357,6 +1372,16 @@ pub enum BridgeOutbound {
         tool_use_id: String,
         tool_name: String,
         description: String,
+        options: Vec<String>,
+    },
+    /// The model called `AskUserQuestion` and the turn is waiting on an answer.
+    ///
+    /// Same reasoning as `PermissionRequest`: the tool blocks on a channel with
+    /// no timeout, so without this the session stalls with nobody able to see
+    /// why.
+    UserQuestion {
+        question_id: String,
+        question: String,
         options: Vec<String>,
     },
 }
@@ -1536,6 +1561,17 @@ pub async fn run_bridge_loop(
                                 .await;
                         }
                     }
+                    Some(BridgeMessage::QuestionResponse {
+                        question_id,
+                        answer,
+                    }) => {
+                        let _ = tui_tx
+                            .send(TuiBridgeEvent::QuestionAnswer {
+                                question_id,
+                                answer,
+                            })
+                            .await;
+                    }
                     Some(BridgeMessage::Cancel { .. }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::Cancelled).await;
                     }
@@ -1616,6 +1652,19 @@ pub async fn run_bridge_loop(
                                 tool_use_id,
                                 tool_name,
                                 description,
+                                options,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::UserQuestion {
+                        question_id,
+                        question,
+                        options,
+                    }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::UserQuestion {
+                                question_id,
+                                question,
                                 options,
                             })
                             .await;

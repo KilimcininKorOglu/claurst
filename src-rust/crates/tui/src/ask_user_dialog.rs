@@ -158,6 +158,18 @@ impl AskUserDialogState {
         self.send_reply(String::new())
     }
 
+    /// Answer with text that did not come from this dialog's own input.
+    ///
+    /// Used by the remote-control path, where the answer arrives over the
+    /// bridge. It takes the same route as [`Self::confirm`] so a remote answer
+    /// and a keyboard answer cannot diverge.
+    ///
+    /// Returns `false` when nothing was waiting, which happens if the other
+    /// side answered first.
+    pub fn answer_externally(&mut self, answer: String) -> bool {
+        self.send_reply(answer)
+    }
+
     fn send_reply(&mut self, answer: String) -> bool {
         self.visible = false;
         if let Some(tx) = self.reply_tx.take() {

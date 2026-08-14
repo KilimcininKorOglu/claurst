@@ -32,6 +32,11 @@ const el = {
   permissionDesc: document.getElementById('permission-desc'),
   permissionActions: document.getElementById('permission-actions'),
   permissionLocal: document.getElementById('permission-local'),
+  question: document.getElementById('question'),
+  questionText: document.getElementById('question-text'),
+  questionOptions: document.getElementById('question-options'),
+  questionForm: document.getElementById('question-form'),
+  questionInput: document.getElementById('question-input'),
   promptForm: document.getElementById('prompt-form'),
   promptInput: document.getElementById('prompt-input'),
   send: document.getElementById('send'),
@@ -46,6 +51,7 @@ const live = {
   bubbles: new Map(),  // message_id -> assistant bubble element
   tools: new Map(),    // tool_id -> tool row element
   permission: null,    // the request currently shown on the card
+  question: null,      // the AskUserQuestion currently shown on the card
 };
 
 function show(name) {
@@ -173,7 +179,9 @@ function leaveSession() {
   live.bubbles.clear();
   live.tools.clear();
   live.permission = null;
+  live.question = null;
   el.permission.hidden = true;
+  el.question.hidden = true;
   el.stream.replaceChildren();
   el.status.hidden = true;
 }
@@ -318,6 +326,10 @@ function render(event) {
       showPermission(event);
       break;
 
+    case 'user_question':
+      showQuestion(event);
+      break;
+
     case 'turn_complete':
       // A new turn must not append to the finished bubble.
       live.bubbles.delete(event.message_id);
@@ -384,6 +396,56 @@ for (const button of el.permission.querySelectorAll('button[data-decision]')) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Question card
+// ---------------------------------------------------------------------------
+
+function showQuestion(request) {
+  live.question = request;
+  el.questionText.textContent = request.question;
+  el.questionInput.value = '';
+
+  el.questionOptions.replaceChildren();
+  for (const option of request.options || []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = option;
+    button.addEventListener('click', () => sendAnswer(option));
+    el.questionOptions.append(button);
+  }
+
+  el.question.hidden = false;
+}
+
+async function sendAnswer(answer) {
+  const request = live.question;
+  if (!request) {
+    return;
+  }
+  // Hide first: the turn resumes on the first answer, so a second tap would
+  // be answering a question that no longer exists.
+  live.question = null;
+  el.question.hidden = true;
+
+  try {
+    await api(`/api/client/sessions/${encodeURIComponent(live.sessionId)}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: request.question_id, answer }),
+    });
+  } catch (error) {
+    reportFailure(error);
+  }
+}
+
+el.questionForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const answer = el.questionInput.value.trim();
+  if (answer) {
+    sendAnswer(answer);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Composer
