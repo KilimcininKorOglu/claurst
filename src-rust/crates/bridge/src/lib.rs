@@ -505,6 +505,92 @@ pub enum BridgeState {
 // Bridge session
 // ---------------------------------------------------------------------------
 
+/// Session facts that change while it runs, sent by re-registering.
+///
+/// Separate from [`BridgeConfig`], which is fixed when the bridge starts:
+/// the model and the permission mode can change mid-session, and the cost
+/// changes every turn.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub cost_usd: Option<f64>,
+}
+
+/// The body of a registration POST.
+///
+/// Split out from the request so the shape can be asserted without a server.
+fn registration_body(
+    config: &BridgeConfig,
+    session_id: &str,
+    info: Option<&SessionInfo>,
+) -> serde_json::Value {
+    // `label` and `cwd` are additions on top of the original payload; extra
+    // JSON keys are ignored by servers that do not know them.
+    //
+    // The hostname is the fallback because an unlabelled session shows up on
+    // the phone as a bare uuid, which is unusable once two machines are
+    // connected.
+    let label = config.label.clone().or_else(machine_hostname);
+    let mut body = serde_json::json!({
+        "session_id": session_id,
+        "device_id": config.device_id,
+        "client_version": config.runner_version,
+        "label": label,
+        "cwd": config.cwd,
+    });
+
+    if let (Some(info), Some(map)) = (info, body.as_object_mut()) {
+        // Absent rather than null when unknown, so a re-registration cannot
+        // erase a value the relay already holds.
+        if let Some(model) = &info.model {
+            map.insert("model".into(), serde_json::Value::from(model.clone()));
+        }
+        if let Some(mode) = &info.permission_mode {
+            map.insert(
+                "permission_mode".into(),
+                serde_json::Value::from(mode.clone()),
+            );
+        }
+        if let Some(cost) = info.cost_usd {
+            map.insert("cost_usd".into(), serde_json::Value::from(cost));
+        }
+    }
+    body
+}
+
+/// POST a registration and hand back the status code.
+///
+/// A free function because `run_bridge_loop` moves the [`BridgeSession`] into
+/// the poll task and still has to re-register when the session facts change.
+/// One place builds the body, so the two callers cannot drift.
+async fn post_registration(
+    http: &reqwest::Client,
+    config: &BridgeConfig,
+    session_id: &str,
+    info: Option<&SessionInfo>,
+) -> anyhow::Result<u16> {
+    let token = config
+        .session_token
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Bridge register: no session token"))?;
+
+    let url = format!("{}/api/claude_code/sessions", config.server_url);
+    debug!(session_id = %session_id, url = %url, "Registering bridge session");
+
+    let resp = http
+        .post(&url)
+        .bearer_auth(token)
+        .header("anthropic-version", "2023-06-01")
+        .header("x-environment-runner-version", &config.runner_version)
+        .json(&registration_body(config, session_id, info))
+        .send()
+        .await
+        .context("Bridge register: HTTP send failed")?;
+
+    Ok(resp.status().as_u16())
+}
+
 /// Active bridge session: owns the HTTP client, session credentials, and
 /// state. Runs the poll loop in a background tokio task.
 pub struct BridgeSession {
@@ -558,43 +644,7 @@ impl BridgeSession {
     /// POST `/api/claude_code/sessions` — mirrors the TypeScript
     /// `registerBridgeEnvironment` call in `bridgeApi.ts`.
     pub async fn register(&mut self) -> anyhow::Result<()> {
-        let token = self
-            .config
-            .session_token
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Bridge register: no session token"))?;
-
-        let url = format!("{}/api/claude_code/sessions", self.config.server_url);
-
-        // `label` and `cwd` are additions on top of the original payload;
-        // extra JSON keys are ignored by servers that do not know them.
-        //
-        // The hostname is the fallback because an unlabelled session shows up
-        // on the phone as a bare uuid, which is unusable once two machines are
-        // connected.
-        let label = self.config.label.clone().or_else(machine_hostname);
-        let body = serde_json::json!({
-            "session_id": self.session_id,
-            "device_id": self.config.device_id,
-            "client_version": self.config.runner_version,
-            "label": label,
-            "cwd": self.config.cwd,
-        });
-
-        debug!(session_id = %self.session_id, url = %url, "Registering bridge session");
-
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(token)
-            .header("anthropic-version", "2023-06-01")
-            .header("x-environment-runner-version", &self.config.runner_version)
-            .json(&body)
-            .send()
-            .await
-            .context("Bridge register: HTTP send failed")?;
-
-        let status = resp.status().as_u16();
+        let status = post_registration(&self.http, &self.config, &self.session_id, None).await?;
         match status {
             200 | 201 => {
                 self.set_state(BridgeState::Connected);
