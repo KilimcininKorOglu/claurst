@@ -28,7 +28,6 @@ pub const MIKMIK_NAME: &str = "MikMik";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MikMikPose {
     Default,
-    ArmsUp,
     LookLeft,
     LookRight,
     LookDown,
@@ -113,7 +112,7 @@ fn face_spans(s: &str) -> Vec<Span<'static>> {
 /// tracking something the user cannot see.
 fn face_row(pose: &MikMikPose) -> &'static str {
     match pose {
-        MikMikPose::Default | MikMikPose::ArmsUp => "( o.o )",
+        MikMikPose::Default => "( o.o )",
         MikMikPose::Blink => "( -.- )",
         // The pair slides inside the brackets rather than changing shape, so
         // the row width never moves.
@@ -140,12 +139,8 @@ pub fn mikmik_lines(pose: &MikMikPose) -> [Line<'static>; 4] {
     // Row 2: face. The eye characters are highlighted white inside it.
     let row2 = Line::from(face_spans(face_row(pose)));
 
-    // Row 3: whiskers and muzzle. ArmsUp raises the whiskers into paws.
-    let row3_text = match pose {
-        MikMikPose::ArmsUp => " \\ ^ / ",
-        _ => " > ^ < ",
-    };
-    let row3 = Line::from(vec![Span::styled(row3_text.to_string(), body_style())]);
+    // Row 3: whiskers and muzzle. Fixed across every pose; only the eyes move.
+    let row3 = Line::from(vec![Span::styled(" > ^ < ".to_string(), body_style())]);
 
     // Row 4: blank spacing.
     let row4 = Line::from("");
@@ -168,7 +163,6 @@ mod tests {
     fn all_poses() -> Vec<MikMikPose> {
         vec![
             MikMikPose::Default,
-            MikMikPose::ArmsUp,
             MikMikPose::LookLeft,
             MikMikPose::LookRight,
             MikMikPose::LookDown,
@@ -226,12 +220,18 @@ mod tests {
     }
 
     #[test]
-    fn arms_up_raises_the_whiskers_and_leaves_the_eyes_alone() {
-        let up = mikmik_lines(&MikMikPose::ArmsUp);
-        let idle = mikmik_lines(&MikMikPose::Default);
-        assert_eq!(line_text(&up[2]), " \\ ^ / ");
-        assert_ne!(line_text(&up[2]), line_text(&idle[2]));
-        assert_eq!(line_text(&up[1]), line_text(&idle[1]));
+    fn only_the_face_row_changes_between_poses() {
+        // Ears and whiskers are fixed, so the eyes are the only thing the
+        // reader can see moving.
+        for pose in all_poses() {
+            let lines = mikmik_lines(&pose);
+            assert_eq!(line_text(&lines[0]), " /\\_/\\ ", "ears moved on {pose:?}");
+            assert_eq!(
+                line_text(&lines[2]),
+                " > ^ < ",
+                "whiskers moved on {pose:?}"
+            );
+        }
     }
 
     #[test]
