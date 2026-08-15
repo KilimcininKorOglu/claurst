@@ -131,7 +131,7 @@ core ← api ← tools ← query ← {tui, commands, acp, bridge} ← cli (binar
 | `claurst-plugins` | Plugin discovery, manifest parsing, and the hook registry (`PreToolUse`, `SessionStart`, …) invoked by the query runner. |
 | `claurst-acp` | Agent Client Protocol server (`claurst acp`), JSON-RPC 2.0 over stdio for Zed and other editors. |
 | `claurst-bridge` | Remote-control bridge (long-polling session protocol) for web/mobile-initiated sessions. |
-| `claurst-buddy` | The companion shown beside the input box, reached through `/buddy`. Its body derives deterministically from a seeded PRNG; its model-written "soul" persists in `companion.json`. Not the welcome-screen mascot, which is `crates/tui/src/rustle.rs`. |
+| `claurst-buddy` | The companion shown beside the input box, reached through `/buddy`. Its body derives deterministically from a seeded PRNG; its model-written "soul" persists in `companion.json`. Not the welcome-screen mascot, which is `crates/tui/src/mikmik.rs`. |
 | `claurst-cli` | The `claurst` binary. Parses ~40 clap flags and dispatches to TUI, headless `--print`, or a subcommand. |
 
 Files that are large enough to need a map before editing:
