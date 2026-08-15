@@ -127,6 +127,8 @@ pub mod memory_update_notification;
 pub mod message_copy;
 /// Message type renderers (assistant, user, tool use, etc.).
 pub mod messages;
+/// MikMik mascot rendering.
+pub mod mikmik;
 /// Model picker overlay (/model command).
 pub mod model_picker;
 /// Notification / banner system.
@@ -147,8 +149,6 @@ pub mod plugin_views;
 pub mod prompt_input;
 /// All ratatui rendering logic.
 pub mod render;
-/// Rustle mascot rendering.
-pub mod rustle;
 /// Session branching overlay (Ctrl+B) — create and switch between conversation branches.
 pub mod session_branching;
 /// Session browser overlay (/session, /resume, /rename, /export).

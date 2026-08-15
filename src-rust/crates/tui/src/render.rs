@@ -30,6 +30,7 @@ use crate::messages::{
     render_transcript_assistant_meta, render_transcript_live_text, render_transcript_user_message,
     RenderContext,
 };
+use crate::mikmik::{mikmik_lines, MIKMIK_NAME, MIKMIK_WIDTH};
 use crate::model_picker::render_model_picker;
 use crate::notifications::{render_notification_banner, Notification, NotificationKind};
 use crate::onboarding_dialog::render_onboarding_dialog;
@@ -40,7 +41,6 @@ use crate::overlays::{
 };
 use crate::plugin_views::render_plugin_hints;
 use crate::prompt_input::{input_height, render_prompt_input, InputMode, TypeaheadSource, VimMode};
-use crate::rustle::rustle_lines;
 use crate::session_branching::render_session_branching;
 use crate::session_browser::render_session_browser;
 use crate::settings_screen::render_settings_screen;
@@ -1918,7 +1918,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         "Welcome back!".to_string()
     };
-    let rustle = rustle_lines(&app.rustle_current_pose);
+    let mikmik = mikmik_lines(&app.mikmik_current_pose);
     let mut left_lines: Vec<Line> = Vec::new();
     left_lines.push(Line::from(Span::styled(
         welcome_msg,
@@ -1927,14 +1927,25 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     )));
     left_lines.push(Line::from(""));
-    // Center mascot in left column
-    let mascot_indent = left_w.saturating_sub(11) / 2;
+    // Center mascot in left column. Every row is MIKMIK_WIDTH wide, so one
+    // indent centres them all.
+    let mascot_indent = left_w.saturating_sub(MIKMIK_WIDTH) / 2;
     let pad = " ".repeat(mascot_indent as usize);
-    for cl in &rustle {
+    for cl in &mikmik {
         let mut spans = vec![Span::raw(pad.clone())];
         spans.extend(cl.spans.iter().cloned());
         left_lines.push(Line::from(spans));
     }
+    // The name, centred under the cat. The mascot is three rows where the old
+    // one was four, so this row costs nothing.
+    let name_indent = left_w.saturating_sub(MIKMIK_NAME.len() as u16) / 2;
+    left_lines.insert(
+        left_lines.len() - 1,
+        Line::from(Span::styled(
+            format!("{}{MIKMIK_NAME}", " ".repeat(name_indent as usize)),
+            Style::default().fg(Color::Rgb(150, 150, 164)),
+        )),
+    );
     frame.render_widget(
         Paragraph::new(left_lines).wrap(Wrap { trim: false }),
         h_chunks[0],
@@ -4326,6 +4337,92 @@ mod effort_dock_tests {
             !open.contains(PROMPT_POINTER),
             "prompt input must NOT be drawn while the picker is open"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MikMik on the welcome screen
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod mikmik_welcome_tests {
+    use super::*;
+    use crate::app::App;
+    use crate::mikmik::MikMikPose;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn welcome_rows(pose: MikMikPose) -> Vec<String> {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.mikmik_current_pose = pose;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render_app(f, &app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_welcome_screen_shows_the_cat_above_its_name() {
+        let rows = welcome_rows(MikMikPose::Default);
+        let row_of = |needle: &str| {
+            rows.iter()
+                .position(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("not drawn: {needle}"))
+        };
+
+        assert!(row_of("/\\_/\\") < row_of("( o.o )"));
+        assert!(row_of("( o.o )") < row_of("> ^ <"));
+        assert!(row_of("> ^ <") < row_of("MikMik"));
+    }
+
+    #[test]
+    fn the_welcome_box_still_closes_under_the_name() {
+        // The cat is three rows where the crab was four, so the name fits
+        // without growing WELCOME_BOX_HEIGHT. Guard that it stayed inside.
+        let rows = welcome_rows(MikMikPose::Default);
+        let name_row = rows
+            .iter()
+            .position(|r| r.contains("MikMik"))
+            .expect("name");
+        let border_row = rows
+            .iter()
+            .position(|r| r.starts_with('\u{256d}') || r.contains('\u{2570}'))
+            .expect("the box has a border");
+        assert!(name_row < rows.len());
+        assert!(
+            rows.iter().skip(name_row).any(|r| r.contains('\u{2570}')),
+            "the box never closes after the name row"
+        );
+        let _ = border_row;
+    }
+
+    #[test]
+    fn every_pose_keeps_the_cat_centred_on_the_same_column() {
+        // Each row is MIKMIK_WIDTH wide, so changing pose must not shift it.
+        let column_of_ears = |pose: MikMikPose| {
+            welcome_rows(pose)
+                .iter()
+                .find(|row| row.contains("/\\_/\\"))
+                .and_then(|row| row.find("/\\_/\\"))
+                .expect("the ears are drawn")
+        };
+        let baseline = column_of_ears(MikMikPose::Default);
+        for pose in [
+            MikMikPose::Blink,
+            MikMikPose::LookLeft,
+            MikMikPose::LookRight,
+            MikMikPose::LookDown,
+            MikMikPose::Loading { frame: 5 },
+        ] {
+            assert_eq!(column_of_ears(pose.clone()), baseline, "{pose:?} shifted");
+        }
     }
 }
 

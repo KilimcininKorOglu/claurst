@@ -1,27 +1,40 @@
-//! Rustle mascot rendering for ratatui.
+//! MikMik mascot rendering for ratatui.
 //!
-//! A 5-row Unicode block-art crab-like creature. Call `rustle_lines()` to get
-//! 5 `Line` values (4 body rows + 1 blank spacing row) ready for embedding in
-//! a Paragraph.
+//! A 3-row ASCII cat. Call `mikmik_lines()` to get 4 `Line` values (3 body
+//! rows + 1 blank spacing row) ready for embedding in a Paragraph.
 //!
 //! Structure (top to bottom):
-//!   Row 1 — head: narrow top (5-wide) widening downward (7-wide)
-//!   Row 2 — claws + eyes: widest row, pincers extend from sides
-//!   Row 3 — body
-//!   Row 4 — legs: body tapers into two pairs of legs via ▀ gap
-//!   Row 5 — blank spacing
+//!   Row 1 — ears
+//!   Row 2 — face: the eyes vary with the pose, the rest is fixed
+//!   Row 3 — whiskers and muzzle
+//!   Row 4 — blank spacing
+//!
+//! Every row is exactly [`MIKMIK_WIDTH`] characters wide, because the welcome
+//! screen centres the mascot on that width rather than measuring it.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-/// The pose / expression of the Rustle mascot.
+/// Width of every mascot row, in characters.
+///
+/// `render.rs` centres the mascot by subtracting this from the column width,
+/// so a row that does not match it renders off-centre.
+pub const MIKMIK_WIDTH: u16 = 7;
+
+/// The mascot's name, shown under it on the welcome screen.
+pub const MIKMIK_NAME: &str = "MikMik";
+
+/// The pose / expression of the MikMik mascot.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RustlePose {
+pub enum MikMikPose {
     Default,
     ArmsUp,
     LookLeft,
     LookRight,
     LookDown,
+    /// Eyes closed. Brief and frequent, which is what makes it read as a
+    /// blink rather than as a nap.
+    Blink,
     /// Loading / error spinner — `frame` drives the animation.
     Loading {
         frame: u64,
@@ -35,8 +48,8 @@ fn body_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Eye-row style: pink text on black background.
-fn eye_bg_style() -> Style {
+/// Face style: pink text on black background.
+fn face_style() -> Style {
     Style::default()
         .fg(Color::Rgb(233, 30, 99))
         .bg(Color::Black)
@@ -51,28 +64,34 @@ fn eyeball_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// Build spans for the eye section, giving ▘/▝ eyeball characters white
-/// foreground and everything else pink-on-black.
-fn eye_spans(s: &'static str) -> Vec<Span<'static>> {
+/// Characters that count as an eye and therefore get the white highlight.
+///
+/// The muzzle `.` and the brackets stay pink, so the eyes are what the reader
+/// looks at first.
+fn is_eyeball(ch: char) -> bool {
+    matches!(ch, 'o' | '-' | 'v' | '|' | '/' | '\\')
+}
+
+/// Build spans for the face row, giving the eye characters white foreground
+/// and everything else pink-on-black.
+fn face_spans(s: &str) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
     let mut buf_is_eyeball = false;
 
     for ch in s.chars() {
-        let is_eyeball =
-            ch == '▘' || ch == '▝' || ch == '▀' || ch == '▄' || ch == '▖' || ch == '▌' || ch == '▐';
+        let eyeball = is_eyeball(ch);
 
-        if is_eyeball != buf_is_eyeball && !buf.is_empty() {
+        if eyeball != buf_is_eyeball && !buf.is_empty() {
             let style = if buf_is_eyeball {
                 eyeball_style()
             } else {
-                eye_bg_style()
+                face_style()
             };
-            spans.push(Span::styled(buf.clone(), style));
-            buf.clear();
+            spans.push(Span::styled(std::mem::take(&mut buf), style));
         }
 
-        buf_is_eyeball = is_eyeball;
+        buf_is_eyeball = eyeball;
         buf.push(ch);
     }
 
@@ -80,7 +99,7 @@ fn eye_spans(s: &'static str) -> Vec<Span<'static>> {
         let style = if buf_is_eyeball {
             eyeball_style()
         } else {
-            eye_bg_style()
+            face_style()
         };
         spans.push(Span::styled(buf, style));
     }
@@ -88,156 +107,50 @@ fn eye_spans(s: &'static str) -> Vec<Span<'static>> {
     spans
 }
 
-/// Build the spinner eye spans for the Loading pose.
+/// The face row for a pose, always [`MIKMIK_WIDTH`] characters.
 ///
-/// Each eye socket is a single character cell with a 2×2 sub-pixel grid.
-/// The spinner rotates which quarter-block is lit:
-///   Left eye (clockwise):        ▘ → ▝ → ▗ → ▖
-///   Right eye (anti-clockwise):  ▝ → ▘ → ▖ → ▗
-///
-/// The current position is white; trailing positions use progressively
-/// darker grays so the animation looks like a sweeping gradient.
-fn loading_eye_spans(frame: u64) -> Vec<Span<'static>> {
-    // Quarter-block characters for each 2×2 position:
-    //   0=TL(▘)  1=TR(▝)  2=BR(▗)  3=BL(▖)
-    const QUARTERS: [char; 4] = ['▘', '▝', '▗', '▖'];
-    // Clockwise order for left eye
-    const CW: [usize; 4] = [0, 1, 2, 3];
-    // Anti-clockwise order for right eye (mirrored)
-    const CCW: [usize; 4] = [1, 0, 3, 2];
-
-    // Brightness gradient: current → trailing positions
-    const COLORS: [Color; 4] = [
-        Color::White,
-        Color::Rgb(170, 170, 175),
-        Color::Rgb(110, 110, 115),
-        Color::Rgb(55, 55, 60),
-    ];
-
-    // One step every 5 frames (~250ms at 50ms/frame = smooth spin)
-    let step = (frame / 5) as usize % 4;
-
-    // Build left eye: show all 4 quarter-blocks overlaid via half-blocks.
-    // Since one character can only show one quarter, we show the BRIGHTEST
-    // position as the visible quarter-block character and cycle it.
-    let left_ch = QUARTERS[CW[step]];
-    let left_color = COLORS[0]; // current position is always white
-
-    let right_ch = QUARTERS[CCW[step]];
-    let right_color = COLORS[0];
-
-    // For a trail effect, also render the PREVIOUS position in a dimmer shade
-    // using a second character. The eye section format is:
-    //   [left_prev][left_curr] █ [right_curr][right_prev]
-    let left_prev_step = (step + 3) % 4; // one step back
-    let left_prev_ch = QUARTERS[CW[left_prev_step]];
-    let right_prev_step = (step + 3) % 4;
-    let right_prev_ch = QUARTERS[CCW[right_prev_step]];
-
-    vec![
-        // Left eye: previous (dim) then current (bright)
-        Span::styled(
-            left_prev_ch.to_string(),
-            Style::default()
-                .fg(COLORS[2])
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            left_ch.to_string(),
-            Style::default()
-                .fg(left_color)
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ),
-        // Nose
-        Span::styled("█".to_string(), eye_bg_style()),
-        // Right eye: current (bright) then previous (dim)
-        Span::styled(
-            right_ch.to_string(),
-            Style::default()
-                .fg(right_color)
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            right_prev_ch.to_string(),
-            Style::default()
-                .fg(COLORS[2])
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]
+/// `Loading` cycles a stroke through both eyes so the cat looks like it is
+/// tracking something the user cannot see.
+fn face_row(pose: &MikMikPose) -> &'static str {
+    match pose {
+        MikMikPose::Default | MikMikPose::ArmsUp => "( o.o )",
+        MikMikPose::Blink => "( -.- )",
+        // The pair slides inside the brackets rather than changing shape, so
+        // the row width never moves.
+        MikMikPose::LookLeft => "(o.o  )",
+        MikMikPose::LookRight => "(  o.o)",
+        MikMikPose::LookDown => "( v.v )",
+        MikMikPose::Loading { frame } => {
+            // One step every 5 frames, matching the old spinner's cadence.
+            const PHASES: [&str; 4] = ["( |.| )", "( /./ )", "( -.- )", "( \\.\\ )"];
+            PHASES[(frame / 5) as usize % PHASES.len()]
+        }
+    }
 }
 
-/// Returns 5 Lines representing the Rustle mascot:
-///   [0] — head row (5-wide top, 7-wide bottom)
-///   [1] — claws + eyes row (widest — pincers extend from sides)
-///   [2] — body row
-///   [3] — legs row (body tapers into two pairs of legs)
-///   [4] — blank spacing line
-pub fn rustle_lines(pose: &RustlePose) -> [Line<'static>; 5] {
-    // Pose varies the claw row (Row 2):
-    //   r2l — left claw + head edge (body_style)
-    //   r2e — eye section with ▘/▝ eyeball highlights
-    //   r2r — head edge + right claw (body_style)
+/// Returns 4 Lines representing the MikMik mascot:
+///   [0] — ears
+///   [1] — face (eyes vary with the pose)
+///   [2] — whiskers and muzzle
+///   [3] — blank spacing line
+pub fn mikmik_lines(pose: &MikMikPose) -> [Line<'static>; 4] {
+    // Row 1: ears.
+    let row1 = Line::from(vec![Span::styled(" /\\_/\\ ".to_string(), body_style())]);
 
-    let (r2l, r2e, r2r) = match pose {
-        RustlePose::Default => (
-            "█▄█",   // left claw tip, ▄ gap-to-connect, head edge
-            "▀ █▀ ", // keep the left eye as-is; match the right eye size and move it up-left
-            "█▄█",   // head edge, ▄ connect-to-gap, right claw tip
-        ),
-        RustlePose::ArmsUp => (
-            "█▀█",   // ▀ = claw raised (upper half = arm up)
-            "▀ █▀ ", // keep the left eye as-is; match the right eye size and move it up-left
-            "█▀█",   // raised right claw
-        ),
-        RustlePose::LookLeft => (
-            "█▄█",
-            "▘ █ ▘", // single-pixel upper-left quarter blocks = eyes shifted left
-            "█▄█",
-        ),
-        RustlePose::LookRight => (
-            "█▄█",
-            " ▀█ ▀", // mirror of Default: upper-half blocks, shifted right
-            "█▄█",
-        ),
-        RustlePose::LookDown => (
-            "█▄█",
-            "▄ █▄ ", // lower-half blocks = eyes shifted down
-            "█▄█",
-        ),
-        RustlePose::Loading { .. } => (
-            "█▄█",
-            "",
-            "█▄█", // eyes built separately via loading_eye_spans
-        ),
+    // Row 2: face. The eye characters are highlighted white inside it.
+    let row2 = Line::from(face_spans(face_row(pose)));
+
+    // Row 3: whiskers and muzzle. ArmsUp raises the whiskers into paws.
+    let row3_text = match pose {
+        MikMikPose::ArmsUp => " \\ ^ / ",
+        _ => " > ^ < ",
     };
+    let row3 = Line::from(vec![Span::styled(row3_text.to_string(), body_style())]);
 
-    // Row 1: head — narrow top (5-wide), wider bottom (7-wide)
-    let row1 = Line::from(vec![Span::styled("  ▄█████▄  ".to_string(), body_style())]);
+    // Row 4: blank spacing.
+    let row4 = Line::from("");
 
-    // Row 2: claws extending from sides + face with eyeball highlights (widest row)
-    let mut row2_spans = vec![Span::styled(r2l.to_string(), body_style())];
-    if let RustlePose::Loading { frame } = pose {
-        row2_spans.extend(loading_eye_spans(*frame));
-    } else {
-        row2_spans.extend(eye_spans(r2e));
-    }
-    row2_spans.push(Span::styled(r2r.to_string(), body_style()));
-    let row2 = Line::from(row2_spans);
-
-    // Row 3: body
-    let row3 = Line::from(vec![Span::styled(" ████████  ".to_string(), body_style())]);
-
-    // Row 4: legs — upper half body (6-wide), lower half two leg pairs (2+gap+2)
-    let row4 = Line::from(vec![Span::styled("  ██▀▀██   ".to_string(), body_style())]);
-
-    // Row 5: blank spacing
-    let row5 = Line::from("");
-
-    [row1, row2, row3, row4, row5]
+    [row1, row2, row3, row4]
 }
 
 #[cfg(test)]
@@ -252,21 +165,99 @@ mod tests {
             .join("")
     }
 
-    #[test]
-    fn default_pose_right_eye_matches_left_eye_size() {
-        let lines = rustle_lines(&RustlePose::Default);
-        assert_eq!(line_text(&lines[1]), "█▄█▀ █▀ █▄█");
+    fn all_poses() -> Vec<MikMikPose> {
+        vec![
+            MikMikPose::Default,
+            MikMikPose::ArmsUp,
+            MikMikPose::LookLeft,
+            MikMikPose::LookRight,
+            MikMikPose::LookDown,
+            MikMikPose::Blink,
+            MikMikPose::Loading { frame: 0 },
+            MikMikPose::Loading { frame: 7 },
+        ]
     }
 
     #[test]
-    fn arms_up_pose_right_eye_matches_left_eye_size() {
-        let lines = rustle_lines(&RustlePose::ArmsUp);
-        assert_eq!(line_text(&lines[1]), "█▀█▀ █▀ █▀█");
+    fn every_pose_is_three_rows_of_the_declared_width() {
+        // The welcome screen centres on MIKMIK_WIDTH instead of measuring, so
+        // a row of another width would render off-centre.
+        for pose in all_poses() {
+            let lines = mikmik_lines(&pose);
+            for (i, line) in lines.iter().take(3).enumerate() {
+                assert_eq!(
+                    line_text(line).chars().count(),
+                    MIKMIK_WIDTH as usize,
+                    "row {i} of {pose:?} is the wrong width"
+                );
+            }
+            assert_eq!(line_text(&lines[3]), "", "row 3 is the spacing row");
+        }
     }
 
     #[test]
-    fn look_right_pose_eyes_match_default_size() {
-        let lines = rustle_lines(&RustlePose::LookRight);
-        assert_eq!(line_text(&lines[1]), "█▄█ ▀█ ▀█▄█");
+    fn blinking_closes_both_eyes() {
+        let open = line_text(&mikmik_lines(&MikMikPose::Default)[1]);
+        let shut = line_text(&mikmik_lines(&MikMikPose::Blink)[1]);
+        assert_eq!(open, "( o.o )");
+        assert_eq!(shut, "( -.- )");
+        assert!(!shut.contains('o'), "an open eye survived the blink");
+    }
+
+    #[test]
+    fn the_glances_move_the_eyes_to_opposite_sides() {
+        let left = line_text(&mikmik_lines(&MikMikPose::LookLeft)[1]);
+        let right = line_text(&mikmik_lines(&MikMikPose::LookRight)[1]);
+        let ahead = line_text(&mikmik_lines(&MikMikPose::Default)[1]);
+
+        assert_eq!(left, "(o.o  )");
+        assert_eq!(right, "(  o.o)");
+        assert_ne!(left, ahead);
+        assert_ne!(right, ahead);
+        // Mirror images: the eyes sit as far left as they sit right.
+        assert_eq!(left.find('o'), right.rfind('o').map(|at| 6 - at));
+    }
+
+    #[test]
+    fn looking_down_lowers_the_eyes_without_closing_them() {
+        let down = line_text(&mikmik_lines(&MikMikPose::LookDown)[1]);
+        assert_eq!(down, "( v.v )");
+        assert_ne!(down, line_text(&mikmik_lines(&MikMikPose::Blink)[1]));
+    }
+
+    #[test]
+    fn arms_up_raises_the_whiskers_and_leaves_the_eyes_alone() {
+        let up = mikmik_lines(&MikMikPose::ArmsUp);
+        let idle = mikmik_lines(&MikMikPose::Default);
+        assert_eq!(line_text(&up[2]), " \\ ^ / ");
+        assert_ne!(line_text(&up[2]), line_text(&idle[2]));
+        assert_eq!(line_text(&up[1]), line_text(&idle[1]));
+    }
+
+    #[test]
+    fn the_loading_spinner_cycles_through_four_distinct_faces() {
+        let seen: std::collections::HashSet<String> = (0..4)
+            .map(|step| line_text(&mikmik_lines(&MikMikPose::Loading { frame: step * 5 })[1]))
+            .collect();
+        assert_eq!(seen.len(), 4, "the spinner repeats within one rotation");
+
+        // It rotates rather than drifting: frame 20 is back to frame 0.
+        assert_eq!(
+            line_text(&mikmik_lines(&MikMikPose::Loading { frame: 0 })[1]),
+            line_text(&mikmik_lines(&MikMikPose::Loading { frame: 20 })[1]),
+        );
+    }
+
+    #[test]
+    fn only_the_eyes_are_highlighted_white() {
+        // The muzzle and brackets must stay pink, or the face reads as a
+        // solid white blob at a glance.
+        let spans = face_spans("( o.o )");
+        let white: String = spans
+            .iter()
+            .filter(|s| s.style.fg == Some(Color::White))
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(white, "oo");
     }
 }

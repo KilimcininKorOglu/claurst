@@ -2748,7 +2748,7 @@ async fn run_interactive(
     let mut progress_shown = false;
     'main: loop {
         app.frame_count = app.frame_count.wrapping_add(1);
-        app.tick_rustle_pose();
+        app.tick_mikmik_pose();
         app.notifications.tick();
 
         // Process file injection dialog outcome (if any)

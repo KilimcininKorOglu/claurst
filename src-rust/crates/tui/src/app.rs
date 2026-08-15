@@ -1274,19 +1274,22 @@ pub struct App {
     // ---- Session timing ---------------------------------------------------
     /// Instant the session started (used for elapsed-time in the status bar).
     pub session_start: std::time::Instant,
-    /// Current Rustle pose for rendering (updated each frame).
-    pub rustle_current_pose: crate::rustle::RustlePose,
-    /// Temporary Rustle pose override (e.g. look-down on Tab). Reverts to
+    /// Current MikMik pose for rendering (updated each frame).
+    pub mikmik_current_pose: crate::mikmik::MikMikPose,
+    /// Temporary MikMik pose override (e.g. look-down on Tab). Reverts to
     /// default after this instant passes.
-    pub rustle_pose_until: Option<std::time::Instant>,
-    /// The temporary pose to show until `rustle_pose_until`.
-    pub rustle_temp_pose: Option<crate::rustle::RustlePose>,
-    /// Frame counter at which the next random eye-shift should fire.
-    pub rustle_next_blink: u64,
+    pub mikmik_pose_until: Option<std::time::Instant>,
+    /// The temporary pose to show until `mikmik_pose_until`.
+    pub mikmik_temp_pose: Option<crate::mikmik::MikMikPose>,
+    /// Frame counter at which the next idle expression should fire.
+    pub mikmik_next_idle: u64,
+    /// How many idle expressions have fired, which decides what the next one
+    /// is: two blinks, then a glance, with the glance alternating sides.
+    pub mikmik_idle_step: u8,
     /// The companion shown beside the input box, or `None` when `/buddy` is
     /// off or the companion has never been hatched.
     ///
-    /// Not the same creature as `rustle_current_pose` above: that is the
+    /// Not the same creature as `mikmik_current_pose` above: that is the
     /// welcome-screen mascot, this one is per-user and comes from
     /// `claurst-buddy`.
     pub companion: Option<claurst_buddy::Companion>,
@@ -1725,15 +1728,16 @@ impl App {
             new_messages_while_scrolled: 0,
             token_warning_threshold_shown: 0,
             session_start: std::time::Instant::now(),
-            rustle_current_pose: crate::rustle::RustlePose::Default,
-            rustle_pose_until: None,
-            rustle_temp_pose: None,
-            rustle_next_blink: 200
+            mikmik_current_pose: crate::mikmik::MikMikPose::Default,
+            mikmik_pose_until: None,
+            mikmik_temp_pose: None,
+            mikmik_next_idle: 200
                 + (std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos() as u64
                     % 300),
+            mikmik_idle_step: 0,
             companion: None,
             companion_bubble: None,
             turn_start: None,
@@ -2365,15 +2369,17 @@ impl App {
         self.context_used_tokens = 0;
     }
 
-    /// Update the Rustle pose for this frame — handles temporary poses, random blinks,
-    /// and the loading spinner on stalls/errors.
+    /// Update the MikMik pose for this frame — handles temporary poses, the
+    /// idle blink-and-glance cycle, and the loading spinner on stalls/errors.
     /// Call once per frame before rendering.
-    pub fn tick_rustle_pose(&mut self) {
+    pub fn tick_mikmik_pose(&mut self) {
+        use crate::mikmik::MikMikPose;
+
         // Loading spinner: shown when streaming has stalled (no data for 3s+).
         if self.is_streaming {
             if let Some(start) = self.stall_start {
                 if start.elapsed() > std::time::Duration::from_secs(3) {
-                    self.rustle_current_pose = crate::rustle::RustlePose::Loading {
+                    self.mikmik_current_pose = MikMikPose::Loading {
                         frame: self.frame_count,
                     };
                     return;
@@ -2382,32 +2388,41 @@ impl App {
         }
 
         // Check if a temporary pose is active.
-        if let Some(until) = self.rustle_pose_until {
+        if let Some(until) = self.mikmik_pose_until {
             if std::time::Instant::now() < until {
-                self.rustle_current_pose = self
-                    .rustle_temp_pose
-                    .clone()
-                    .unwrap_or(crate::rustle::RustlePose::Default);
+                self.mikmik_current_pose =
+                    self.mikmik_temp_pose.clone().unwrap_or(MikMikPose::Default);
                 return;
             }
             // Expired — clear it.
-            self.rustle_pose_until = None;
-            self.rustle_temp_pose = None;
+            self.mikmik_pose_until = None;
+            self.mikmik_temp_pose = None;
         }
 
-        // Random eye-shift: every ~200-500 frames, briefly look right.
-        if self.frame_count >= self.rustle_next_blink {
-            self.rustle_temp_pose = Some(crate::rustle::RustlePose::LookRight);
-            self.rustle_pose_until =
-                Some(std::time::Instant::now() + std::time::Duration::from_millis(800));
-            // Schedule next blink 200-500 frames from now (random-ish).
+        // Idle expression: every ~200-500 frames the cat does something.
+        // Two blinks, then a glance, and the glance alternates sides so both
+        // LookLeft and LookRight get used.
+        if self.frame_count >= self.mikmik_next_idle {
+            let (pose, hold_ms) = match self.mikmik_idle_step % 3 {
+                // A blink is short. Held as long as a glance it would read as
+                // the cat falling asleep rather than blinking.
+                0 | 1 => (MikMikPose::Blink, 130),
+                _ if (self.mikmik_idle_step / 3).is_multiple_of(2) => (MikMikPose::LookRight, 800),
+                _ => (MikMikPose::LookLeft, 800),
+            };
+            self.mikmik_idle_step = self.mikmik_idle_step.wrapping_add(1);
+
+            self.mikmik_temp_pose = Some(pose.clone());
+            self.mikmik_pose_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(hold_ms));
+            // Schedule the next one 200-500 frames from now (random-ish).
             let jitter = (self.frame_count.wrapping_mul(7) % 300) + 200;
-            self.rustle_next_blink = self.frame_count + jitter;
-            self.rustle_current_pose = crate::rustle::RustlePose::LookRight;
+            self.mikmik_next_idle = self.frame_count + jitter;
+            self.mikmik_current_pose = pose;
             return;
         }
 
-        self.rustle_current_pose = crate::rustle::RustlePose::Default;
+        self.mikmik_current_pose = MikMikPose::Default;
     }
 
     /// Read the companion from settings and disk into [`App::companion`].
@@ -2459,10 +2474,10 @@ impl App {
             .then_some(name)
     }
 
-    /// Trigger Rustle looking down briefly (called on Tab / mode switch).
-    pub fn rustle_look_down(&mut self) {
-        self.rustle_temp_pose = Some(crate::rustle::RustlePose::LookDown);
-        self.rustle_pose_until =
+    /// Trigger MikMik looking down briefly (called on Tab / mode switch).
+    pub fn mikmik_look_down(&mut self) {
+        self.mikmik_temp_pose = Some(crate::mikmik::MikMikPose::LookDown);
+        self.mikmik_pose_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
     }
 
@@ -5228,7 +5243,7 @@ impl App {
                 } else if !self.is_streaming && self.prompt_input.is_empty() {
                     // Cycle agent mode: build → plan → build
                     self.cycle_agent_mode();
-                    self.rustle_look_down();
+                    self.mikmik_look_down();
                 }
             }
 
@@ -6067,7 +6082,7 @@ impl App {
                         self.refresh_prompt_input();
                     } else if self.prompt_input.is_empty() {
                         self.cycle_agent_mode();
-                        self.rustle_look_down();
+                        self.mikmik_look_down();
                     }
                 }
                 false
@@ -7742,6 +7757,111 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    // ---- MikMik (the fixed welcome-screen mascot) ----
+
+    /// Drive the idle timer until it has fired `count` times, collecting the
+    /// pose chosen on each firing.
+    fn idle_poses(app: &mut App, count: usize) -> Vec<crate::mikmik::MikMikPose> {
+        let mut seen = Vec::new();
+        while seen.len() < count {
+            // Jump straight to the next scheduled expression and clear any
+            // hold left over from the previous one.
+            app.frame_count = app.mikmik_next_idle;
+            app.mikmik_pose_until = None;
+            app.mikmik_temp_pose = None;
+            app.tick_mikmik_pose();
+            seen.push(app.mikmik_current_pose.clone());
+        }
+        seen
+    }
+
+    #[test]
+    fn the_idle_cycle_uses_both_glances_and_not_only_blinks() {
+        use crate::mikmik::MikMikPose;
+        let mut app = make_app();
+        let seen = idle_poses(&mut app, 12);
+
+        assert!(seen.contains(&MikMikPose::Blink), "never blinked");
+        assert!(
+            seen.contains(&MikMikPose::LookRight),
+            "never glanced right: {seen:?}"
+        );
+        assert!(
+            seen.contains(&MikMikPose::LookLeft),
+            "never glanced left: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn blinking_is_more_common_than_glancing() {
+        // A blink every third expression would read as a stare. Two of every
+        // three idle expressions are blinks.
+        use crate::mikmik::MikMikPose;
+        let mut app = make_app();
+        let seen = idle_poses(&mut app, 12);
+        let blinks = seen.iter().filter(|p| **p == MikMikPose::Blink).count();
+        assert_eq!(blinks, 8, "expected two blinks per glance: {seen:?}");
+    }
+
+    #[test]
+    fn a_blink_is_held_far_shorter_than_a_glance() {
+        // Held as long as a glance, a closed eye reads as sleeping.
+        use crate::mikmik::MikMikPose;
+        let mut app = make_app();
+
+        let mut blink_hold = None;
+        let mut glance_hold = None;
+        for _ in 0..12 {
+            app.frame_count = app.mikmik_next_idle;
+            app.mikmik_pose_until = None;
+            app.mikmik_temp_pose = None;
+            let before = std::time::Instant::now();
+            app.tick_mikmik_pose();
+            let held = app
+                .mikmik_pose_until
+                .expect("an idle expression sets a deadline")
+                .saturating_duration_since(before);
+            match app.mikmik_current_pose {
+                MikMikPose::Blink => blink_hold = Some(held),
+                MikMikPose::LookLeft | MikMikPose::LookRight => glance_hold = Some(held),
+                _ => {}
+            }
+        }
+
+        let blink = blink_hold.expect("saw a blink");
+        let glance = glance_hold.expect("saw a glance");
+        assert!(
+            blink < glance,
+            "blink {blink:?} was not shorter than {glance:?}"
+        );
+        assert!(blink < std::time::Duration::from_millis(300));
+    }
+
+    #[test]
+    fn a_stalled_stream_shows_the_loading_face_over_any_idle_pose() {
+        use crate::mikmik::MikMikPose;
+        let mut app = make_app();
+        app.mikmik_temp_pose = Some(MikMikPose::Blink);
+        app.mikmik_pose_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        app.is_streaming = true;
+        app.stall_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(4));
+
+        app.tick_mikmik_pose();
+        assert!(matches!(
+            app.mikmik_current_pose,
+            MikMikPose::Loading { .. }
+        ));
+    }
+
+    #[test]
+    fn looking_down_survives_until_its_deadline() {
+        use crate::mikmik::MikMikPose;
+        let mut app = make_app();
+        app.mikmik_look_down();
+        app.tick_mikmik_pose();
+        assert_eq!(app.mikmik_current_pose, MikMikPose::LookDown);
     }
 
     // ---- companion (the /buddy creature beside the input box) ----
