@@ -2322,7 +2322,12 @@ impl App {
     /// `protocol` is recorded whenever it differs from the account name, which
     /// is what lets an endpoint be addressed as `"<account>/<model>"` under a
     /// name of the user's choosing instead of its vendor's.
-    fn persist_custom_provider_base_url(&self, account_id: &str, protocol: &str, base_url: &str) {
+    fn persist_custom_provider_base_url(
+        &mut self,
+        account_id: &str,
+        protocol: &str,
+        base_url: &str,
+    ) {
         let mut settings = Settings::load_sync().unwrap_or_default();
         let entry = settings
             .providers
@@ -2333,7 +2338,16 @@ impl App {
         if protocol != account_id {
             entry.protocol = Some(protocol.to_string());
         }
+        let written = entry.clone();
         let _ = settings.save_sync();
+
+        // The running session has to learn about the account too. The provider
+        // registry is rebuilt from `config.provider_configs`, so an account
+        // that only reached the file cannot be built, cannot be asked what
+        // models it serves, and stays invisible until the next launch.
+        self.config
+            .provider_configs
+            .insert(account_id.to_string(), written);
     }
 
     fn persist_provider_and_model(&self) {
@@ -4150,6 +4164,10 @@ impl App {
                         // comes from the account rather than from a catalogue
                         // that cannot know what a gateway proxies.
                         self.pending_model_sync = Some(account_id.clone());
+                        // The registry was built without this account, so it
+                        // has to be rebuilt before anything can reach the new
+                        // endpoint, discovery included.
+                        self.pending_provider_reload = true;
                         self.activate_provider(account_id, provider_name, "Connected to");
                     } else {
                         self.custom_provider_dialog.move_next_field();

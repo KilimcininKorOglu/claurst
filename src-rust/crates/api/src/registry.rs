@@ -671,11 +671,17 @@ impl ProviderRegistry {
         // Accounts the user named themselves. Registered first so a later
         // per-vendor registration cannot claim the same id, and so an account
         // pointing at a gateway is reachable by the name the user gave it.
-        for (account_id, protocol) in user_named_accounts() {
-            if protocol == ProviderId::ANTHROPIC {
-                if let Some(provider) = anthropic_account_provider(&account_id) {
-                    self.register(provider);
-                }
+        //
+        // Built through `provider_from_config` rather than by hand, so every
+        // protocol it already knows works here too. Hand-rolling one protocol
+        // silently dropped the rest, and an account that is never registered
+        // cannot be asked what models it serves.
+        let account_config = claurst_core::config::Settings::load_sync()
+            .unwrap_or_default()
+            .effective_config();
+        for (account_id, _protocol) in user_named_accounts() {
+            if let Some(provider) = provider_from_config(&account_config, &account_id) {
+                self.register(provider);
             }
         }
 
