@@ -6749,6 +6749,202 @@ mod credential_storage_tests {
             "an empty field must not become an empty credential"
         );
     }
+
+    // ---- account registry relocation ------------------------------------
+
+    /// Write the old on-disk layout: a registry plus one token file per
+    /// profile directory.
+    fn write_legacy_registry(profiles: &[(&str, &str, &str)], active: &[(&str, &str)]) {
+        let root = crate::config::Settings::config_dir();
+        let mut sections = serde_json::Map::new();
+        for (protocol, profile_id, access_token) in profiles {
+            let section = sections
+                .entry(protocol.to_string())
+                .or_insert_with(|| serde_json::json!({ "profiles": {} }));
+            section["profiles"][profile_id] = serde_json::json!({ "id": profile_id });
+
+            let dir = root.join("accounts").join(protocol).join(profile_id);
+            std::fs::create_dir_all(&dir).expect("profile dir");
+            let (file, body) = if *protocol == "codex" {
+                (
+                    "codex_tokens.json",
+                    serde_json::json!({ "access_token": access_token }),
+                )
+            } else {
+                (
+                    "oauth_tokens.json",
+                    serde_json::json!({
+                        "access_token": access_token,
+                        "scopes": ["user:inference"],
+                        "email": format!("{profile_id}@example.com"),
+                    }),
+                )
+            };
+            std::fs::write(dir.join(file), body.to_string()).expect("token file");
+        }
+        for (protocol, profile_id) in active {
+            sections[*protocol]["active"] = serde_json::json!(profile_id);
+        }
+        std::fs::write(
+            root.join("accounts.json"),
+            serde_json::json!({ "version": 1, "providers": sections }).to_string(),
+        )
+        .expect("registry");
+    }
+
+    #[tokio::test]
+    async fn every_profile_becomes_an_ordinary_account() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        write_legacy_registry(
+            &[
+                ("anthropic", "work", "token-work"),
+                ("anthropic", "personal", "token-personal"),
+                ("codex", "chatgpt", "token-chatgpt"),
+            ],
+            &[("anthropic", "work"), ("codex", "chatgpt")],
+        );
+        crate::config::Settings {
+            provider: Some("anthropic".to_string()),
+            ..Default::default()
+        }
+        .save_sync()
+        .expect("save settings");
+
+        let mut moved = crate::AuthStore::migrate_account_registry();
+        moved.sort();
+
+        assert_eq!(
+            moved,
+            vec![
+                "chatgpt".to_string(),
+                "personal".to_string(),
+                "work".to_string()
+            ]
+        );
+
+        let store = crate::AuthStore::load();
+        assert_eq!(
+            store.anthropic_tokens("personal").map(|t| &t.access_token),
+            Some(&"token-personal".to_string())
+        );
+        assert_eq!(
+            store.codex_tokens("chatgpt").map(|t| &t.access_token),
+            Some(&"token-chatgpt".to_string())
+        );
+
+        let settings = crate::config::Settings::load_sync().expect("reload");
+        assert_eq!(
+            settings.providers["personal"].protocol.as_deref(),
+            Some("anthropic"),
+            "a migrated account needs a providers entry to be addressable"
+        );
+        assert_eq!(
+            settings.providers["chatgpt"].protocol.as_deref(),
+            Some("codex")
+        );
+        assert_eq!(
+            settings.provider.as_deref(),
+            Some("work"),
+            "the active pointer named a vendor and now names that vendor's active account"
+        );
+
+        let root = crate::config::Settings::config_dir();
+        assert!(!root.join("accounts.json").exists());
+        assert!(!root.join("accounts").exists());
+        let backups: Vec<_> = std::fs::read_dir(&root)
+            .expect("read config dir")
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("accounts-backup-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1, "the old layout is kept, not deleted");
+    }
+
+    #[tokio::test]
+    async fn a_profile_id_already_taken_by_an_account_is_suffixed() {
+        // Two vendors can hand out the same profile id, and an API key account
+        // may already be using it. The second must not overwrite the first.
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        write_legacy_registry(&[("anthropic", "work", "token-work")], &[]);
+        settings_with_key("work", Some("sk-existing"))
+            .save_sync()
+            .expect("save settings");
+
+        let moved = crate::AuthStore::migrate_account_registry();
+
+        assert_eq!(moved, vec!["work-2".to_string()]);
+        let store = crate::AuthStore::load();
+        assert_eq!(
+            store.anthropic_tokens("work-2").map(|t| &t.access_token),
+            Some(&"token-work".to_string())
+        );
+        let settings = crate::config::Settings::load_sync().expect("reload");
+        assert_eq!(
+            settings.providers["work"].api_base.as_deref(),
+            Some("http://127.0.0.1:8789"),
+            "the account that already held the name keeps it"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_single_file_layout_is_taken_too() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        let root = crate::config::Settings::config_dir();
+        std::fs::create_dir_all(&root).expect("config dir");
+        std::fs::write(
+            root.join("oauth_tokens.json"),
+            serde_json::json!({
+                "access_token": "token-legacy",
+                "scopes": ["user:inference"],
+            })
+            .to_string(),
+        )
+        .expect("legacy tokens");
+
+        let moved = crate::AuthStore::migrate_account_registry();
+
+        assert_eq!(moved, vec!["anthropic".to_string()]);
+        assert_eq!(
+            crate::AuthStore::load()
+                .anthropic_tokens("anthropic")
+                .map(|t| &t.access_token),
+            Some(&"token-legacy".to_string())
+        );
+        assert!(!root.join("oauth_tokens.json").exists());
+    }
+
+    #[tokio::test]
+    async fn a_second_run_finds_nothing_left_to_move() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        write_legacy_registry(&[("anthropic", "work", "token-work")], &[]);
+        assert_eq!(
+            crate::AuthStore::migrate_account_registry(),
+            vec!["work".to_string()]
+        );
+
+        assert!(
+            crate::AuthStore::migrate_account_registry().is_empty(),
+            "the migration must not run again on every launch"
+        );
+        assert_eq!(
+            crate::AuthStore::load()
+                .anthropic_tokens("work")
+                .map(|t| &t.access_token),
+            Some(&"token-work".to_string()),
+            "and must not disturb what it moved the first time"
+        );
+    }
 }
 
 #[cfg(test)]

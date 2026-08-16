@@ -42,6 +42,113 @@ pub struct AuthStore {
     pub credentials: HashMap<String, StoredCredential>,
 }
 
+// ---------------------------------------------------------------------------
+// The old account registry, read once by the startup migration
+// ---------------------------------------------------------------------------
+
+/// `accounts.json` as it used to be written.
+///
+/// Declared here rather than reused from `accounts.rs` so the migration keeps
+/// working after that module drops the types.
+#[derive(Debug, Default, Deserialize)]
+struct LegacyRegistry {
+    #[serde(default)]
+    providers: std::collections::BTreeMap<String, LegacyProviderAccounts>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyProviderAccounts {
+    #[serde(default)]
+    active: Option<String>,
+    #[serde(default)]
+    profiles: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+/// The token file each provider wrote inside a profile directory.
+fn token_file_name(protocol: &str) -> &'static str {
+    match protocol {
+        crate::provider_id::ProviderId::CODEX => "codex_tokens.json",
+        _ => "oauth_tokens.json",
+    }
+}
+
+/// Read one profile's token file into the credential it becomes.
+fn read_legacy_credential(protocol: &str, path: &std::path::Path) -> Option<StoredCredential> {
+    let text = std::fs::read_to_string(path).ok()?;
+    match protocol {
+        crate::provider_id::ProviderId::CODEX => serde_json::from_str(&text)
+            .ok()
+            .map(StoredCredential::CodexOAuth),
+        _ => serde_json::from_str(&text)
+            .ok()
+            .map(StoredCredential::AnthropicOAuth),
+    }
+}
+
+/// A name no account is using yet, keeping the profile id where it is free.
+fn free_account_name(settings: &crate::config::Settings, store: &AuthStore, base: &str) -> String {
+    crate::accounts::unique_account_name(base, |candidate| {
+        settings.providers.contains_key(candidate) || store.credentials.contains_key(candidate)
+    })
+}
+
+/// Give a migrated account the `providers` entry it needs to be built.
+fn open_provider_entry(settings: &mut crate::config::Settings, account_id: &str, protocol: &str) {
+    let entry = settings
+        .providers
+        .entry(account_id.to_string())
+        .or_default();
+    entry.enabled = true;
+    if protocol != account_id {
+        entry.protocol = Some(protocol.to_string());
+    }
+}
+
+/// Move the old registry and profile directories aside.
+///
+/// Kept rather than deleted: the credentials have just been copied, and a
+/// migration that got something wrong is only recoverable while the originals
+/// still exist.
+fn archive_legacy_layout(
+    root: &std::path::Path,
+    registry_path: &std::path::Path,
+    accounts_dir: &std::path::Path,
+) {
+    let backup = root.join(format!(
+        "accounts-backup-{}",
+        chrono::Utc::now().timestamp()
+    ));
+    if std::fs::create_dir_all(&backup).is_err() {
+        tracing::warn!(
+            "could not create {}; leaving the old account files in place",
+            backup.display()
+        );
+        return;
+    }
+    crate::accounts::set_user_only_dir_perms(&backup);
+    for (source, name) in [(registry_path, "accounts.json"), (accounts_dir, "accounts")] {
+        if source.exists() {
+            if let Err(e) = std::fs::rename(source, backup.join(name)) {
+                tracing::warn!("could not move {} aside: {}", source.display(), e);
+            }
+        }
+    }
+    for legacy in [
+        crate::oauth::OAuthTokens::token_file_path(),
+        crate::oauth_config::codex_tokens_path(),
+    ] {
+        if legacy.exists() {
+            let name = legacy
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "legacy_tokens.json".to_string());
+            if let Err(e) = std::fs::rename(&legacy, backup.join(name)) {
+                tracing::warn!("could not move {} aside: {}", legacy.display(), e);
+            }
+        }
+    }
+}
+
 impl AuthStore {
     /// Path to the auth store file.
     pub fn path() -> PathBuf {
@@ -218,6 +325,111 @@ impl AuthStore {
                 e
             );
         }
+        moved
+    }
+
+    /// Fold the old account registry into the auth store and `settings.json`.
+    ///
+    /// Anthropic and Codex accounts used to live as a registry entry in
+    /// `accounts.json` plus a token file under `accounts/<provider>/<id>/`,
+    /// which meant the same concept was stored two ways and only one of them
+    /// could be addressed as `"<account>/<model>"`. Each profile becomes an
+    /// ordinary account: a credential here and a `providers` entry there.
+    ///
+    /// Returns the account names that were moved. The old files are left in a
+    /// `accounts-backup-<timestamp>/` directory rather than deleted, so a
+    /// migration that goes wrong can be undone by hand.
+    pub fn migrate_account_registry() -> Vec<String> {
+        let root = crate::config::Settings::config_dir();
+        let registry_path = root.join("accounts.json");
+        let accounts_dir = root.join("accounts");
+        let legacy_anthropic = crate::oauth::OAuthTokens::token_file_path();
+        let legacy_codex = crate::oauth_config::codex_tokens_path();
+
+        let has_registry = registry_path.exists();
+        if !has_registry && !legacy_anthropic.exists() && !legacy_codex.exists() {
+            return Vec::new();
+        }
+
+        let Ok(mut settings) = crate::config::Settings::load_sync() else {
+            return Vec::new();
+        };
+        let mut store = Self::load();
+        let mut moved = Vec::new();
+        // Which account each provider's active profile became, so the active
+        // pointer can be rewritten once every profile has a name.
+        let mut new_active: Vec<(String, String)> = Vec::new();
+
+        if has_registry {
+            let registry: LegacyRegistry = std::fs::read_to_string(&registry_path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+
+            for (protocol, section) in &registry.providers {
+                for profile_id in section.profiles.keys() {
+                    let token_path = accounts_dir
+                        .join(protocol)
+                        .join(profile_id)
+                        .join(token_file_name(protocol));
+                    let Some(credential) = read_legacy_credential(protocol, &token_path) else {
+                        continue;
+                    };
+                    let account_id = free_account_name(&settings, &store, profile_id);
+                    store.credentials.insert(account_id.clone(), credential);
+                    open_provider_entry(&mut settings, &account_id, protocol);
+                    if section.active.as_deref() == Some(profile_id.as_str()) {
+                        new_active.push((protocol.clone(), account_id.clone()));
+                    }
+                    moved.push(account_id);
+                }
+            }
+        }
+
+        // The single-file layout that predates the registry. Named after the
+        // vendor, because there is no profile id to take a name from.
+        for (protocol, path) in [
+            (crate::provider_id::ProviderId::ANTHROPIC, legacy_anthropic),
+            (crate::provider_id::ProviderId::CODEX, legacy_codex),
+        ] {
+            let Some(credential) = read_legacy_credential(protocol, &path) else {
+                continue;
+            };
+            let account_id = free_account_name(&settings, &store, protocol);
+            store.credentials.insert(account_id.clone(), credential);
+            open_provider_entry(&mut settings, &account_id, protocol);
+            new_active.push((protocol.to_string(), account_id.clone()));
+            moved.push(account_id);
+        }
+
+        if moved.is_empty() {
+            return moved;
+        }
+
+        // The active pointer named a vendor before accounts had names of their
+        // own. Point it at whichever account that vendor's active profile
+        // became, and leave any other value alone: it already names an account.
+        if let Some(active) = settings.provider.clone() {
+            if let Some((_, account_id)) = new_active
+                .iter()
+                .find(|(protocol, _)| protocol.as_str() == active)
+            {
+                settings.provider = Some(account_id.clone());
+                settings.config.provider = Some(account_id.clone());
+            }
+        }
+
+        store.save();
+        if let Err(e) = settings.save_sync() {
+            tracing::warn!(
+                "moved {} account(s) into the auth store, but could not write \
+                 settings.json ({}); they have no providers entry yet",
+                moved.len(),
+                e
+            );
+            return moved;
+        }
+        archive_legacy_layout(&root, &registry_path, &accounts_dir);
         moved
     }
 

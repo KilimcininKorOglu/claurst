@@ -443,6 +443,17 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Fold the old per-provider account registry into the same two files, so
+    // every account is one credential plus one providers entry.
+    let moved_accounts = claurst_core::AuthStore::migrate_account_registry();
+    if !moved_accounts.is_empty() {
+        eprintln!(
+            "claurst: moved {} into auth.json and settings.json. The old accounts.json \
+             and accounts/ directory are kept under accounts-backup-<timestamp>/.",
+            moved_accounts.join(", ")
+        );
+    }
+
     // Fast-path: `claude auth <login|logout|status>` — mirrors TypeScript cli.tsx pattern
     if raw_args.get(1).map(|s| s.as_str()) == Some("auth") {
         return handle_auth_command(&raw_args[2..]).await;
