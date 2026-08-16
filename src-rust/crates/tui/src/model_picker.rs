@@ -296,6 +296,47 @@ fn model_entry(id: &str, name: &str, desc: &str) -> ModelEntry {
     }
 }
 
+/// The models one account offers, and nothing else.
+///
+/// A discovered account lists exactly what its own endpoint reported. Only the
+/// display metadata (context window, pricing) is borrowed from the catalog,
+/// and only for ids the catalog happens to know, because a gateway may proxy a
+/// model the catalog has never heard of.
+///
+/// An account with no list falls back to the catalog for the protocol it
+/// speaks, which is what every vendor-named account did before accounts could
+/// carry a list of their own.
+pub fn models_for_account(
+    account_id: &str,
+    account: Option<&claurst_core::config::ProviderConfig>,
+    registry: &claurst_api::ModelRegistry,
+) -> Vec<ModelEntry> {
+    let protocol = account
+        .map(|entry| entry.protocol_or(account_id))
+        .unwrap_or_else(|| account_id.to_string());
+
+    let served: &[String] = account.map(|entry| entry.models.as_slice()).unwrap_or(&[]);
+    let catalog = models_for_provider_from_registry(&protocol, registry);
+    if served.is_empty() {
+        return catalog;
+    }
+
+    let by_id: std::collections::HashMap<&str, &ModelEntry> = catalog
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect();
+
+    served
+        .iter()
+        .map(|id| match by_id.get(id.as_str()) {
+            Some(known) => (*known).clone(),
+            // No catalog row. Show the id itself rather than hiding a model
+            // the account genuinely serves.
+            None => model_entry(id, id, ""),
+        })
+        .collect()
+}
+
 /// Get models for a provider from the model registry (models.dev data).
 ///
 /// Builds picker entries from the bundled / network-refreshed registry.
@@ -1578,6 +1619,62 @@ mod tests {
     //     entries for each well-known provider.  Specific model IDs aren't
     //     asserted here because the snapshot is regenerated periodically;
     //     instead we check the family / provider-namespace shape.
+    #[test]
+    fn an_account_lists_only_what_it_serves() {
+        // The whole point of slice 4: a gateway that serves four models must
+        // not be advertised with its vendor's entire catalogue.
+        let registry = claurst_api::ModelRegistry::new();
+        let account = claurst_core::config::ProviderConfig {
+            protocol: Some("anthropic".to_string()),
+            models: vec!["claude-sonnet-5".to_string(), "gpt-5.6-sol".to_string()],
+            ..Default::default()
+        };
+
+        let entries = models_for_account("is_gateway", Some(&account), &registry);
+        let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["claude-sonnet-5", "gpt-5.6-sol"]);
+    }
+
+    #[test]
+    fn a_model_the_catalog_never_heard_of_is_still_offered() {
+        // A gateway may proxy an id models.dev has no row for; dropping it
+        // would hide a model the account genuinely serves.
+        let registry = claurst_api::ModelRegistry::new();
+        let account = claurst_core::config::ProviderConfig {
+            protocol: Some("anthropic".to_string()),
+            models: vec!["totally-made-up-model".to_string()],
+            ..Default::default()
+        };
+
+        let entries = models_for_account("is_gateway", Some(&account), &registry);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "totally-made-up-model");
+        assert_eq!(entries[0].display_name, "totally-made-up-model");
+    }
+
+    #[test]
+    fn an_undiscovered_account_falls_back_to_its_protocol_catalog() {
+        // Nothing regresses for an account written before discovery existed.
+        let registry = claurst_api::ModelRegistry::new();
+        let account = claurst_core::config::ProviderConfig {
+            protocol: Some("anthropic".to_string()),
+            ..Default::default()
+        };
+
+        let with_account = models_for_account("my_gateway", Some(&account), &registry);
+        let catalog = models_for_provider_from_registry("anthropic", &registry);
+        assert_eq!(with_account.len(), catalog.len());
+        assert!(!with_account.is_empty(), "the fallback must not be empty");
+    }
+
+    #[test]
+    fn an_unconfigured_id_behaves_exactly_as_before() {
+        let registry = claurst_api::ModelRegistry::new();
+        let via_account = models_for_account("anthropic", None, &registry);
+        let direct = models_for_provider_from_registry("anthropic", &registry);
+        assert_eq!(via_account.len(), direct.len());
+    }
+
     #[test]
     fn models_for_provider_anthropic() {
         let registry = claurst_api::ModelRegistry::new();
