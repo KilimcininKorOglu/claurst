@@ -1816,6 +1816,10 @@ pub mod config {
                 None
             };
 
+            // A user-named account matches no env var, so every lookup that
+            // keys off a vendor asks about the protocol it speaks.
+            let protocol = self.vendor_id_for_account(provider_id);
+
             top_level_key
                 .filter(|key| !key.is_empty())
                 .or_else(|| {
@@ -1824,13 +1828,11 @@ pub mod config {
                         .filter(|key| !key.is_empty())
                 })
                 .or_else(|| {
-                    // A user-named account matches no env var, so ask about
-                    // the protocol it speaks.
-                    api_key_env_vars_for_provider(&self.vendor_id_for_account(provider_id))
+                    api_key_env_vars_for_provider(&protocol)
                         .iter()
                         .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
                 })
-                .or_else(|| crate::AuthStore::load().api_key_for(provider_id))
+                .or_else(|| crate::AuthStore::load().api_key_for_protocol(provider_id, &protocol))
                 // Support {env:VAR_NAME} patterns in the resolved value
                 .map(|key| substitute_env_vars(&key))
         }
@@ -1959,6 +1961,27 @@ pub mod config {
                 .get(account_id)
                 .map(|entry| entry.protocol_or(account_id))
                 .unwrap_or_else(|| account_id.to_string())
+        }
+
+        /// The account name to file a login under.
+        ///
+        /// Logging in again with the same identity refreshes that account in
+        /// place, because it is the same account and a suffixed copy would
+        /// leave a dead credential behind. A name already taken by an account
+        /// speaking a different protocol is a collision, and gets suffixed.
+        pub fn account_name_for_login(&self, login: &str, protocol: &str) -> String {
+            let slug = crate::accounts::slugify_profile_id(login);
+            let same_account = self
+                .provider_configs
+                .get(&slug)
+                .map(|entry| entry.protocol_or(&slug) == protocol)
+                .unwrap_or(true);
+            if same_account {
+                return slug;
+            }
+            crate::accounts::unique_account_name(&slug, |candidate| {
+                self.provider_configs.contains_key(candidate)
+            })
         }
 
         /// Resolve a model string onto the account that will serve it.
@@ -6990,6 +7013,54 @@ mod account_schema_tests {
     fn an_unconfigured_id_is_its_own_vendor() {
         let config = Config::default();
         assert_eq!(config.vendor_id_for_account("anthropic"), "anthropic");
+    }
+
+    #[test]
+    fn logging_in_again_refreshes_the_same_account() {
+        // The same GitHub login through the same protocol is the same account.
+        // A suffixed copy would leave the first credential behind, still
+        // listed and no longer refreshed.
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("kerem".to_string(), account(Some("github-copilot"), &[]));
+        assert_eq!(
+            config.account_name_for_login("kerem", "github-copilot"),
+            "kerem"
+        );
+    }
+
+    #[test]
+    fn a_second_login_gets_its_own_account() {
+        let config = Config::default();
+        assert_eq!(
+            config.account_name_for_login("someone-else", "github-copilot"),
+            "someone-else"
+        );
+    }
+
+    #[test]
+    fn a_name_taken_by_another_protocol_is_suffixed() {
+        // Two different vendors can hand out the same login name; the second
+        // must not inherit the first one's endpoint.
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("kerem".to_string(), account(Some("openai"), &[]));
+        assert_eq!(
+            config.account_name_for_login("kerem", "github-copilot"),
+            "kerem-2"
+        );
+    }
+
+    #[test]
+    fn a_login_that_cannot_be_a_name_is_slugified() {
+        let config = Config::default();
+        assert_eq!(
+            config.account_name_for_login("Kerem Yilmaz", "github-copilot"),
+            "kerem-yilmaz",
+            "whitespace and case would break the account/model separator"
+        );
     }
 
     #[test]

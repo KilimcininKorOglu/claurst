@@ -248,14 +248,25 @@ pub fn slugify_profile_id(raw: &str) -> String {
 
 /// If the requested id already exists, suffix with -2, -3, … until free.
 pub fn ensure_unique_profile_id(registry: &AccountRegistry, provider: &str, base: &str) -> String {
+    unique_account_name(base, |candidate| {
+        registry.get(provider, candidate).is_some()
+    })
+}
+
+/// Slugify `base` and suffix it with -2, -3, … until `taken` says it is free.
+///
+/// Accounts that live in `settings.json` are keyed by name rather than by
+/// profile, so they need the same collision rule without an
+/// [`AccountRegistry`] to ask.
+pub fn unique_account_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     let base = slugify_profile_id(base);
-    if registry.get(provider, &base).is_none() {
+    if !taken(&base) {
         return base;
     }
     let mut n = 2usize;
     loop {
         let candidate = format!("{}-{}", base, n);
-        if registry.get(provider, &candidate).is_none() {
+        if !taken(&candidate) {
             return candidate;
         }
         n += 1;

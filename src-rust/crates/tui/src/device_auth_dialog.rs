@@ -52,6 +52,14 @@ pub struct DeviceAuthDialogState {
     /// OAuth URL for browser-based flows (Codex). Shown in the dialog so the
     /// user can copy-paste it when automatic browser launch fails.
     pub auth_url: String,
+    /// Name to file the credential under, when the flow could work out which
+    /// account it belongs to.
+    ///
+    /// A GitHub token is opaque, so the login name comes from an extra call the
+    /// background task makes. `None` means the flow could not name the account
+    /// and the caller has to fall back to the provider id, which is what
+    /// happens when the identity call fails.
+    pub resolved_account: Option<String>,
 }
 
 impl Default for DeviceAuthDialogState {
@@ -72,6 +80,7 @@ impl DeviceAuthDialogState {
             device_code: String::new(),
             interval: 5,
             auth_url: String::new(),
+            resolved_account: None,
         }
     }
 
@@ -84,6 +93,7 @@ impl DeviceAuthDialogState {
         self.user_code.clear();
         self.verification_uri.clear();
         self.device_code.clear();
+        self.resolved_account = None;
     }
 
     /// Close and reset the dialog.
@@ -91,6 +101,7 @@ impl DeviceAuthDialogState {
         self.visible = false;
         self.status = DeviceAuthStatus::Idle;
         self.auth_url.clear();
+        self.resolved_account = None;
     }
 
     /// Switch to BrowserAuth status and store the URL so the dialog can
@@ -126,6 +137,12 @@ impl DeviceAuthDialogState {
         self.status = DeviceAuthStatus::Success(token);
     }
 
+    /// Mark the flow as successful and record the account the token belongs to.
+    pub fn set_success_for(&mut self, token: String, account_id: Option<String>) {
+        self.resolved_account = account_id;
+        self.status = DeviceAuthStatus::Success(token);
+    }
+
     /// Mark the flow as failed.
     pub fn set_error(&mut self, msg: String) {
         self.status = DeviceAuthStatus::Error(msg);
@@ -151,6 +168,12 @@ pub enum DeviceAuthEvent {
     GotBrowserUrl { url: String },
     /// Access token obtained — auth succeeded.
     TokenReceived(String),
+    /// Access token obtained and the account it belongs to was named.
+    ///
+    /// Separate from [`TokenReceived`](Self::TokenReceived) because only the
+    /// flows that can identify their account send it, and the rest must keep
+    /// filing the credential under the provider id.
+    TokenReceivedFor { token: String, account_id: String },
     /// Something went wrong.
     Error(String),
 }

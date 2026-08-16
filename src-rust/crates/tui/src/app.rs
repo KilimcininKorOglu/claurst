@@ -2386,6 +2386,11 @@ impl App {
         self.persist_account(account_id, protocol, None);
     }
 
+    /// The account name to file a login under.
+    fn account_name_for_login(&self, login: &str, protocol: &str) -> String {
+        self.config.account_name_for_login(login, protocol)
+    }
+
     fn persist_provider_and_model(&self) {
         let mut settings = Settings::load_sync().unwrap_or_default();
         settings.provider = self.config.provider.clone();
@@ -4037,10 +4042,26 @@ impl App {
                         } else {
                             claurst_core::StoredCredential::ApiKey { key: token }
                         };
-                        self.auth_store.set(&provider_id, credential);
+                        // File the credential under the account the flow
+                        // named, so a second login for the same vendor is a
+                        // second account rather than an overwrite. A flow that
+                        // could not name its account keeps using the provider
+                        // id, which is where its credential has always gone.
+                        let account_id = self
+                            .device_auth_dialog
+                            .resolved_account
+                            .clone()
+                            .map(|login| self.account_name_for_login(&login, &provider_id))
+                            .unwrap_or_else(|| provider_id.clone());
+                        if account_id != provider_id {
+                            self.persist_account_protocol(&account_id, &provider_id);
+                        }
+                        self.auth_store.set(&account_id, credential);
                         self.device_auth_pending = None;
                         self.device_auth_dialog.close();
-                        self.activate_provider(provider_id, provider_name, "Connected to");
+                        self.queue_model_sync(&account_id, false);
+                        self.pending_provider_reload = true;
+                        self.activate_provider(account_id, provider_name, "Connected to");
                         return false;
                     }
                 }

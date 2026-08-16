@@ -5022,8 +5022,31 @@ async fn run_interactive(
                                 .await
                                 {
                                     Ok(token) => {
-                                        let _ =
-                                            tx2.send(DeviceAuthEvent::TokenReceived(token)).await;
+                                        // Name the account after the GitHub
+                                        // login so a second Copilot account is
+                                        // filed separately instead of
+                                        // overwriting the first. The token is
+                                        // opaque, so the name has to be asked
+                                        // for; when that call fails the flow
+                                        // still completes under the provider
+                                        // id, which is what it always did.
+                                        let event =
+                                            match claurst_core::device_code::github_login(&token)
+                                                .await
+                                            {
+                                                Ok(login) => DeviceAuthEvent::TokenReceivedFor {
+                                                    token,
+                                                    account_id: login,
+                                                },
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "could not read the GitHub login for this \
+                                                     token ({e}); filing it under the provider id"
+                                                    );
+                                                    DeviceAuthEvent::TokenReceived(token)
+                                                }
+                                            };
+                                        let _ = tx2.send(event).await;
                                     }
                                     Err(e) => {
                                         let _ = tx2.send(DeviceAuthEvent::Error(e)).await;
@@ -5134,6 +5157,10 @@ async fn run_interactive(
                 }
                 DeviceAuthEvent::TokenReceived(token) => {
                     app.device_auth_dialog.set_success(token);
+                }
+                DeviceAuthEvent::TokenReceivedFor { token, account_id } => {
+                    app.device_auth_dialog
+                        .set_success_for(token, Some(account_id));
                 }
                 DeviceAuthEvent::Error(msg) => {
                     app.device_auth_dialog.set_error(msg);

@@ -96,3 +96,33 @@ pub async fn poll_for_token(
         }
     }
 }
+
+/// Ask GitHub which account a device-flow token belongs to.
+///
+/// A GitHub token is opaque, so unlike an OpenAI or Anthropic id_token it
+/// carries no identity to read locally. The login name is what lets a second
+/// Copilot account be filed under its own name instead of overwriting the
+/// first. The `read:user` scope the device flow requests is enough for this
+/// call.
+pub async fn github_login(token: &str) -> Result<String, String> {
+    let resp = reqwest::Client::new()
+        .get("https://api.github.com/user")
+        .header("Accept", "application/vnd.github+json")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", DEVICE_FLOW_USER_AGENT)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("GitHub returned {status} for the signed-in user"));
+    }
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    json.get("login")
+        .and_then(|value| value.as_str())
+        .filter(|login| !login.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "GitHub did not report a login name".to_string())
+}

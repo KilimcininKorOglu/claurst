@@ -158,8 +158,20 @@ impl AuthStore {
     /// Get the API key for a provider, checking stored credentials first then
     /// falling back to the relevant environment variable.
     pub fn api_key_for(&self, provider_id: &str) -> Option<String> {
+        self.api_key_for_protocol(provider_id, provider_id)
+    }
+
+    /// Get the API key stored under `account_id`, reading it as a credential of
+    /// `protocol`.
+    ///
+    /// The two differ whenever the user named the account: the credential is
+    /// filed under the name they chose, while how to read it and which env var
+    /// stands in for it are properties of the wire format it speaks. Passing
+    /// the account name as both is what [`api_key_for`](Self::api_key_for)
+    /// does, which is right for an account named after its vendor.
+    pub fn api_key_for_protocol(&self, account_id: &str, protocol: &str) -> Option<String> {
         // Check stored credentials first
-        if let Some(stored) = self.get(provider_id) {
+        if let Some(stored) = self.get(account_id) {
             match stored {
                 StoredCredential::ApiKey { key } => {
                     if !key.is_empty() {
@@ -168,7 +180,7 @@ impl AuthStore {
                 }
                 StoredCredential::OAuthToken {
                     access, refresh, ..
-                } if provider_id == "github-copilot" => {
+                } if protocol == "github-copilot" => {
                     if !refresh.is_empty() {
                         return Some(refresh.clone());
                     }
@@ -187,7 +199,7 @@ impl AuthStore {
         // were exported via env vars look "configured" to the dialog but
         // resolve to empty at request time. If you add a provider there,
         // mirror its env var here.
-        let env_var = match provider_id {
+        let env_var = match protocol {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openai" => "OPENAI_API_KEY",
             "google" => "GOOGLE_API_KEY",
@@ -264,6 +276,32 @@ mod tests {
         assert_eq!(
             store.api_key_for("github-copilot").as_deref(),
             Some("refresh-token")
+        );
+    }
+
+    #[test]
+    fn a_copilot_token_is_read_under_the_account_it_was_filed_under() {
+        // A second Copilot login is stored under its GitHub name, so the OAuth
+        // branch has to key off the protocol rather than the account name.
+        let mut store = AuthStore::default();
+        store.credentials.insert(
+            "kerem".to_string(),
+            StoredCredential::OAuthToken {
+                access: "access-token".to_string(),
+                refresh: "refresh-token".to_string(),
+                expires: 0,
+            },
+        );
+
+        assert_eq!(
+            store
+                .api_key_for_protocol("kerem", "github-copilot")
+                .as_deref(),
+            Some("refresh-token")
+        );
+        assert!(
+            store.api_key_for("kerem").is_none(),
+            "without the protocol there is nothing that says how to read it"
         );
     }
 
