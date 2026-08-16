@@ -7,18 +7,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// A stored credential for a provider.
+/// A stored credential for an account.
+///
+/// Every credential the product holds lives here, whatever its shape, so an
+/// account is one entry in one file rather than a registry entry plus a token
+/// file of its own.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StoredCredential {
     #[serde(rename = "api")]
     ApiKey { key: String },
+    /// GitHub Copilot's device-flow token.
     #[serde(rename = "oauth")]
     OAuthToken {
         access: String,
         refresh: String,
         expires: u64,
     },
+    /// Anthropic's OAuth tokens, from either the claude.ai or the console flow.
+    ///
+    /// Carries its own fields rather than collapsing into `OAuthToken`, because
+    /// the scope list decides whether the credential is a Bearer token or a
+    /// minted API key, and the identity fields name the account.
+    #[serde(rename = "anthropic-oauth")]
+    AnthropicOAuth(crate::oauth::OAuthTokens),
+    /// OpenAI Codex OAuth tokens.
+    #[serde(rename = "codex-oauth")]
+    CodexOAuth(crate::oauth_config::CodexTokens),
 }
 
 /// Persistent credential store backed by `~/.claurst/auth.json`.
@@ -104,6 +119,55 @@ impl AuthStore {
         self.save();
     }
 
+    /// The Anthropic OAuth tokens stored for `account_id`, if that is what the
+    /// account holds.
+    pub fn anthropic_tokens(&self, account_id: &str) -> Option<&crate::oauth::OAuthTokens> {
+        match self.get(account_id) {
+            Some(StoredCredential::AnthropicOAuth(tokens)) => Some(tokens),
+            _ => None,
+        }
+    }
+
+    /// The Codex OAuth tokens stored for `account_id`, if that is what the
+    /// account holds.
+    pub fn codex_tokens(&self, account_id: &str) -> Option<&crate::oauth_config::CodexTokens> {
+        match self.get(account_id) {
+            Some(StoredCredential::CodexOAuth(tokens)) => Some(tokens),
+            _ => None,
+        }
+    }
+
+    /// Store Anthropic OAuth tokens for `account_id` (persists immediately).
+    pub fn set_anthropic_tokens(&mut self, account_id: &str, tokens: crate::oauth::OAuthTokens) {
+        self.set(account_id, StoredCredential::AnthropicOAuth(tokens));
+    }
+
+    /// Store Codex OAuth tokens for `account_id` (persists immediately).
+    pub fn set_codex_tokens(&mut self, account_id: &str, tokens: crate::oauth_config::CodexTokens) {
+        self.set(account_id, StoredCredential::CodexOAuth(tokens));
+    }
+
+    /// Every account holding a credential of `protocol`.
+    ///
+    /// Reads the credential's own shape rather than a separate registry, so an
+    /// account cannot be listed without a credential or hold one without being
+    /// listed.
+    pub fn accounts_for_protocol(&self, protocol: &str) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .credentials
+            .iter()
+            .filter(|(_, cred)| match (protocol, cred) {
+                ("anthropic", StoredCredential::AnthropicOAuth(_)) => true,
+                ("codex", StoredCredential::CodexOAuth(_)) => true,
+                ("github-copilot", StoredCredential::OAuthToken { .. }) => true,
+                _ => false,
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
     /// Move every plaintext `providers.<account>.api_key` out of
     /// `settings.json` and into this store.
     ///
@@ -186,6 +250,23 @@ impl AuthStore {
                     }
                     if !access.is_empty() {
                         return Some(access.clone());
+                    }
+                }
+                // The claude.ai flow presents the access token as a Bearer and
+                // the console flow presents the API key it minted, so the
+                // credential to hand out is whichever the scopes call for.
+                //
+                // Expiry is not checked here: this is a synchronous read and
+                // refreshing needs the network. The caller that can await goes
+                // through `oauth::resolve_auth_for_account`.
+                StoredCredential::AnthropicOAuth(tokens) => {
+                    if let Some(credential) = tokens.effective_credential() {
+                        return Some(credential.to_string());
+                    }
+                }
+                StoredCredential::CodexOAuth(tokens) => {
+                    if !tokens.access_token.is_empty() {
+                        return Some(tokens.access_token.clone());
                     }
                 }
                 _ => {}
@@ -277,6 +358,114 @@ mod tests {
             store.api_key_for("github-copilot").as_deref(),
             Some("refresh-token")
         );
+    }
+
+    fn anthropic_tokens(scopes: &[&str], api_key: Option<&str>) -> crate::oauth::OAuthTokens {
+        crate::oauth::OAuthTokens {
+            access_token: "access-token".to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            email: Some("work@example.com".to_string()),
+            api_key: api_key.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn every_credential_shape_survives_a_round_trip() {
+        // The store is now the only place a credential lives, so a field lost
+        // in serialisation is a credential the account can never present.
+        let mut store = AuthStore::default();
+        store.credentials.insert(
+            "gateway".to_string(),
+            StoredCredential::ApiKey { key: "sk-1".into() },
+        );
+        store.credentials.insert(
+            "kerem".to_string(),
+            StoredCredential::OAuthToken {
+                access: "gho-a".into(),
+                refresh: "gho-r".into(),
+                expires: 7,
+            },
+        );
+        store.credentials.insert(
+            "work".to_string(),
+            StoredCredential::AnthropicOAuth(anthropic_tokens(&["user:inference"], None)),
+        );
+        store.credentials.insert(
+            "chatgpt".to_string(),
+            StoredCredential::CodexOAuth(crate::oauth_config::CodexTokens {
+                access_token: "codex-a".into(),
+                refresh_token: Some("codex-r".into()),
+                account_id: Some("acct-1".into()),
+                expires_at: Some(99),
+            }),
+        );
+
+        let json = serde_json::to_string(&store).expect("serialise");
+        let back: AuthStore = serde_json::from_str(&json).expect("deserialise");
+
+        assert_eq!(back.api_key_for("gateway").as_deref(), Some("sk-1"));
+        let tokens = back.anthropic_tokens("work").expect("anthropic account");
+        assert_eq!(tokens.email.as_deref(), Some("work@example.com"));
+        assert_eq!(tokens.scopes, vec!["user:inference".to_string()]);
+        let codex = back.codex_tokens("chatgpt").expect("codex account");
+        assert_eq!(codex.refresh_token.as_deref(), Some("codex-r"));
+        assert_eq!(codex.expires_at, Some(99));
+    }
+
+    #[test]
+    fn an_anthropic_account_presents_what_its_scopes_call_for() {
+        let mut store = AuthStore::default();
+        store.credentials.insert(
+            "subscription".to_string(),
+            StoredCredential::AnthropicOAuth(anthropic_tokens(&["user:inference"], None)),
+        );
+        store.credentials.insert(
+            "console".to_string(),
+            StoredCredential::AnthropicOAuth(anthropic_tokens(
+                &["org:create_api_key"],
+                Some("sk-ant-minted"),
+            )),
+        );
+
+        assert_eq!(
+            store
+                .api_key_for_protocol("subscription", "anthropic")
+                .as_deref(),
+            Some("access-token"),
+            "a claude.ai token is presented as the Bearer itself"
+        );
+        assert_eq!(
+            store
+                .api_key_for_protocol("console", "anthropic")
+                .as_deref(),
+            Some("sk-ant-minted"),
+            "a console account presents the key it minted, not the access token"
+        );
+    }
+
+    #[test]
+    fn accounts_are_grouped_by_the_credential_they_hold() {
+        let mut store = AuthStore::default();
+        store.credentials.insert(
+            "gateway".to_string(),
+            StoredCredential::ApiKey { key: "sk-1".into() },
+        );
+        store.credentials.insert(
+            "personal".to_string(),
+            StoredCredential::AnthropicOAuth(anthropic_tokens(&["user:inference"], None)),
+        );
+        store.credentials.insert(
+            "work".to_string(),
+            StoredCredential::AnthropicOAuth(anthropic_tokens(&["user:inference"], None)),
+        );
+
+        assert_eq!(
+            store.accounts_for_protocol("anthropic"),
+            vec!["personal".to_string(), "work".to_string()]
+        );
+        assert!(store.accounts_for_protocol("codex").is_empty());
     }
 
     #[test]
