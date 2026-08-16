@@ -330,10 +330,13 @@ impl LlmProvider for AnthropicProvider {
                     id: ModelId::new(&m.id),
                     provider_id: self.id.clone(),
                     name,
-                    // Sensible Claude defaults; the picker overlays richer
-                    // context/cost from the models.dev catalog for known ids.
-                    context_window: 200_000,
-                    max_output_tokens: 64_000,
+                    // What the endpoint reports wins. A gateway can front a
+                    // model with a window the catalogue has no row for, and
+                    // stating a default as though it were measured showed
+                    // "200K context" for a 1M endpoint. The defaults stay for
+                    // endpoints that report nothing.
+                    context_window: m.context_window.unwrap_or(200_000),
+                    max_output_tokens: m.max_tokens.unwrap_or(64_000),
                     ..Default::default()
                 }
             })

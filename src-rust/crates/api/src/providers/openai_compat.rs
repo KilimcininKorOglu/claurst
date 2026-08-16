@@ -1029,26 +1029,35 @@ impl LlmProvider for OpenAiCompatProvider {
         };
 
         let provider_id = self.id.clone();
-        let models: Vec<ModelInfo> = data
-            .iter()
-            .filter_map(|m| {
-                let id = m.get("id").and_then(|v| v.as_str())?;
-                Some(ModelInfo {
-                    id: ModelId::new(id),
-                    provider_id: provider_id.clone(),
-                    name: id.to_string(),
-                    context_window: match id {
-                        "gpt-5" | "gpt-5.4" | "gpt-5.2" | "gpt-5-mini" | "gpt-5-nano"
-                        | "gpt-5-chat-latest" | "gpt-5.2-codex" | "gpt-5.1-codex"
-                        | "gpt-5.1-codex-mini" | "gpt-5.1-codex-max" => 400_000,
-                        "o3" | "o3-mini" | "o4-mini" => 200_000,
-                        _ => 128_000,
-                    },
-                    max_output_tokens: 16_384,
-                    ..Default::default()
+        let models: Vec<ModelInfo> =
+            data.iter()
+                .filter_map(|m| {
+                    let id = m.get("id").and_then(|v| v.as_str())?;
+                    // What the endpoint reports wins over the id-keyed table
+                    // below, which cannot know a model a gateway proxies.
+                    let reported = |keys: &[&str]| -> Option<u32> {
+                        keys.iter()
+                            .find_map(|key| m.get(*key).and_then(|v| v.as_u64()))
+                            .and_then(|v| u32::try_from(v).ok())
+                    };
+                    Some(ModelInfo {
+                        id: ModelId::new(id),
+                        provider_id: provider_id.clone(),
+                        name: id.to_string(),
+                        context_window: reported(&["context_window", "max_input_tokens"])
+                            .unwrap_or(match id {
+                                "gpt-5" | "gpt-5.4" | "gpt-5.2" | "gpt-5-mini" | "gpt-5-nano"
+                                | "gpt-5-chat-latest" | "gpt-5.2-codex" | "gpt-5.1-codex"
+                                | "gpt-5.1-codex-mini" | "gpt-5.1-codex-max" => 400_000,
+                                "o3" | "o3-mini" | "o4-mini" => 200_000,
+                                _ => 128_000,
+                            }),
+                        max_output_tokens: reported(&["max_tokens", "max_output_tokens"])
+                            .unwrap_or(16_384),
+                        ..Default::default()
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
         Ok(models)
     }

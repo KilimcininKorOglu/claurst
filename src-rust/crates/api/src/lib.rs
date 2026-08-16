@@ -480,6 +480,17 @@ pub struct AvailableModel {
     /// endpoint looked like it served nothing.
     #[serde(default, deserialize_with = "deserialize_created_at")]
     pub created_at: Option<String>,
+    /// Total context window the endpoint reports for this model.
+    ///
+    /// Only the endpoint knows this. A gateway may front a model with a
+    /// different window than the vendor publishes, and the catalogue cannot
+    /// know a model it has never heard of, so a reported value is worth more
+    /// than any local default.
+    #[serde(default, alias = "max_input_tokens")]
+    pub context_window: Option<u32>,
+    /// Most tokens the endpoint will emit in one response for this model.
+    #[serde(default, alias = "max_output_tokens")]
+    pub max_tokens: Option<u32>,
 }
 
 /// Accept either an RFC 3339 string or unix seconds for `created_at`.
@@ -1771,6 +1782,38 @@ mod available_model_tests {
             stamp.starts_with("2024-05-13"),
             "unix seconds were not normalised: {stamp}"
         );
+    }
+
+    #[test]
+    fn the_endpoint_s_own_limits_are_read() {
+        // The gateway reports these; claurst used to drop them and then state
+        // a 200K default as though it had been measured.
+        let body = r#"{"data":[
+            {"id":"claude-opus-5","context_window":1000000,"max_tokens":128000}
+        ]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].context_window, Some(1_000_000));
+        assert_eq!(parsed.data[0].max_tokens, Some(128_000));
+    }
+
+    #[test]
+    fn the_alternate_spellings_are_accepted() {
+        let body = r#"{"data":[
+            {"id":"m","max_input_tokens":922000,"max_output_tokens":64000}
+        ]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].context_window, Some(922_000));
+        assert_eq!(parsed.data[0].max_tokens, Some(64_000));
+    }
+
+    #[test]
+    fn an_endpoint_that_reports_no_limits_leaves_them_unset() {
+        // None is what lets the caller keep its own default instead of
+        // recording a zero as if the endpoint had said so.
+        let body = r#"{"data":[{"id":"m"}]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert!(parsed.data[0].context_window.is_none());
+        assert!(parsed.data[0].max_tokens.is_none());
     }
 
     #[test]
