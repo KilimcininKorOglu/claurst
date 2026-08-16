@@ -471,8 +471,38 @@ mod sse_parser {
 pub struct AvailableModel {
     pub id: String,
     pub display_name: Option<String>,
-    /// Unix timestamp of when the model was created (seconds).
-    pub created_at: Option<i64>,
+    /// When the model first appeared, as an RFC 3339 timestamp.
+    ///
+    /// Anthropic sends a string here and OpenAI-compatible endpoints send unix
+    /// seconds, so both are accepted and normalised. Typing it as one or the
+    /// other made every response from the other shape fail to parse, and the
+    /// only caller turns that failure into an empty model list, so a whole
+    /// endpoint looked like it served nothing.
+    #[serde(default, deserialize_with = "deserialize_created_at")]
+    pub created_at: Option<String>,
+}
+
+/// Accept either an RFC 3339 string or unix seconds for `created_at`.
+fn deserialize_created_at<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Wire {
+        Text(String),
+        Epoch(i64),
+    }
+
+    Ok(match Option::<Wire>::deserialize(deserializer)? {
+        Some(Wire::Text(text)) => Some(text),
+        Some(Wire::Epoch(seconds)) => chrono::DateTime::from_timestamp(seconds, 0)
+            .map(|stamp| stamp.to_rfc3339())
+            .or(Some(seconds.to_string())),
+        None => None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1687,5 +1717,67 @@ mod tests {
         // the generous default floor.
         assert!(stream_idle_timeout() >= request_timeout());
         assert!(stream_idle_timeout() >= Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS));
+    }
+}
+
+#[cfg(test)]
+mod available_model_tests {
+    //! `GET /v1/models` is answered in two shapes. Getting the timestamp type
+    //! wrong fails the whole response, and the only caller turns that into an
+    //! empty model list, so the endpoint looks like it serves nothing.
+    use super::AvailableModel;
+
+    #[derive(serde::Deserialize)]
+    struct ModelsResponse {
+        data: Vec<AvailableModel>,
+    }
+
+    #[test]
+    fn an_anthropic_response_parses() {
+        // Verbatim shape of an Anthropic-compatible gateway's reply: the
+        // timestamp arrives as a string, and `created` sits beside it.
+        let body = r#"{"object":"list","data":[
+            {"id":"claude-opus-5","object":"model","type":"model","created":0,
+             "created_at":"1970-01-01T00:00:00Z","owned_by":"anthropic",
+             "display_name":"Claude Opus 5","context_window":1000000}
+        ]}"#;
+
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data.len(), 1);
+        assert_eq!(parsed.data[0].id, "claude-opus-5");
+        assert_eq!(
+            parsed.data[0].display_name.as_deref(),
+            Some("Claude Opus 5")
+        );
+        assert_eq!(
+            parsed.data[0].created_at.as_deref(),
+            Some("1970-01-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn an_openai_style_epoch_parses_too() {
+        let body = r#"{"data":[{"id":"gpt-4o","created":1715558400}]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].id, "gpt-4o");
+    }
+
+    #[test]
+    fn an_epoch_in_created_at_is_normalised_to_rfc3339() {
+        let body = r#"{"data":[{"id":"gpt-4o","created_at":1715558400}]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        let stamp = parsed.data[0].created_at.as_deref().expect("kept");
+        assert!(
+            stamp.starts_with("2024-05-13"),
+            "unix seconds were not normalised: {stamp}"
+        );
+    }
+
+    #[test]
+    fn a_missing_timestamp_is_not_an_error() {
+        let body = r#"{"data":[{"id":"local-model"}]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].id, "local-model");
+        assert!(parsed.data[0].created_at.is_none());
     }
 }

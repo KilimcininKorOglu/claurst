@@ -310,7 +310,17 @@ impl LlmProvider for AnthropicProvider {
     async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
         let available = match self.client.fetch_available_models().await {
             Ok(m) => m,
-            Err(_) => return Ok(Vec::new()),
+            Err(err) => {
+                // The empty vec is the picker's fallback to the catalog, but
+                // swallowing the reason makes a misconfigured gateway look
+                // like an endpoint that simply serves nothing.
+                tracing::warn!(
+                    provider = %self.id,
+                    error = %err,
+                    "model discovery failed"
+                );
+                return Ok(Vec::new());
+            }
         };
         let models = available
             .into_iter()
