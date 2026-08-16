@@ -199,7 +199,13 @@ pub fn render_custom_provider_dialog(
     };
 
     let url_text = if state.url_input.is_empty() {
-        "https://your-openai-compatible-endpoint/v1".to_string()
+        // The same dialog serves both custom protocols, so the hint follows
+        // the one that was picked instead of always naming OpenAI's.
+        if state.provider_id == "custom-anthropic" {
+            "https://your-anthropic-compatible-endpoint".to_string()
+        } else {
+            "https://your-openai-compatible-endpoint/v1".to_string()
+        }
     } else {
         state.url_input.clone()
     };
