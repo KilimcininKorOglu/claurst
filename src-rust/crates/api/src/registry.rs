@@ -374,9 +374,10 @@ pub fn provider_from_config(
         "github-copilot" => {
             api_key.map(|key| Arc::new(CopilotProvider::new(key)) as Arc<dyn LlmProvider>)
         }
-        "codex" | "openai-codex" => {
-            CodexProvider::from_stored().map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
-        }
+        // Read the named account's own tokens. `from_stored` would hand every
+        // Codex account the active account's token.
+        "codex" | "openai-codex" => CodexProvider::from_account(provider_id)
+            .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>),
         _ => api_key.and_then(|key| provider_from_key(provider_id, key)),
     }
 }
@@ -425,6 +426,17 @@ impl ProviderRegistry {
     pub fn register(&mut self, provider: Arc<dyn LlmProvider>) -> &mut Self {
         let id = provider.id().clone();
         self.providers.insert(id, provider);
+        self
+    }
+
+    /// Register a provider under an account name instead of its vendor id.
+    ///
+    /// A user-named account is addressed by that name everywhere else:
+    /// `"<account>/<model>"`, `settings.provider`, the `/model` picker. Filing
+    /// it under the implementation's own id hides it from all three, and two
+    /// accounts of the same vendor collapse into one entry.
+    pub fn register_as(&mut self, account_id: &str, provider: Arc<dyn LlmProvider>) -> &mut Self {
+        self.providers.insert(ProviderId::new(account_id), provider);
         self
     }
 
@@ -520,7 +532,7 @@ impl ProviderRegistry {
 
         for provider_id in configured_provider_ids {
             if let Some(provider) = provider_from_config(config, &provider_id) {
-                registry.register(provider);
+                registry.register_as(&provider_id, provider);
             }
         }
 
@@ -1332,5 +1344,110 @@ mod custom_anthropic_tests {
         assert!(registry
             .get(&ProviderId::new(ProviderId::CUSTOM_ANTHROPIC))
             .is_some());
+    }
+}
+
+#[cfg(test)]
+mod account_registration_tests {
+    //! An account is addressed by its own name. The registry has to key on
+    //! that name, or the `/model` picker and `"<account>/<model>"` routing
+    //! never see accounts whose implementation reports a vendor id.
+    use super::*;
+    use claurst_core::config::{Config, ProviderConfig};
+    use std::sync::Mutex as StdMutex;
+
+    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self { saved, _dir: dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    fn account(protocol: &str) -> ProviderConfig {
+        ProviderConfig {
+            protocol: Some(protocol.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_codex_account_is_filed_under_its_own_name() {
+        let lock = ENV_LOCK.lock();
+        let _lock = match lock {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let tokens = claurst_core::oauth_config::CodexTokens {
+            access_token: "codex-token".to_string(),
+            ..Default::default()
+        };
+        claurst_core::oauth_config::save_codex_tokens_for_account(&tokens, "chatgpt")
+            .expect("store tokens");
+
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("chatgpt".to_string(), account("codex"));
+
+        let registry = ProviderRegistry::from_config(&config, ClientConfig::default());
+
+        assert!(
+            registry.get(&ProviderId::new("chatgpt")).is_some(),
+            "the account name must be the key, got {:?}",
+            registry.provider_ids()
+        );
+    }
+
+    #[test]
+    fn two_accounts_of_one_vendor_stay_separate() {
+        let lock = ENV_LOCK.lock();
+        let _lock = match lock {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut store = claurst_core::AuthStore::load();
+        for (account_id, key) in [("day-job", "gho_day"), ("side-project", "gho_side")] {
+            store.set(
+                account_id,
+                claurst_core::auth_store::StoredCredential::ApiKey {
+                    key: key.to_string(),
+                },
+            );
+        }
+
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("day-job".to_string(), account("github-copilot"));
+        config
+            .provider_configs
+            .insert("side-project".to_string(), account("github-copilot"));
+
+        let registry = ProviderRegistry::from_config(&config, ClientConfig::default());
+
+        assert!(registry.get(&ProviderId::new("day-job")).is_some());
+        assert!(registry.get(&ProviderId::new("side-project")).is_some());
     }
 }
