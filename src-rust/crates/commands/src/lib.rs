@@ -73,7 +73,7 @@ pub enum CommandResult {
     /// Trigger the OAuth login flow for a specific provider with optional
     /// human-friendly label for the new account profile.
     ///
-    /// `provider` is one of `claurst_core::accounts::PROVIDER_ANTHROPIC` or
+    /// `provider` is one of `claurst_core::ProviderId::ANTHROPIC` or
     /// `PROVIDER_CODEX`. `login_with_claude_ai` is only meaningful for
     /// Anthropic.
     StartLoginForProvider {
@@ -2088,7 +2088,7 @@ mod tests {
                 login_with_claude_ai,
                 label,
             } => {
-                assert_eq!(provider, claurst_core::accounts::PROVIDER_ANTHROPIC);
+                assert_eq!(provider, claurst_core::ProviderId::ANTHROPIC);
                 assert!(login_with_claude_ai);
                 assert!(label.is_none());
             }
@@ -2107,7 +2107,7 @@ mod tests {
                 login_with_claude_ai,
                 ..
             } => {
-                assert_eq!(provider, claurst_core::accounts::PROVIDER_ANTHROPIC);
+                assert_eq!(provider, claurst_core::ProviderId::ANTHROPIC);
                 assert!(!login_with_claude_ai);
             }
             other => panic!("expected StartLoginForProvider, got {:?}", other),
@@ -2123,7 +2123,7 @@ mod tests {
             CommandResult::StartLoginForProvider {
                 provider, label, ..
             } => {
-                assert_eq!(provider, claurst_core::accounts::PROVIDER_CODEX);
+                assert_eq!(provider, claurst_core::ProviderId::CODEX);
                 assert_eq!(label.as_deref(), Some("work"));
             }
             other => panic!("expected StartLoginForProvider, got {:?}", other),

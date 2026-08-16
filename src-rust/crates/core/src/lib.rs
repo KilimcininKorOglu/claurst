@@ -1919,15 +1919,11 @@ pub mod config {
                 return Some((key, false));
             }
 
-            let tokens = crate::oauth::OAuthTokens::load().await?;
-
-            // Read the active profile *after* `load()`, which migrates a legacy
-            // token file into a profile and marks it active on first read. A
-            // refresh has to write back to the profile the tokens came from.
-            let active = crate::accounts::AccountRegistry::load()
-                .active(crate::accounts::PROVIDER_ANTHROPIC)
-                .map(String::from);
-            let tokens = tokens.refreshed_into(active.as_deref()).await;
+            // The active account, when it holds Anthropic OAuth tokens. A
+            // refresh has to write back to the account the tokens came from.
+            let active = self.provider.clone()?;
+            let tokens = crate::oauth::OAuthTokens::load_for_account(&active).await?;
+            let tokens = tokens.refreshed_into(Some(&active)).await;
 
             tokens
                 .effective_credential()

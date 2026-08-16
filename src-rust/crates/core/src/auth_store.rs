@@ -64,6 +64,19 @@ struct LegacyProviderAccounts {
     profiles: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+/// The protocol a credential's own shape implies, for an account that has no
+/// `providers` entry yet.
+///
+/// An API key says nothing about its vendor, so it implies nothing.
+fn implied_protocol(credential: &StoredCredential) -> Option<&'static str> {
+    match credential {
+        StoredCredential::AnthropicOAuth(_) => Some(crate::provider_id::ProviderId::ANTHROPIC),
+        StoredCredential::CodexOAuth(_) => Some(crate::provider_id::ProviderId::CODEX),
+        StoredCredential::OAuthToken { .. } => Some("github-copilot"),
+        StoredCredential::ApiKey { .. } => None,
+    }
+}
+
 /// The token file each provider wrote inside a profile directory.
 fn token_file_name(protocol: &str) -> &'static str {
     match protocol {
@@ -254,22 +267,20 @@ impl AuthStore {
         self.set(account_id, StoredCredential::CodexOAuth(tokens));
     }
 
-    /// Every account holding a credential of `protocol`.
+    /// Every account holding a credential and speaking `protocol`.
     ///
-    /// Reads the credential's own shape rather than a separate registry, so an
-    /// account cannot be listed without a credential or hold one without being
-    /// listed.
+    /// An account's protocol is declared by its `providers` entry, so that is
+    /// asked first. An account with a credential but no entry falls back to
+    /// what its credential shape implies, which is what a login writes before
+    /// the entry exists.
     pub fn accounts_for_protocol(&self, protocol: &str) -> Vec<String> {
+        let settings = crate::config::Settings::load_sync().unwrap_or_default();
         let mut ids: Vec<String> = self
             .credentials
             .iter()
-            .filter(|(_, cred)| {
-                matches!(
-                    (protocol, cred),
-                    ("anthropic", StoredCredential::AnthropicOAuth(_))
-                        | ("codex", StoredCredential::CodexOAuth(_))
-                        | ("github-copilot", StoredCredential::OAuthToken { .. })
-                )
+            .filter(|(id, cred)| match settings.providers.get(*id) {
+                Some(entry) => entry.protocol_or(id) == protocol,
+                None => implied_protocol(cred) == Some(protocol),
             })
             .map(|(id, _)| id.clone())
             .collect();

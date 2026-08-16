@@ -34,9 +34,9 @@ impl SlashCommand for LoginCommand {
         let label = parse_label_arg(&tokens);
 
         let provider = if use_codex {
-            claurst_core::accounts::PROVIDER_CODEX
+            claurst_core::ProviderId::CODEX
         } else {
-            claurst_core::accounts::PROVIDER_ANTHROPIC
+            claurst_core::ProviderId::ANTHROPIC
         };
 
         CommandResult::StartLoginForProvider {
@@ -45,6 +45,19 @@ impl SlashCommand for LoginCommand {
             label,
         }
     }
+}
+
+/// Drop every account speaking `protocol`: its credential and its `providers`
+/// entry. Returns how many were removed.
+fn forget_every_account(protocol: &str) -> usize {
+    let mut store = claurst_core::AuthStore::load();
+    let ids = store.accounts_for_protocol(protocol);
+    for id in &ids {
+        store.credentials.remove(id);
+        let _ = claurst_core::config::forget_account(id);
+    }
+    store.save();
+    ids.len()
 }
 
 fn parse_label_arg(tokens: &[&str]) -> Option<String> {
@@ -84,18 +97,10 @@ impl SlashCommand for LogoutCommand {
 
         if use_codex {
             if purge_all {
-                let mut registry = claurst_core::accounts::AccountRegistry::load();
-                let ids: Vec<String> = registry
-                    .list(claurst_core::accounts::PROVIDER_CODEX)
-                    .into_iter()
-                    .map(|p| p.id)
-                    .collect();
-                for id in &ids {
-                    let _ = registry.remove(claurst_core::accounts::PROVIDER_CODEX, id);
-                }
+                let removed = forget_every_account(claurst_core::ProviderId::CODEX);
                 return CommandResult::Message(format!(
                     "Removed {} stored Codex account(s).",
-                    ids.len()
+                    removed
                 ));
             }
             if let Err(e) = claurst_core::oauth_config::clear_codex_tokens() {
@@ -106,15 +111,7 @@ impl SlashCommand for LogoutCommand {
 
         // Anthropic logout.
         if purge_all {
-            let mut registry = claurst_core::accounts::AccountRegistry::load();
-            let ids: Vec<String> = registry
-                .list(claurst_core::accounts::PROVIDER_ANTHROPIC)
-                .into_iter()
-                .map(|p| p.id)
-                .collect();
-            for id in &ids {
-                let _ = registry.remove(claurst_core::accounts::PROVIDER_ANTHROPIC, id);
-            }
+            let removed = forget_every_account(claurst_core::ProviderId::ANTHROPIC);
             let mut settings = claurst_core::config::Settings::load()
                 .await
                 .unwrap_or_default();
@@ -123,7 +120,7 @@ impl SlashCommand for LogoutCommand {
             ctx.config.api_key = None;
             return CommandResult::Message(format!(
                 "Removed {} stored Anthropic account(s) and cleared API key.",
-                ids.len()
+                removed
             ));
         }
 
@@ -152,44 +149,88 @@ impl SlashCommand for AccountsCommand {
         "accounts"
     }
     fn description(&self) -> &str {
-        "List stored Anthropic and Codex accounts"
+        "List every stored account"
     }
     fn help(&self) -> &str {
         "Usage: /accounts\n\n\
-         Lists every stored Anthropic and Codex account along with the\n\
-         currently active one (marked with `*`). Use /switch to change\n\
-         accounts, /login to add a new one, /logout to remove one."
+         Lists every account that holds a credential, grouped by the protocol\n\
+         it speaks, with the active one marked `*`. Use /switch to change the\n\
+         active account, /connect or /login to add one, /logout to remove one."
     }
 
-    async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        let registry = claurst_core::accounts::AccountRegistry::load();
-        let mut out = String::new();
-        for (provider, label) in [
-            (claurst_core::accounts::PROVIDER_ANTHROPIC, "Anthropic"),
-            (claurst_core::accounts::PROVIDER_CODEX, "Codex"),
-        ] {
-            let profiles = registry.list(provider);
-            let active = registry.active(provider);
-            if profiles.is_empty() {
-                out.push_str(&format!("{}: (no accounts stored)\n", label));
-                continue;
-            }
-            out.push_str(&format!("{}:\n", label));
-            for p in profiles {
-                let marker = if active == Some(&p.id) { "*" } else { " " };
-                let email = p.email.as_deref().unwrap_or("");
-                let tier = p
-                    .subscription_tier
-                    .as_deref()
-                    .map(|t| format!(" [{}]", t))
-                    .unwrap_or_default();
-                out.push_str(&format!("  {} {}{}  {}\n", marker, p.id, tier, email));
-            }
+    async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
+        let store = claurst_core::AuthStore::load();
+        let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+        let active = ctx
+            .config
+            .provider
+            .clone()
+            .or_else(|| settings.provider.clone());
+
+        // One row per account, grouped by protocol. Metadata comes from the
+        // credential itself, because that is the only place it is stored.
+        let mut by_protocol: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for (account_id, credential) in &store.credentials {
+            let protocol = settings
+                .providers
+                .get(account_id)
+                .map(|entry| entry.protocol_or(account_id))
+                .unwrap_or_else(|| account_id.clone());
+            let marker = if active.as_deref() == Some(account_id.as_str()) {
+                "*"
+            } else {
+                " "
+            };
+            by_protocol.entry(protocol).or_default().push(format!(
+                "  {} {}{}",
+                marker,
+                account_id,
+                describe(credential)
+            ));
         }
-        if out.is_empty() {
-            out.push_str("No accounts stored. Use /login to add one.");
+
+        if by_protocol.is_empty() {
+            return CommandResult::Message(
+                "No accounts stored. Use /connect to add one.".to_string(),
+            );
+        }
+
+        let mut out = String::new();
+        for (protocol, mut rows) in by_protocol {
+            rows.sort();
+            out.push_str(&format!("{}:\n", protocol));
+            for row in rows {
+                out.push_str(&row);
+                out.push('\n');
+            }
         }
         CommandResult::Message(out.trim_end().to_string())
+    }
+}
+
+/// The identity a credential carries, for the `/accounts` listing.
+fn describe(credential: &claurst_core::StoredCredential) -> String {
+    use claurst_core::StoredCredential as C;
+    match credential {
+        C::AnthropicOAuth(tokens) => {
+            let tier = tokens
+                .subscription_type
+                .as_deref()
+                .map(|t| format!(" [{}]", t))
+                .unwrap_or_default();
+            let email = tokens
+                .email
+                .as_deref()
+                .map(|e| format!("  {}", e))
+                .unwrap_or_default();
+            format!("{tier}{email}")
+        }
+        C::CodexOAuth(tokens) => tokens
+            .account_id
+            .as_deref()
+            .map(|id| format!("  {}", id))
+            .unwrap_or_default(),
+        C::OAuthToken { .. } | C::ApiKey { .. } => String::new(),
     }
 }
 
@@ -203,40 +244,55 @@ impl SlashCommand for SwitchCommand {
         "switch"
     }
     fn description(&self) -> &str {
-        "Switch the active account for a provider"
+        "Make a stored account the active one"
     }
     fn help(&self) -> &str {
-        "Usage: /switch [--codex] <profile-id>\n\n\
-         Make a stored account active. Defaults to Anthropic; pass `--codex`\n\
-         to switch the Codex account instead. Run /accounts first to see\n\
-         available profile ids."
+        "Usage: /switch <account>\n\n\
+         Point the session at a stored account. Run /accounts first to see the\n\
+         names. Every account is switched the same way, whatever protocol it\n\
+         speaks."
     }
 
-    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let tokens: Vec<&str> = args.split_whitespace().collect();
-        let use_codex = tokens.contains(&"--codex");
-        let provider = if use_codex {
-            claurst_core::accounts::PROVIDER_CODEX
-        } else {
-            claurst_core::accounts::PROVIDER_ANTHROPIC
-        };
-        let display = if use_codex { "Codex" } else { "Anthropic" };
-        let id = tokens.iter().find(|t| !t.starts_with("--"));
-
-        let Some(id) = id else {
-            return CommandResult::Error(format!(
-                "Usage: /switch {}<profile-id> (try /accounts to see options)",
-                if use_codex { "--codex " } else { "" }
-            ));
+        let Some(account_id) = tokens.iter().find(|t| !t.starts_with("--")) else {
+            return CommandResult::Error(
+                "Usage: /switch <account> (try /accounts to see the names)".to_string(),
+            );
         };
 
-        let mut registry = claurst_core::accounts::AccountRegistry::load();
-        match registry.switch_to(provider, id) {
-            Ok(()) => {
-                CommandResult::Message(format!("Switched {} active account to '{}'.", display, id))
-            }
-            Err(e) => CommandResult::Error(format!("{}", e)),
+        let store = claurst_core::AuthStore::load();
+        if store.get(account_id).is_none() {
+            let mut known: Vec<&str> = store.credentials.keys().map(String::as_str).collect();
+            known.sort();
+            return CommandResult::Error(if known.is_empty() {
+                format!("No account named '{account_id}'. Nothing is stored yet.")
+            } else {
+                format!(
+                    "No account named '{account_id}'. Stored: {}.",
+                    known.join(", ")
+                )
+            });
         }
+
+        let protocol = claurst_core::config::Settings::load_sync()
+            .ok()
+            .and_then(|settings| {
+                settings
+                    .providers
+                    .get(*account_id)
+                    .map(|entry| entry.protocol_or(account_id))
+            })
+            .unwrap_or_else(|| (*account_id).to_string());
+
+        if let Err(e) = claurst_core::config::register_account(account_id, &protocol, true) {
+            return CommandResult::Error(format!("Failed to switch account: {e}"));
+        }
+        ctx.config.provider = Some((*account_id).to_string());
+        CommandResult::ConfigChangeMessage(
+            ctx.config.clone(),
+            format!("Switched to '{account_id}'."),
+        )
     }
 }
 

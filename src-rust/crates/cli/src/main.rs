@@ -3553,7 +3553,7 @@ async fn run_interactive(
                                     label,
                                 }) => {
                                     claurst_tui::restore_terminal(&mut terminal).ok();
-                                    if provider == claurst_core::accounts::PROVIDER_CODEX {
+                                    if provider == claurst_core::ProviderId::CODEX {
                                         let (tx, mut rx) =
                                             tokio::sync::mpsc::channel::<
                                                 claurst_tui::DeviceAuthEvent,
@@ -5548,10 +5548,8 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
                     } else {
                         println!("  Auth method: console (API key)");
                     }
-                    if let Some(active) = claurst_core::accounts::AccountRegistry::load()
-                        .active(claurst_core::accounts::PROVIDER_ANTHROPIC)
-                    {
-                        println!("  Profile: {}", active);
+                    if let Some(active) = active_account() {
+                        println!("  Account: {}", active);
                     }
                     std::process::exit(0);
                 }
@@ -5572,13 +5570,13 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         Some("list") | Some("ls") | Some("accounts") => {
-            print_account_list(claurst_core::accounts::PROVIDER_ANTHROPIC, "Anthropic");
+            print_account_list(claurst_core::ProviderId::ANTHROPIC, "Anthropic");
             std::process::exit(0);
         }
 
         Some("switch") | Some("use") => {
             let id = args.get(1).map(|s| s.as_str());
-            switch_account(claurst_core::accounts::PROVIDER_ANTHROPIC, "Anthropic", id);
+            switch_account(claurst_core::ProviderId::ANTHROPIC, "Anthropic", id);
         }
 
         Some("remove") | Some("rm") => {
@@ -5586,7 +5584,7 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
                 eprintln!("Usage: claurst auth remove <profile-id>");
                 std::process::exit(1);
             });
-            remove_account(claurst_core::accounts::PROVIDER_ANTHROPIC, "Anthropic", id);
+            remove_account(claurst_core::ProviderId::ANTHROPIC, "Anthropic", id);
         }
 
         Some(unknown) => {
@@ -5628,11 +5626,18 @@ fn extract_label_flag(args: &[String]) -> Option<String> {
     None
 }
 
+/// The account the session is pointed at, whatever protocol it speaks.
+fn active_account() -> Option<String> {
+    claurst_core::config::Settings::load_sync()
+        .ok()
+        .and_then(|settings| settings.provider)
+}
+
 fn print_account_list(provider: &str, display_name: &str) {
-    let registry = claurst_core::accounts::AccountRegistry::load();
-    let profiles = registry.list(provider);
-    let active = registry.active(provider).map(String::from);
-    if profiles.is_empty() {
+    let store = claurst_core::AuthStore::load();
+    let accounts = store.accounts_for_protocol(provider);
+    let active = active_account();
+    if accounts.is_empty() {
         println!("No {} accounts stored.", display_name);
         println!(
             "Use `claurst {} login` to add one.",
@@ -5645,41 +5650,46 @@ fn print_account_list(provider: &str, display_name: &str) {
         return;
     }
     println!("{} accounts:", display_name);
-    for p in profiles {
-        let marker = if active.as_deref() == Some(&p.id) {
+    for id in accounts {
+        let marker = if active.as_deref() == Some(id.as_str()) {
             "*"
         } else {
             " "
         };
-        let email = p.email.as_deref().unwrap_or("");
-        let label = p
-            .label
-            .as_deref()
-            .map(|l| format!(" ({})", l))
-            .unwrap_or_default();
-        let tier = p
-            .subscription_tier
-            .as_deref()
-            .map(|t| format!(" [{}]", t))
-            .unwrap_or_default();
-        println!("  {} {}{}{}  {}", marker, p.id, label, tier, email);
+        // Identity comes from the credential, which is the only place it is
+        // recorded now that there is no separate registry.
+        let detail = match store.get(&id) {
+            Some(claurst_core::StoredCredential::AnthropicOAuth(tokens)) => {
+                let tier = tokens
+                    .subscription_type
+                    .as_deref()
+                    .map(|t| format!(" [{}]", t))
+                    .unwrap_or_default();
+                format!("{}  {}", tier, tokens.email.as_deref().unwrap_or(""))
+            }
+            Some(claurst_core::StoredCredential::CodexOAuth(tokens)) => {
+                format!("  {}", tokens.account_id.as_deref().unwrap_or(""))
+            }
+            _ => String::new(),
+        };
+        println!("  {} {}{}", marker, id, detail.trim_end());
     }
 }
 
 fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
-    let mut registry = claurst_core::accounts::AccountRegistry::load();
-    let profiles = registry.list(provider);
+    let store = claurst_core::AuthStore::load();
+    let accounts = store.accounts_for_protocol(provider);
 
     let target = match id {
         Some(id) => id.to_string(),
         None => {
-            if profiles.is_empty() {
+            if accounts.is_empty() {
                 eprintln!("No {} accounts stored.", display_name);
                 std::process::exit(1);
             }
             // No id: print the picker and exit with usage.
             eprintln!(
-                "Usage: claurst {} switch <profile-id>",
+                "Usage: claurst {} switch <account>",
                 if provider == "anthropic" {
                     "auth"
                 } else {
@@ -5692,15 +5702,20 @@ fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
         }
     };
 
-    match registry.switch_to(provider, &target) {
+    if !accounts.contains(&target) {
+        eprintln!("No {} account '{}'.", display_name, target);
+        eprintln!();
+        print_account_list(provider, display_name);
+        std::process::exit(1);
+    }
+
+    match claurst_core::config::register_account(&target, provider, true) {
         Ok(()) => {
-            println!("Switched {} active account to '{}'.", display_name, target);
+            println!("Switched to '{}'.", target);
             std::process::exit(0);
         }
         Err(e) => {
-            eprintln!("{}", e);
-            eprintln!();
-            print_account_list(provider, display_name);
+            eprintln!("Failed to switch account: {}", e);
             std::process::exit(1);
         }
     }
@@ -5729,14 +5744,9 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
             });
             match crate::codex_oauth_flow::run_oauth_flow_with_label(tx, label.as_deref()).await {
                 Ok(_) => {
-                    let registry = claurst_core::accounts::AccountRegistry::load();
                     println!("Successfully logged in to Codex!");
-                    if let Some(p) = registry.active_profile(claurst_core::accounts::PROVIDER_CODEX)
-                    {
-                        if let Some(email) = &p.email {
-                            println!("  Account: {}", email);
-                        }
-                        println!("  Profile: {}", p.id);
+                    if let Some(active) = active_account() {
+                        println!("  Account: {}", active);
                     }
                     std::process::exit(0);
                 }
@@ -5757,36 +5767,38 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
             }
         },
         Some("list") | Some("ls") | Some("accounts") => {
-            print_account_list(claurst_core::accounts::PROVIDER_CODEX, "Codex");
+            print_account_list(claurst_core::ProviderId::CODEX, "Codex");
             std::process::exit(0);
         }
         Some("switch") | Some("use") => {
             let id = args.get(1).map(|s| s.as_str());
-            switch_account(claurst_core::accounts::PROVIDER_CODEX, "Codex", id);
+            switch_account(claurst_core::ProviderId::CODEX, "Codex", id);
         }
         Some("remove") | Some("rm") => {
             let id = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| {
                 eprintln!("Usage: claurst codex remove <profile-id>");
                 std::process::exit(1);
             });
-            remove_account(claurst_core::accounts::PROVIDER_CODEX, "Codex", id);
+            remove_account(claurst_core::ProviderId::CODEX, "Codex", id);
         }
         Some("status") => {
-            let registry = claurst_core::accounts::AccountRegistry::load();
-            match registry.active_profile(claurst_core::accounts::PROVIDER_CODEX) {
-                Some(p) => {
-                    println!("Logged in to Codex.");
-                    println!("  Profile: {}", p.id);
-                    if let Some(email) = &p.email {
-                        println!("  Account: {}", email);
-                    }
-                    std::process::exit(0);
-                }
-                None => {
-                    println!("Not logged in to Codex.");
-                    std::process::exit(1);
-                }
+            let store = claurst_core::AuthStore::load();
+            let accounts = store.accounts_for_protocol(claurst_core::ProviderId::CODEX);
+            if accounts.is_empty() {
+                println!("Not logged in to Codex.");
+                std::process::exit(1);
             }
+            println!("Logged in to Codex.");
+            let active = active_account();
+            for id in accounts {
+                let marker = if active.as_deref() == Some(id.as_str()) {
+                    "*"
+                } else {
+                    " "
+                };
+                println!("  {} {}", marker, id);
+            }
+            std::process::exit(0);
         }
         Some(unknown) => {
             eprintln!("Unknown codex subcommand: '{}'", unknown);
@@ -5817,30 +5829,54 @@ fn print_codex_usage() {
 
 fn handle_accounts_command(args: &[String]) {
     if args.iter().any(|a| a == "--json") {
-        let registry = claurst_core::accounts::AccountRegistry::load();
-        let json = serde_json::to_string_pretty(&registry).unwrap_or_else(|_| "{}".into());
-        println!("{}", json);
+        let store = claurst_core::AuthStore::load();
+        let active = active_account();
+        let accounts: Vec<serde_json::Value> = store
+            .credentials
+            .keys()
+            .map(|id| {
+                serde_json::json!({
+                    "account": id,
+                    "active": active.as_deref() == Some(id.as_str()),
+                })
+            })
+            .collect();
+        // Names only: the values are live credentials and printing them to
+        // stdout would leak them into shell history and CI logs.
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "accounts": accounts }))
+                .unwrap_or_else(|_| "{}".into())
+        );
         return;
     }
 
-    print_account_list(claurst_core::accounts::PROVIDER_ANTHROPIC, "Anthropic");
+    print_account_list(claurst_core::ProviderId::ANTHROPIC, "Anthropic");
     println!();
-    print_account_list(claurst_core::accounts::PROVIDER_CODEX, "Codex");
+    print_account_list(claurst_core::ProviderId::CODEX, "Codex");
 }
 
 fn remove_account(provider: &str, display_name: &str, id: &str) -> ! {
-    let mut registry = claurst_core::accounts::AccountRegistry::load();
-    if registry.get(provider, id).is_none() {
+    let mut store = claurst_core::AuthStore::load();
+    if !store
+        .accounts_for_protocol(provider)
+        .iter()
+        .any(|a| a == id)
+    {
         eprintln!("No {} account '{}' to remove.", display_name, id);
         std::process::exit(1);
     }
-    match registry.remove(provider, id) {
+    store.remove(id);
+    match claurst_core::config::forget_account(id) {
         Ok(()) => {
             println!("Removed {} account '{}'.", display_name, id);
             std::process::exit(0);
         }
         Err(e) => {
-            eprintln!("Failed to remove account: {}", e);
+            eprintln!(
+                "Removed the credential, but could not update settings.json: {}",
+                e
+            );
             std::process::exit(1);
         }
     }

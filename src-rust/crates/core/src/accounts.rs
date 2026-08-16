@@ -1,227 +1,12 @@
-//! Multi-account credential management.
+//! Naming and identity helpers for accounts.
 //!
-//! Stores named profiles per provider (anthropic, codex) on disk so users can
-//! switch between Pro/Max/work/personal accounts without re-logging-in.
-//!
-//! Design borrows from two prior arts:
-//!
-//!   * **codexmaxx** (kitze/codexmaxx) — named per-account snapshots stored on
-//!     disk, identity derived from JWT payload (email / account_id), explicit
-//!     "import current external login" flow.
-//!   * **opencode** — single tagged-union JSON file, chmod 0600, symmetric
-//!     `list / login / logout / switch` commands across providers.
-//!
-//! Layout:
-//!
-//! ```text
-//! ~/.claurst/
-//!   accounts.json                              # registry (this module)
-//!   accounts/
-//!     anthropic/<profile-id>/oauth_tokens.json
-//!     codex/<profile-id>/codex_tokens.json
-//!   oauth_tokens.json                          # legacy (auto-migrated)
-//!   codex_tokens.json                          # legacy (auto-migrated)
-//! ```
-//!
-//! The registry holds metadata (label, email, account-id, timestamps, active
-//! pointer per provider). The per-account credential files keep their existing
-//! schemas so the rest of the codebase doesn't change shape.
+//! An account is a `providers` entry in `settings.json` plus a credential in
+//! `auth.json`, both keyed by the account's name. This module only decides
+//! what that name may be and who it belongs to; the two stores own the data.
 
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// Identifier for a credential provider that supports multi-account.
-pub const PROVIDER_ANTHROPIC: &str = "anthropic";
-pub const PROVIDER_CODEX: &str = "codex";
-
-/// Whether `provider_id` stores credentials per account profile.
-///
-/// Every other provider holds a single credential, so naming an account for
-/// one of them is a configuration mistake rather than a missing profile.
-pub fn provider_supports_profiles(provider_id: &str) -> bool {
-    matches!(provider_id, PROVIDER_ANTHROPIC | PROVIDER_CODEX)
-}
-
-/// Metadata recorded for a single stored profile.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AccountProfile {
-    /// Slug used as the directory name and CLI identifier.
-    pub id: String,
-    /// Optional human-friendly label (e.g. "work", "personal").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// Email extracted from the JWT id_token (when available).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub email: Option<String>,
-    /// Provider-side account identifier (account_id / account_uuid).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub account_id: Option<String>,
-    /// Organization UUID (Anthropic only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub organization_uuid: Option<String>,
-    /// Plan / subscription tier (Pro, Max, …) when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subscription_tier: Option<String>,
-    /// ISO-8601 timestamp when this profile was first added.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub added_at: Option<String>,
-    /// ISO-8601 timestamp of the last `switch_to(...)` call.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_selected_at: Option<String>,
-}
-
-impl AccountProfile {
-    /// Best-effort display name for menus: label > email > id.
-    pub fn display_name(&self) -> String {
-        self.label
-            .clone()
-            .or_else(|| self.email.clone())
-            .unwrap_or_else(|| self.id.clone())
-    }
-}
-
-/// Per-provider section of the registry.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProviderAccounts {
-    /// Profile id of the currently-active account for this provider.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active: Option<String>,
-    /// All stored profiles, keyed by id.
-    #[serde(default)]
-    pub profiles: BTreeMap<String, AccountProfile>,
-}
-
-/// On-disk shape of `~/.claurst/accounts.json`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AccountRegistry {
-    /// Schema version (current: 1).
-    #[serde(default = "default_version")]
-    pub version: u32,
-    /// One entry per credential provider.
-    #[serde(default)]
-    pub providers: BTreeMap<String, ProviderAccounts>,
-}
-
-fn default_version() -> u32 {
-    1
-}
-
-impl AccountRegistry {
-    /// Path to `~/.claurst/accounts.json`.
-    pub fn path() -> PathBuf {
-        claurst_dir().join("accounts.json")
-    }
-
-    /// Load the registry. Returns an empty registry if the file is missing or
-    /// malformed.
-    pub fn load() -> Self {
-        let path = Self::path();
-        if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(reg) = serde_json::from_str::<AccountRegistry>(&data) {
-                return reg;
-            }
-        }
-        AccountRegistry::default()
-    }
-
-    /// Persist the registry to disk. Best-effort but propagates I/O errors.
-    pub fn save(&self) -> anyhow::Result<()> {
-        let path = Self::path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-            set_user_only_dir_perms(parent);
-        }
-        let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
-        set_user_only_perms(&path);
-        Ok(())
-    }
-
-    /// Get the active profile id for a provider.
-    pub fn active(&self, provider: &str) -> Option<&str> {
-        self.providers
-            .get(provider)
-            .and_then(|p| p.active.as_deref())
-    }
-
-    /// Get the active profile metadata, if any.
-    pub fn active_profile(&self, provider: &str) -> Option<&AccountProfile> {
-        let p = self.providers.get(provider)?;
-        let id = p.active.as_ref()?;
-        p.profiles.get(id)
-    }
-
-    /// List all profiles for a provider (sorted by id).
-    pub fn list(&self, provider: &str) -> Vec<AccountProfile> {
-        self.providers
-            .get(provider)
-            .map(|p| p.profiles.values().cloned().collect())
-            .unwrap_or_default()
-    }
-
-    /// Lookup a profile by id within a provider.
-    pub fn get(&self, provider: &str, id: &str) -> Option<&AccountProfile> {
-        self.providers.get(provider)?.profiles.get(id)
-    }
-
-    /// Insert or update a profile, optionally setting it active.
-    pub fn upsert(
-        &mut self,
-        provider: &str,
-        mut profile: AccountProfile,
-        make_active: bool,
-    ) -> anyhow::Result<()> {
-        if profile.added_at.is_none() {
-            profile.added_at = Some(now_iso());
-        }
-        let section = self.providers.entry(provider.to_string()).or_default();
-        section.profiles.insert(profile.id.clone(), profile.clone());
-        if make_active {
-            section.active = Some(profile.id.clone());
-            if let Some(stored) = section.profiles.get_mut(&profile.id) {
-                stored.last_selected_at = Some(now_iso());
-            }
-        }
-        self.save()
-    }
-
-    /// Switch the active profile for a provider. Returns `Err` if the id does
-    /// not exist.
-    pub fn switch_to(&mut self, provider: &str, id: &str) -> anyhow::Result<()> {
-        let section = self
-            .providers
-            .get_mut(provider)
-            .ok_or_else(|| anyhow::anyhow!("No accounts stored for {provider}"))?;
-        if !section.profiles.contains_key(id) {
-            anyhow::bail!("Account '{}' not found for {}", id, provider);
-        }
-        section.active = Some(id.to_string());
-        if let Some(p) = section.profiles.get_mut(id) {
-            p.last_selected_at = Some(now_iso());
-        }
-        self.save()
-    }
-
-    /// Remove a profile (and its credential directory). If it was active,
-    /// clears the active pointer.
-    pub fn remove(&mut self, provider: &str, id: &str) -> anyhow::Result<()> {
-        if let Some(section) = self.providers.get_mut(provider) {
-            section.profiles.remove(id);
-            if section.active.as_deref() == Some(id) {
-                section.active = None;
-            }
-        }
-        // Remove the per-account credential dir.
-        let dir = account_dir(provider, id);
-        if dir.exists() {
-            let _ = std::fs::remove_dir_all(&dir);
-        }
-        self.save()
-    }
-}
-
-/// Slugify an arbitrary string into a safe profile id. Lowercases, replaces
+/// Slugify an arbitrary string into a safe account name. Lowercases, replaces
 /// non-`[a-z0-9_-]` with `-`, trims dashes/underscores from edges, falls back
 /// to "account" if the result is empty.
 pub fn slugify_profile_id(raw: &str) -> String {
@@ -246,18 +31,7 @@ pub fn slugify_profile_id(raw: &str) -> String {
     }
 }
 
-/// If the requested id already exists, suffix with -2, -3, … until free.
-pub fn ensure_unique_profile_id(registry: &AccountRegistry, provider: &str, base: &str) -> String {
-    unique_account_name(base, |candidate| {
-        registry.get(provider, candidate).is_some()
-    })
-}
-
 /// Slugify `base` and suffix it with -2, -3, … until `taken` says it is free.
-///
-/// Accounts that live in `settings.json` are keyed by name rather than by
-/// profile, so they need the same collision rule without an
-/// [`AccountRegistry`] to ask.
 pub fn unique_account_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     let base = slugify_profile_id(base);
     if !taken(&base) {
@@ -276,33 +50,6 @@ pub fn unique_account_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
 /// The canonical claurst home directory.
 pub fn claurst_dir() -> PathBuf {
     crate::config::Settings::config_dir()
-}
-
-/// `~/.claurst/accounts/<provider>/<id>/`.
-pub fn account_dir(provider: &str, id: &str) -> PathBuf {
-    claurst_dir().join("accounts").join(provider).join(id)
-}
-
-/// File where the per-account Anthropic OAuth tokens live.
-pub fn anthropic_token_path(profile_id: &str) -> PathBuf {
-    account_dir(PROVIDER_ANTHROPIC, profile_id).join("oauth_tokens.json")
-}
-
-/// File where the per-account Codex OAuth tokens live.
-pub fn codex_token_path(profile_id: &str) -> PathBuf {
-    account_dir(PROVIDER_CODEX, profile_id).join("codex_tokens.json")
-}
-
-/// Backup directory for the previous live token file (rotated on each switch).
-pub fn backup_dir(provider: &str) -> PathBuf {
-    claurst_dir()
-        .join("accounts")
-        .join(provider)
-        .join(".backups")
-}
-
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339()
 }
 
 /// Tighten permissions on a credential/session file so only the owner can
@@ -350,7 +97,7 @@ pub struct JwtIdentity {
 }
 
 /// Decode the payload of a JWT (`header.payload.signature`) and pull out the
-/// fields we care about for naming a profile. Tolerates malformed input by
+/// fields we care about for naming an account. Tolerates malformed input by
 /// returning an empty identity.
 pub fn jwt_identity(token: &str) -> JwtIdentity {
     use base64::Engine;
@@ -400,7 +147,7 @@ pub fn jwt_identity(token: &str) -> JwtIdentity {
     out
 }
 
-/// Derive a short, human-friendly profile id from a JWT identity. Falls back
+/// Derive a short, human-friendly account name from a JWT identity. Falls back
 /// to "account" if nothing useful is in the token.
 pub fn id_from_identity(identity: &JwtIdentity) -> String {
     if let Some(email) = &identity.email {
@@ -425,19 +172,26 @@ pub fn id_from_identity(identity: &JwtIdentity) -> String {
 /// This is not a security boundary and must not be used as one. It is an
 /// identifier, not a secret: anyone on the machine can reproduce it.
 pub fn stable_identity() -> String {
-    identity_from_registry(&AccountRegistry::load()).unwrap_or_else(machine_identity)
+    active_account_identity().unwrap_or_else(machine_identity)
 }
 
-/// The account half of [`stable_identity`], split out so it can be tested
-/// without a registry on disk.
-fn identity_from_registry(registry: &AccountRegistry) -> Option<String> {
-    [PROVIDER_ANTHROPIC, PROVIDER_CODEX]
-        .into_iter()
-        .find_map(|provider| {
-            registry
-                .active(provider)
-                .map(|id| format!("{provider}:{id}"))
-        })
+/// The account half of [`stable_identity`].
+///
+/// Only an OAuth account answers: an API key names no person, so two machines
+/// sharing one key would otherwise report the same identity.
+fn active_account_identity() -> Option<String> {
+    let settings = crate::config::Settings::load_sync().ok()?;
+    let active = settings.provider.clone()?;
+    let store = crate::AuthStore::load();
+    for protocol in [
+        crate::provider_id::ProviderId::ANTHROPIC,
+        crate::provider_id::ProviderId::CODEX,
+    ] {
+        if store.accounts_for_protocol(protocol).contains(&active) {
+            return Some(format!("{protocol}:{active}"));
+        }
+    }
+    None
 }
 
 /// The machine half of [`stable_identity`], used when no account is stored.
@@ -478,22 +232,15 @@ mod tests {
     }
 
     #[test]
-    fn ensure_unique_appends_suffix() {
-        let mut reg = AccountRegistry::default();
-        let mut section = ProviderAccounts::default();
-        section.profiles.insert(
-            "work".to_string(),
-            AccountProfile {
-                id: "work".into(),
-                ..Default::default()
-            },
+    fn unique_account_name_appends_a_suffix() {
+        let taken = |candidate: &str| candidate == "work";
+        assert_eq!(unique_account_name("work", taken), "work-2");
+        assert_eq!(unique_account_name("personal", taken), "personal");
+        assert_eq!(
+            unique_account_name("Work Account", taken),
+            "work-account",
+            "the name is slugified before the collision check"
         );
-        reg.providers.insert(PROVIDER_ANTHROPIC.into(), section);
-
-        let next = ensure_unique_profile_id(&reg, PROVIDER_ANTHROPIC, "work");
-        assert_eq!(next, "work-2");
-        let fresh = ensure_unique_profile_id(&reg, PROVIDER_ANTHROPIC, "personal");
-        assert_eq!(fresh, "personal");
     }
 
     #[test]
@@ -523,27 +270,6 @@ mod tests {
         assert_eq!(identity.account_id.as_deref(), Some("acc_abc123"));
 
         assert_eq!(id_from_identity(&identity), "kuber");
-    }
-
-    #[test]
-    fn account_paths_are_under_claurst_dir() {
-        let p = anthropic_token_path("work");
-        assert!(p.ends_with("accounts/anthropic/work/oauth_tokens.json"));
-        let c = codex_token_path("personal");
-        assert!(c.ends_with("accounts/codex/personal/codex_tokens.json"));
-    }
-
-    #[test]
-    fn account_profile_display_falls_back_through_label_email_id() {
-        let mut p = AccountProfile {
-            id: "kuber".into(),
-            ..Default::default()
-        };
-        assert_eq!(p.display_name(), "kuber");
-        p.email = Some("kuber@example.com".into());
-        assert_eq!(p.display_name(), "kuber@example.com");
-        p.label = Some("Personal".into());
-        assert_eq!(p.display_name(), "Personal");
     }
 
     // -----------------------------------------------------------------------
@@ -629,52 +355,15 @@ mod tests {
         assert_eq!(dir_mode.unwrap(), 0o700, "config dir must be owner-only");
     }
     #[test]
-    fn only_the_multi_account_providers_support_profiles() {
-        assert!(provider_supports_profiles(PROVIDER_ANTHROPIC));
-        assert!(provider_supports_profiles(PROVIDER_CODEX));
-        assert!(!provider_supports_profiles("openai"));
-        assert!(!provider_supports_profiles("google"));
-        assert!(!provider_supports_profiles(""));
-    }
-
-    #[test]
     fn the_same_machine_answers_with_the_same_identity() {
         assert_eq!(machine_identity(), machine_identity());
         assert!(machine_identity().starts_with("machine:"));
     }
 
     #[test]
-    fn a_stored_account_wins_over_the_machine() {
-        let mut registry = AccountRegistry::default();
-        registry.providers.insert(
-            PROVIDER_CODEX.to_string(),
-            ProviderAccounts {
-                active: Some("work".to_string()),
-                profiles: BTreeMap::new(),
-            },
-        );
-        assert_eq!(
-            identity_from_registry(&registry).as_deref(),
-            Some("codex:work")
-        );
-
-        // Anthropic is checked first, so adding it moves the identity even
-        // though codex was there already.
-        registry.providers.insert(
-            PROVIDER_ANTHROPIC.to_string(),
-            ProviderAccounts {
-                active: Some("personal".to_string()),
-                profiles: BTreeMap::new(),
-            },
-        );
-        assert_eq!(
-            identity_from_registry(&registry).as_deref(),
-            Some("anthropic:personal")
-        );
-    }
-
-    #[test]
-    fn an_empty_registry_falls_through_to_the_machine() {
-        assert_eq!(identity_from_registry(&AccountRegistry::default()), None);
+    fn an_api_key_account_falls_through_to_the_machine() {
+        // Nothing is stored under this config root, so there is no OAuth
+        // account to name and the machine has to answer.
+        assert!(stable_identity().starts_with("machine:"));
     }
 }

@@ -114,30 +114,24 @@ fn validate_advisor_model(model: &str, active_provider: &str) -> Result<(), Stri
     };
     let provider_id = target.provider_id;
 
-    if !claurst_core::accounts::provider_supports_profiles(provider_id) {
-        return Err(format!(
-            "'{provider_id}' stores a single credential, so it has no accounts to choose from. \
-             Drop the ':{profile_id}' part."
-        ));
-    }
-
-    let registry = claurst_core::accounts::AccountRegistry::load();
-    if registry.get(provider_id, profile_id).is_some() {
+    // An account exists exactly when it holds a credential, so the auth store
+    // is the only thing to ask.
+    let store = claurst_core::AuthStore::load();
+    let stored = store.accounts_for_protocol(provider_id);
+    if stored.iter().any(|id| id == profile_id) {
         return Ok(());
     }
 
-    let stored = registry.list(provider_id);
     if stored.is_empty() {
         Err(format!(
             "No '{provider_id}' accounts are stored, so '{profile_id}' cannot be used. \
              Run `/login` to add one."
         ))
     } else {
-        let ids: Vec<&str> = stored.iter().map(|profile| profile.id.as_str()).collect();
         Err(format!(
             "There is no '{provider_id}' account named '{profile_id}'. \
              Stored accounts: {}.",
-            ids.join(", ")
+            stored.join(", ")
         ))
     }
 }
@@ -480,7 +474,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_account_on_a_single_credential_provider_is_rejected() {
+    async fn an_account_that_is_not_stored_is_rejected() {
+        // Every vendor can hold several accounts now, so the check is whether
+        // this one exists rather than whether the vendor allows any.
         let _home = HomeGuard::new();
         let mut ctx = make_ctx();
 
@@ -488,8 +484,8 @@ mod tests {
 
         match result {
             CommandResult::Error(message) => assert!(
-                message.contains("single credential"),
-                "the error should explain why, got {message:?}"
+                message.contains("No 'openai' accounts are stored"),
+                "the error should name what is missing, got {message:?}"
             ),
             other => panic!("expected an error, got {other:?}"),
         }
@@ -511,17 +507,15 @@ mod tests {
     #[tokio::test]
     async fn a_known_account_is_accepted() {
         let _home = HomeGuard::new();
-        let mut registry = claurst_core::accounts::AccountRegistry::load();
-        registry
-            .upsert(
-                claurst_core::accounts::PROVIDER_ANTHROPIC,
-                claurst_core::accounts::AccountProfile {
-                    id: "personal".to_string(),
-                    ..Default::default()
-                },
-                false,
-            )
-            .expect("upsert");
+        let mut store = claurst_core::AuthStore::load();
+        store.set_anthropic_tokens(
+            "personal",
+            claurst_core::oauth::OAuthTokens {
+                access_token: "personal-token".to_string(),
+                scopes: vec![claurst_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
+                ..Default::default()
+            },
+        );
 
         let mut ctx = make_ctx();
         let result = AdvisorCommand
