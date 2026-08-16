@@ -59,7 +59,6 @@ pub mod message_utils;
 
 // Reading of the `advisorModel` setting, shared by the Advisor tool and
 // the `/advisor` command.
-pub mod advisor_target;
 
 // Per-session file modification history (T4-6).
 pub mod file_history;
@@ -1900,14 +1899,18 @@ pub mod config {
             self.resolve_provider_api_key(self.selected_provider_id())
         }
 
-        /// Async variant: also checks `~/.claurst/oauth_tokens.json`.
+        /// Async variant: also reads the active account's stored OAuth tokens.
         /// Returns `(credential, use_bearer_auth)`.
         /// - For Console OAuth flow: credential is the stored API key, bearer=false.
         /// - For Claude.ai OAuth flow: credential is the access token, bearer=true.
         ///
         /// Silently attempts token refresh when the access token is expired.
         pub async fn resolve_auth_async(&self) -> Option<(String, bool)> {
-            if self.selected_provider_id() != "anthropic" {
+            // Asks which wire format the account speaks, not what it is named:
+            // an OAuth login named after its owner still needs this path, which
+            // is the only one that refreshes an expired token.
+            let active = self.selected_provider_id();
+            if self.vendor_id_for_account(active) != crate::provider_id::ProviderId::ANTHROPIC {
                 return self.resolve_api_key().map(|key| (key, false));
             }
 

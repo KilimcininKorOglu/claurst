@@ -156,10 +156,9 @@ pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
 /// `custom-anthropic`: a user can register two gateways under names of their
 /// own choosing and both are built here.
 ///
-/// Needs a base URL. Without one there is nothing to point at, and falling
-/// back to the real Anthropic endpoint would make the account a confusing
-/// duplicate of it. The key may be empty, because a self-hosted gateway can be
-/// unauthenticated.
+/// An account with a base URL points at that endpoint. One without a base URL
+/// is only built when it holds Anthropic OAuth tokens, because then it is a
+/// login to the real Anthropic rather than a gateway with nothing to point at.
 pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvider>> {
     let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
     let entry = settings.providers.get(account_id);
@@ -167,6 +166,7 @@ pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvide
         return None;
     }
 
+    let store = claurst_core::AuthStore::load();
     let base_url = entry
         .and_then(|provider| provider.api_base.clone())
         .filter(|url| !url.trim().is_empty())
@@ -174,18 +174,33 @@ pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvide
             claurst_core::config::api_base_env_var_for_provider(account_id)
                 .and_then(|name| std::env::var(name).ok())
         })
-        .filter(|url| !url.trim().is_empty())?;
+        .filter(|url| !url.trim().is_empty());
+
+    // A subscription token is presented as a Bearer; a console account and a
+    // gateway both present a key.
+    let tokens = store.anthropic_tokens(account_id);
+    let use_bearer_auth = tokens.is_some_and(|tokens| tokens.uses_bearer_auth());
 
     let api_key = entry
         .and_then(|provider| provider.api_key.clone())
         .filter(|key| !key.trim().is_empty())
-        .or_else(|| claurst_core::AuthStore::load().api_key_for(account_id))
+        .or_else(|| store.api_key_for_protocol(account_id, ProviderId::ANTHROPIC))
         .unwrap_or_default();
+
+    let base_url = match base_url {
+        Some(url) => url,
+        // No endpoint of its own: only an OAuth login belongs on Anthropic's.
+        None if tokens.is_some() => {
+            claurst_core::config::default_api_base_for_provider(ProviderId::ANTHROPIC)?.to_string()
+        }
+        None => return None,
+    };
 
     Some(Arc::new(AnthropicProvider::from_config_with_id(
         ClientConfig {
             api_key,
             api_base: base_url,
+            use_bearer_auth,
             ..Default::default()
         },
         account_id,
@@ -944,120 +959,84 @@ pub async fn provider_for_config(
 /// accounts" and "this account does not exist" call for different advice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderResolveError {
-    /// The provider is not registered, or it has no usable credentials.
-    NotAvailable { provider_id: String },
-    /// The provider stores a single credential, so it has no accounts to pick.
-    ProfilesUnsupported { provider_id: String },
-    /// No account with that id is stored for the provider.
-    ProfileNotFound {
-        provider_id: String,
-        profile_id: String,
+    /// No account of that name is stored, or it has no usable credentials.
+    AccountNotFound {
+        account_id: String,
         available: Vec<String>,
     },
-    /// The account exists in the registry but its stored tokens are missing or
-    /// unusable.
-    ProfileCredentialsMissing {
-        provider_id: String,
-        profile_id: String,
-    },
+    /// The account is stored but its credential is missing or unusable.
+    AccountCredentialsMissing { account_id: String },
 }
 
 impl std::fmt::Display for ProviderResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotAvailable { provider_id } => {
-                write!(f, "provider '{provider_id}' is not available")
-            }
-            Self::ProfilesUnsupported { provider_id } => write!(
-                f,
-                "provider '{provider_id}' stores one credential and has no accounts to choose from"
-            ),
-            Self::ProfileNotFound {
-                provider_id,
-                profile_id,
+            Self::AccountNotFound {
+                account_id,
                 available,
             } => {
-                write!(f, "no '{provider_id}' account named '{profile_id}'")?;
+                write!(f, "no account named '{account_id}'")?;
                 if available.is_empty() {
                     write!(f, "; none are stored")
                 } else {
                     write!(f, "; stored accounts: {}", available.join(", "))
                 }
             }
-            Self::ProfileCredentialsMissing {
-                provider_id,
-                profile_id,
-            } => write!(
-                f,
-                "the '{provider_id}' account '{profile_id}' has no usable credentials"
-            ),
+            Self::AccountCredentialsMissing { account_id } => {
+                write!(f, "the account '{account_id}' has no usable credentials")
+            }
         }
     }
 }
 
 impl std::error::Error for ProviderResolveError {}
 
-/// Hand back a provider, optionally authenticated as a named account.
+/// Hand back the provider for one named account.
 ///
-/// With no `profile_id` this is `provider_by_id` with a typed error. With one,
-/// the provider is built directly from that account's stored credentials
-/// rather than through the registry, because the registry always resolves the
-/// *active* account.
-pub async fn provider_by_id_for_profile(
+/// An OAuth account is built directly from its stored tokens rather than
+/// through the registry, because that path refreshes an expired token and
+/// authenticates as this account instead of the active one. Everything else
+/// goes through the ordinary lookup.
+pub async fn provider_for_account(
     config: &claurst_core::config::Config,
-    provider_id: &str,
-    profile_id: Option<&str>,
+    account_id: &str,
 ) -> Result<Arc<dyn LlmProvider>, ProviderResolveError> {
-    let Some(account_id) = profile_id else {
-        return provider_by_id(config, provider_id).await.ok_or_else(|| {
-            ProviderResolveError::NotAvailable {
-                provider_id: provider_id.to_string(),
-            }
-        });
-    };
-
     let store = claurst_core::AuthStore::load();
-    let available = store.accounts_for_protocol(provider_id);
-    if !available.iter().any(|id| id == account_id) {
-        return Err(ProviderResolveError::ProfileNotFound {
-            provider_id: provider_id.to_string(),
-            profile_id: account_id.to_string(),
-            available,
-        });
-    }
-
-    let missing = || ProviderResolveError::ProfileCredentialsMissing {
-        provider_id: provider_id.to_string(),
-        profile_id: account_id.to_string(),
+    let missing = || ProviderResolveError::AccountCredentialsMissing {
+        account_id: account_id.to_string(),
     };
 
-    match provider_id {
-        ProviderId::ANTHROPIC => {
-            let (credential, use_bearer_auth) =
-                claurst_core::oauth::resolve_auth_for_account(account_id)
-                    .await
-                    .ok_or_else(missing)?;
-            // Built directly rather than through `ProviderRegistry`, which
-            // would resolve the active account instead of this one.
-            Ok(Arc::new(AnthropicProvider::from_config(
-                crate::client::ClientConfig {
-                    api_key: credential,
-                    api_base: config.resolve_anthropic_api_base(),
-                    use_bearer_auth,
-                    ..Default::default()
-                },
-            )))
-        }
-        ProviderId::CODEX => CodexProvider::from_account(account_id)
-            .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
-            .ok_or_else(missing),
-        // `accounts_for_protocol` only answers for protocols whose credential
-        // shape it recognises, so nothing else can reach this arm with a
-        // matching account.
-        _ => Err(ProviderResolveError::ProfilesUnsupported {
-            provider_id: provider_id.to_string(),
-        }),
+    if store.anthropic_tokens(account_id).is_some() {
+        let (credential, use_bearer_auth) =
+            claurst_core::oauth::resolve_auth_for_account(account_id)
+                .await
+                .ok_or_else(missing)?;
+        return Ok(Arc::new(AnthropicProvider::from_config(
+            crate::client::ClientConfig {
+                api_key: credential,
+                api_base: config
+                    .resolve_provider_api_base(account_id)
+                    .unwrap_or_else(|| config.resolve_anthropic_api_base()),
+                use_bearer_auth,
+                ..Default::default()
+            },
+        )));
     }
+
+    if store.codex_tokens(account_id).is_some() {
+        return CodexProvider::from_account(account_id)
+            .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
+            .ok_or_else(missing);
+    }
+
+    provider_by_id(config, account_id).await.ok_or_else(|| {
+        let mut available: Vec<String> = store.credentials.keys().cloned().collect();
+        available.sort();
+        ProviderResolveError::AccountNotFound {
+            account_id: account_id.to_string(),
+            available,
+        }
+    })
 }
 
 #[cfg(test)]
@@ -1146,13 +1125,13 @@ mod profile_resolution_tests {
         let _home = HomeGuard::new();
         let config = claurst_core::config::Config::default();
 
-        let error = provider_by_id_for_profile(&config, "openai", Some("personal"))
+        let error = provider_for_account(&config, "personal")
             .await
             .err()
             .expect("no such openai account");
 
         match error {
-            ProviderResolveError::ProfileNotFound { available, .. } => {
+            ProviderResolveError::AccountNotFound { available, .. } => {
                 assert!(available.is_empty(), "nothing is stored for openai");
             }
             other => panic!("expected ProfileNotFound, got {other:?}"),
@@ -1167,13 +1146,13 @@ mod profile_resolution_tests {
         register("personal", "personal-token");
         let config = claurst_core::config::Config::default();
 
-        let error = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("missing"))
+        let error = provider_for_account(&config, "missing")
             .await
             .err()
             .expect("no such account");
 
         match error {
-            ProviderResolveError::ProfileNotFound { available, .. } => {
+            ProviderResolveError::AccountNotFound { available, .. } => {
                 assert_eq!(available, vec!["personal".to_string(), "work".to_string()]);
             }
             other => panic!("expected ProfileNotFound, got {other:?}"),
@@ -1188,16 +1167,15 @@ mod profile_resolution_tests {
         register("work", "");
         let config = claurst_core::config::Config::default();
 
-        let error = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("work"))
+        let error = provider_for_account(&config, "work")
             .await
             .err()
             .expect("no usable credential");
 
         assert_eq!(
             error,
-            ProviderResolveError::ProfileCredentialsMissing {
-                provider_id: PROVIDER_ANTHROPIC.to_string(),
-                profile_id: "work".to_string(),
+            ProviderResolveError::AccountCredentialsMissing {
+                account_id: "work".to_string(),
             }
         );
     }
@@ -1209,7 +1187,7 @@ mod profile_resolution_tests {
         register("personal", "personal-token");
         let config = claurst_core::config::Config::default();
 
-        let provider = provider_by_id_for_profile(&config, PROVIDER_ANTHROPIC, Some("personal"))
+        let provider = provider_for_account(&config, "personal")
             .await
             .expect("resolves");
 
@@ -1217,22 +1195,23 @@ mod profile_resolution_tests {
     }
 
     #[tokio::test]
-    async fn no_profile_keeps_the_existing_lookup() {
+    async fn an_unknown_name_is_an_unknown_account() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
         let config = claurst_core::config::Config::default();
 
-        // No credentials anywhere, so an unknown provider reports NotAvailable
-        // rather than an account-shaped error.
-        let error = provider_by_id_for_profile(&config, "not-a-provider", None)
+        // There is one kind of failure now, because there is one kind of
+        // thing to name.
+        let error = provider_for_account(&config, "not-a-provider")
             .await
             .err()
-            .expect("unknown provider");
+            .expect("unknown account");
 
         assert_eq!(
             error,
-            ProviderResolveError::NotAvailable {
-                provider_id: "not-a-provider".to_string()
+            ProviderResolveError::AccountNotFound {
+                account_id: "not-a-provider".to_string(),
+                available: Vec::new(),
             }
         );
     }

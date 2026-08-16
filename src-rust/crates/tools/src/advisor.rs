@@ -11,7 +11,6 @@
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
 use claurst_api::ProviderResolveError;
-use claurst_core::advisor_target::{parse_advisor_model, AdvisorTarget};
 use claurst_core::message_utils::text_from_blocks;
 use claurst_core::types::Message;
 use serde::Deserialize;
@@ -73,17 +72,8 @@ fn claim_call_slot(turn: usize) -> bool {
 /// rather than suggesting a retry.
 fn describe_resolve_error(error: &ProviderResolveError) -> String {
     match error {
-        ProviderResolveError::NotAvailable { provider_id } => format!(
-            "Advisor provider '{provider_id}' is not available. \
-             Tell the user to check its credentials or pick another model with `/advisor <model>`."
-        ),
-        ProviderResolveError::ProfilesUnsupported { provider_id } => format!(
-            "Advisor provider '{provider_id}' stores one credential, so naming an account for it \
-             is a configuration mistake. Tell the user to drop the account from `advisorModel`."
-        ),
-        ProviderResolveError::ProfileNotFound {
-            provider_id,
-            profile_id,
+        ProviderResolveError::AccountNotFound {
+            account_id,
             available,
         } => {
             let stored = if available.is_empty() {
@@ -92,15 +82,12 @@ fn describe_resolve_error(error: &ProviderResolveError) -> String {
                 format!("stored accounts: {}", available.join(", "))
             };
             format!(
-                "There is no '{provider_id}' account named '{profile_id}' ({stored}). \
+                "There is no account named '{account_id}' ({stored}). \
                  Tell the user to fix `advisorModel`."
             )
         }
-        ProviderResolveError::ProfileCredentialsMissing {
-            provider_id,
-            profile_id,
-        } => format!(
-            "The '{provider_id}' account '{profile_id}' has no usable credentials. \
+        ProviderResolveError::AccountCredentialsMissing { account_id } => format!(
+            "The account '{account_id}' has no usable credentials. \
              Tell the user to log into it again."
         ),
     }
@@ -158,15 +145,9 @@ impl Tool for AdvisorTool {
             }
         };
 
-        let target = match parse_advisor_model(configured, ctx.config.selected_provider_id()) {
-            Ok(target) => target,
-            Err(e) => {
-                return ToolResult::error(format!(
-                    "The configured advisor model '{configured}' cannot be read: {e}. \
-                     Tell the user to fix `advisorModel`."
-                ))
-            }
-        };
+        // The same reading the turn loop gives a model string, so `<account>/`
+        // means the same thing here as it does there.
+        let route = ctx.config.resolve_route(configured);
 
         let turn = ctx.current_turn.load(std::sync::atomic::Ordering::Relaxed);
         if !claim_call_slot(turn) {
@@ -176,25 +157,13 @@ impl Tool for AdvisorTool {
             ));
         }
 
-        let AdvisorTarget {
-            provider_id,
-            profile_id,
-            model,
-        } = target;
-        debug!(
-            provider = provider_id,
-            profile = profile_id,
-            model,
-            "Consulting advisor"
-        );
+        let (account, model) = (route.account.as_str(), route.model.as_str());
+        debug!(account, model, "Consulting advisor");
 
-        let provider =
-            match claurst_api::provider_by_id_for_profile(&ctx.config, provider_id, profile_id)
-                .await
-            {
-                Ok(provider) => provider,
-                Err(e) => return ToolResult::error(describe_resolve_error(&e)),
-            };
+        let provider = match claurst_api::provider_for_account(&ctx.config, account).await {
+            Ok(provider) => provider,
+            Err(e) => return ToolResult::error(describe_resolve_error(&e)),
+        };
 
         let mut prompt = params.question;
         if let Some(context) = params.context.as_deref().map(str::trim) {
@@ -256,15 +225,14 @@ mod tests {
         *state = (usize::MAX, 0);
     }
 
-    // Model-string parsing itself is covered in `claurst_core::advisor_target`.
+    // Model-string parsing itself is covered by `Config::resolve_route`.
     // These cover what this tool adds on top: turning a failed lookup into
     // something the model can act on.
 
     #[test]
     fn an_unknown_account_names_the_stored_ones() {
-        let message = describe_resolve_error(&ProviderResolveError::ProfileNotFound {
-            provider_id: "anthropic".to_string(),
-            profile_id: "missing".to_string(),
+        let message = describe_resolve_error(&ProviderResolveError::AccountNotFound {
+            account_id: "missing".to_string(),
             available: vec!["personal".to_string(), "work".to_string()],
         });
 
@@ -277,9 +245,8 @@ mod tests {
 
     #[test]
     fn an_unknown_account_with_none_stored_says_so() {
-        let message = describe_resolve_error(&ProviderResolveError::ProfileNotFound {
-            provider_id: "codex".to_string(),
-            profile_id: "work".to_string(),
+        let message = describe_resolve_error(&ProviderResolveError::AccountNotFound {
+            account_id: "work".to_string(),
             available: Vec::new(),
         });
 
@@ -287,31 +254,14 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_without_accounts_is_reported_as_a_settings_mistake() {
-        let message = describe_resolve_error(&ProviderResolveError::ProfilesUnsupported {
-            provider_id: "openai".to_string(),
-        });
-
-        assert!(message.contains("advisorModel"));
-    }
-
-    #[test]
     fn every_resolve_failure_tells_the_model_to_involve_the_user() {
         let failures = [
-            ProviderResolveError::NotAvailable {
-                provider_id: "openai".to_string(),
-            },
-            ProviderResolveError::ProfilesUnsupported {
-                provider_id: "openai".to_string(),
-            },
-            ProviderResolveError::ProfileNotFound {
-                provider_id: "anthropic".to_string(),
-                profile_id: "work".to_string(),
+            ProviderResolveError::AccountNotFound {
+                account_id: "work".to_string(),
                 available: Vec::new(),
             },
-            ProviderResolveError::ProfileCredentialsMissing {
-                provider_id: "anthropic".to_string(),
-                profile_id: "work".to_string(),
+            ProviderResolveError::AccountCredentialsMissing {
+                account_id: "work".to_string(),
             },
         ];
 

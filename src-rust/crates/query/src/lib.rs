@@ -873,7 +873,13 @@ pub async fn run_query_loop(
             // Dispatch through the provider path for non-Anthropic providers,
             // AND for Anthropic when the pre-built client has no API key
             // (user started without ANTHROPIC_API_KEY but added one via /connect).
-            let use_provider_dispatch = provider_id_str != "anthropic" || client.api_key_is_empty();
+            //
+            // The question is which wire format the account speaks, not what it
+            // is called: an OAuth login named after its owner still belongs on
+            // the raw client, which is the arm that refreshes an expired token.
+            let vendor = tool_ctx.config.vendor_id_for_account(&provider_id_str);
+            let use_provider_dispatch =
+                vendor != claurst_core::ProviderId::ANTHROPIC || client.api_key_is_empty();
 
             if use_provider_dispatch {
                 let pid = claurst_core::provider_id::ProviderId::new(&provider_id_str);

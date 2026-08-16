@@ -4,7 +4,6 @@
 
 use super::*;
 use async_trait::async_trait;
-use claurst_core::advisor_target::parse_advisor_model;
 use claurst_core::types::Role;
 
 pub struct AdvisorCommand;
@@ -26,17 +25,16 @@ impl SlashCommand for AdvisorCommand {
          The advisor is a second model that reviews a decision on request.\n\
          The main model can consult it through the Advisor tool, and you can\n\
          run it yourself over the last reply with `review`.\n\n\
-         A model can be given as `model`, `provider/model`, or\n\
-         `provider:account/model`. The account form runs the advisor on a\n\
-         second stored login (see `/accounts`) while the session stays on the\n\
-         active one. Only anthropic and codex keep separate accounts.\n\n\
+         A model can be given as `model` or `account/model`. The account form\n\
+         runs the advisor on another stored account (see `/accounts`) while\n\
+         the session stays on the active one.\n\n\
          Examples:\n\
-           /advisor claude-opus-4-6           set the advisor model\n\
-           /advisor openai/gpt-4o             set a model on another provider\n\
-           /advisor anthropic:personal/sonnet run the advisor on another account\n\
-           /advisor review                    have the advisor review the last reply\n\
-           /advisor off                       disable the advisor\n\
-           /advisor                           show the current setting"
+           /advisor claude-opus-4-6      set the advisor model\n\
+           /advisor openai/gpt-4o        set a model on another account\n\
+           /advisor personal/sonnet      run the advisor on another account\n\
+           /advisor review               have the advisor review the last reply\n\
+           /advisor off                  disable the advisor\n\
+           /advisor                      show the current setting"
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -70,17 +68,7 @@ impl SlashCommand for AdvisorCommand {
                 CommandResult::ConfigChangeMessage(config, "Advisor model unset.".to_string())
             }
             model => {
-                // The model id itself is not checked: the advisor runs
-                // client-side, so it works on every provider and there is no
-                // list to validate against. A named account *is* checked,
-                // because a typo there would only surface much later as a
-                // failed advisor call.
-                if let Err(message) =
-                    validate_advisor_model(model, ctx.config.selected_provider_id())
-                {
-                    return CommandResult::Error(message);
-                }
-
+                let route = describe_advisor_route(&ctx.config, model);
                 settings.advisor_model = Some(model.to_string());
                 if let Err(e) = settings.save_sync() {
                     return CommandResult::Error(format!("Could not save settings: {e}"));
@@ -90,7 +78,7 @@ impl SlashCommand for AdvisorCommand {
                 CommandResult::ConfigChangeMessage(
                     config,
                     format!(
-                        "Advisor model set to: {model}. \
+                        "Advisor model set to: {model}. {route} \
                          `/advisor review` works now; the model gains the Advisor tool \
                          on the next session."
                     ),
@@ -100,40 +88,19 @@ impl SlashCommand for AdvisorCommand {
     }
 }
 
-/// Reject an advisor model the user could not have meant, before it is saved.
+/// Say how the saved value was read.
 ///
-/// Only the syntax and any named account are checked. The model id is left
-/// alone because the advisor runs client-side against any provider, so there
-/// is no authoritative list to compare it with.
-fn validate_advisor_model(model: &str, active_provider: &str) -> Result<(), String> {
-    let target = parse_advisor_model(model, active_provider)
-        .map_err(|e| format!("Could not read '{model}': {e}."))?;
-
-    let Some(profile_id) = target.profile_id else {
-        return Ok(());
-    };
-    let provider_id = target.provider_id;
-
-    // An account exists exactly when it holds a credential, so the auth store
-    // is the only thing to ask.
-    let store = claurst_core::AuthStore::load();
-    let stored = store.accounts_for_protocol(provider_id);
-    if stored.iter().any(|id| id == profile_id) {
-        return Ok(());
-    }
-
-    if stored.is_empty() {
-        Err(format!(
-            "No '{provider_id}' accounts are stored, so '{profile_id}' cannot be used. \
-             Run `/login` to add one."
-        ))
-    } else {
-        Err(format!(
-            "There is no '{provider_id}' account named '{profile_id}'. \
-             Stored accounts: {}.",
-            stored.join(", ")
-        ))
-    }
+/// The model id itself cannot be checked: the advisor runs client-side against
+/// any account, so there is no list to compare it with. The account can be
+/// wrong without looking wrong, though, because an unrecognised prefix is read
+/// as part of the model id rather than rejected (`meta-llama/Llama-3.3` has to
+/// keep working). Showing the split lets a typo be spotted at once.
+fn describe_advisor_route(config: &claurst_core::config::Config, model: &str) -> String {
+    let route = config.resolve_route(model);
+    format!(
+        "Runs on account '{}' with model '{}'.",
+        route.account, route.model
+    )
 }
 
 /// Run the advisor over the most recent assistant reply and show the result.
@@ -161,23 +128,10 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
         None => return CommandResult::Error("There is no assistant reply to review.".to_string()),
     };
 
-    let target = match parse_advisor_model(configured, ctx.config.selected_provider_id()) {
-        Ok(target) => target,
-        Err(e) => {
-            return CommandResult::Error(format!(
-                "Could not read the advisor model '{configured}': {e}."
-            ))
-        }
-    };
-    let model = target.model;
+    let route = ctx.config.resolve_route(configured);
+    let model = route.model.as_str();
 
-    let provider = match claurst_api::provider_by_id_for_profile(
-        &ctx.config,
-        target.provider_id,
-        target.profile_id,
-    )
-    .await
-    {
+    let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
         Ok(provider) => provider,
         Err(e) => return CommandResult::Error(format!("Advisor unavailable: {e}.")),
     };
@@ -447,61 +401,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unknown_account_is_rejected_before_the_setting_is_written() {
+    async fn the_saved_value_reports_how_it_was_read() {
+        // An account name and a model id look alike, so the reply says which
+        // half is which rather than leaving a typo to surface much later.
         let _home = HomeGuard::new();
-        let path = claurst_core::config::Settings::global_settings_path();
-        std::fs::create_dir_all(path.parent().expect("settings dir")).expect("mkdir");
-        std::fs::write(&path, r#"{"advisorModel":"sonnet"}"#).expect("seed settings");
-
         let mut ctx = make_ctx();
+
+        let result = AdvisorCommand.execute("openai/gpt-4o", &mut ctx).await;
+
+        match result {
+            CommandResult::ConfigChangeMessage(_, message) => assert!(
+                message.contains("account 'openai'") && message.contains("model 'gpt-4o'"),
+                "the split should be visible, got {message:?}"
+            ),
+            other => panic!("expected the setting to be saved, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unrecognised_prefix_stays_part_of_the_model_id() {
+        // `meta-llama/Llama-3.3` is one model id, not an account and a model,
+        // so the prefix is only read as an account when it is one.
+        let _home = HomeGuard::new();
+        let mut ctx = make_ctx();
+
         let result = AdvisorCommand
-            .execute("anthropic:missing/sonnet", &mut ctx)
+            .execute("meta-llama/Llama-3.3", &mut ctx)
             .await;
 
         match result {
-            CommandResult::Error(message) => assert!(
-                message.contains("missing"),
-                "the error should name the account, got {message:?}"
+            CommandResult::ConfigChangeMessage(_, message) => assert!(
+                message.contains("model 'meta-llama/Llama-3.3'"),
+                "the whole string is the model id, got {message:?}"
             ),
-            other => panic!("expected an error, got {other:?}"),
+            other => panic!("expected the setting to be saved, got {other:?}"),
         }
-        let saved = claurst_core::config::Settings::load_sync().expect("settings still parse");
-        assert_eq!(
-            saved.advisor_model.as_deref(),
-            Some("sonnet"),
-            "a rejected value must not replace the working one"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_account_that_is_not_stored_is_rejected() {
-        // Every vendor can hold several accounts now, so the check is whether
-        // this one exists rather than whether the vendor allows any.
-        let _home = HomeGuard::new();
-        let mut ctx = make_ctx();
-
-        let result = AdvisorCommand.execute("openai:work/gpt-4o", &mut ctx).await;
-
-        match result {
-            CommandResult::Error(message) => assert!(
-                message.contains("No 'openai' accounts are stored"),
-                "the error should name what is missing, got {message:?}"
-            ),
-            other => panic!("expected an error, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn a_malformed_account_form_is_rejected() {
-        let _home = HomeGuard::new();
-        let mut ctx = make_ctx();
-
-        let result = AdvisorCommand.execute("anthropic:/sonnet", &mut ctx).await;
-
-        assert!(
-            matches!(result, CommandResult::Error(_)),
-            "an empty account must not be read as a provider name"
-        );
     }
 
     #[tokio::test]
@@ -518,19 +452,14 @@ mod tests {
         );
 
         let mut ctx = make_ctx();
-        let result = AdvisorCommand
-            .execute("anthropic:personal/sonnet", &mut ctx)
-            .await;
+        let result = AdvisorCommand.execute("personal/sonnet", &mut ctx).await;
 
         assert!(
             matches!(result, CommandResult::ConfigChangeMessage(_, _)),
             "a stored account must be accepted, got {result:?}"
         );
         let saved = claurst_core::config::Settings::load_sync().expect("settings parse");
-        assert_eq!(
-            saved.advisor_model.as_deref(),
-            Some("anthropic:personal/sonnet")
-        );
+        assert_eq!(saved.advisor_model.as_deref(), Some("personal/sonnet"));
     }
 
     #[tokio::test]

@@ -83,7 +83,7 @@ pub use protocol::{LineStreamDecoder, OpenAiChatDecoder};
 
 // Phase 1C re-exports — provider registry.
 pub use registry::{
-    provider_by_id, provider_by_id_for_profile, provider_for_config, provider_lookup_ids,
+    provider_by_id, provider_for_account, provider_for_config, provider_lookup_ids,
     ProviderRegistry, ProviderResolveError,
 };
 
