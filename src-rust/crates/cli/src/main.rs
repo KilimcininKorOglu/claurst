@@ -1558,10 +1558,23 @@ async fn reload_provider_runtime_state(
     })
 }
 
+/// Keep `config.provider` in step with a `"<account>/<model>"` model string.
+///
+/// Only a first segment that actually names an account moves the account.
+/// A bare `split_once('/')` also fired on model ids that contain a slash of
+/// their own (`meta-llama/Llama-3.3` on OpenRouter), which set the provider to
+/// a vendor namespace that is not a provider at all.
+///
+/// The wire model is not rewritten here; `Config::resolve_route` strips the
+/// prefix at request time for both dispatch arms.
 fn normalize_provider_from_model(config: &mut Config) {
-    if let Some(model) = config.model.as_deref() {
-        if let Some((provider, _)) = model.split_once('/') {
-            config.provider = Some(provider.to_string());
+    let Some(model) = config.model.as_deref() else {
+        return;
+    };
+    if let Some((head, rest)) = model.split_once('/') {
+        if !rest.is_empty() && config.is_account_id(head) {
+            let head = head.to_string();
+            config.provider = Some(head);
         }
     }
 }

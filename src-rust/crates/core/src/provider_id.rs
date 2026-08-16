@@ -86,6 +86,85 @@ impl ProviderId {
     pub const ROUTING: &'static str = "routing";
     pub const NEURALWATT: &'static str = "neuralwatt";
     pub const FREE: &'static str = "free";
+
+    /// Every provider id claurst ships with, including the spelling aliases
+    /// users type (`lmstudio` for `lm-studio`, `zhipu` for `zhipuai`, …).
+    ///
+    /// Used to decide whether the first segment of a `"<account>/<model>"`
+    /// string names an account or is part of the model id itself. A model id
+    /// may legitimately contain a slash (`meta-llama/Llama-3.3` on OpenRouter),
+    /// so the segment is only treated as an account when it appears here or in
+    /// the user's own `providers` map.
+    pub const WELL_KNOWN: &'static [&'static str] = &[
+        Self::ANTHROPIC,
+        Self::OPENAI,
+        Self::GOOGLE,
+        Self::GOOGLE_VERTEX,
+        Self::AMAZON_BEDROCK,
+        Self::AZURE,
+        Self::GITHUB_COPILOT,
+        Self::MISTRAL,
+        Self::XAI,
+        Self::GROQ,
+        Self::DEEPINFRA,
+        Self::CEREBRAS,
+        Self::COHERE,
+        Self::CROF,
+        Self::TOGETHER_AI,
+        Self::PERPLEXITY,
+        Self::OPENROUTER,
+        Self::OLLAMA,
+        Self::LM_STUDIO,
+        Self::LLAMA_CPP,
+        Self::CUSTOM_OPENAI,
+        Self::CUSTOM_ANTHROPIC,
+        Self::DEEPSEEK,
+        Self::GITLAB,
+        Self::CLOUDFLARE,
+        Self::VENICE,
+        Self::SAP,
+        Self::SAMBANOVA,
+        Self::HUGGINGFACE,
+        Self::NVIDIA,
+        Self::SILICONFLOW,
+        Self::MOONSHOT,
+        Self::ZHIPU,
+        Self::ZAI,
+        Self::NEBIUS,
+        Self::OVHCLOUD,
+        Self::SCALEWAY,
+        Self::VULTR,
+        Self::BASETEN,
+        Self::FRIENDLI,
+        Self::UPSTAGE,
+        Self::STEPFUN,
+        Self::FIREWORKS,
+        Self::NOVITA,
+        Self::MINIMAX,
+        Self::CODEX,
+        Self::OPENCODE_GO,
+        Self::OPENCODE_ZEN,
+        Self::SYNTHETIC,
+        Self::ROUTING,
+        Self::NEURALWATT,
+        Self::FREE,
+        // Spelling aliases accepted on the wire but not canonical ids.
+        "openai-codex",
+        "lmstudio",
+        "llamacpp",
+        "llama-server",
+        "togetherai",
+        "qwen",
+        "alibaba",
+        "moonshot",
+        "zhipu",
+        "vultr-ai",
+    ];
+
+    /// Whether `id` names a provider claurst ships with.
+    pub fn is_well_known(id: &str) -> bool {
+        Self::WELL_KNOWN.contains(&id)
+    }
 }
 
 impl fmt::Display for ProviderId {

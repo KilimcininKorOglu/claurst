@@ -775,8 +775,14 @@ pub async fn run_query_loop(
             build_system_prompt(&patched)
         };
 
+        // Resolve the account and the wire model ONCE, before either dispatch
+        // arm builds a request. The Anthropic arm below and the provider arm
+        // further down both read this, so a `"<account>/<model>"` prefix is
+        // stripped for both instead of only for the provider arm.
+        let route = tool_ctx.config.resolve_route(&effective_model);
+
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
-        let mut req_builder = CreateMessageRequest::builder(&effective_model, config.max_tokens)
+        let mut req_builder = CreateMessageRequest::builder(&route.model, config.max_tokens)
             .messages(api_messages)
             .system(system)
             .tools(api_tools);
@@ -852,133 +858,11 @@ pub async fn run_query_loop(
             };
         }
 
-        // Non-Anthropic provider dispatch: if the model is "provider/model"
-        // format and the registry has that provider, use it directly.
-        //
-        // Provider resolution priority:
-        //   1. Explicit "provider/model" format in the model string
-        //   2. config.provider setting (from --provider flag or settings.json)
-        //   3. Model registry lookup (e.g. "gemini-3-flash-preview" → google)
-        //   4. Default to "anthropic"
+        // Account dispatch. `route` was resolved once, before the Anthropic
+        // request was built, so both arms below agree on where this turn goes
+        // and on the model id that travels on the wire.
         if let Some(ref registry) = config.provider_registry {
-            let (provider_id_str, model_id_str) = if let Some(p) = tool_ctx
-                .config
-                .provider
-                .as_deref()
-                .filter(|p| *p != "anthropic")
-            {
-                // Explicit non-Anthropic provider in config — use it.
-                // If the stored model is in canonical "provider/model" form,
-                // strip the top-level provider prefix before sending it to the
-                // provider adapter. If it contains an additional slash
-                // (e.g. "meta-llama/Llama-3.3..." on OpenRouter), preserve it.
-                let provider_prefix = format!("{}/", p);
-                let model_id = effective_model
-                    .strip_prefix(&provider_prefix)
-                    .unwrap_or(&effective_model)
-                    .to_string();
-                (p.to_string(), model_id)
-            } else if let Some((p, m)) = effective_model.split_once('/') {
-                // No explicit provider but model has "provider/model" format.
-                // Check whether `p` is a known provider or just a model
-                // namespace (e.g. "meta-llama/Llama-3" on OpenRouter).
-                let known_providers = [
-                    // Native (non-OpenAI-compat) providers
-                    "anthropic",
-                    "openai",
-                    "google",
-                    "azure",
-                    "amazon-bedrock",
-                    "github-copilot",
-                    "codex",
-                    "openai-codex",
-                    "cohere",
-                    "minimax",
-                    // Local / self-hosted
-                    "ollama",
-                    "lmstudio",
-                    "lm-studio",
-                    "llamacpp",
-                    "llama-cpp",
-                    "llama-server",
-                    // OpenAI-compat cloud providers
-                    "groq",
-                    "mistral",
-                    "deepseek",
-                    "xai",
-                    "perplexity",
-                    "cerebras",
-                    "openrouter",
-                    "togetherai",
-                    "together-ai",
-                    "deepinfra",
-                    "venice",
-                    "huggingface",
-                    "nvidia",
-                    "fireworks",
-                    "sambanova",
-                    // Additional OpenAI-compat providers
-                    "qwen",
-                    "alibaba",
-                    "siliconflow",
-                    "moonshot",
-                    "moonshotai",
-                    "zhipu",
-                    "zhipuai",
-                    "zai",
-                    "nebius",
-                    "novita",
-                    "ovhcloud",
-                    "scaleway",
-                    "vultr",
-                    "vultr-ai",
-                    "baseten",
-                    "friendli",
-                    "upstage",
-                    "stepfun",
-                ];
-                if known_providers.contains(&p) {
-                    (p.to_string(), m.to_string())
-                } else {
-                    // Treat the whole string as the model ID, fall through
-                    // to auto-detection below.
-                    let fallback_provider =
-                        tool_ctx.config.provider.as_deref().unwrap_or("anthropic");
-                    (fallback_provider.to_string(), effective_model.clone())
-                }
-            } else {
-                // No explicit provider set (or set to "anthropic"): try the
-                // model registry to auto-detect provider from the model name.
-                // Use the shared model registry from QueryConfig if available;
-                // otherwise construct a temporary one.
-                let temp_reg;
-                let model_reg: &claurst_api::ModelRegistry =
-                    if let Some(ref shared) = config.model_registry {
-                        shared
-                    } else {
-                        temp_reg = {
-                            let mut r = claurst_api::ModelRegistry::new();
-                            if let Some(cache_dir) = dirs::cache_dir() {
-                                let cache_path = cache_dir.join("claurst").join("models_dev.json");
-                                r.load_cache(&cache_path);
-                            }
-                            r
-                        };
-                        &temp_reg
-                    };
-                if let Some(detected_pid) = model_reg.find_provider_for_model(&effective_model) {
-                    let pid_str = detected_pid.to_string();
-                    if pid_str != "anthropic" {
-                        (pid_str, effective_model.clone())
-                    } else {
-                        ("anthropic".to_string(), effective_model.clone())
-                    }
-                } else {
-                    // Fall back to config.provider (may be "anthropic" or None→"anthropic")
-                    let p = tool_ctx.config.provider.as_deref().unwrap_or("anthropic");
-                    (p.to_string(), effective_model.clone())
-                }
-            };
+            let (provider_id_str, model_id_str) = (route.account.clone(), route.model.clone());
 
             // Dispatch through the provider path for non-Anthropic providers,
             // AND for Anthropic when the pre-built client has no API key

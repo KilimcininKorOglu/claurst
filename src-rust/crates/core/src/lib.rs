@@ -1046,6 +1046,22 @@ pub mod config {
         }
     }
 
+    // ---- Route -----------------------------------------------------------
+
+    /// A model string resolved onto the account that will serve the request.
+    ///
+    /// Produced by [`Config::resolve_route`]. Both turn-loop dispatch arms take
+    /// their account and wire model from this one value, so the two cannot
+    /// disagree about where a request is going.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Route {
+        /// Account (provider) id that serves the request.
+        pub account: String,
+        /// Model id exactly as it must appear on the wire, with any
+        /// `"<account>/"` prefix already removed.
+        pub model: String,
+    }
+
     // ---- Config ----------------------------------------------------------
 
     /// Top-level configuration values, merged from CLI args + settings file + env.
@@ -1825,6 +1841,51 @@ pub mod config {
                 .filter(|&secs| secs > 0)
                 .or_else(|| self.request_timeout_secs.filter(|&secs| secs > 0))
                 .unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS)
+        }
+
+        /// Whether `id` names an account: one the user configured, or one
+        /// claurst ships with.
+        pub fn is_account_id(&self, id: &str) -> bool {
+            self.provider_configs.contains_key(id)
+                || crate::provider_id::ProviderId::is_well_known(id)
+        }
+
+        /// Resolve a model string onto the account that will serve it.
+        ///
+        /// The account is decided by configuration alone, never by the shape of
+        /// the model name. A gateway may legitimately serve `gpt-*` or
+        /// `claude-*`, and two accounts may serve the same model id, so
+        /// inferring an endpoint from the model name would send the prompt to a
+        /// different vendor than the one the user configured.
+        ///
+        /// Precedence:
+        ///   1. `"<account>/<model>"` when the first segment names an account.
+        ///   2. The explicitly selected [`Config::provider`].
+        ///   3. Anthropic.
+        ///
+        /// Only the first segment is consumed, so a model id that itself
+        /// contains a slash (`meta-llama/Llama-3.3` on OpenRouter) survives
+        /// both as `"openrouter/meta-llama/Llama-3.3"` and bare.
+        pub fn resolve_route(&self, model: &str) -> Route {
+            if let Some((head, rest)) = model.split_once('/') {
+                if !rest.is_empty() && self.is_account_id(head) {
+                    return Route {
+                        account: head.to_string(),
+                        model: rest.to_string(),
+                    };
+                }
+            }
+
+            let account = self
+                .provider
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .unwrap_or(crate::provider_id::ProviderId::ANTHROPIC);
+
+            Route {
+                account: account.to_string(),
+                model: model.to_string(),
+            }
         }
 
         /// Resolve the request timeout for the active provider.
@@ -6512,5 +6573,112 @@ mod remote_control_settings_tests {
             !json.contains("remoteControl\""),
             "an unconfigured user must not gain an empty key: {json}"
         );
+    }
+}
+
+#[cfg(test)]
+mod route_resolution_tests {
+    //! The account that serves a turn is decided by configuration alone. A
+    //! model name must never move a request to a different endpoint: a gateway
+    //! may serve any vendor's models, and two accounts may serve the same model
+    //! id, so a name-shaped guess sends the prompt to the wrong company.
+    use crate::config::{Config, ProviderConfig};
+
+    fn config_with(provider: Option<&str>, accounts: &[&str]) -> Config {
+        let mut config = Config {
+            provider: provider.map(str::to_owned),
+            ..Default::default()
+        };
+        for id in accounts {
+            config
+                .provider_configs
+                .insert((*id).to_string(), ProviderConfig::default());
+        }
+        config
+    }
+
+    #[test]
+    fn a_known_account_prefix_is_stripped_from_the_wire_model() {
+        // Regression: the prefix used to reach the Anthropic endpoint verbatim
+        // and came back as 400 model_not_supported, because the split happened
+        // after the request was already built.
+        let config = config_with(None, &[]);
+        let route = config.resolve_route("anthropic/claude-sonnet-5");
+        assert_eq!(route.account, "anthropic");
+        assert_eq!(route.model, "claude-sonnet-5");
+    }
+
+    #[test]
+    fn a_prefixed_and_a_bare_id_agree_on_the_wire_model() {
+        let config = config_with(Some("anthropic"), &[]);
+        let prefixed = config.resolve_route("anthropic/claude-sonnet-5");
+        let bare = config.resolve_route("claude-sonnet-5");
+        assert_eq!(prefixed.model, bare.model);
+        assert_eq!(prefixed.account, bare.account);
+    }
+
+    #[test]
+    fn the_model_family_never_chooses_the_account() {
+        // The whole point. `gpt-*` used to be forced onto OpenAI even with an
+        // account explicitly selected, which took the prompt to another vendor.
+        let config = config_with(Some("my_gateway"), &["my_gateway"]);
+        for model in ["gpt-5.6-sol", "claude-sonnet-5", "gemini-3-pro", "grok-4"] {
+            let route = config.resolve_route(model);
+            assert_eq!(
+                route.account, "my_gateway",
+                "{model} was routed away from the selected account"
+            );
+            assert_eq!(route.model, model);
+        }
+    }
+
+    #[test]
+    fn an_explicit_anthropic_selection_is_a_choice_not_a_blank() {
+        // `provider: "anthropic"` used to be filtered out as "unset", which is
+        // what let the name heuristic take over.
+        let config = config_with(Some("anthropic"), &[]);
+        let route = config.resolve_route("gpt-5.6-sol");
+        assert_eq!(route.account, "anthropic");
+        assert_eq!(route.model, "gpt-5.6-sol");
+    }
+
+    #[test]
+    fn a_vendor_namespace_is_not_mistaken_for_an_account() {
+        // OpenRouter ids carry their own slash. Consuming it would send
+        // "Llama-3.3-70B" to a non-existent "meta-llama" account.
+        let config = config_with(Some("openrouter"), &["openrouter"]);
+        let route = config.resolve_route("meta-llama/Llama-3.3-70B");
+        assert_eq!(route.account, "openrouter");
+        assert_eq!(route.model, "meta-llama/Llama-3.3-70B");
+    }
+
+    #[test]
+    fn only_the_first_segment_is_consumed() {
+        let config = config_with(None, &["openrouter"]);
+        let route = config.resolve_route("openrouter/meta-llama/Llama-3.3-70B");
+        assert_eq!(route.account, "openrouter");
+        assert_eq!(route.model, "meta-llama/Llama-3.3-70B");
+    }
+
+    #[test]
+    fn a_user_named_account_works_like_a_shipped_one() {
+        let config = config_with(Some("anthropic"), &["ev_gateway"]);
+        let route = config.resolve_route("ev_gateway/gpt-5.6-sol");
+        assert_eq!(route.account, "ev_gateway");
+        assert_eq!(route.model, "gpt-5.6-sol");
+    }
+
+    #[test]
+    fn a_trailing_slash_is_not_an_account_prefix() {
+        let config = config_with(None, &[]);
+        let route = config.resolve_route("anthropic/");
+        assert_eq!(route.model, "anthropic/", "an empty model id was accepted");
+    }
+
+    #[test]
+    fn no_selection_lands_on_anthropic() {
+        let config = config_with(None, &[]);
+        let route = config.resolve_route("claude-sonnet-5");
+        assert_eq!(route.account, "anthropic");
     }
 }

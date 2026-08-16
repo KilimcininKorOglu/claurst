@@ -2298,64 +2298,17 @@ impl App {
         let _ = settings.save_sync();
     }
 
-    fn infer_provider_from_model(model: &str) -> Option<String> {
-        // Free-mode synthetic IDs always route back through the "free"
-        // composite provider so the Zen → OpenRouter fallback kicks in.
-        if model == "free/auto"
-            || model.starts_with("free/")
+    /// The `free` composite's synthetic id prefixes.
+    ///
+    /// These are routing aliases, not a guess from the model family: a
+    /// `zen/…` id has to reach the composite provider for the
+    /// Zen → OpenRouter fallback to apply, and the composite is registered
+    /// under `free` rather than under the prefix it exposes.
+    fn free_composite_provider(model: &str) -> Option<&'static str> {
+        let aliased = model.starts_with("free/")
             || model.starts_with("zen/")
-            || model.starts_with("opencode-zen/")
-        {
-            return Some("free".to_string());
-        }
-        if let Some((provider, _)) = model.split_once('/') {
-            let known = [
-                "anthropic",
-                "openai",
-                "google",
-                "groq",
-                "cerebras",
-                "deepseek",
-                "mistral",
-                "xai",
-                "openrouter",
-                "github-copilot",
-                "codex",
-                "cohere",
-                "perplexity",
-                "togetherai",
-                "together-ai",
-                "deepinfra",
-                "venice",
-                "minimax",
-                "ollama",
-                "lmstudio",
-                "llamacpp",
-                "azure",
-                "amazon-bedrock",
-                "free",
-                "opencode-zen",
-                "custom-openai",
-                "custom-anthropic",
-            ];
-            if known.contains(&provider) {
-                return Some(provider.to_string());
-            }
-        }
-
-        if model.starts_with("claude") {
-            Some("anthropic".to_string())
-        } else if model.starts_with("gpt-")
-            || model.starts_with("o1")
-            || model.starts_with("o3")
-            || model.starts_with("o4")
-        {
-            Some("openai".to_string())
-        } else if model.starts_with("gemini") || model.starts_with("gemma") {
-            Some("google".to_string())
-        } else {
-            None
-        }
+            || model.starts_with("opencode-zen/");
+        aliased.then_some("free")
     }
 
     /// Switch the active provider while clearing any explicit model override.
@@ -2539,8 +2492,16 @@ impl App {
     pub fn set_model(&mut self, model: String) {
         self.model_name = model.clone();
         self.config.model = Some(model.clone());
-        if let Some(provider) = Self::infer_provider_from_model(&model) {
-            self.config.provider = Some(provider);
+        // Keep the active account in step with the id the picker handed over.
+        // Only an explicit `"<account>/"` prefix moves the account; the model
+        // family never does, because a gateway may serve any vendor's models
+        // and guessing from the name would silently retarget the request.
+        if let Some(provider) = Self::free_composite_provider(&model) {
+            self.config.provider = Some(provider.to_string());
+        } else if let Some((head, rest)) = model.split_once('/') {
+            if !rest.is_empty() && self.config.is_account_id(head) {
+                self.config.provider = Some(head.to_string());
+            }
         }
         self.refresh_context_window_size();
         // Reset used tokens when switching models (context is fresh).
