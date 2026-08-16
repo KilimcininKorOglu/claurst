@@ -764,6 +764,7 @@ pub mod config {
     pub fn api_base_env_var_for_provider(provider_id: &str) -> Option<&'static str> {
         match provider_id {
             "anthropic" => Some("ANTHROPIC_BASE_URL"),
+            "custom-anthropic" => Some("CUSTOM_ANTHROPIC_BASE_URL"),
             "openai" => Some("OPENAI_BASE_URL"),
             "minimax" => Some("MINIMAX_BASE_URL"),
             "ollama" => Some("OLLAMA_HOST"),
@@ -939,7 +940,12 @@ pub mod config {
 
     // ---- ProviderConfig --------------------------------------------------
 
-    /// Per-provider configuration: API keys, base URLs, and options.
+    /// One account: an endpoint, the credential for it, and the models it
+    /// serves.
+    ///
+    /// Keyed by account name rather than by vendor, so two accounts speaking
+    /// the same wire format can sit side by side (a local gateway and the
+    /// vendor's own endpoint, or two gateways with different budgets).
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ProviderConfig {
         /// API key (overrides environment variable)
@@ -949,12 +955,31 @@ pub mod config {
         /// Whether this provider is enabled (default: true)
         #[serde(default = "default_true")]
         pub enabled: bool,
-        /// Model ID whitelist (empty = allow all)
+        /// Wire format this account speaks, as a provider id (`"anthropic"`,
+        /// `"openai"`, …).
+        ///
+        /// `None` falls back to the account's own name, so an account named
+        /// after its vendor needs no protocol field and every existing
+        /// settings file keeps working untouched.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub protocol: Option<String>,
+        /// Models this account serves.
+        ///
+        /// Filled by discovery when the account is added and editable by hand
+        /// afterwards. Empty means "not known", which is permissive: only a
+        /// non-empty list is treated as authoritative, so an account written
+        /// before discovery existed is never locked out.
         #[serde(default)]
-        pub models_whitelist: Vec<String>,
-        /// Model ID blacklist
-        #[serde(default)]
-        pub models_blacklist: Vec<String>,
+        pub models: Vec<String>,
+        /// When [`models`](Self::models) was last filled by discovery.
+        /// Informational; nothing reads it to decide anything.
+        #[serde(
+            default,
+            rename = "modelsSyncedAt",
+            alias = "models_synced_at",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub models_synced_at: Option<String>,
         /// Provider-specific options (passed through to provider implementation)
         #[serde(default)]
         pub options: HashMap<String, serde_json::Value>,
@@ -977,11 +1002,32 @@ pub mod config {
                 api_key: None,
                 api_base: None,
                 enabled: true,
-                models_whitelist: Vec::new(),
-                models_blacklist: Vec::new(),
+                protocol: None,
+                models: Vec::new(),
+                models_synced_at: None,
                 options: HashMap::new(),
                 request_timeout_secs: None,
             }
+        }
+    }
+
+    impl ProviderConfig {
+        /// Wire format this account speaks, falling back to `account_id` when
+        /// no protocol was recorded.
+        pub fn protocol_or(&self, account_id: &str) -> String {
+            self.protocol
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .unwrap_or(account_id)
+                .to_string()
+        }
+
+        /// Whether this account is known to serve `model`.
+        ///
+        /// An empty model list means the account was never discovered, so
+        /// nothing is claimed either way and the answer is `true`.
+        pub fn serves_model(&self, model: &str) -> bool {
+            self.models.is_empty() || self.models.iter().any(|m| m == model)
         }
     }
 
@@ -1886,6 +1932,35 @@ pub mod config {
                 account: account.to_string(),
                 model: model.to_string(),
             }
+        }
+
+        /// Reject a model the resolved account is known not to serve.
+        ///
+        /// Returns the message to surface, or `None` when the pairing is fine.
+        /// An account whose model list was never filled claims nothing, so it
+        /// always passes: the list is authoritative only once it exists.
+        ///
+        /// Refusing here is the point. The alternative, quietly moving the
+        /// request to whichever account does serve the model, is what sent
+        /// prompts to a different vendor than the one that was selected.
+        pub fn reject_unserved_model(&self, route: &Route) -> Option<String> {
+            let account = self.provider_configs.get(&route.account)?;
+            if account.serves_model(&route.model) {
+                return None;
+            }
+
+            let mut offered = account.models.clone();
+            offered.sort();
+            Some(format!(
+                "Account '{}' does not serve model '{}'.\n\
+                 It serves: {}.\n\
+                 Pick one of those, or write '<account>/{}' to send this model \
+                 to a different account.",
+                route.account,
+                route.model,
+                offered.join(", "),
+                route.model,
+            ))
         }
 
         /// Resolve the request timeout for the active provider.
@@ -6680,5 +6755,108 @@ mod route_resolution_tests {
         let config = config_with(None, &[]);
         let route = config.resolve_route("claude-sonnet-5");
         assert_eq!(route.account, "anthropic");
+    }
+}
+
+#[cfg(test)]
+mod account_schema_tests {
+    //! An account is an endpoint plus the models it serves. The model list is
+    //! authoritative once it exists, and silent about everything before that,
+    //! so a settings file written before discovery existed is never locked out.
+    use crate::config::{Config, ProviderConfig, Settings};
+
+    fn account(protocol: Option<&str>, models: &[&str]) -> ProviderConfig {
+        ProviderConfig {
+            api_base: Some("http://127.0.0.1:8789".to_string()),
+            protocol: protocol.map(str::to_owned),
+            models: models.iter().map(|m| (*m).to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_account_without_a_protocol_speaks_its_own_name() {
+        // How every settings file written before this field existed keeps
+        // resolving to the implementation it always did.
+        let entry = ProviderConfig::default();
+        assert_eq!(entry.protocol_or("anthropic"), "anthropic");
+        assert_eq!(entry.protocol_or("my_gateway"), "my_gateway");
+    }
+
+    #[test]
+    fn a_recorded_protocol_wins_over_the_account_name() {
+        let entry = account(Some("anthropic"), &[]);
+        assert_eq!(entry.protocol_or("my_gateway"), "anthropic");
+    }
+
+    #[test]
+    fn a_blank_protocol_is_treated_as_absent() {
+        let entry = account(Some("   "), &[]);
+        assert_eq!(entry.protocol_or("my_gateway"), "my_gateway");
+    }
+
+    #[test]
+    fn an_undiscovered_account_claims_nothing() {
+        let entry = account(None, &[]);
+        assert!(entry.serves_model("anything-at-all"));
+    }
+
+    #[test]
+    fn a_discovered_account_is_authoritative() {
+        let entry = account(None, &["claude-opus-5", "gpt-5.6-sol"]);
+        assert!(entry.serves_model("gpt-5.6-sol"));
+        assert!(!entry.serves_model("claude-sonnet-5"));
+    }
+
+    #[test]
+    fn an_unserved_model_is_refused_not_rerouted() {
+        let mut config = Config {
+            provider: Some("my_gateway".to_string()),
+            ..Default::default()
+        };
+        config.provider_configs.insert(
+            "my_gateway".to_string(),
+            account(Some("anthropic"), &["claude-opus-5"]),
+        );
+
+        let route = config.resolve_route("gpt-4o");
+        assert_eq!(route.account, "my_gateway", "the account must not move");
+
+        let message = config
+            .reject_unserved_model(&route)
+            .expect("an unserved model must be refused");
+        assert!(message.contains("my_gateway"));
+        assert!(message.contains("gpt-4o"));
+        assert!(message.contains("claude-opus-5"), "offer the alternatives");
+    }
+
+    #[test]
+    fn a_served_model_passes() {
+        let mut config = Config::default();
+        config.provider_configs.insert(
+            "my_gateway".to_string(),
+            account(Some("anthropic"), &["claude-opus-5"]),
+        );
+        let route = config.resolve_route("my_gateway/claude-opus-5");
+        assert!(config.reject_unserved_model(&route).is_none());
+    }
+
+    #[test]
+    fn an_account_survives_a_settings_round_trip() {
+        // `save_to_path_sync` serialises the typed struct, so a field with no
+        // home on the struct is dropped on the next write.
+        let mut settings = Settings::default();
+        settings.providers.insert(
+            "my_gateway".to_string(),
+            account(Some("anthropic"), &["claude-opus-5", "gpt-5.6-sol"]),
+        );
+
+        let json = serde_json::to_string(&settings).expect("serialise");
+        let back: Settings = serde_json::from_str(&json).expect("deserialise");
+        let entry = back.providers.get("my_gateway").expect("account survived");
+
+        assert_eq!(entry.protocol.as_deref(), Some("anthropic"));
+        assert_eq!(entry.models, ["claude-opus-5", "gpt-5.6-sol"]);
+        assert_eq!(entry.api_base.as_deref(), Some("http://127.0.0.1:8789"));
     }
 }

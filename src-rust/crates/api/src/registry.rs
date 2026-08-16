@@ -147,9 +147,22 @@ pub fn build_free_provider() -> Option<Arc<dyn LlmProvider>> {
 /// back to the real Anthropic endpoint would make this a confusing duplicate.
 /// The key may be empty, because a self-hosted gateway can be unauthenticated.
 pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
+    anthropic_account_provider(ProviderId::CUSTOM_ANTHROPIC)
+}
+
+/// Build the account `account_id` as an Anthropic-wire-format provider.
+///
+/// Any account may speak this protocol, not just the one named
+/// `custom-anthropic`: a user can register two gateways under names of their
+/// own choosing and both are built here.
+///
+/// Needs a base URL. Without one there is nothing to point at, and falling
+/// back to the real Anthropic endpoint would make the account a confusing
+/// duplicate of it. The key may be empty, because a self-hosted gateway can be
+/// unauthenticated.
+pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvider>> {
     let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
-    let provider_id = ProviderId::CUSTOM_ANTHROPIC;
-    let entry = settings.providers.get(provider_id);
+    let entry = settings.providers.get(account_id);
     if entry.is_some_and(|provider| !provider.enabled) {
         return None;
     }
@@ -157,13 +170,16 @@ pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
     let base_url = entry
         .and_then(|provider| provider.api_base.clone())
         .filter(|url| !url.trim().is_empty())
-        .or_else(|| std::env::var("CUSTOM_ANTHROPIC_BASE_URL").ok())
+        .or_else(|| {
+            claurst_core::config::api_base_env_var_for_provider(account_id)
+                .and_then(|name| std::env::var(name).ok())
+        })
         .filter(|url| !url.trim().is_empty())?;
 
     let api_key = entry
         .and_then(|provider| provider.api_key.clone())
         .filter(|key| !key.trim().is_empty())
-        .or_else(|| claurst_core::AuthStore::load().api_key_for(provider_id))
+        .or_else(|| claurst_core::AuthStore::load().api_key_for(account_id))
         .unwrap_or_default();
 
     Some(Arc::new(AnthropicProvider::from_config_with_id(
@@ -172,8 +188,36 @@ pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
             api_base: base_url,
             ..Default::default()
         },
-        provider_id,
+        account_id,
     )))
+}
+
+/// Every configured account that speaks a non-default protocol, i.e. whose
+/// `protocol` field does not simply repeat its own name.
+///
+/// These are the accounts the built-in per-vendor registration cannot know
+/// about, because they are named by the user.
+pub fn user_named_accounts() -> Vec<(String, String)> {
+    let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+    settings
+        .providers
+        .iter()
+        .filter(|(_, entry)| entry.enabled)
+        .filter_map(|(id, entry)| {
+            let protocol = entry.protocol.as_deref()?.trim();
+            (!protocol.is_empty() && protocol != id)
+                .then(|| (id.clone(), normalize_protocol(protocol).to_string()))
+        })
+        .collect()
+}
+
+/// Accept the wire-format spellings a user may reasonably write.
+fn normalize_protocol(protocol: &str) -> &str {
+    match protocol {
+        "anthropic-messages" | "messages" => ProviderId::ANTHROPIC,
+        "openai-chat" | "chat-completions" => ProviderId::OPENAI,
+        other => other,
+    }
 }
 
 pub fn provider_from_config(
@@ -190,11 +234,22 @@ pub fn provider_from_config(
 
     use crate::providers;
 
-    match provider_id {
-        "anthropic" => None,
+    // Dispatch on the wire format, not on the account's name. An account named
+    // by the user carries its protocol explicitly; one named after its vendor
+    // falls back to that name, which is how every pre-existing settings file
+    // keeps resolving to the same implementation it always did.
+    let protocol = provider_cfg
+        .map(|entry| entry.protocol_or(provider_id))
+        .map(|protocol| normalize_protocol(&protocol).to_string())
+        .unwrap_or_else(|| provider_id.to_string());
+
+    match protocol.as_str() {
+        // The account literally named `anthropic` is served by the pre-built
+        // raw client, which the turn loop holds already.
+        "anthropic" if provider_id == ProviderId::ANTHROPIC => None,
         // Built from settings rather than the resolved key, because it needs a
         // base URL and speaks the Anthropic wire format, not OpenAI's.
-        "custom-anthropic" => custom_anthropic_provider(),
+        "anthropic" | "custom-anthropic" => anthropic_account_provider(provider_id),
         // Composite "Free" provider — two keys are pulled internally from the
         // auth store; the `api_key` resolved above is ignored.
         "free" => build_free_provider(),
@@ -612,6 +667,17 @@ impl ProviderRegistry {
     /// Returns `&mut self` for builder chaining.
     pub fn with_available_providers(&mut self) -> &mut Self {
         use crate::providers::openai_compat_providers as p;
+
+        // Accounts the user named themselves. Registered first so a later
+        // per-vendor registration cannot claim the same id, and so an account
+        // pointing at a gateway is reachable by the name the user gave it.
+        for (account_id, protocol) in user_named_accounts() {
+            if protocol == ProviderId::ANTHROPIC {
+                if let Some(provider) = anthropic_account_provider(&account_id) {
+                    self.register(provider);
+                }
+            }
+        }
 
         // Local providers — always try to register.
         self.register(Arc::new(p::ollama()));

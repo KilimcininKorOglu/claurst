@@ -781,6 +781,12 @@ pub async fn run_query_loop(
         // stripped for both instead of only for the provider arm.
         let route = tool_ctx.config.resolve_route(&effective_model);
 
+        // Refuse a model the account is known not to serve rather than moving
+        // the request to whichever account does serve it.
+        if let Some(message) = tool_ctx.config.reject_unserved_model(&route) {
+            return QueryOutcome::Error(ClaudeError::Config(message));
+        }
+
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
         let mut req_builder = CreateMessageRequest::builder(&route.model, config.max_tokens)
             .messages(api_messages)
