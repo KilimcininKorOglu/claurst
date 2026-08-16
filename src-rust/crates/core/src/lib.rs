@@ -1119,6 +1119,17 @@ pub mod config {
         }
     }
 
+    /// Whether `name` can be stored as an account and addressed later.
+    ///
+    /// A slash would collide with the `"<account>/<model>"` separator, so an
+    /// account carrying one could never be named in a model string. Whitespace
+    /// cannot survive that round trip either. Both are refused where the name
+    /// is typed rather than left to corrupt a lookup later.
+    pub fn account_name_is_valid(name: &str) -> bool {
+        let name = name.trim();
+        !name.is_empty() && !name.contains('/') && !name.contains(char::is_whitespace)
+    }
+
     // ---- Route -----------------------------------------------------------
 
     /// A model string resolved onto the account that will serve the request.
@@ -1805,7 +1816,9 @@ pub mod config {
                         .filter(|key| !key.is_empty())
                 })
                 .or_else(|| {
-                    api_key_env_vars_for_provider(provider_id)
+                    // A user-named account matches no env var, so ask about
+                    // the protocol it speaks.
+                    api_key_env_vars_for_provider(&self.vendor_id_for_account(provider_id))
                         .iter()
                         .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
                 })
@@ -1878,15 +1891,19 @@ pub mod config {
                 return None;
             }
 
+            // A user-named account matches no env var and no shipped default,
+            // so both lookups ask about the protocol it speaks instead.
+            let vendor = self.vendor_id_for_account(provider_id);
+
             provider_cfg
                 .and_then(|provider| provider.api_base.clone())
                 .filter(|base| !base.is_empty())
                 .or_else(|| {
-                    api_base_env_var_for_provider(provider_id)
+                    api_base_env_var_for_provider(&vendor)
                         .and_then(|name| std::env::var(name).ok())
                         .filter(|base| !base.is_empty())
                 })
-                .or_else(|| default_api_base_for_provider(provider_id).map(str::to_owned))
+                .or_else(|| default_api_base_for_provider(&vendor).map(str::to_owned))
                 // Support {env:VAR_NAME} patterns in the resolved base URL
                 .map(|base| substitute_env_vars(&base))
         }
@@ -1921,6 +1938,19 @@ pub mod config {
         pub fn is_account_id(&self, id: &str) -> bool {
             self.provider_configs.contains_key(id)
                 || crate::provider_id::ProviderId::is_well_known(id)
+        }
+
+        /// The id to use when looking up per-vendor defaults for an account.
+        ///
+        /// An account named by the user (`work_openai`) matches no env var and
+        /// no default base URL, so those lookups have to ask about the
+        /// protocol it speaks instead. An account named after its vendor
+        /// answers with its own name and nothing changes.
+        pub fn vendor_id_for_account(&self, account_id: &str) -> String {
+            self.provider_configs
+                .get(account_id)
+                .map(|entry| entry.protocol_or(account_id))
+                .unwrap_or_else(|| account_id.to_string())
         }
 
         /// Resolve a model string onto the account that will serve it.
@@ -6792,7 +6822,7 @@ mod account_schema_tests {
     //! An account is an endpoint plus the models it serves. The model list is
     //! authoritative once it exists, and silent about everything before that,
     //! so a settings file written before discovery existed is never locked out.
-    use crate::config::{Config, ProviderConfig, Settings};
+    use crate::config::{account_name_is_valid, Config, ProviderConfig, Settings};
 
     fn account(protocol: Option<&str>, models: &[&str]) -> ProviderConfig {
         ProviderConfig {
@@ -6835,6 +6865,44 @@ mod account_schema_tests {
         let entry = account(None, &["claude-opus-5", "gpt-5.6-sol"]);
         assert!(entry.serves_model("gpt-5.6-sol"));
         assert!(!entry.serves_model("claude-sonnet-5"));
+    }
+
+    #[test]
+    fn a_user_named_account_inherits_its_vendor_defaults() {
+        // `work_openai` matches no env var and no shipped base URL, so both
+        // lookups have to ask about the protocol it speaks.
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("work_openai".to_string(), account(Some("openai"), &[]));
+        assert_eq!(config.vendor_id_for_account("work_openai"), "openai");
+    }
+
+    #[test]
+    fn a_vendor_named_account_answers_with_its_own_name() {
+        let mut config = Config::default();
+        config
+            .provider_configs
+            .insert("openai".to_string(), ProviderConfig::default());
+        assert_eq!(config.vendor_id_for_account("openai"), "openai");
+    }
+
+    #[test]
+    fn an_unconfigured_id_is_its_own_vendor() {
+        let config = Config::default();
+        assert_eq!(config.vendor_id_for_account("anthropic"), "anthropic");
+    }
+
+    #[test]
+    fn an_account_name_must_survive_a_model_string() {
+        // `/` is the separator, so a name carrying one could never be used.
+        assert!(account_name_is_valid("is_gateway"));
+        assert!(account_name_is_valid("  work-openai  "), "trimmed first");
+        assert!(!account_name_is_valid(""));
+        assert!(!account_name_is_valid("   "));
+        assert!(!account_name_is_valid("my/gateway"));
+        assert!(!account_name_is_valid("my gateway"));
+        assert!(!account_name_is_valid("my\tgateway"));
     }
 
     #[test]

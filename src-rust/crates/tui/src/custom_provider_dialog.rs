@@ -119,13 +119,8 @@ impl CustomProviderDialogState {
     }
 
     /// Whether the typed account name can be stored and addressed.
-    ///
-    /// A slash would collide with the `"<account>/<model>"` separator and
-    /// whitespace cannot survive a round trip through a model string, so both
-    /// are refused at the point of entry rather than corrupting a lookup later.
     pub fn account_name_is_valid(&self) -> bool {
-        let name = self.account_input.trim();
-        !name.is_empty() && !name.contains('/') && !name.contains(char::is_whitespace)
+        claurst_core::config::account_name_is_valid(&self.account_input)
     }
 
     pub fn can_submit(&self) -> bool {

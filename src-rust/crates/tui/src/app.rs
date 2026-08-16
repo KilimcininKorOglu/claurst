@@ -2350,23 +2350,21 @@ impl App {
         self.open_model_picker_for_provider(&provider_id, Some(picker_title));
     }
 
-    /// Write the account the connect dialog just collected.
+    /// Write the account a connect dialog just collected.
     ///
     /// `protocol` is recorded whenever it differs from the account name, which
     /// is what lets an endpoint be addressed as `"<account>/<model>"` under a
-    /// name of the user's choosing instead of its vendor's.
-    fn persist_custom_provider_base_url(
-        &mut self,
-        account_id: &str,
-        protocol: &str,
-        base_url: &str,
-    ) {
+    /// name of the user's choosing instead of its vendor's. `base_url` is
+    /// `None` for a vendor account, which reaches its own endpoint.
+    fn persist_account(&mut self, account_id: &str, protocol: &str, base_url: Option<&str>) {
         let mut settings = Settings::load_sync().unwrap_or_default();
         let entry = settings
             .providers
             .entry(account_id.to_string())
             .or_default();
-        entry.api_base = Some(base_url.to_string());
+        if let Some(base_url) = base_url {
+            entry.api_base = Some(base_url.to_string());
+        }
         entry.enabled = true;
         if protocol != account_id {
             entry.protocol = Some(protocol.to_string());
@@ -2381,6 +2379,11 @@ impl App {
         self.config
             .provider_configs
             .insert(account_id.to_string(), written);
+    }
+
+    /// Record a vendor account that reaches its own endpoint.
+    fn persist_account_protocol(&mut self, account_id: &str, protocol: &str) {
+        self.persist_account(account_id, protocol, None);
     }
 
     fn persist_provider_and_model(&self) {
@@ -4101,16 +4104,24 @@ impl App {
                 KeyCode::Esc => {
                     self.key_input_dialog.close();
                 }
+                KeyCode::Tab | KeyCode::Down | KeyCode::Up => {
+                    self.key_input_dialog.toggle_field();
+                }
                 KeyCode::Enter => {
-                    let provider_id = self.key_input_dialog.provider_id.clone();
-                    let provider_name = self.key_input_dialog.provider_name.clone();
-                    let api_key = self.key_input_dialog.take_key();
-                    if !api_key.is_empty() {
+                    if self.key_input_dialog.can_submit() {
+                        let provider_name = self.key_input_dialog.provider_name.clone();
+                        let (account_id, protocol, api_key) = self.key_input_dialog.take_key();
+                        // Stored under the account name, not the vendor's, so
+                        // a second key for the same vendor is a second account
+                        // instead of overwriting the first.
+                        self.persist_account_protocol(&account_id, &protocol);
                         self.auth_store.set(
-                            &provider_id,
+                            &account_id,
                             claurst_core::StoredCredential::ApiKey { key: api_key },
                         );
-                        self.activate_provider(provider_id, provider_name, "Connected to");
+                        self.queue_model_sync(&account_id, false);
+                        self.pending_provider_reload = true;
+                        self.activate_provider(account_id, provider_name, "Connected to");
                     }
                 }
                 KeyCode::Backspace => {
@@ -4207,7 +4218,7 @@ impl App {
                         let provider_name = self.custom_provider_dialog.provider_name.clone();
                         let (account_id, protocol, base_url, api_key) =
                             self.custom_provider_dialog.take_values();
-                        self.persist_custom_provider_base_url(&account_id, &protocol, &base_url);
+                        self.persist_account(&account_id, &protocol, Some(&base_url));
                         self.auth_store.set(
                             &account_id,
                             claurst_core::StoredCredential::ApiKey { key: api_key },
