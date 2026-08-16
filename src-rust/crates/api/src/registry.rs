@@ -1043,7 +1043,7 @@ pub async fn provider_by_id_for_profile(
     match provider_id {
         claurst_core::accounts::PROVIDER_ANTHROPIC => {
             let (credential, use_bearer_auth) =
-                claurst_core::oauth::resolve_auth_for_profile(profile_id)
+                claurst_core::oauth::resolve_auth_for_account(profile_id)
                     .await
                     .ok_or_else(missing)?;
             // Built directly rather than through `ProviderRegistry`, which
@@ -1057,7 +1057,7 @@ pub async fn provider_by_id_for_profile(
                 },
             )))
         }
-        claurst_core::accounts::PROVIDER_CODEX => CodexProvider::from_profile(profile_id)
+        claurst_core::accounts::PROVIDER_CODEX => CodexProvider::from_account(profile_id)
             .map(|provider| Arc::new(provider) as Arc<dyn LlmProvider>)
             .ok_or_else(missing),
         // `provider_supports_profiles` already rejected everything else.

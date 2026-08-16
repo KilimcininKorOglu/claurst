@@ -584,20 +584,21 @@ mod tests {
         assert_eq!(mode, 0o700, "account dir must be owner-only");
     }
 
-    /// End-to-end: the real codex token save path produces a 0o600 file under
-    /// a 0o700 account dir. Redirects `dirs::home_dir()` via a temp `HOME`,
-    /// serialized against any other HOME-mutating test in this binary.
+    /// End-to-end: the real codex token save path lands in an owner-only
+    /// `auth.json` under an owner-only config dir. Redirects the config root
+    /// via a temp `CLAURST_HOME`, serialized against any other env-mutating
+    /// test in this binary.
     #[cfg(unix)]
     #[test]
-    fn real_codex_save_path_writes_0600_token_file() {
+    fn real_codex_save_path_writes_an_0600_auth_store() {
         use std::os::unix::fs::PermissionsExt;
         use std::sync::Mutex;
         static HOME_LOCK: Mutex<()> = Mutex::new(());
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let tmp = tempfile::tempdir().unwrap();
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", tmp.path());
+        let prev_home = std::env::var_os("CLAURST_HOME");
+        std::env::set_var("CLAURST_HOME", tmp.path());
 
         let tokens = crate::oauth_config::CodexTokens {
             access_token: "access-secret".into(),
@@ -605,31 +606,27 @@ mod tests {
             account_id: Some("acc_1".into()),
             expires_at: Some(0),
         };
-        let save_res = crate::oauth_config::save_codex_tokens_for_profile(&tokens, "work");
+        let save_res = crate::oauth_config::save_codex_tokens_for_account(&tokens, "work");
 
-        let path = codex_token_path("work");
+        let path = crate::AuthStore::path();
         let file_mode = std::fs::metadata(&path).map(|m| m.permissions().mode() & 0o777);
         let dir_mode =
             std::fs::metadata(path.parent().unwrap()).map(|m| m.permissions().mode() & 0o777);
+        let stored = crate::AuthStore::load()
+            .codex_tokens("work")
+            .map(|t| t.access_token.clone());
 
-        // Restore HOME before asserting so a failure can't leak the override
-        // into the rest of the test binary.
+        // Restore the config root before asserting so a failure can't leak the
+        // override into the rest of the test binary.
         match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
+            Some(v) => std::env::set_var("CLAURST_HOME", v),
+            None => std::env::remove_var("CLAURST_HOME"),
         }
 
         save_res.unwrap();
-        assert_eq!(
-            file_mode.unwrap(),
-            0o600,
-            "codex token file must be owner-only"
-        );
-        assert_eq!(
-            dir_mode.unwrap(),
-            0o700,
-            "codex account dir must be owner-only"
-        );
+        assert_eq!(stored.as_deref(), Some("access-secret"));
+        assert_eq!(file_mode.unwrap(), 0o600, "auth store must be owner-only");
+        assert_eq!(dir_mode.unwrap(), 0o700, "config dir must be owner-only");
     }
     #[test]
     fn only_the_multi_account_providers_support_profiles() {

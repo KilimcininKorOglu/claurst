@@ -22,8 +22,8 @@ use claurst_core::codex_oauth::{
     CODEX_API_ENDPOINT, CODEX_MODELS, CODEX_TOKEN_URL, DEFAULT_CODEX_MODEL,
 };
 use claurst_core::oauth_config::{
-    get_codex_tokens, load_codex_tokens_for_profile, save_codex_tokens,
-    save_codex_tokens_for_profile, CodexTokens,
+    get_codex_tokens, load_codex_tokens_for_account, save_codex_tokens,
+    save_codex_tokens_for_account, CodexTokens,
 };
 use claurst_core::provider_id::{ModelId, ProviderId};
 use claurst_core::types::UsageInfo;
@@ -51,11 +51,11 @@ pub struct CodexProvider {
     http_client: reqwest::Client,
     /// Mutable token cache: updated in-place when a refresh succeeds.
     tokens: Arc<Mutex<CodexTokens>>,
-    /// Account profile these tokens came from, when one was named.
+    /// Account these tokens came from, when one was named.
     ///
-    /// A refresh has to be written back to the same profile. `None` keeps the
-    /// legacy behaviour of writing through the active-profile path.
-    profile: Option<String>,
+    /// A refresh has to be written back to the same account. `None` writes
+    /// through the active account instead.
+    account: Option<String>,
 }
 
 impl CodexProvider {
@@ -69,7 +69,7 @@ impl CodexProvider {
             id: ProviderId::new(ProviderId::CODEX),
             http_client,
             tokens: Arc::new(Mutex::new(tokens)),
-            profile: None,
+            account: None,
         }
     }
 
@@ -82,27 +82,27 @@ impl CodexProvider {
         Some(Self::new(tokens))
     }
 
-    /// Construct from one named account profile, bypassing the active pointer.
+    /// Construct from one named account, bypassing the active pointer.
     ///
-    /// Returns `None` when the profile has no stored tokens, so the caller can
+    /// Returns `None` when the account has no stored tokens, so the caller can
     /// tell "no such account" apart from a failed request.
-    pub fn from_profile(profile_id: &str) -> Option<Self> {
-        let tokens = load_codex_tokens_for_profile(profile_id)?;
+    pub fn from_account(account_id: &str) -> Option<Self> {
+        let tokens = load_codex_tokens_for_account(account_id)?;
         if tokens.access_token.is_empty() {
             return None;
         }
         let mut provider = Self::new(tokens);
-        provider.profile = Some(profile_id.to_string());
+        provider.account = Some(account_id.to_string());
         Some(provider)
     }
 
-    /// Write tokens back to the profile they were read from.
+    /// Write tokens back to the account they were read from.
     ///
     /// Refreshing a non-active account through `save_codex_tokens` would store
     /// its tokens under the *active* account and break both.
     fn persist_tokens(&self, updated: &CodexTokens) -> anyhow::Result<()> {
-        match self.profile.as_deref() {
-            Some(profile_id) => save_codex_tokens_for_profile(updated, profile_id),
+        match self.account.as_deref() {
+            Some(account_id) => save_codex_tokens_for_account(updated, account_id),
             None => save_codex_tokens(updated),
         }
     }
@@ -993,11 +993,10 @@ impl LlmProvider for CodexProvider {
 }
 
 #[cfg(test)]
-mod profile_tests {
+mod account_tests {
     //! A refreshed token has to go back to the account it came from. Writing it
-    //! through the active-profile path would overwrite a different account.
+    //! through the active-account path would overwrite a different account.
     use super::*;
-    use claurst_core::accounts::PROVIDER_CODEX;
     use claurst_core::oauth_config::save_codex_tokens_and_register;
     use std::sync::Mutex as StdMutex;
 
@@ -1037,53 +1036,56 @@ mod profile_tests {
     }
 
     #[test]
-    fn from_profile_is_none_when_the_account_has_no_tokens() {
+    fn from_account_is_none_when_the_account_has_no_tokens() {
         let _lock = ENV_LOCK.lock().expect("lock");
         let _home = HomeGuard::new();
 
-        assert!(CodexProvider::from_profile("missing").is_none());
+        assert!(CodexProvider::from_account("missing").is_none());
     }
 
     #[test]
-    fn from_profile_reads_that_account_rather_than_the_active_one() {
+    fn from_account_reads_that_account_rather_than_the_active_one() {
         let _lock = ENV_LOCK.lock().expect("lock");
         let _home = HomeGuard::new();
 
         save_codex_tokens_and_register(&tokens("token-for-work"), Some("work")).expect("work");
-        save_codex_tokens_for_profile(&tokens("token-for-personal"), "personal").expect("personal");
+        save_codex_tokens_for_account(&tokens("token-for-personal"), "personal").expect("personal");
 
-        let provider = CodexProvider::from_profile("personal").expect("provider");
+        let provider = CodexProvider::from_account("personal").expect("provider");
         let stored = provider.tokens.lock().expect("tokens").access_token.clone();
 
         assert_eq!(stored, "token-for-personal");
         assert_eq!(
-            claurst_core::accounts::AccountRegistry::load().active(PROVIDER_CODEX),
+            claurst_core::config::Settings::load_sync()
+                .expect("settings")
+                .provider
+                .as_deref(),
             Some("work"),
-            "reading a profile must not move the active pointer"
+            "reading an account must not move the active pointer"
         );
     }
 
     #[test]
-    fn a_refresh_writes_back_to_the_named_profile() {
+    fn a_refresh_writes_back_to_the_named_account() {
         let _lock = ENV_LOCK.lock().expect("lock");
         let _home = HomeGuard::new();
 
         save_codex_tokens_and_register(&tokens("token-for-work"), Some("work")).expect("work");
-        save_codex_tokens_for_profile(&tokens("token-for-personal"), "personal").expect("personal");
+        save_codex_tokens_for_account(&tokens("token-for-personal"), "personal").expect("personal");
 
-        let provider = CodexProvider::from_profile("personal").expect("provider");
+        let provider = CodexProvider::from_account("personal").expect("provider");
         provider
             .persist_tokens(&tokens("refreshed-personal"))
             .expect("persist");
 
         assert_eq!(
-            load_codex_tokens_for_profile("personal")
+            load_codex_tokens_for_account("personal")
                 .expect("personal tokens")
                 .access_token,
             "refreshed-personal"
         );
         assert_eq!(
-            load_codex_tokens_for_profile("work")
+            load_codex_tokens_for_account("work")
                 .expect("work tokens")
                 .access_token,
             "token-for-work",
@@ -1092,7 +1094,7 @@ mod profile_tests {
     }
 
     #[test]
-    fn without_a_profile_a_refresh_still_uses_the_active_path() {
+    fn without_an_account_a_refresh_still_uses_the_active_one() {
         let _lock = ENV_LOCK.lock().expect("lock");
         let _home = HomeGuard::new();
 
@@ -1104,7 +1106,7 @@ mod profile_tests {
             .expect("persist");
 
         assert_eq!(
-            load_codex_tokens_for_profile("work")
+            load_codex_tokens_for_account("work")
                 .expect("work tokens")
                 .access_token,
             "refreshed-work"

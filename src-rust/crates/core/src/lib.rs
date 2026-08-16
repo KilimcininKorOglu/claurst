@@ -1138,6 +1138,45 @@ pub mod config {
         !name.is_empty() && !name.contains('/') && !name.contains(char::is_whitespace)
     }
 
+    /// Open a `providers` entry for an account, optionally making it active.
+    ///
+    /// An account is a `providers` entry plus a credential, so a login flow
+    /// that stored a credential has to write the entry too. Without it the
+    /// account cannot be built, addressed as `"<account>/<model>"`, or offered
+    /// in the model picker.
+    pub fn register_account(
+        account_id: &str,
+        protocol: &str,
+        make_active: bool,
+    ) -> anyhow::Result<()> {
+        let mut settings = Settings::load_sync().unwrap_or_default();
+        let entry = settings
+            .providers
+            .entry(account_id.to_string())
+            .or_default();
+        entry.enabled = true;
+        if protocol != account_id {
+            entry.protocol = Some(protocol.to_string());
+        }
+        if make_active {
+            settings.provider = Some(account_id.to_string());
+            settings.config.provider = Some(account_id.to_string());
+        }
+        settings.save_sync()
+    }
+
+    /// Drop an account's `providers` entry, clearing the active pointer when it
+    /// named that account.
+    pub fn forget_account(account_id: &str) -> anyhow::Result<()> {
+        let mut settings = Settings::load_sync().unwrap_or_default();
+        settings.providers.remove(account_id);
+        if settings.provider.as_deref() == Some(account_id) {
+            settings.provider = None;
+            settings.config.provider = None;
+        }
+        settings.save_sync()
+    }
+
     // ---- Route -----------------------------------------------------------
 
     /// A model string resolved onto the account that will serve the request.
@@ -4859,44 +4898,36 @@ pub mod oauth {
             }
         }
 
-        /// Legacy token file path — kept for backward-compat reads when no
-        /// account registry exists yet. New writes go to per-account dirs.
+        /// Legacy token file path, read once by the startup migration and
+        /// never written.
         pub fn token_file_path() -> std::path::PathBuf {
             crate::config::Settings::config_dir().join("oauth_tokens.json")
         }
 
-        /// Save tokens for a specific account profile under
-        /// `~/.claurst/accounts/anthropic/<profile_id>/oauth_tokens.json`.
-        pub async fn save_for_profile(&self, profile_id: &str) -> anyhow::Result<()> {
-            let path = crate::accounts::anthropic_token_path(profile_id);
-            if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-                crate::accounts::set_user_only_dir_perms(parent);
-            }
-            tokio::fs::write(&path, serde_json::to_string_pretty(self)?).await?;
-            // These are live OAuth access + refresh tokens — never leave them
-            // world/group readable (issue #212).
-            crate::accounts::set_user_only_perms(&path);
+        /// Save tokens under `account_id` in the auth store.
+        pub async fn save_for_account(&self, account_id: &str) -> anyhow::Result<()> {
+            let mut store = crate::AuthStore::load();
+            store.set_anthropic_tokens(account_id, self.clone());
             Ok(())
         }
 
-        /// Load tokens for a specific account profile, or `None` if missing.
-        pub async fn load_for_profile(profile_id: &str) -> Option<Self> {
-            let path = crate::accounts::anthropic_token_path(profile_id);
-            let content = tokio::fs::read_to_string(&path).await.ok()?;
-            serde_json::from_str(&content).ok()
+        /// Load the tokens stored for `account_id`, or `None` when that account
+        /// holds a credential of another kind.
+        pub async fn load_for_account(account_id: &str) -> Option<Self> {
+            crate::AuthStore::load()
+                .anthropic_tokens(account_id)
+                .cloned()
         }
 
-        /// Persist to `profile_id` when given, else through the active-profile
-        /// path.
+        /// Persist to `account_id` when given, else through the active account.
         ///
-        /// Every write that follows a read must name the profile it read from.
-        /// `save()` resolves the *active* profile, so persisting a non-active
+        /// Every write that follows a read must name the account it read from.
+        /// `save()` resolves the *active* account, so persisting a non-active
         /// account through it would overwrite the active account's tokens and
         /// break both.
-        pub async fn persist(&self, profile_id: Option<&str>) -> anyhow::Result<()> {
-            match profile_id {
-                Some(id) => self.save_for_profile(id).await,
+        pub async fn persist(&self, account_id: Option<&str>) -> anyhow::Result<()> {
+            match account_id {
+                Some(id) => self.save_for_account(id).await,
                 None => self.save().await,
             }
         }
@@ -4908,7 +4939,7 @@ pub mod oauth {
         /// is no refresh token, or when the exchange fails. A failed refresh is
         /// not an error here: the caller still gets a credential to try, and
         /// the API reports the real problem.
-        pub async fn refreshed_into(self, profile_id: Option<&str>) -> Self {
+        pub async fn refreshed_into(self, account_id: Option<&str>) -> Self {
             if !self.is_expired() {
                 return self;
             }
@@ -4965,135 +4996,105 @@ pub mod oauth {
                     .split_whitespace()
                     .map(String::from)
                     .collect();
-                let _ = updated.persist(profile_id).await;
+                let _ = updated.persist(account_id).await;
                 Some(updated)
             };
             refreshed.unwrap_or(self)
         }
 
-        /// Save these tokens, register/refresh a profile in the account
-        /// registry, and mark it active. Returns the profile id used.
+        /// Save these tokens under an account, open its `providers` entry, and
+        /// make it the active account. Returns the account name used.
         ///
-        /// If `label` is None, derives the id from email/account_uuid.
+        /// The name comes from `label` when given, otherwise from the identity
+        /// the tokens carry. Logging in again with the same identity refreshes
+        /// that account in place rather than stacking a second copy.
         pub async fn save_and_register(&self, label: Option<&str>) -> anyhow::Result<String> {
-            use crate::accounts::{
-                ensure_unique_profile_id, slugify_profile_id, AccountProfile, AccountRegistry,
-                PROVIDER_ANTHROPIC,
-            };
+            let settings = crate::config::Settings::load_sync().unwrap_or_default();
+            let config = settings.effective_config();
 
-            let mut registry = AccountRegistry::load();
-
-            // Identity-aware id resolution: if a profile with the same email
-            // or account_uuid already exists, reuse it instead of stacking
-            // duplicates.
-            let existing_id = registry
-                .list(PROVIDER_ANTHROPIC)
+            // Same email or account_uuid means the same account, whatever it
+            // was named when it was first stored.
+            let store = crate::AuthStore::load();
+            let existing_id = store
+                .accounts_for_protocol(crate::provider_id::ProviderId::ANTHROPIC)
                 .into_iter()
-                .find(|p| {
-                    (self.email.is_some() && p.email == self.email)
-                        || (self.account_uuid.is_some() && p.account_id == self.account_uuid)
-                })
-                .map(|p| p.id);
+                .find(|id| {
+                    store.anthropic_tokens(id).is_some_and(|stored| {
+                        (self.email.is_some() && stored.email == self.email)
+                            || (self.account_uuid.is_some()
+                                && stored.account_uuid == self.account_uuid)
+                    })
+                });
 
-            let id = if let Some(id) = existing_id {
-                id
-            } else if let Some(label) = label {
-                ensure_unique_profile_id(&registry, PROVIDER_ANTHROPIC, label)
-            } else {
-                let base = self
-                    .email
-                    .as_deref()
-                    .map(|e| e.split('@').next().unwrap_or(e).to_string())
-                    .or_else(|| self.account_uuid.clone())
-                    .unwrap_or_else(|| "account".to_string());
-                ensure_unique_profile_id(&registry, PROVIDER_ANTHROPIC, &base)
+            let id = match existing_id {
+                Some(id) => id,
+                None => {
+                    let base = label.map(str::to_string).unwrap_or_else(|| {
+                        self.email
+                            .as_deref()
+                            .map(|e| e.split('@').next().unwrap_or(e).to_string())
+                            .or_else(|| self.account_uuid.clone())
+                            .unwrap_or_else(|| "account".to_string())
+                    });
+                    config.account_name_for_login(&base, crate::provider_id::ProviderId::ANTHROPIC)
+                }
             };
 
-            self.save_for_profile(&id).await?;
-
-            let profile = AccountProfile {
-                id: id.clone(),
-                label: label.map(slugify_profile_id),
-                email: self.email.clone(),
-                account_id: self.account_uuid.clone(),
-                organization_uuid: self.organization_uuid.clone(),
-                subscription_tier: self.subscription_type.clone(),
-                added_at: None,
-                last_selected_at: None,
-            };
-            registry.upsert(PROVIDER_ANTHROPIC, profile, true)?;
+            self.save_for_account(&id).await?;
+            crate::config::register_account(&id, crate::provider_id::ProviderId::ANTHROPIC, true)?;
             Ok(id)
         }
 
-        /// Save (active profile, or new profile if registry empty) — back-compat
-        /// shim for callers that don't think in terms of profiles.
+        /// Save to the active account, registering a new one when the active
+        /// account is not an Anthropic OAuth account.
         pub async fn save(&self) -> anyhow::Result<()> {
-            let registry = crate::accounts::AccountRegistry::load();
-            if let Some(active) = registry.active(crate::accounts::PROVIDER_ANTHROPIC) {
-                self.save_for_profile(active).await
-            } else {
-                // No registry yet — register as a new profile.
-                self.save_and_register(None).await.map(|_| ())
+            match active_anthropic_account() {
+                Some(active) => self.save_for_account(&active).await,
+                None => self.save_and_register(None).await.map(|_| ()),
             }
         }
 
-        /// Load tokens for the active anthropic profile. Falls back to the
-        /// legacy `~/.claurst/oauth_tokens.json` (auto-migrating it into a
-        /// "default" profile on first read) if no registry exists.
+        /// Load the active account's tokens, or `None` when the active account
+        /// is not an Anthropic OAuth account.
         pub async fn load() -> Option<Self> {
-            let mut registry = crate::accounts::AccountRegistry::load();
-
-            if let Some(active) = registry.active(crate::accounts::PROVIDER_ANTHROPIC) {
-                if let Some(t) = Self::load_for_profile(active).await {
-                    return Some(t);
-                }
-            }
-
-            // Fallback: legacy single-file storage. Migrate on the spot.
-            let legacy = Self::token_file_path();
-            if legacy.exists() {
-                let content = tokio::fs::read_to_string(&legacy).await.ok()?;
-                let tokens: Self = serde_json::from_str(&content).ok()?;
-                // Best-effort migration: register under a derived id.
-                if let Ok(id) = tokens.save_and_register(None).await {
-                    let _ = tokio::fs::remove_file(&legacy).await;
-                    // refresh active pointer
-                    let _ = registry.switch_to(crate::accounts::PROVIDER_ANTHROPIC, &id);
-                }
-                return Some(tokens);
-            }
-            None
+            Self::load_for_account(&active_anthropic_account()?).await
         }
 
-        /// Clear credentials for the active profile (or all credentials if
-        /// `purge_all` is true) and drop the profile from the registry.
+        /// Drop the active Anthropic account: its credential and its
+        /// `providers` entry.
         pub async fn clear() -> anyhow::Result<()> {
-            let mut registry = crate::accounts::AccountRegistry::load();
-            if let Some(active) = registry
-                .active(crate::accounts::PROVIDER_ANTHROPIC)
-                .map(String::from)
-            {
-                registry.remove(crate::accounts::PROVIDER_ANTHROPIC, &active)?;
-            }
-            // Also remove any legacy file.
-            let legacy = Self::token_file_path();
-            if legacy.exists() {
-                tokio::fs::remove_file(&legacy).await?;
+            if let Some(active) = active_anthropic_account() {
+                crate::AuthStore::load().remove(&active);
+                crate::config::forget_account(&active)?;
             }
             Ok(())
         }
     }
 
-    /// Resolve the Anthropic credential for one named account profile.
+    /// The active account, when it is an Anthropic OAuth account.
+    ///
+    /// Returns `None` when the session is pointed at an API key account or at
+    /// another vendor, because then there is no OAuth account in play and
+    /// picking one arbitrarily would report a credential the session is not
+    /// using.
+    fn active_anthropic_account() -> Option<String> {
+        let settings = crate::config::Settings::load_sync().ok()?;
+        let active = settings.provider.clone()?;
+        crate::AuthStore::load()
+            .anthropic_tokens(&active)
+            .map(|_| active)
+    }
+
+    /// Resolve the Anthropic credential for one named account.
     ///
     /// Returns the credential and whether it is a Bearer token, matching
     /// `Config::resolve_anthropic_auth_async`. Unlike that function this one
     /// deliberately ignores any configured or ambient `ANTHROPIC_API_KEY`: the
     /// caller asked for a specific OAuth account, so a stray API key must not
     /// silently answer in its place.
-    pub async fn resolve_auth_for_profile(profile_id: &str) -> Option<(String, bool)> {
-        let tokens = OAuthTokens::load_for_profile(profile_id).await?;
-        let tokens = tokens.refreshed_into(Some(profile_id)).await;
+    pub async fn resolve_auth_for_account(account_id: &str) -> Option<(String, bool)> {
+        let tokens = OAuthTokens::load_for_account(account_id).await?;
+        let tokens = tokens.refreshed_into(Some(account_id)).await;
         tokens
             .effective_credential()
             .map(|cred| (cred.to_string(), tokens.uses_bearer_auth()))
@@ -6516,7 +6517,6 @@ mod credential_storage_tests {
     //! and in the account it belongs to. A refreshed token persisted through
     //! the active-profile path would overwrite a different account, and a key
     //! left in `settings.json` stays readable by everyone on the machine.
-    use crate::accounts::{AccountRegistry, PROVIDER_ANTHROPIC};
     use crate::oauth::OAuthTokens;
 
     // `Settings::config_dir()` reads process-global env. Serialise every test
@@ -6557,7 +6557,7 @@ mod credential_storage_tests {
     }
 
     #[tokio::test]
-    async fn persist_with_a_profile_writes_to_that_profiles_file() {
+    async fn persist_with_an_account_writes_to_that_account() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
 
@@ -6566,14 +6566,14 @@ mod credential_storage_tests {
             .await
             .expect("persist");
 
-        let loaded = OAuthTokens::load_for_profile("personal")
+        let loaded = OAuthTokens::load_for_account("personal")
             .await
             .expect("profile tokens");
         assert_eq!(loaded.access_token, "token-for-personal");
     }
 
     #[tokio::test]
-    async fn persist_with_a_profile_leaves_the_active_profile_untouched() {
+    async fn persist_with_an_account_leaves_the_active_account_untouched() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
 
@@ -6587,34 +6587,39 @@ mod credential_storage_tests {
             .await
             .expect("persist personal");
 
-        let work = OAuthTokens::load_for_profile("work")
+        let work = OAuthTokens::load_for_account("work")
             .await
             .expect("work tokens");
         assert_eq!(
             work.access_token, "token-for-work",
-            "writing a non-active profile must not touch the active one"
+            "writing a non-active account must not touch the active one"
         );
         assert_eq!(
-            AccountRegistry::load().active(PROVIDER_ANTHROPIC),
+            crate::config::Settings::load_sync()
+                .expect("settings")
+                .provider
+                .as_deref(),
             Some("work"),
-            "persisting a profile must not move the active pointer"
+            "persisting an account must not move the active pointer"
         );
     }
 
     #[tokio::test]
-    async fn persist_without_a_profile_falls_back_to_the_active_path() {
+    async fn persist_without_an_account_falls_back_to_the_active_one() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
 
-        // No registry yet, so `save()` registers a profile and marks it active.
+        // Nothing stored yet, so `save()` opens an account and makes it active.
         tokens("token-for-default")
             .persist(None)
             .await
             .expect("persist");
 
-        let registry = AccountRegistry::load();
-        let active = registry.active(PROVIDER_ANTHROPIC).expect("active profile");
-        let loaded = OAuthTokens::load_for_profile(active)
+        let active = crate::config::Settings::load_sync()
+            .expect("settings")
+            .provider
+            .expect("active account");
+        let loaded = OAuthTokens::load_for_account(&active)
             .await
             .expect("active tokens");
         assert_eq!(loaded.access_token, "token-for-default");
@@ -6632,7 +6637,7 @@ mod credential_storage_tests {
 
         assert_eq!(result.access_token, "still-good");
         assert!(
-            OAuthTokens::load_for_profile("personal").await.is_none(),
+            OAuthTokens::load_for_account("personal").await.is_none(),
             "a token that is still valid must not be written back"
         );
     }
@@ -6652,7 +6657,7 @@ mod credential_storage_tests {
             result.access_token, "stale",
             "with no refresh token the caller still gets a credential to try"
         );
-        assert!(OAuthTokens::load_for_profile("personal").await.is_none());
+        assert!(OAuthTokens::load_for_account("personal").await.is_none());
     }
 
     // ---- plaintext key relocation ---------------------------------------
