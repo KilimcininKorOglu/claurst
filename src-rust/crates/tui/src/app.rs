@@ -1343,6 +1343,12 @@ pub struct App {
     /// client + provider registry. Without it the session keeps the client built
     /// at startup, which for a fresh OAuth login still has no usable credential.
     pub pending_provider_reload: bool,
+    /// Account whose model list should be filled from its own endpoint.
+    ///
+    /// Set when an account is connected and drained after the provider
+    /// registry has been rebuilt, because discovery needs a provider that can
+    /// already reach the new endpoint.
+    pub pending_model_sync: Option<String>,
     /// Pending MCP panel-auth request for the interactive loop.
     pub pending_mcp_panel_auth: Option<String>,
     /// Shared file-history service used for turn diff reconstruction.
@@ -1763,6 +1769,7 @@ impl App {
             mcp_manager: None,
             pending_mcp_reconnect: false,
             pending_provider_reload: false,
+            pending_model_sync: None,
             pending_mcp_panel_auth: None,
             file_history: None,
             current_turn: None,
@@ -2140,10 +2147,12 @@ impl App {
         self.dismiss_error_notifications();
         self.load_model_registry_cache();
 
-        let models = crate::model_picker::models_for_provider_from_registry(
-            provider_id,
-            &self.model_registry,
-        );
+        // The account's own list wins when it has one, so the picker offers
+        // what this endpoint actually serves instead of its vendor's catalogue.
+        let account = self.config.provider_configs.get(provider_id);
+        let has_own_list = account.is_some_and(|entry| !entry.models.is_empty());
+        let models =
+            crate::model_picker::models_for_account(provider_id, account, &self.model_registry);
         self.model_picker.set_models(models);
         self.model_picker_provider_id = Some(provider_id.to_string());
         // Catalog-backed providers (Anthropic/OpenAI/Google) are a read-only
@@ -2151,7 +2160,9 @@ impl App {
         // discover from, so skip the background fetch entirely and treat the
         // projection as final. Live-endpoint / curated-list providers still
         // fetch their real model list to overlay onto the projection.
-        if crate::model_picker::provider_uses_catalog_projection(provider_id) {
+        if has_own_list || crate::model_picker::provider_uses_catalog_projection(provider_id) {
+            // A discovered account is already authoritative; re-fetching would
+            // only replace the list with the same thing.
             self.model_picker.loading_models = false;
             self.model_picker_fetch_pending = false;
         } else {
@@ -2188,7 +2199,25 @@ impl App {
     /// request would resolve, rather than re-deriving it from settings and
     /// drifting. Before the registry is attached there is nothing to enumerate,
     /// so the caller falls back to the single-provider picker.
+    /// Accounts the picker may offer.
+    ///
+    /// A registered provider is not necessarily usable: the vendor defaults are
+    /// registered whether or not anyone configured them, and offering one with
+    /// no endpoint and no credential means a whole catalogue of models that
+    /// fail the moment they are picked. An account qualifies when the user
+    /// configured it, when a credential resolves for it, or when it is local
+    /// and needs neither.
     fn reachable_provider_ids(&self) -> Vec<String> {
+        /// Endpoints that run on the user's own machine and take no key.
+        const LOCAL: &[&str] = &[
+            "ollama",
+            "lmstudio",
+            "lm-studio",
+            "llamacpp",
+            "llama-cpp",
+            "llama-server",
+        ];
+
         let Some(registry) = self.provider_registry.as_ref() else {
             return Vec::new();
         };
@@ -2196,6 +2225,11 @@ impl App {
             .provider_ids()
             .into_iter()
             .map(|id| id.to_string())
+            .filter(|id| {
+                self.config.provider_configs.contains_key(id)
+                    || LOCAL.contains(&id.as_str())
+                    || self.config.resolve_provider_api_key(id).is_some()
+            })
             .collect();
         ids.sort();
         ids.dedup();
@@ -2222,10 +2256,22 @@ impl App {
         self.dismiss_error_notifications();
         self.load_model_registry_cache();
 
-        let models = crate::model_picker::models_for_all_providers_from_registry(
-            &provider_ids,
-            &self.model_registry,
-        );
+        // One section per account, each listing what that account serves.
+        // Building this from the catalogue instead would offer models the
+        // account cannot reach, under a heading naming a vendor rather than
+        // the account the request would actually go to.
+        let models: Vec<crate::model_picker::ModelEntry> = provider_ids
+            .iter()
+            .flat_map(|account_id| {
+                crate::model_picker::models_for_account(
+                    account_id,
+                    self.config.provider_configs.get(account_id),
+                    &self.model_registry,
+                )
+                .into_iter()
+                .map(|entry| entry.into_provider_scoped(account_id))
+            })
+            .collect();
         self.model_picker.set_models(models);
 
         // The live fetch is per-provider, so it still targets the session's
@@ -2279,14 +2325,22 @@ impl App {
         self.open_model_picker_for_provider(&provider_id, Some(picker_title));
     }
 
-    fn persist_custom_provider_base_url(&self, provider_id: &str, base_url: &str) {
+    /// Write the account the connect dialog just collected.
+    ///
+    /// `protocol` is recorded whenever it differs from the account name, which
+    /// is what lets an endpoint be addressed as `"<account>/<model>"` under a
+    /// name of the user's choosing instead of its vendor's.
+    fn persist_custom_provider_base_url(&self, account_id: &str, protocol: &str, base_url: &str) {
         let mut settings = Settings::load_sync().unwrap_or_default();
         let entry = settings
             .providers
-            .entry(provider_id.to_string())
+            .entry(account_id.to_string())
             .or_default();
         entry.api_base = Some(base_url.to_string());
         entry.enabled = true;
+        if protocol != account_id {
+            entry.protocol = Some(protocol.to_string());
+        }
         let _ = settings.save_sync();
     }
 
@@ -3494,6 +3548,11 @@ impl App {
         pending
     }
 
+    /// Take the account waiting for its model list to be discovered.
+    pub fn take_pending_model_sync(&mut self) -> Option<String> {
+        self.pending_model_sync.take()
+    }
+
     pub fn take_pending_provider_reload(&mut self) -> bool {
         let pending = self.pending_provider_reload;
         self.pending_provider_reload = false;
@@ -4086,15 +4145,20 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if self.custom_provider_dialog.can_submit() {
-                        let provider_id = self.custom_provider_dialog.provider_id.clone();
                         let provider_name = self.custom_provider_dialog.provider_name.clone();
-                        let (base_url, api_key) = self.custom_provider_dialog.take_values();
-                        self.persist_custom_provider_base_url(&provider_id, &base_url);
+                        let (account_id, protocol, base_url, api_key) =
+                            self.custom_provider_dialog.take_values();
+                        self.persist_custom_provider_base_url(&account_id, &protocol, &base_url);
                         self.auth_store.set(
-                            &provider_id,
+                            &account_id,
                             claurst_core::StoredCredential::ApiKey { key: api_key },
                         );
-                        self.activate_provider(provider_id, provider_name, "Connected to");
+                        // Ask the endpoint what it serves once the refreshed
+                        // registry can reach it, so the account's model list
+                        // comes from the account rather than from a catalogue
+                        // that cannot know what a gateway proxies.
+                        self.pending_model_sync = Some(account_id.clone());
+                        self.activate_provider(account_id, provider_name, "Connected to");
                     } else {
                         self.custom_provider_dialog.move_next_field();
                     }

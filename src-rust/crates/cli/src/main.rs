@@ -1558,6 +1558,22 @@ async fn reload_provider_runtime_state(
     })
 }
 
+/// Record the models an account was discovered to serve.
+///
+/// Written to disk rather than kept in memory so the list is visible and
+/// editable: discovery seeds it once, and the file is the source of truth from
+/// then on.
+fn persist_account_models(account_id: &str, models: Vec<String>) -> Result<(), String> {
+    let mut settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+    let entry = settings
+        .providers
+        .entry(account_id.to_string())
+        .or_default();
+    entry.models = models;
+    entry.models_synced_at = Some(chrono::Utc::now().to_rfc3339());
+    settings.save_sync().map_err(|err| err.to_string())
+}
+
 /// Keep `config.provider` in step with a `"<account>/<model>"` model string.
 ///
 /// Only a first segment that actually names an account moves the account.
@@ -5152,6 +5168,60 @@ async fn run_interactive(
                 }
                 Err(err) => {
                     app.status_message = Some(format!("Could not activate credentials: {}", err));
+                }
+            }
+        }
+
+        // Fill a newly connected account's model list from the account itself.
+        // Runs after the reload above, because discovery needs a provider that
+        // can already reach the new endpoint.
+        if let Some(account_id) = app.take_pending_model_sync() {
+            let provider = app.provider_registry.as_ref().and_then(|registry| {
+                registry
+                    .get(&claurst_core::ProviderId::new(&account_id))
+                    .cloned()
+            });
+
+            match provider {
+                Some(provider) => match provider.discover_models().await {
+                    Ok(models) if !models.is_empty() => {
+                        let ids: Vec<String> =
+                            models.iter().map(|model| model.id.to_string()).collect();
+                        let count = ids.len();
+                        match persist_account_models(&account_id, ids) {
+                            Ok(()) => {
+                                app.status_message = Some(format!(
+                                    "{account_id}: {count} model{} discovered.",
+                                    if count == 1 { "" } else { "s" }
+                                ));
+                            }
+                            Err(err) => {
+                                app.status_message =
+                                    Some(format!("{account_id}: could not save models: {err}"));
+                            }
+                        }
+                    }
+                    // An endpoint that lists nothing is not an error, but the
+                    // account stays permissive rather than silently locked to
+                    // an empty list.
+                    Ok(_) => {
+                        app.status_message = Some(format!(
+                            "{account_id}: endpoint listed no models; \
+                             set them by hand in settings.json."
+                        ));
+                    }
+                    Err(err) => {
+                        app.status_message = Some(format!(
+                            "{account_id}: model discovery failed ({err}); \
+                             set them by hand in settings.json."
+                        ));
+                    }
+                },
+                None => {
+                    app.status_message = Some(format!(
+                        "{account_id}: not reachable for model discovery; \
+                         set its models by hand in settings.json."
+                    ));
                 }
             }
         }
