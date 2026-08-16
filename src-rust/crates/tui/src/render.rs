@@ -2495,12 +2495,11 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             .split(status_area);
 
         let left_line = if app.has_credentials {
-            let (provider, model_short) =
-                if let Some((provider, model)) = app.model_name.split_once('/') {
-                    (provider.to_string(), model.to_string())
-                } else {
-                    ("local".to_string(), app.model_name.clone())
-                };
+            // The same split the turn loop makes, so the status line names the
+            // account the next request will actually reach. Splitting on the
+            // first `/` here would read `meta-llama/Llama-3.3` as an account.
+            let route = app.config.resolve_route(&app.model_name);
+            let (provider, model_short) = (route.account, route.model);
             let mut spans = vec![
                 Span::styled(
                     format!(" {} ", agent_mode.to_uppercase()),
@@ -4775,5 +4774,88 @@ mod message_timestamp_tests {
             "toggling the setting must invalidate the cached lines, got {after:?}"
         );
         assert!(after.contains("ping") && after.contains("pong"));
+    }
+}
+
+#[cfg(test)]
+mod status_line_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::{Config, ProviderConfig};
+    use claurst_core::cost::CostTracker;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// Draw the input pane and return the status row as plain text.
+    fn status_row(app: &App) -> String {
+        let mut terminal = match Terminal::new(TestBackend::new(120, 6)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_input(frame, app, frame.area(), true)) {
+            panic!("draw: {err}");
+        }
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect()
+    }
+
+    fn app_with_account(account: &str, model: &str) -> App {
+        let mut config = Config::default();
+        config.provider_configs.insert(
+            account.to_string(),
+            ProviderConfig {
+                protocol: Some("anthropic".to_string()),
+                ..Default::default()
+            },
+        );
+        config.provider = Some(account.to_string());
+        let mut app = App::new(config, CostTracker::new());
+        app.has_credentials = true;
+        app.model_name = model.to_string();
+        app
+    }
+
+    #[test]
+    fn the_status_line_names_the_active_account() {
+        // `/switch` only writes `config.provider`; the status line has to read
+        // it from there or it keeps showing whatever was set at startup.
+        let app = app_with_account("work", "claude-opus-5");
+        let row = status_row(&app);
+        assert!(
+            row.contains("claude-opus-5 · work"),
+            "expected the account name in the status line, got {row:?}"
+        );
+    }
+
+    #[test]
+    fn a_slash_in_the_model_id_is_not_read_as_an_account() {
+        // OpenRouter model ids carry a slash of their own. Splitting on the
+        // first one would print `Llama-3.3 · meta-llama`.
+        let app = app_with_account("openrouter", "meta-llama/Llama-3.3");
+        let row = status_row(&app);
+        assert!(
+            row.contains("meta-llama/Llama-3.3 · openrouter"),
+            "expected the full model id, got {row:?}"
+        );
+    }
+
+    #[test]
+    fn an_account_prefix_on_the_model_still_wins() {
+        let mut app = app_with_account("work", "claude-opus-5");
+        app.config.provider_configs.insert(
+            "personal".to_string(),
+            ProviderConfig {
+                protocol: Some("anthropic".to_string()),
+                ..Default::default()
+            },
+        );
+        app.model_name = "personal/claude-sonnet-5".to_string();
+        let row = status_row(&app);
+        assert!(
+            row.contains("claude-sonnet-5 · personal"),
+            "expected the prefixed account to win, got {row:?}"
+        );
     }
 }

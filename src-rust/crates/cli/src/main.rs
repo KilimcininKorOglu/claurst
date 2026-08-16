@@ -2634,14 +2634,6 @@ async fn run_interactive(
     app.bash_prefix_allowlist
         .extend(settings.allowed_bash_prefixes.iter().cloned());
 
-    // If a non-Anthropic provider is active, prefix model_name with "provider/model"
-    // so the status bar can show the provider name.
-    if let Some(ref provider) = live_config.provider {
-        if provider != "anthropic" && !app.model_name.contains('/') {
-            app.model_name = format!("{}/{}", provider, app.model_name);
-        }
-    }
-
     // Set agent mode from the --agent flag (carried on query_config).
     if let Some(ref agent_name) = base_query_config.agent_name {
         app.agent_mode = Some(agent_name.clone());
