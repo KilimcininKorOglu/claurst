@@ -430,6 +430,19 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Relocate any plaintext key in `settings.json` before anything reads a
+    // credential, so every path below resolves it from the same place. Runs
+    // ahead of the subcommand fast-paths because `auth`, `codex` and
+    // `accounts` all read credentials too.
+    let moved_keys = claurst_core::AuthStore::migrate_plaintext_provider_keys();
+    if !moved_keys.is_empty() {
+        eprintln!(
+            "claurst: moved the API key for {} out of settings.json into auth.json, \
+             which is the only credential file locked to your user.",
+            moved_keys.join(", ")
+        );
+    }
+
     // Fast-path: `claude auth <login|logout|status>` — mirrors TypeScript cli.tsx pattern
     if raw_args.get(1).map(|s| s.as_str()) == Some("auth") {
         return handle_auth_command(&raw_args[2..]).await;

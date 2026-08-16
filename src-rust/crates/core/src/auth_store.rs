@@ -104,6 +104,57 @@ impl AuthStore {
         self.save();
     }
 
+    /// Move every plaintext `providers.<account>.api_key` out of
+    /// `settings.json` and into this store.
+    ///
+    /// `settings.json` is written with the default file mode and holds no
+    /// other secret, while `auth.json` is written `0o600`, so a key left in
+    /// settings is readable by every other account on the machine. Returns the
+    /// accounts that were moved, so a caller can tell the user where the key
+    /// went.
+    ///
+    /// Runs at startup, which also means a key written into `settings.json` by
+    /// hand is relocated on the next launch rather than staying in the clear.
+    pub fn migrate_plaintext_provider_keys() -> Vec<String> {
+        let Ok(mut settings) = crate::config::Settings::load_sync() else {
+            return Vec::new();
+        };
+
+        let mut store = Self::load();
+        let mut moved = Vec::new();
+        for (account_id, provider) in settings.providers.iter_mut() {
+            let Some(key) = provider.api_key.take().filter(|key| !key.is_empty()) else {
+                continue;
+            };
+            // A credential already in the store is the newer one, because
+            // nothing writes to `settings.json` any more. Drop the stale copy
+            // rather than restoring it over the live credential.
+            if store.get(account_id).is_none() {
+                store
+                    .credentials
+                    .insert(account_id.clone(), StoredCredential::ApiKey { key });
+            }
+            moved.push(account_id.clone());
+        }
+
+        if moved.is_empty() {
+            return moved;
+        }
+
+        store.save();
+        if let Err(e) = settings.save_sync() {
+            // The key now lives in both files. Say so instead of reporting a
+            // move that only half happened.
+            tracing::warn!(
+                "moved {} plaintext provider key(s) into the auth store, but could not \
+                 rewrite settings.json ({}); the plaintext copy is still there",
+                moved.len(),
+                e
+            );
+        }
+        moved
+    }
+
     /// Get the API key for a provider, checking stored credentials first then
     /// falling back to the relevant environment variable.
     pub fn api_key_for(&self, provider_id: &str) -> Option<String> {

@@ -948,7 +948,13 @@ pub mod config {
     /// vendor's own endpoint, or two gateways with different budgets).
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ProviderConfig {
-        /// API key (overrides environment variable)
+        /// API key, read but never written.
+        ///
+        /// Credentials belong in `auth.json`, which is the only one of the two
+        /// files locked to the owner. A key found here is moved there at
+        /// startup by [`AuthStore::migrate_plaintext_provider_keys`], so this
+        /// field exists to pick up a hand-written key once and hand it over.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         pub api_key: Option<String>,
         /// Override the default base URL for this provider
         pub api_base: Option<String>,
@@ -972,7 +978,9 @@ pub mod config {
         #[serde(default)]
         pub models: Vec<String>,
         /// When [`models`](Self::models) was last filled by discovery.
-        /// Informational; nothing reads it to decide anything.
+        ///
+        /// The model picker reads it to decide whether the list is stale
+        /// enough to re-read in the background.
         #[serde(
             default,
             rename = "modelsSyncedAt",
@@ -6480,10 +6488,11 @@ mod tests {
 }
 
 #[cfg(test)]
-mod oauth_profile_tests {
-    //! A refreshed token must land in the profile it was read from. Persisting
-    //! a non-active account through the active-profile path would overwrite the
-    //! active account's credentials and break both.
+mod credential_storage_tests {
+    //! A credential has to end up in the one file that is locked to its owner,
+    //! and in the account it belongs to. A refreshed token persisted through
+    //! the active-profile path would overwrite a different account, and a key
+    //! left in `settings.json` stays readable by everyone on the machine.
     use crate::accounts::{AccountRegistry, PROVIDER_ANTHROPIC};
     use crate::oauth::OAuthTokens;
 
@@ -6621,6 +6630,96 @@ mod oauth_profile_tests {
             "with no refresh token the caller still gets a credential to try"
         );
         assert!(OAuthTokens::load_for_profile("personal").await.is_none());
+    }
+
+    // ---- plaintext key relocation ---------------------------------------
+
+    fn settings_with_key(account: &str, key: Option<&str>) -> crate::config::Settings {
+        let mut settings = crate::config::Settings::default();
+        settings.providers.insert(
+            account.to_string(),
+            crate::config::ProviderConfig {
+                api_key: key.map(str::to_string),
+                api_base: Some("http://127.0.0.1:8789".to_string()),
+                ..Default::default()
+            },
+        );
+        settings
+    }
+
+    #[tokio::test]
+    async fn a_plaintext_key_moves_out_of_settings() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        settings_with_key("is_gateway", Some("sk-plaintext"))
+            .save_sync()
+            .expect("save settings");
+
+        let moved = crate::AuthStore::migrate_plaintext_provider_keys();
+
+        assert_eq!(moved, vec!["is_gateway".to_string()]);
+        assert_eq!(
+            crate::AuthStore::load()
+                .api_key_for("is_gateway")
+                .as_deref(),
+            Some("sk-plaintext")
+        );
+        let settings = crate::config::Settings::load_sync().expect("reload settings");
+        assert!(
+            settings.providers["is_gateway"].api_key.is_none(),
+            "the plaintext copy has to be cleared, not duplicated"
+        );
+        assert_eq!(
+            settings.providers["is_gateway"].api_base.as_deref(),
+            Some("http://127.0.0.1:8789"),
+            "the rest of the account survives the rewrite"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stored_credential_wins_over_the_plaintext_copy() {
+        // Nothing writes to settings.json any more, so a key found there is
+        // the older of the two and must not overwrite the live credential.
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        settings_with_key("is_gateway", Some("sk-stale"))
+            .save_sync()
+            .expect("save settings");
+        let mut store = crate::AuthStore::default();
+        store.set(
+            "is_gateway",
+            crate::StoredCredential::ApiKey {
+                key: "sk-current".to_string(),
+            },
+        );
+
+        let moved = crate::AuthStore::migrate_plaintext_provider_keys();
+
+        assert_eq!(moved, vec!["is_gateway".to_string()]);
+        assert_eq!(
+            crate::AuthStore::load()
+                .api_key_for("is_gateway")
+                .as_deref(),
+            Some("sk-current")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_account_without_a_plaintext_key_is_left_alone() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        settings_with_key("is_gateway", None)
+            .save_sync()
+            .expect("save settings");
+
+        assert!(crate::AuthStore::migrate_plaintext_provider_keys().is_empty());
+        assert!(
+            crate::AuthStore::load().get("is_gateway").is_none(),
+            "an empty field must not become an empty credential"
+        );
     }
 }
 
