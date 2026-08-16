@@ -156,11 +156,13 @@ impl AuthStore {
         let mut ids: Vec<String> = self
             .credentials
             .iter()
-            .filter(|(_, cred)| match (protocol, cred) {
-                ("anthropic", StoredCredential::AnthropicOAuth(_)) => true,
-                ("codex", StoredCredential::CodexOAuth(_)) => true,
-                ("github-copilot", StoredCredential::OAuthToken { .. }) => true,
-                _ => false,
+            .filter(|(_, cred)| {
+                matches!(
+                    (protocol, cred),
+                    ("anthropic", StoredCredential::AnthropicOAuth(_))
+                        | ("codex", StoredCredential::CodexOAuth(_))
+                        | ("github-copilot", StoredCredential::OAuthToken { .. })
+                )
             })
             .map(|(id, _)| id.clone())
             .collect();
