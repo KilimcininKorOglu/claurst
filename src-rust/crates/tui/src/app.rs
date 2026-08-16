@@ -2199,25 +2199,18 @@ impl App {
     /// request would resolve, rather than re-deriving it from settings and
     /// drifting. Before the registry is attached there is nothing to enumerate,
     /// so the caller falls back to the single-provider picker.
-    /// Accounts the picker may offer.
+    /// Accounts the picker may offer: the ones that were actually added.
     ///
-    /// A registered provider is not necessarily usable: the vendor defaults are
-    /// registered whether or not anyone configured them, and offering one with
-    /// no endpoint and no credential means a whole catalogue of models that
-    /// fail the moment they are picked. An account qualifies when the user
-    /// configured it, when a credential resolves for it, or when it is local
-    /// and needs neither.
+    /// Being registered is not the same as being set up. The registry carries
+    /// every vendor default plus the three local endpoints whether or not
+    /// anyone configured them, and offering those puts models in front of the
+    /// user that fail the moment they are picked — a missing key for a vendor,
+    /// a refused connection for a local server that is not running.
+    ///
+    /// An account qualifies when it has an entry in `providers` or when a
+    /// credential resolves for it. Adding a local endpoint through `/connect`
+    /// writes that entry, so it comes back the moment it is set up.
     fn reachable_provider_ids(&self) -> Vec<String> {
-        /// Endpoints that run on the user's own machine and take no key.
-        const LOCAL: &[&str] = &[
-            "ollama",
-            "lmstudio",
-            "lm-studio",
-            "llamacpp",
-            "llama-cpp",
-            "llama-server",
-        ];
-
         let Some(registry) = self.provider_registry.as_ref() else {
             return Vec::new();
         };
@@ -2227,7 +2220,6 @@ impl App {
             .map(|id| id.to_string())
             .filter(|id| {
                 self.config.provider_configs.contains_key(id)
-                    || LOCAL.contains(&id.as_str())
                     || self.config.resolve_provider_api_key(id).is_some()
             })
             .collect();
@@ -9015,5 +9007,34 @@ mod tests {
         assert!(!app.should_exit);
         app.handle_key_event(press_key(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.should_exit);
+    }
+
+    #[test]
+    fn only_added_accounts_reach_the_picker() {
+        // Registration is not setup. The registry always carries the vendor
+        // defaults and the three local endpoints, and offering those lists
+        // models that fail the moment they are picked: a missing key for a
+        // vendor, a refused connection for a local server that is not running.
+        let mut app = make_app();
+        app.provider_registry = Some(std::sync::Arc::new(
+            claurst_api::ProviderRegistry::from_environment(Default::default()),
+        ));
+
+        // Nothing configured and no key in this process: nothing on offer.
+        app.config.provider_configs.clear();
+        let offered = app.reachable_provider_ids();
+        for unconfigured in ["ollama", "lm-studio", "llama-cpp", "anthropic"] {
+            assert!(
+                !offered.contains(&unconfigured.to_string()),
+                "{unconfigured} was offered without being added: {offered:?}"
+            );
+        }
+
+        // Adding one puts it back, under the name it was added as.
+        app.config.provider_configs.insert(
+            "ollama".to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+        assert!(app.reachable_provider_ids().contains(&"ollama".to_string()));
     }
 }
