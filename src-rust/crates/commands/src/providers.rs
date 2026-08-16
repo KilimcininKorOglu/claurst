@@ -17,13 +17,43 @@ impl SlashCommand for ProvidersCommand {
         "providers"
     }
     fn description(&self) -> &str {
-        "List available AI providers and their status"
+        "List available AI providers, or re-read an account's model list"
     }
     fn help(&self) -> &str {
-        "Usage: /providers\n\nList all providers registered in the model registry with their\nmodel counts, context windows, and pricing information."
+        "Usage: /providers [sync [<account>] [--force]]\n\n\
+         Without arguments, lists all providers registered in the model\n\
+         registry with their model counts, context windows, and pricing.\n\n\
+         `sync` asks each configured account what models it serves and\n\
+         rewrites its stored list, so a model the endpoint added later\n\
+         becomes usable without editing settings.json. Name an account to\n\
+         sync only that one.\n\n\
+         Limits you wrote yourself in `modelOverrides` are kept. Pass\n\
+         `--force` to replace them with the endpoint's own numbers."
     }
 
-    async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
+    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
+        let tokens: Vec<&str> = args.split_whitespace().collect();
+        if let Some((first, rest)) = tokens.split_first() {
+            if *first != "sync" {
+                return CommandResult::Error(format!(
+                    "Unknown argument '{first}'. Usage: /providers [sync [<account>] [--force]]"
+                ));
+            }
+            let force = rest.contains(&"--force");
+            let accounts: Vec<String> = rest
+                .iter()
+                .filter(|token| !token.starts_with("--"))
+                .map(|token| (*token).to_string())
+                .collect();
+            return CommandResult::SyncAccountModels { accounts, force };
+        }
+
+        self.list_providers()
+    }
+}
+
+impl ProvidersCommand {
+    fn list_providers(&self) -> CommandResult {
         let registry = claurst_api::ModelRegistry::new();
         let all = registry.list_all();
 

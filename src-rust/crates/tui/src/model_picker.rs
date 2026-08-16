@@ -2,6 +2,8 @@
 //! Mirrors src/components/ModelPicker.tsx — including effort levels and
 //! fast-mode notice.
 
+use std::collections::HashMap;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -307,6 +309,47 @@ fn model_entry(id: &str, name: &str, desc: &str) -> ModelEntry {
 /// speaks, which is what every vendor-named account did before accounts could
 /// carry a list of their own.
 pub fn models_for_account(
+    account_id: &str,
+    account: Option<&claurst_core::config::ProviderConfig>,
+    registry: &claurst_api::ModelRegistry,
+) -> Vec<ModelEntry> {
+    models_for_account_with_overrides(account_id, account, registry, &HashMap::new())
+}
+
+/// As [`models_for_account`], with the user's and discovery's model metadata
+/// layered on top.
+///
+/// Discovery records what the endpoint reported under `"<account>/<model>"` in
+/// `modelOverrides`. Without reading it back the picker shows a bare id for
+/// every model the catalogue has no row for, which is exactly the case a
+/// gateway creates.
+pub fn models_for_account_with_overrides(
+    account_id: &str,
+    account: Option<&claurst_core::config::ProviderConfig>,
+    registry: &claurst_api::ModelRegistry,
+    overrides: &HashMap<String, claurst_core::config::ModelOverride>,
+) -> Vec<ModelEntry> {
+    let mut entries = models_for_account_inner(account_id, account, registry);
+    for entry in &mut entries {
+        let Some(over) = overrides.get(&format!("{account_id}/{}", entry.id)) else {
+            continue;
+        };
+        if let Some(name) = over.name.as_deref().filter(|n| !n.is_empty()) {
+            entry.display_name = name.to_string();
+        }
+        if let Some(window) = over.context_window {
+            let context = format_context_window(window);
+            entry.description = if entry.description.is_empty() {
+                context
+            } else {
+                format!("{context} | {}", entry.description)
+            };
+        }
+    }
+    entries
+}
+
+fn models_for_account_inner(
     account_id: &str,
     account: Option<&claurst_core::config::ProviderConfig>,
     registry: &claurst_api::ModelRegistry,
@@ -1633,6 +1676,65 @@ mod tests {
         let entries = models_for_account("is_gateway", Some(&account), &registry);
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, ["claude-sonnet-5", "gpt-5.6-sol"]);
+    }
+
+    #[test]
+    fn discovered_limits_reach_the_picker() {
+        // Discovery records what the endpoint said under "<account>/<model>".
+        // Without reading it back, a gateway's models show as bare ids with no
+        // context at all, which is the whole case this exists for.
+        let registry = claurst_api::ModelRegistry::new();
+        let account = claurst_core::config::ProviderConfig {
+            protocol: Some("anthropic".to_string()),
+            models: vec!["gpt-5.6-sol".to_string()],
+            ..Default::default()
+        };
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "is_gateway/gpt-5.6-sol".to_string(),
+            claurst_core::config::ModelOverride {
+                context_window: Some(1_050_000),
+                name: Some("GPT-5.6 Sol".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let entries =
+            models_for_account_with_overrides("is_gateway", Some(&account), &registry, &overrides);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].display_name, "GPT-5.6 Sol");
+        assert!(
+            entries[0].description.contains("1.1M context"),
+            "the endpoint's window is missing: {:?}",
+            entries[0].description
+        );
+    }
+
+    #[test]
+    fn an_override_for_another_account_is_ignored() {
+        // Keys are account-scoped; two accounts may serve the same model id
+        // with different windows.
+        let registry = claurst_api::ModelRegistry::new();
+        let account = claurst_core::config::ProviderConfig {
+            protocol: Some("anthropic".to_string()),
+            models: vec!["gpt-5.6-sol".to_string()],
+            ..Default::default()
+        };
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "other_gateway/gpt-5.6-sol".to_string(),
+            claurst_core::config::ModelOverride {
+                context_window: Some(1_050_000),
+                ..Default::default()
+            },
+        );
+
+        let entries =
+            models_for_account_with_overrides("is_gateway", Some(&account), &registry, &overrides);
+        assert!(
+            entries[0].description.is_empty(),
+            "another account's window leaked"
+        );
     }
 
     #[test]

@@ -1029,6 +1029,33 @@ pub mod config {
         pub fn serves_model(&self, model: &str) -> bool {
             self.models.is_empty() || self.models.iter().any(|m| m == model)
         }
+
+        /// Whether the stored model list is older than `max_age_days`.
+        ///
+        /// An account with models but no timestamp counts as stale: the list
+        /// was written by hand or by a build that did not stamp it, and asking
+        /// the endpoint once is cheaper than serving a list nobody can date.
+        /// An account with no models claims nothing, so it is never stale.
+        pub fn models_are_stale(
+            &self,
+            now: chrono::DateTime<chrono::Utc>,
+            max_age_days: i64,
+        ) -> bool {
+            if self.models.is_empty() {
+                return false;
+            }
+            let Some(stamped) = self.models_synced_at.as_deref() else {
+                return true;
+            };
+            match chrono::DateTime::parse_from_rfc3339(stamped) {
+                Ok(at) => {
+                    now.signed_duration_since(at.with_timezone(&chrono::Utc))
+                        > chrono::Duration::days(max_age_days)
+                }
+                // An unreadable stamp is not a fresh one.
+                Err(_) => true,
+            }
+        }
     }
 
     // ---- ModelOverride ---------------------------------------------------
@@ -1954,11 +1981,13 @@ pub mod config {
             Some(format!(
                 "Account '{}' does not serve model '{}'.\n\
                  It serves: {}.\n\
-                 Pick one of those, or write '<account>/{}' to send this model \
-                 to a different account.",
+                 Run '/providers sync {}' if the endpoint changed recently, \
+                 or write '<account>/{}' to send this model to a different \
+                 account.",
                 route.account,
                 route.model,
                 offered.join(", "),
+                route.account,
                 route.model,
             ))
         }
@@ -6806,6 +6835,66 @@ mod account_schema_tests {
         let entry = account(None, &["claude-opus-5", "gpt-5.6-sol"]);
         assert!(entry.serves_model("gpt-5.6-sol"));
         assert!(!entry.serves_model("claude-sonnet-5"));
+    }
+
+    #[test]
+    fn an_undiscovered_account_is_never_stale() {
+        // It claims nothing, so there is nothing to go out of date.
+        let entry = account(None, &[]);
+        let now = chrono::Utc::now();
+        assert!(!entry.models_are_stale(now, 7));
+    }
+
+    #[test]
+    fn a_list_with_no_stamp_counts_as_stale() {
+        // Written by hand or by a build that did not stamp it. Asking once is
+        // cheaper than serving a list nobody can date.
+        let entry = account(None, &["claude-opus-5"]);
+        assert!(entry.models_are_stale(chrono::Utc::now(), 7));
+    }
+
+    #[test]
+    fn a_fresh_list_is_left_alone() {
+        let mut entry = account(None, &["claude-opus-5"]);
+        entry.models_synced_at = Some(chrono::Utc::now().to_rfc3339());
+        assert!(!entry.models_are_stale(chrono::Utc::now(), 7));
+    }
+
+    #[test]
+    fn a_list_past_the_threshold_is_stale() {
+        let mut entry = account(None, &["claude-opus-5"]);
+        let now = chrono::Utc::now();
+        entry.models_synced_at = Some((now - chrono::Duration::days(8)).to_rfc3339());
+        assert!(entry.models_are_stale(now, 7));
+        assert!(
+            !entry.models_are_stale(now, 30),
+            "the threshold must be honoured"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_stamp_is_not_a_fresh_one() {
+        let mut entry = account(None, &["claude-opus-5"]);
+        entry.models_synced_at = Some("last tuesday".to_string());
+        assert!(entry.models_are_stale(chrono::Utc::now(), 7));
+    }
+
+    #[test]
+    fn the_refusal_names_the_command_that_fixes_it() {
+        let mut config = Config {
+            provider: Some("my_gateway".to_string()),
+            ..Default::default()
+        };
+        config.provider_configs.insert(
+            "my_gateway".to_string(),
+            account(Some("anthropic"), &["claude-opus-5"]),
+        );
+        let route = config.resolve_route("gpt-5.7");
+        let message = config.reject_unserved_model(&route).expect("refused");
+        assert!(
+            message.contains("/providers sync my_gateway"),
+            "a stale list must point at the way to refresh it: {message}"
+        );
     }
 
     #[test]

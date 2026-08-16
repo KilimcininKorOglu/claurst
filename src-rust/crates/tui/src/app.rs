@@ -1184,6 +1184,23 @@ pub fn recent_session_label(title: Option<String>, last_prompt: Option<String>) 
 // ---------------------------------------------------------------------------
 
 /// The top-level TUI application.
+/// How old a stored model list may get before the picker re-reads it in the
+/// background.
+///
+/// Long enough that opening the picker is not a network call, short enough
+/// that a model added to an endpoint becomes usable without anyone noticing
+/// the list went stale.
+const MODEL_LIST_MAX_AGE_DAYS: i64 = 7;
+
+/// One queued model-list discovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelSyncRequest {
+    /// Account to ask.
+    pub account: String,
+    /// Whether the endpoint's limits may replace ones the user wrote by hand.
+    pub force: bool,
+}
+
 pub struct App {
     // Core state
     pub config: Config,
@@ -1343,12 +1360,14 @@ pub struct App {
     /// client + provider registry. Without it the session keeps the client built
     /// at startup, which for a fresh OAuth login still has no usable credential.
     pub pending_provider_reload: bool,
-    /// Account whose model list should be filled from its own endpoint.
+    /// Accounts whose model list should be filled from their own endpoint,
+    /// each with whether it may replace limits the user wrote by hand.
     ///
-    /// Set when an account is connected and drained after the provider
-    /// registry has been rebuilt, because discovery needs a provider that can
-    /// already reach the new endpoint.
-    pub pending_model_sync: Option<String>,
+    /// Filled when an account is connected, when `/providers sync` asks, and
+    /// when the picker finds a stale list. Drained after the provider registry
+    /// has been rebuilt, because discovery needs a provider that can already
+    /// reach the endpoint.
+    pub pending_model_sync: Vec<ModelSyncRequest>,
     /// Pending MCP panel-auth request for the interactive loop.
     pub pending_mcp_panel_auth: Option<String>,
     /// Shared file-history service used for turn diff reconstruction.
@@ -1769,7 +1788,7 @@ impl App {
             mcp_manager: None,
             pending_mcp_reconnect: false,
             pending_provider_reload: false,
-            pending_model_sync: None,
+            pending_model_sync: Vec::new(),
             pending_mcp_panel_auth: None,
             file_history: None,
             current_turn: None,
@@ -2151,8 +2170,12 @@ impl App {
         // what this endpoint actually serves instead of its vendor's catalogue.
         let account = self.config.provider_configs.get(provider_id);
         let has_own_list = account.is_some_and(|entry| !entry.models.is_empty());
-        let models =
-            crate::model_picker::models_for_account(provider_id, account, &self.model_registry);
+        let models = crate::model_picker::models_for_account_with_overrides(
+            provider_id,
+            account,
+            &self.model_registry,
+            &self.config.model_overrides,
+        );
         self.model_picker.set_models(models);
         self.model_picker_provider_id = Some(provider_id.to_string());
         // Catalog-backed providers (Anthropic/OpenAI/Google) are a read-only
@@ -2160,6 +2183,15 @@ impl App {
         // discover from, so skip the background fetch entirely and treat the
         // projection as final. Live-endpoint / curated-list providers still
         // fetch their real model list to overlay onto the projection.
+        // A list nobody has re-read in a while may be missing a model the
+        // endpoint added since. Queue a background re-read rather than
+        // blocking the picker on it.
+        if account.is_some_and(|entry| {
+            entry.models_are_stale(chrono::Utc::now(), MODEL_LIST_MAX_AGE_DAYS)
+        }) {
+            self.queue_model_sync(provider_id, false);
+        }
+
         if has_own_list || crate::model_picker::provider_uses_catalog_projection(provider_id) {
             // A discovered account is already authoritative; re-fetching would
             // only replace the list with the same thing.
@@ -2255,10 +2287,11 @@ impl App {
         let models: Vec<crate::model_picker::ModelEntry> = provider_ids
             .iter()
             .flat_map(|account_id| {
-                crate::model_picker::models_for_account(
+                crate::model_picker::models_for_account_with_overrides(
                     account_id,
                     self.config.provider_configs.get(account_id),
                     &self.model_registry,
+                    &self.config.model_overrides,
                 )
                 .into_iter()
                 .map(|entry| entry.into_provider_scoped(account_id))
@@ -3554,9 +3587,29 @@ impl App {
         pending
     }
 
-    /// Take the account waiting for its model list to be discovered.
-    pub fn take_pending_model_sync(&mut self) -> Option<String> {
-        self.pending_model_sync.take()
+    /// Queue an account for model-list discovery.
+    ///
+    /// Re-queuing the same account replaces the earlier request rather than
+    /// stacking a second one, so opening the picker repeatedly cannot pile up
+    /// duplicate network calls. A forcing request outranks a plain one.
+    pub fn queue_model_sync(&mut self, account: &str, force: bool) {
+        if let Some(existing) = self
+            .pending_model_sync
+            .iter_mut()
+            .find(|req| req.account == account)
+        {
+            existing.force |= force;
+            return;
+        }
+        self.pending_model_sync.push(ModelSyncRequest {
+            account: account.to_string(),
+            force,
+        });
+    }
+
+    /// Take every queued discovery.
+    pub fn take_pending_model_sync(&mut self) -> Vec<ModelSyncRequest> {
+        std::mem::take(&mut self.pending_model_sync)
     }
 
     pub fn take_pending_provider_reload(&mut self) -> bool {
@@ -4163,7 +4216,7 @@ impl App {
                         // registry can reach it, so the account's model list
                         // comes from the account rather than from a catalogue
                         // that cannot know what a gateway proxies.
-                        self.pending_model_sync = Some(account_id.clone());
+                        self.queue_model_sync(&account_id, false);
                         // The registry was built without this account, so it
                         // has to be rebuilt before anything can reach the new
                         // endpoint, discovery included.
@@ -9054,5 +9107,41 @@ mod tests {
             claurst_core::config::ProviderConfig::default(),
         );
         assert!(app.reachable_provider_ids().contains(&"ollama".to_string()));
+    }
+
+    #[test]
+    fn queuing_the_same_account_twice_does_not_stack_calls() {
+        // Opening the picker repeatedly must not pile up duplicate network
+        // calls against the same endpoint.
+        let mut app = make_app();
+        app.queue_model_sync("is_gateway", false);
+        app.queue_model_sync("is_gateway", false);
+        assert_eq!(app.pending_model_sync.len(), 1);
+    }
+
+    #[test]
+    fn a_forcing_request_outranks_a_plain_one() {
+        // An explicit `/providers sync --force` must not be downgraded by a
+        // background staleness check that happens to queue the same account.
+        let mut app = make_app();
+        app.queue_model_sync("is_gateway", false);
+        app.queue_model_sync("is_gateway", true);
+        assert_eq!(app.pending_model_sync.len(), 1);
+        assert!(app.pending_model_sync[0].force);
+
+        app.take_pending_model_sync();
+        app.queue_model_sync("is_gateway", true);
+        app.queue_model_sync("is_gateway", false);
+        assert!(app.pending_model_sync[0].force, "force must not be cleared");
+    }
+
+    #[test]
+    fn taking_the_queue_empties_it() {
+        let mut app = make_app();
+        app.queue_model_sync("a", false);
+        app.queue_model_sync("b", true);
+        let taken = app.take_pending_model_sync();
+        assert_eq!(taken.len(), 2);
+        assert!(app.pending_model_sync.is_empty());
     }
 }

@@ -111,6 +111,17 @@ pub enum CommandResult {
         /// Whether uncommitted changes were carried across (for the status line).
         moved_changes: bool,
     },
+    /// Ask the named accounts what models they serve and rewrite their lists.
+    ///
+    /// Discovery is async and needs the live provider registry, so the command
+    /// only names the accounts and the event loop performs the calls.
+    SyncAccountModels {
+        /// Accounts to ask. Empty means every configured account.
+        accounts: Vec<String>,
+        /// Whether the endpoint's limits may replace ones the user wrote by
+        /// hand into `modelOverrides`.
+        force: bool,
+    },
 }
 
 /// Every slash command implements this trait.
