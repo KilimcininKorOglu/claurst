@@ -325,6 +325,8 @@ impl LlmProvider for AnthropicProvider {
         let models = available
             .into_iter()
             .map(|m| {
+                let context_window = m.context_window().unwrap_or(200_000);
+                let max_output_tokens = m.max_output().unwrap_or(64_000);
                 let name = m.display_name.unwrap_or_else(|| m.id.clone());
                 ModelInfo {
                     id: ModelId::new(&m.id),
@@ -335,8 +337,8 @@ impl LlmProvider for AnthropicProvider {
                     // stating a default as though it were measured showed
                     // "200K context" for a 1M endpoint. The defaults stay for
                     // endpoints that report nothing.
-                    context_window: m.context_window.unwrap_or(200_000),
-                    max_output_tokens: m.max_tokens.unwrap_or(64_000),
+                    context_window,
+                    max_output_tokens,
                     ..Default::default()
                 }
             })

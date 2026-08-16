@@ -486,11 +486,36 @@ pub struct AvailableModel {
     /// different window than the vendor publishes, and the catalogue cannot
     /// know a model it has never heard of, so a reported value is worth more
     /// than any local default.
-    #[serde(default, alias = "max_input_tokens")]
+    ///
+    /// Read it through [`context_window`](Self::context_window), which also
+    /// considers the alternate spelling. The two are separate fields rather
+    /// than a serde alias because an endpoint may send both, and an alias
+    /// makes that a duplicate-field error that fails the whole response.
+    #[serde(default)]
     pub context_window: Option<u32>,
+    /// Alternate spelling of [`context_window`](Self::context_window).
+    #[serde(default)]
+    pub max_input_tokens: Option<u32>,
     /// Most tokens the endpoint will emit in one response for this model.
-    #[serde(default, alias = "max_output_tokens")]
+    ///
+    /// Read it through [`max_output`](Self::max_output).
+    #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// Alternate spelling of [`max_tokens`](Self::max_tokens).
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+}
+
+impl AvailableModel {
+    /// The context window the endpoint reported, under either spelling.
+    pub fn context_window(&self) -> Option<u32> {
+        self.context_window.or(self.max_input_tokens)
+    }
+
+    /// The output ceiling the endpoint reported, under either spelling.
+    pub fn max_output(&self) -> Option<u32> {
+        self.max_tokens.or(self.max_output_tokens)
+    }
 }
 
 /// Accept either an RFC 3339 string or unix seconds for `created_at`.
@@ -1792,8 +1817,8 @@ mod available_model_tests {
             {"id":"claude-opus-5","context_window":1000000,"max_tokens":128000}
         ]}"#;
         let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
-        assert_eq!(parsed.data[0].context_window, Some(1_000_000));
-        assert_eq!(parsed.data[0].max_tokens, Some(128_000));
+        assert_eq!(parsed.data[0].context_window(), Some(1_000_000));
+        assert_eq!(parsed.data[0].max_output(), Some(128_000));
     }
 
     #[test]
@@ -1802,8 +1827,30 @@ mod available_model_tests {
             {"id":"m","max_input_tokens":922000,"max_output_tokens":64000}
         ]}"#;
         let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
-        assert_eq!(parsed.data[0].context_window, Some(922_000));
-        assert_eq!(parsed.data[0].max_tokens, Some(64_000));
+        assert_eq!(parsed.data[0].context_window(), Some(922_000));
+        assert_eq!(parsed.data[0].max_output(), Some(64_000));
+    }
+
+    #[test]
+    fn both_spellings_at_once_are_not_a_duplicate_field() {
+        // The real gateway sends context_window AND max_input_tokens in the
+        // same object. Declaring them as one aliased field made that a
+        // duplicate-field error that failed the entire response.
+        let body = r#"{"data":[
+            {"id":"claude-opus-5","context_window":1000000,"max_input_tokens":1000000,
+             "max_tokens":128000}
+        ]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].context_window(), Some(1_000_000));
+    }
+
+    #[test]
+    fn the_primary_spelling_wins_when_they_disagree() {
+        let body = r#"{"data":[
+            {"id":"m","context_window":1000000,"max_input_tokens":922000}
+        ]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
+        assert_eq!(parsed.data[0].context_window(), Some(1_000_000));
     }
 
     #[test]
@@ -1812,8 +1859,8 @@ mod available_model_tests {
         // recording a zero as if the endpoint had said so.
         let body = r#"{"data":[{"id":"m"}]}"#;
         let parsed: ModelsResponse = serde_json::from_str(body).expect("must parse");
-        assert!(parsed.data[0].context_window.is_none());
-        assert!(parsed.data[0].max_tokens.is_none());
+        assert!(parsed.data[0].context_window().is_none());
+        assert!(parsed.data[0].max_output().is_none());
     }
 
     #[test]
