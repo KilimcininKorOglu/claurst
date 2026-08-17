@@ -126,3 +126,76 @@ pub fn stop_hooks_with_full_behavior(
 
     Vec::new()
 }
+
+/// Run every `PreToolUse` hook, from settings and from plugins, for one tool.
+///
+/// Returns the error result the caller must substitute when a hook blocked the
+/// call, and `None` when the tool may run. Both dispatch arms of the query loop
+/// call this, so a hook fires no matter which provider served the turn.
+pub(crate) async fn run_pre_tool_hooks(
+    tool_ctx: &claurst_tools::ToolContext,
+    name: &str,
+    input: &serde_json::Value,
+) -> Option<claurst_tools::ToolResult> {
+    let hook_ctx = claurst_core::hooks::HookContext {
+        event: "PreToolUse".to_string(),
+        tool_name: Some(name.to_string()),
+        tool_input: Some(input.clone()),
+        tool_output: None,
+        is_error: None,
+        session_id: Some(tool_ctx.session_id.clone()),
+    };
+    let outcome = claurst_core::hooks::run_hooks(
+        &tool_ctx.config.hooks,
+        claurst_core::config::HookEvent::PreToolUse,
+        &hook_ctx,
+        &tool_ctx.working_dir,
+    )
+    .await;
+
+    if let claurst_core::hooks::HookOutcome::Blocked(reason) = outcome {
+        tracing::warn!(tool = %name, reason = %reason, "PreToolUse hook blocked execution");
+        return Some(claurst_tools::ToolResult::error(format!(
+            "Blocked by hook: {}",
+            reason
+        )));
+    }
+
+    if let claurst_plugins::HookOutcome::Deny(reason) =
+        claurst_plugins::run_global_pre_tool_hook(name, input)
+    {
+        tracing::warn!(tool = %name, reason = %reason, "Plugin PreToolUse hook blocked execution");
+        return Some(claurst_tools::ToolResult::error(format!(
+            "Blocked by plugin hook: {}",
+            reason
+        )));
+    }
+
+    None
+}
+
+/// Run every `PostToolUse` hook, from settings and from plugins, for one tool.
+pub(crate) async fn run_post_tool_hooks(
+    tool_ctx: &claurst_tools::ToolContext,
+    name: &str,
+    input: &serde_json::Value,
+    result: &claurst_tools::ToolResult,
+) {
+    let hook_ctx = claurst_core::hooks::HookContext {
+        event: "PostToolUse".to_string(),
+        tool_name: Some(name.to_string()),
+        tool_input: Some(input.clone()),
+        tool_output: Some(result.content.clone()),
+        is_error: Some(result.is_error),
+        session_id: Some(tool_ctx.session_id.clone()),
+    };
+    claurst_core::hooks::run_hooks(
+        &tool_ctx.config.hooks,
+        claurst_core::config::HookEvent::PostToolUse,
+        &hook_ctx,
+        &tool_ctx.working_dir,
+    )
+    .await;
+
+    claurst_plugins::run_global_post_tool_hook(name, input, &result.content, result.is_error);
+}

@@ -1285,7 +1285,8 @@ pub async fn run_query_loop(
                                     input_json: tool_input.to_string(),
                                 });
                             }
-                            let result = if malformed_tool_calls.contains(&tool_id) {
+                            let malformed = malformed_tool_calls.contains(&tool_id);
+                            let result = if malformed {
                                 // Never execute a tool whose arguments could not
                                 // be parsed — return an error the model can see
                                 // and recover from (issue #215).
@@ -1293,9 +1294,20 @@ pub async fn run_query_loop(
                                     "Tool call '{}' was not executed: its arguments were malformed or truncated JSON. Retry the tool call with complete, valid JSON arguments.",
                                     tool_name
                                 ))
+                            } else if let Some(blocked) =
+                                run_pre_tool_hooks(tool_ctx, &tool_name, &tool_input).await
+                            {
+                                blocked
                             } else {
                                 execute_tool(&tool_name, &tool_input, tools, tool_ctx).await
                             };
+                            // A blocked tool still reports, matching the other
+                            // dispatch arm; only an unparsed call stays silent,
+                            // because no hook ever saw it.
+                            if !malformed {
+                                run_post_tool_hooks(tool_ctx, &tool_name, &tool_input, &result)
+                                    .await;
+                            }
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.send(QueryEvent::ToolEnd {
                                     tool_name: tool_name.clone(),
@@ -1907,46 +1919,7 @@ pub async fn run_query_loop(
                             });
                         }
 
-                        let hooks = &tool_ctx.config.hooks;
-                        let hook_ctx = claurst_core::hooks::HookContext {
-                            event: "PreToolUse".to_string(),
-                            tool_name: Some(name.clone()),
-                            tool_input: Some(input.clone()),
-                            tool_output: None,
-                            is_error: None,
-                            session_id: Some(tool_ctx.session_id.clone()),
-                        };
-                        let pre_outcome = claurst_core::hooks::run_hooks(
-                            hooks,
-                            claurst_core::config::HookEvent::PreToolUse,
-                            &hook_ctx,
-                            &tool_ctx.working_dir,
-                        )
-                        .await;
-
-                        let plugin_pre_outcome =
-                            claurst_plugins::run_global_pre_tool_hook(&name, &input);
-
-                        let blocked_result = if let claurst_core::hooks::HookOutcome::Blocked(
-                            reason,
-                        ) = pre_outcome
-                        {
-                            warn!(tool = %name, reason = %reason, "PreToolUse hook blocked execution");
-                            Some(claurst_tools::ToolResult::error(format!(
-                                "Blocked by hook: {}",
-                                reason
-                            )))
-                        } else if let claurst_plugins::HookOutcome::Deny(reason) =
-                            plugin_pre_outcome
-                        {
-                            warn!(tool = %name, reason = %reason, "Plugin PreToolUse hook blocked execution");
-                            Some(claurst_tools::ToolResult::error(format!(
-                                "Blocked by plugin hook: {}",
-                                reason
-                            )))
-                        } else {
-                            None
-                        };
+                        let blocked_result = run_pre_tool_hooks(tool_ctx, &name, &input).await;
 
                         prepared.push(PreparedTool {
                             id,
@@ -1994,29 +1967,7 @@ pub async fn run_query_loop(
                 let mut result_blocks: Vec<ContentBlock> = Vec::with_capacity(prepared.len());
                 for (p, result) in prepared.iter().zip(exec_results) {
                     if !batch_cancelled {
-                        let hooks = &tool_ctx.config.hooks;
-                        let post_ctx = claurst_core::hooks::HookContext {
-                            event: "PostToolUse".to_string(),
-                            tool_name: Some(p.name.clone()),
-                            tool_input: Some(p.input.clone()),
-                            tool_output: Some(result.content.clone()),
-                            is_error: Some(result.is_error),
-                            session_id: Some(tool_ctx.session_id.clone()),
-                        };
-                        claurst_core::hooks::run_hooks(
-                            hooks,
-                            claurst_core::config::HookEvent::PostToolUse,
-                            &post_ctx,
-                            &tool_ctx.working_dir,
-                        )
-                        .await;
-
-                        claurst_plugins::run_global_post_tool_hook(
-                            &p.name,
-                            &p.input,
-                            &result.content,
-                            result.is_error,
-                        );
+                        run_post_tool_hooks(tool_ctx, &p.name, &p.input, &result).await;
                     }
 
                     if let Some(ref tx) = event_tx {
