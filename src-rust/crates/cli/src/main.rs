@@ -668,6 +668,7 @@ async fn main() -> anyhow::Result<()> {
         ContextBuilder::new(cwd.clone()).disable_claude_mds(config.disable_claude_mds);
     let system_ctx = ctx_builder.build_system_context().await;
     let user_ctx = ctx_builder.build_user_context().await;
+    let loaded_instructions = !system_ctx.trim().is_empty() || !user_ctx.trim().is_empty();
 
     // Build system prompt
     let mut system_parts = vec![
@@ -881,6 +882,33 @@ async fn main() -> anyhow::Result<()> {
     // Publish the registry: sub-agent prompts read the plugins' `agents/`
     // definitions from here.
     claurst_plugins::set_global_registry(plugin_registry);
+
+    // Setup, then SessionStart: a plugin gets one chance to prepare itself
+    // before the session tells it a session is under way.
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::Setup,
+        None,
+        serde_json::json!({ "working_dir": cwd.display().to_string() }),
+    )
+    .await;
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::SessionStart,
+        None,
+        serde_json::json!({
+            "working_dir": cwd.display().to_string(),
+            "session_id": session_id,
+        }),
+    )
+    .await;
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::InstructionsLoaded,
+        None,
+        serde_json::json!({
+            "working_dir": cwd.display().to_string(),
+            "has_instructions": loaded_instructions,
+        }),
+    )
+    .await;
 
     // Initialize MCP servers first (needed for ToolContext.mcp_manager).
     //
@@ -2082,6 +2110,13 @@ async fn run_headless(
         }
     }
 
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::SessionEnd,
+        None,
+        serde_json::json!({ "session_id": tool_ctx.session_id }),
+    )
+    .await;
+
     Ok(())
 }
 
@@ -2483,6 +2518,12 @@ fn remote_user_message(
 ///
 /// Returns `false` when no request was waiting under that id, which happens if
 /// the same request was already answered from the other side.
+/// What a settled permission prompt decided, for the caller to report on.
+struct PermissionSettlement {
+    tool_name: String,
+    denied: bool,
+}
+
 fn settle_pending_permission(
     pending_permissions: &ParkingMutex<claurst_tools::PendingPermissionStore>,
     permission_manager: Option<
@@ -2490,10 +2531,8 @@ fn settle_pending_permission(
     >,
     tool_use_id: &str,
     selected_key: Option<char>,
-) -> bool {
-    let Some(mut pending) = pending_permissions.lock().waiting.remove(tool_use_id) else {
-        return false;
-    };
+) -> Option<PermissionSettlement> {
+    let mut pending = pending_permissions.lock().waiting.remove(tool_use_id)?;
 
     let selected_path = pending.request.path.clone();
     let decision = match selected_key {
@@ -2531,10 +2570,17 @@ fn settle_pending_permission(
         }
     }
 
+    let denied = matches!(
+        decision,
+        claurst_core::permissions::PermissionDecision::Deny
+    );
     if let Some(tx) = pending.decision_tx.take() {
         let _ = tx.send(decision);
     }
-    true
+    Some(PermissionSettlement {
+        tool_name: pending.request.tool_name.clone(),
+        denied,
+    })
 }
 
 async fn run_interactive(
@@ -2813,6 +2859,8 @@ async fn run_interactive(
     // Same correlation for the project-MCP trust prompt, which has its own
     // dialog and settle path rather than going through `PermissionManager`.
     let mut pending_mcp_approval_id: Option<String> = None;
+    // Watched so a settings write reaches the ConfigChange hook exactly once.
+    let mut settings_saves_seen = app.settings_screen.saves();
 
     // Remote prompts waiting for the session to be able to take one.
     //
@@ -3304,6 +3352,14 @@ async fn run_interactive(
                                     session.working_dir = Some(destination.display().to_string());
                                     session.updated_at = chrono::Utc::now();
                                     let _ = claurst_core::history::save_session(&session).await;
+                                    claurst_plugins::run_global_hook(
+                                        claurst_plugins::HookEventKind::CwdChanged,
+                                        None,
+                                        serde_json::json!({
+                                            "working_dir": destination.display().to_string(),
+                                        }),
+                                    )
+                                    .await;
                                     // NOTE: opencode appends a synthetic
                                     // <system-reminder> prompt after a move. claurst
                                     // re-derives working_directory into every turn's
@@ -3774,6 +3830,18 @@ async fn run_interactive(
                         }
 
                         // Fire UserPromptSubmit hook (non-blocking)
+                        // The plugin side runs whether or not settings.json
+                        // declares hooks; only the settings side is skipped
+                        // when the map is empty.
+                        claurst_plugins::run_global_hook(
+                            claurst_plugins::HookEventKind::UserPromptSubmit,
+                            None,
+                            serde_json::json!({
+                                "prompt": input,
+                                "session_id": tool_ctx.session_id,
+                            }),
+                        )
+                        .await;
                         if !cmd_ctx.config.hooks.is_empty() {
                             let hook_ctx = claurst_core::hooks::HookContext {
                                 event: "UserPromptSubmit".to_string(),
@@ -4093,12 +4161,21 @@ async fn run_interactive(
                                 }
                             }
 
-                            settle_pending_permission(
+                            if let Some(settlement) = settle_pending_permission(
                                 &pending_permissions,
                                 tool_ctx.permission_manager.as_ref(),
                                 &tool_use_id,
                                 selected_key,
-                            );
+                            ) {
+                                if settlement.denied {
+                                    claurst_plugins::run_global_hook(
+                                        claurst_plugins::HookEventKind::PermissionDenied,
+                                        Some(&settlement.tool_name),
+                                        serde_json::json!({ "tool_name": settlement.tool_name }),
+                                    )
+                                    .await;
+                                }
+                            }
                             continue;
                         }
                         continue;
@@ -4230,6 +4307,15 @@ async fn run_interactive(
                                             .collect(),
                                     });
                         }
+                        claurst_plugins::run_global_hook(
+                            claurst_plugins::HookEventKind::PermissionRequest,
+                            Some(&dialog.tool_name),
+                            serde_json::json!({
+                                "tool_name": dialog.tool_name,
+                                "description": dialog.description,
+                            }),
+                        )
+                        .await;
                         app.permission_request = Some(dialog);
                         pending_permissions
                             .lock()
@@ -4615,13 +4701,23 @@ async fn run_interactive(
                             PermissionResponseKind::AllowSession => 'Y',
                             PermissionResponseKind::Deny => 'n',
                         };
-                        let settled = settle_pending_permission(
+                        let settlement = settle_pending_permission(
                             &pending_permissions,
                             tool_ctx.permission_manager.as_ref(),
                             &tool_use_id,
                             Some(selected_key),
                         );
-                        if settled
+                        if let Some(ref settled) = settlement {
+                            if settled.denied {
+                                claurst_plugins::run_global_hook(
+                                    claurst_plugins::HookEventKind::PermissionDenied,
+                                    Some(&settled.tool_name),
+                                    serde_json::json!({ "tool_name": settled.tool_name }),
+                                )
+                                .await;
+                            }
+                        }
+                        if settlement.is_some()
                             && app
                                 .permission_request
                                 .as_ref()
@@ -5588,6 +5684,43 @@ async fn run_interactive(
             pending_mcp_approval_id = None;
         }
 
+        // Report the notices raised this pass, and a settings write, to the
+        // plugins. Both surfaces are synchronous, so this is where the async
+        // side happens.
+        for (kind, message) in app.drain_notification_outbox() {
+            let hook_ctx = claurst_core::hooks::HookContext {
+                event: "Notification".to_string(),
+                tool_name: None,
+                tool_input: None,
+                tool_output: Some(message.clone()),
+                is_error: Some(kind == "error"),
+                session_id: Some(tool_ctx.session_id.clone()),
+            };
+            claurst_core::hooks::run_hooks(
+                &cmd_ctx.config.hooks,
+                claurst_core::config::HookEvent::Notification,
+                &hook_ctx,
+                &tool_ctx.working_dir,
+            )
+            .await;
+            claurst_plugins::run_global_hook(
+                claurst_plugins::HookEventKind::Notification,
+                None,
+                serde_json::json!({ "kind": kind, "message": message }),
+            )
+            .await;
+        }
+
+        if app.settings_screen.saves() != settings_saves_seen {
+            settings_saves_seen = app.settings_screen.saves();
+            claurst_plugins::run_global_hook(
+                claurst_plugins::HookEventKind::ConfigChange,
+                None,
+                serde_json::json!({ "source": "settings_screen" }),
+            )
+            .await;
+        }
+
         if app.should_exit {
             break 'main;
         }
@@ -5596,6 +5729,14 @@ async fn run_interactive(
     if let Some(runtime) = bridge_runtime.take() {
         runtime.cancel.cancel();
     }
+
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::SessionEnd,
+        None,
+        serde_json::json!({ "session_id": tool_ctx.session_id }),
+    )
+    .await;
+
     restore_terminal(&mut terminal)?;
     Ok(())
 }
@@ -7104,7 +7245,7 @@ mod remote_permission_tests {
     fn a_remote_allow_releases_the_blocked_tool() {
         let (store, rx) = store_with("tool-1");
 
-        assert!(settle_pending_permission(&store, None, "tool-1", Some('y')));
+        assert!(settle_pending_permission(&store, None, "tool-1", Some('y')).is_some());
 
         assert_eq!(
             rx.blocking_recv().ok(),
@@ -7117,7 +7258,9 @@ mod remote_permission_tests {
     fn a_remote_deny_reaches_the_blocked_tool() {
         let (store, rx) = store_with("tool-2");
 
-        assert!(settle_pending_permission(&store, None, "tool-2", Some('n')));
+        let settlement = settle_pending_permission(&store, None, "tool-2", Some('n'))
+            .expect("the prompt was waiting");
+        assert!(settlement.denied, "a deny has to report itself as one");
 
         assert_eq!(
             rx.blocking_recv().ok(),
@@ -7129,13 +7272,8 @@ mod remote_permission_tests {
     fn answering_twice_is_reported_rather_than_silently_ignored() {
         let (store, _rx) = store_with("tool-3");
 
-        assert!(settle_pending_permission(&store, None, "tool-3", Some('y')));
-        assert!(!settle_pending_permission(
-            &store,
-            None,
-            "tool-3",
-            Some('n')
-        ));
+        assert!(settle_pending_permission(&store, None, "tool-3", Some('y')).is_some());
+        assert!(settle_pending_permission(&store, None, "tool-3", Some('n')).is_none());
     }
 
     #[test]
@@ -7148,12 +7286,7 @@ mod remote_permission_tests {
             ),
         ));
 
-        assert!(settle_pending_permission(
-            &store,
-            Some(&manager),
-            "tool-4",
-            Some('Y')
-        ));
+        assert!(settle_pending_permission(&store, Some(&manager), "tool-4", Some('Y')).is_some());
 
         let decision = manager
             .lock()

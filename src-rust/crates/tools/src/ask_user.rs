@@ -81,7 +81,26 @@ impl Tool for AskUserQuestionTool {
             if tx.send(event).is_err() {
                 return ToolResult::error("Question channel closed".to_string());
             }
-            match reply_rx.await {
+            claurst_plugins::run_global_hook(
+                claurst_plugins::HookEventKind::Elicitation,
+                None,
+                json!({ "question": params.question, "options": params.options }),
+            )
+            .await;
+
+            let answered = reply_rx.await;
+            claurst_plugins::run_global_hook(
+                claurst_plugins::HookEventKind::ElicitationResult,
+                None,
+                json!({
+                    "question": params.question,
+                    "answer": answered.as_deref().unwrap_or(""),
+                    "answered": answered.as_ref().is_ok_and(|a| !a.is_empty()),
+                }),
+            )
+            .await;
+
+            match answered {
                 Ok(answer) if answer.is_empty() => {
                     ToolResult::success("The user dismissed the question without answering.")
                 }

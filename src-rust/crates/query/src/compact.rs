@@ -1187,6 +1187,13 @@ pub async fn compact_conversation(
 ) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
 
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::PreCompact,
+        None,
+        serde_json::json!({ "message_count": total, "model": model }),
+    )
+    .await;
+
     // Token-budget keep: summarise everything older than the most recent
     // ~KEEP_RECENT_TOKENS worth of messages, cut on a pairing-safe boundary.
     let split_at = compute_keep_split_index(messages, KEEP_RECENT_TOKENS);
@@ -1208,7 +1215,21 @@ pub async fn compact_conversation(
     );
 
     // Use a generous token budget for the summary (20k mirrors TypeScript MAX_OUTPUT_TOKENS_FOR_SUMMARY)
-    summarise_head(client, messages, split_at, model, 20_000).await
+    let compacted = summarise_head(client, messages, split_at, model, 20_000).await;
+
+    claurst_plugins::run_global_hook(
+        claurst_plugins::HookEventKind::PostCompact,
+        None,
+        serde_json::json!({
+            "message_count_before": total,
+            "message_count_after": compacted.as_ref().map(|m| m.len()).unwrap_or(total),
+            "model": model,
+            "ok": compacted.is_ok(),
+        }),
+    )
+    .await;
+
+    compacted
 }
 
 /// Auto-compact `messages` if needed.  Updates `state` in place.

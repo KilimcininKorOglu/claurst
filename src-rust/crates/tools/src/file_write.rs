@@ -117,6 +117,17 @@ impl Tool for FileWriteTool {
         let byte_count = params.content.len();
 
         let action = if is_new { "Created" } else { "Wrote" };
+
+        claurst_plugins::run_global_hook(
+            claurst_plugins::HookEventKind::FileChanged,
+            Some(&path.to_string_lossy()),
+            json!({
+                "file_path": path.display().to_string(),
+                "change": if is_new { "created" } else { "written" },
+            }),
+        )
+        .await;
+
         ToolResult::success(format!(
             "{} {} ({} lines, {} bytes)",
             action,

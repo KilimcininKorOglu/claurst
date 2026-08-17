@@ -64,6 +64,8 @@ pub struct SettingsScreen {
     /// "false" is worse than one that refuses the change, so every save records
     /// its outcome here and the footer shows it.
     pub save_error: Option<String>,
+    /// Number of successful writes, so the session loop can notice one.
+    saves: u64,
 
     // ---- Real settings fields ----
     pub auto_compact: bool,
@@ -108,6 +110,7 @@ impl SettingsScreen {
             settings_snapshot: settings_snapshot.clone(),
             pending_changes: HashMap::new(),
             save_error: None,
+            saves: 0,
             auto_compact: false,
             notifications: true,
             show_turn_duration: false,
@@ -256,9 +259,19 @@ impl SettingsScreen {
     /// Write the snapshot back to `settings.json` and keep the outcome.
     fn persist(&mut self) {
         self.save_error = match self.settings_snapshot.save_sync() {
-            Ok(()) => None,
+            Ok(()) => {
+                // Counted rather than fired here: the session loop owns the
+                // async side and reports the change to the plugins.
+                self.saves = self.saves.saturating_add(1);
+                None
+            }
             Err(error) => Some(error.to_string()),
         };
+    }
+
+    /// How many times this screen has written `settings.json`.
+    pub fn saves(&self) -> u64 {
+        self.saves
     }
 
     /// Start editing a field by name, seeding the buffer with current value.

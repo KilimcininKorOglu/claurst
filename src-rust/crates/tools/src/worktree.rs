@@ -212,6 +212,16 @@ impl Tool for EnterWorktreeTool {
                     original_head,
                 });
 
+                claurst_plugins::run_global_hook(
+                    claurst_plugins::HookEventKind::WorktreeCreate,
+                    None,
+                    json!({
+                        "path": worktree_path.display().to_string(),
+                        "branch": branch,
+                    }),
+                )
+                .await;
+
                 // Run optional post-create command in the new worktree directory.
                 //
                 // Security (#210): the post_create_command is model-supplied and
@@ -453,6 +463,16 @@ impl Tool for ExitWorktreeTool {
                 if let Some(ref branch) = session.branch {
                     let _ = run_git(&session.original_cwd, &["branch", "-D", branch]).await;
                 }
+
+                claurst_plugins::run_global_hook(
+                    claurst_plugins::HookEventKind::WorktreeRemove,
+                    None,
+                    json!({
+                        "path": session.worktree_path.display().to_string(),
+                        "branch": session.branch,
+                    }),
+                )
+                .await;
 
                 ToolResult::success(format!(
                     "Exited and removed worktree at {}. \

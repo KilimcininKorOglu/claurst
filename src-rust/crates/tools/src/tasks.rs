@@ -162,6 +162,13 @@ impl Tool for TaskCreateTool {
         debug!(task_id = %task_id, subject = %params.subject, "Creating task");
         TASK_STORE.insert(task_id.clone(), task);
 
+        claurst_plugins::run_global_hook(
+            claurst_plugins::HookEventKind::TaskCreated,
+            None,
+            json!({ "task_id": task_id, "subject": params.subject }),
+        )
+        .await;
+
         ToolResult::success(
             serde_json::to_string_pretty(&json!({
                 "task_id": task_id,
@@ -355,6 +362,15 @@ impl Tool for TaskUpdateTool {
 
         if task_status == TaskStatus::Deleted {
             TASK_STORE.remove(&task_id);
+        }
+
+        if task_status == TaskStatus::Completed {
+            claurst_plugins::run_global_hook(
+                claurst_plugins::HookEventKind::TaskCompleted,
+                None,
+                json!({ "task_id": task_id }),
+            )
+            .await;
         }
 
         ToolResult::success(

@@ -166,6 +166,17 @@ impl Tool for FileEditTool {
             if replacements != 1 { "s" } else { "" }
         );
 
+        claurst_plugins::run_global_hook(
+            claurst_plugins::HookEventKind::FileChanged,
+            Some(&path.to_string_lossy()),
+            json!({
+                "file_path": path.display().to_string(),
+                "change": "edited",
+                "replacements": replacements,
+            }),
+        )
+        .await;
+
         ToolResult::success(msg).with_metadata(json!({
             "file_path": path.display().to_string(),
             "replacements": replacements,

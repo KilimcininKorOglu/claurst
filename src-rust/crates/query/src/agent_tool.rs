@@ -123,6 +123,17 @@ fn resolve_subagent_model(params: &AgentInput, ctx: &ToolContext) -> String {
     }
 }
 
+/// One word for how a run ended, for a hook payload.
+pub(crate) fn outcome_label(outcome: &QueryOutcome) -> &'static str {
+    match outcome {
+        QueryOutcome::EndTurn { .. } => "end_turn",
+        QueryOutcome::MaxTokens { .. } => "max_tokens",
+        QueryOutcome::Cancelled => "cancelled",
+        QueryOutcome::Error(_) => "error",
+        QueryOutcome::BudgetExceeded { .. } => "budget_exceeded",
+    }
+}
+
 /// Render the `*.md` agent definitions found in `dirs` as prompt sections.
 ///
 /// Returns an empty string when no directory holds one, which is the signal
@@ -498,6 +509,17 @@ impl Tool for AgentTool {
         // cancel propagates into this sub-agent's own run_query_loop (issue #218).
         let cancel = ctx.cancel_token.child_token();
 
+        claurst_plugins::run_global_hook(
+            claurst_plugins::HookEventKind::SubagentStart,
+            None,
+            serde_json::json!({
+                "description": params.description,
+                "model": query_config.model,
+                "session_id": ctx.session_id,
+            }),
+        )
+        .await;
+
         let outcome = run_query_loop(
             client.as_ref(),
             &mut messages,
@@ -515,6 +537,17 @@ impl Tool for AgentTool {
         if let (Some(root), Some(wt)) = (git_root, worktree_path) {
             remove_worktree(&root, &wt).await;
         }
+
+        claurst_plugins::run_global_hook(
+            claurst_plugins::HookEventKind::SubagentStop,
+            None,
+            serde_json::json!({
+                "description": params.description,
+                "outcome": outcome_label(&outcome),
+                "session_id": ctx.session_id,
+            }),
+        )
+        .await;
 
         match outcome {
             QueryOutcome::EndTurn { message, usage } => {

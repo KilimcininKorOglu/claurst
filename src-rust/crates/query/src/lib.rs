@@ -404,7 +404,54 @@ fn effective_output_style_for_turn(
 /// during tool execution (e.g. by the UI or a command queue).  Each string is
 /// appended as a plain user message between turns.  Callers that do not need
 /// command queuing may pass `None` or an empty `Vec`.
+///
+/// Fires the plugin `Stop` hook when the loop ends, or `StopFailure` when it
+/// ends on an error, which is why the body lives in `run_query_loop_inner`:
+/// the loop returns from too many places to hook each one.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_query_loop(
+    client: &claurst_api::AnthropicClient,
+    messages: &mut Vec<Message>,
+    tools: &[Box<dyn Tool>],
+    tool_ctx: &ToolContext,
+    config: &QueryConfig,
+    cost_tracker: Arc<CostTracker>,
+    event_tx: Option<mpsc::UnboundedSender<QueryEvent>>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    pending_messages: Option<&mut Vec<String>>,
+) -> QueryOutcome {
+    let outcome = run_query_loop_inner(
+        client,
+        messages,
+        tools,
+        tool_ctx,
+        config,
+        cost_tracker,
+        event_tx,
+        cancel_token,
+        pending_messages,
+    )
+    .await;
+
+    let event = if matches!(outcome, QueryOutcome::Error(_)) {
+        claurst_plugins::HookEventKind::StopFailure
+    } else {
+        claurst_plugins::HookEventKind::Stop
+    };
+    claurst_plugins::run_global_hook(
+        event,
+        None,
+        serde_json::json!({
+            "outcome": agent_tool::outcome_label(&outcome),
+            "session_id": tool_ctx.session_id,
+        }),
+    )
+    .await;
+
+    outcome
+}
+
+async fn run_query_loop_inner(
     client: &claurst_api::AnthropicClient,
     messages: &mut Vec<Message>,
     tools: &[Box<dyn Tool>],

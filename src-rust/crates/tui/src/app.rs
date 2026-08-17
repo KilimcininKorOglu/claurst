@@ -1499,6 +1499,9 @@ pub struct App {
     pub import_config_dialog: ImportConfigDialogState,
     /// Ctrl+K command palette overlay.
     pub command_palette: DialogSelectState,
+    /// Notices raised since the session loop last drained them, as
+    /// `(kind, message)`.
+    pub notification_outbox: Vec<(String, String)>,
     /// Slash commands that exist only in this session: the ones a plugin
     /// contributed and the skills discovery found. Held as owned pairs because
     /// the built-in table is static and these are not.
@@ -1880,6 +1883,7 @@ impl App {
                     .collect();
                 DialogSelectState::new("Command Palette", items)
             },
+            notification_outbox: Vec::new(),
             extra_slash_commands: Vec::new(),
             home_dir_warning: false,
             output_style: "auto".to_string(),
@@ -3387,7 +3391,17 @@ impl App {
         if kind == NotificationKind::Error {
             self.error_modal_scroll_offset = 0;
         }
+        // Queued rather than reported here: the session loop owns the async
+        // side and hands each notice to the hooks.
+        self.notification_outbox
+            .push((format!("{kind:?}").to_lowercase(), msg.clone()));
         self.notifications.push(kind, msg, duration_secs);
+    }
+
+    /// Take the notices raised since the last call, for the session loop to
+    /// report to the hooks.
+    pub fn drain_notification_outbox(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.notification_outbox)
     }
 
     pub fn push_system_message(&mut self, text: String, style: SystemMessageStyle) {
