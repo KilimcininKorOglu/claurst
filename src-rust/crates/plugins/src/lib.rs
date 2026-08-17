@@ -235,7 +235,34 @@ pub async fn load_plugins(
         registry.extend(plugins, errors);
     }
 
+    apply_disabled_plugins(&mut registry, &load_disabled_plugin_names());
     registry
+}
+
+/// Names the user turned off with `/plugin disable`.
+///
+/// Read here rather than taken as an argument so no caller can forget it: a
+/// plugin that is still enabled contributes commands, hooks and MCP servers,
+/// and one of those launches a process.
+fn load_disabled_plugin_names() -> std::collections::HashSet<String> {
+    claurst_core::config::Settings::load_sync()
+        .map(|settings| settings.disabled_plugins)
+        .unwrap_or_default()
+}
+
+/// Turn off every discovered plugin the user disabled.
+///
+/// Discovery enables whatever it finds, so this is what makes `/plugin disable`
+/// mean anything. `enabledPlugins` is not consulted: `/plugin enable` writes it
+/// and clears the name from `disabledPlugins` in the same step, so the disabled
+/// set alone decides.
+fn apply_disabled_plugins(
+    registry: &mut PluginRegistry,
+    disabled: &std::collections::HashSet<String>,
+) {
+    for name in disabled {
+        registry.disable(name);
+    }
 }
 
 /// Reload plugins: produce a new registry, compute the diff, and replace the old one.
@@ -705,5 +732,107 @@ mod tests {
         let diff = ReloadDiff::default();
         let out = format_reload_summary(&reg, &diff);
         assert!(out.contains("Reloaded"));
+    }
+
+    /// Build a plugin directory the loader will accept.
+    fn write_plugin(root: &std::path::Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).expect("plugin dir");
+        std::fs::write(
+            dir.join("plugin.json"),
+            format!(r#"{{"name": "{name}", "version": "0.1.0"}}"#),
+        )
+        .expect("manifest");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_plugin_does_not_load_enabled() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let plugins = tmp.path().join(".claurst").join("plugins");
+        std::fs::create_dir_all(&plugins).expect("plugins dir");
+        write_plugin(&plugins, "alpha");
+        write_plugin(&plugins, "beta");
+
+        let mut registry = load_plugins(tmp.path(), &[]).await;
+        assert!(registry.is_enabled("alpha"));
+        assert!(registry.is_enabled("beta"));
+
+        let disabled = std::collections::HashSet::from(["beta".to_string()]);
+        apply_disabled_plugins(&mut registry, &disabled);
+
+        assert!(registry.is_enabled("alpha"));
+        assert!(
+            !registry.is_enabled("beta"),
+            "discovery enables whatever it finds, so /plugin disable means nothing \
+             unless the disabled set is applied"
+        );
+        assert!(
+            registry.enabled().iter().all(|p| p.name != "beta"),
+            "a disabled plugin must contribute no commands, hooks or MCP servers"
+        );
+    }
+
+    #[test]
+    fn disabling_a_name_that_was_never_found_is_harmless() {
+        let mut registry = PluginRegistry::new();
+        let disabled = std::collections::HashSet::from(["ghost".to_string()]);
+
+        apply_disabled_plugins(&mut registry, &disabled);
+
+        assert_eq!(registry.enabled_count(), 0);
+    }
+
+    /// `CLAURST_HOME` is process-global, so the tests that point it somewhere
+    /// cannot run at the same time.
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn with_settings(body: &str) -> Self {
+            let dir = tempfile::tempdir().expect("tmp home");
+            std::fs::write(dir.path().join("settings.json"), body).expect("settings");
+            let previous = std::env::var_os("CLAURST_HOME");
+            // SAFETY: HOME_LOCK serialises every test that touches this
+            // variable, and no other thread reads it meanwhile.
+            unsafe { std::env::set_var("CLAURST_HOME", dir.path()) };
+            Self {
+                previous,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                // SAFETY: same as above.
+                Some(value) => unsafe { std::env::set_var("CLAURST_HOME", value) },
+                None => unsafe { std::env::remove_var("CLAURST_HOME") },
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn load_plugins_reads_the_disabled_set_from_settings() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::with_settings(r#"{"disabledPlugins": ["beta"]}"#);
+
+        let project = tempfile::tempdir().expect("tmp project");
+        let plugins = project.path().join(".claurst").join("plugins");
+        std::fs::create_dir_all(&plugins).expect("plugins dir");
+        write_plugin(&plugins, "alpha");
+        write_plugin(&plugins, "beta");
+
+        let registry = load_plugins(project.path(), &[]).await;
+
+        assert!(registry.is_enabled("alpha"));
+        assert!(
+            !registry.is_enabled("beta"),
+            "/plugin disable writes disabledPlugins, so loading has to read it"
+        );
     }
 }
