@@ -1098,6 +1098,33 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+/// Slash commands that exist only because of this session's plugins and
+/// skills, as `(name, description)` pairs for the TUI's command lists.
+///
+/// Without this the typeahead, the palette and the help overlay show the
+/// built-in table alone, so a plugin command is reachable only by someone who
+/// already knows its name.
+fn session_slash_commands(
+    cwd: &std::path::Path,
+    config: &claurst_core::Config,
+) -> Vec<(String, String)> {
+    let mut commands: Vec<(String, String)> = Vec::new();
+
+    if let Some(registry) = claurst_plugins::global_plugin_registry() {
+        for def in registry.all_command_defs() {
+            commands.push((def.name.clone(), def.description.clone()));
+        }
+    }
+
+    for (name, skill) in claurst_core::discover_skills(cwd, &config.skills) {
+        commands.push((name, skill.description.clone()));
+    }
+
+    commands.sort();
+    commands.dedup_by(|a, b| a.0 == b.0);
+    commands
+}
+
 async fn connect_mcp_manager_arc(
     servers: &[claurst_core::config::McpServerConfig],
 ) -> Option<Arc<claurst_mcp::McpManager>> {
@@ -2618,6 +2645,7 @@ async fn run_interactive(
     // Set up terminal
     let mut terminal = setup_terminal(live_config.mouse_capture_enabled())?;
     let mut app = App::new(live_config.clone(), cost_tracker.clone());
+    app.set_extra_slash_commands(session_slash_commands(&tool_ctx.working_dir, &live_config));
     if let Some(error) = settings_load_error {
         app.invalid_config_dialog =
             claurst_tui::InvalidConfigDialogState::show_settings_error(&error);

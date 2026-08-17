@@ -1499,6 +1499,10 @@ pub struct App {
     pub import_config_dialog: ImportConfigDialogState,
     /// Ctrl+K command palette overlay.
     pub command_palette: DialogSelectState,
+    /// Slash commands that exist only in this session: the ones a plugin
+    /// contributed and the skills discovery found. Held as owned pairs because
+    /// the built-in table is static and these are not.
+    pub extra_slash_commands: Vec<(String, String)>,
     /// Whether Claurst was launched from the user's home directory.
     /// Shown as a startup notice: "Note: You have launched Claurst in your home directory…"
     pub home_dir_warning: bool,
@@ -1876,6 +1880,7 @@ impl App {
                     .collect();
                 DialogSelectState::new("Command Palette", items)
             },
+            extra_slash_commands: Vec::new(),
             home_dir_warning: false,
             output_style: "auto".to_string(),
             pr_number: None,
@@ -3553,12 +3558,55 @@ impl App {
         }
         let file_autocomplete_limit = self.config.file_autocomplete_limit;
         let file_autocomplete_show_hidden = self.config.file_autocomplete_show_hidden_files;
+        let mut commands: Vec<(&str, &str)> = PROMPT_SLASH_COMMANDS.to_vec();
+        commands.extend(
+            self.extra_slash_commands
+                .iter()
+                .map(|(name, description)| (name.as_str(), description.as_str())),
+        );
         self.prompt_input.update_suggestions(
-            PROMPT_SLASH_COMMANDS,
+            &commands,
             file_autocomplete_limit,
             file_autocomplete_show_hidden,
         );
         self.sync_legacy_prompt_fields();
+    }
+
+    /// Add the slash commands a plugin contributed and the skills discovery
+    /// found, so typeahead, the palette and `?` list what the session can
+    /// actually run. A name the built-in table already carries is dropped,
+    /// because the built-in is what answers it.
+    pub fn set_extra_slash_commands(&mut self, extras: Vec<(String, String)>) {
+        let builtin: std::collections::HashSet<&str> = PROMPT_SLASH_COMMANDS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        let extras: Vec<(String, String)> = extras
+            .into_iter()
+            .filter(|(name, _)| !builtin.contains(name.as_str()))
+            .collect();
+
+        for (name, description) in &extras {
+            self.command_palette.items.push(SelectItem {
+                id: format!("/{}", name),
+                title: format!("/{}", name),
+                description: description.clone(),
+                category: "Commands".to_string(),
+                badge: None,
+            });
+        }
+
+        let mut entries = self.help_overlay.commands.clone();
+        entries.extend(extras.iter().map(|(name, description)| HelpEntry {
+            name: name.clone(),
+            aliases: String::new(),
+            description: description.clone(),
+            category: "Commands".to_string(),
+        }));
+        self.help_overlay.populate_from_commands(entries);
+
+        self.extra_slash_commands = extras;
+        self.refresh_prompt_input();
     }
 
     pub fn set_prompt_text(&mut self, text: String) {
