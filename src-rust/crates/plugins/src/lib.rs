@@ -102,6 +102,14 @@ pub fn set_global_hooks(registry: HookRegistry) {
     let _ = GLOBAL_HOOK_REGISTRY.set(registry);
 }
 
+/// Access the hooks the session registered from its plugins, if any.
+///
+/// The `/hooks` browser reads this so a plugin's hook is visible next to the
+/// ones from `settings.json`.
+pub fn global_hook_registry() -> Option<&'static HookRegistry> {
+    GLOBAL_HOOK_REGISTRY.get()
+}
+
 /// Run all `PreToolUse` hooks registered by plugins for the given tool.
 ///
 /// Returns `HookOutcome::Deny` if any blocking hook returns a non-zero exit

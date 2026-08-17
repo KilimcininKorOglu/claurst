@@ -39,6 +39,8 @@ pub struct HookEntry {
     /// - agent   → the agent name
     /// - http    → the URL
     pub target: String,
+    /// Where the hook came from: `"settings"` or `"plugin:<name>"`.
+    pub source: String,
 }
 
 impl HookEntry {
@@ -289,6 +291,10 @@ impl HooksConfigMenuState {
     }
 
     fn load_hooks(&mut self) {
+        // Before the settings file, because every read below can bail out and
+        // a plugin's hooks run whether or not settings.json declares any.
+        self.hooks.extend(plugin_hook_entries());
+
         let settings_path = claurst_core::config::Settings::config_dir().join("settings.json");
         let json_str = match std::fs::read_to_string(&settings_path) {
             Ok(s) => s,
@@ -364,6 +370,7 @@ impl HooksConfigMenuState {
                                 matcher: matcher.clone(),
                                 hook_type,
                                 target,
+                                source: "settings".to_string(),
                             });
                         }
                     }
@@ -371,6 +378,37 @@ impl HooksConfigMenuState {
             }
         }
     }
+}
+
+/// The hooks this session registered from its plugins.
+///
+/// They live in the plugin registry rather than `settings.json`, so without
+/// this the browser would report none of them while they run on every tool
+/// call.
+fn plugin_hook_entries() -> Vec<HookEntry> {
+    let Some(registry) = claurst_plugins::global_hook_registry() else {
+        return Vec::new();
+    };
+
+    let mut entries: Vec<HookEntry> = Vec::new();
+    for (event, hooks) in registry {
+        for hook in hooks {
+            entries.push(HookEntry {
+                event: event.clone(),
+                matcher: hook.matcher.clone().unwrap_or_else(|| "*".to_string()),
+                hook_type: "command".to_string(),
+                target: hook.command.clone(),
+                source: format!("plugin:{}", hook.plugin_name),
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        a.event
+            .cmp(&b.event)
+            .then(a.source.cmp(&b.source))
+            .then(a.target.cmp(&b.target))
+    });
+    entries
 }
 
 impl Default for HooksConfigMenuState {
@@ -530,8 +568,9 @@ fn render_hook_list(state: &HooksConfigMenuState) -> (&'static str, Vec<Line<'st
     let hooks = state.hooks_for_selection();
     for (i, hook) in hooks.iter().enumerate() {
         let selected = i == state.selected;
-        let badge = hook.hook_type.to_uppercase();
-        push_list_row(&mut lines, &hook.summary(), &badge, selected);
+        // The source is the badge: a plugin hook cannot be edited in
+        // settings.json, so which one it is matters more than its type.
+        push_list_row(&mut lines, &hook.summary(), &hook.source, selected);
     }
 
     (" Hooks — Select Hook ", lines)
@@ -557,6 +596,7 @@ fn render_hook_detail(state: &HooksConfigMenuState) -> (&'static str, Vec<Line<'
     push_detail_row(&mut lines, "Event", &hook.event);
     push_detail_row(&mut lines, "Matcher", &hook.matcher);
     push_detail_row(&mut lines, "Type", &hook.hook_type);
+    push_detail_row(&mut lines, "Source", &hook.source);
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  Target:",
@@ -632,6 +672,7 @@ mod tests {
             matcher: "Bash".to_string(),
             hook_type: "command".to_string(),
             target: "echo hi".to_string(),
+            source: "settings".to_string(),
         }];
         state.build_events();
 
