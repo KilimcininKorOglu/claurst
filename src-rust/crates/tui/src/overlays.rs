@@ -596,22 +596,12 @@ impl HistoryEntry {
         }
     }
 
-    /// Human-readable relative time: "just now", "2m ago", "3h ago", "2d ago", etc.
+    /// Human-readable relative time: "just now", "2 minutes ago", "yesterday",
+    /// "Mar 15". An entry with no timestamp renders nothing.
     pub fn relative_time(&self) -> String {
-        let ts = match self.timestamp {
-            None => return String::new(),
-            Some(t) => t,
-        };
-        let now = current_unix_secs();
-        let delta = now.saturating_sub(ts);
-        if delta < 60 {
-            "just now".to_string()
-        } else if delta < 3600 {
-            format!("{}m ago", delta / 60)
-        } else if delta < 86400 {
-            format!("{}h ago", delta / 3600)
-        } else {
-            format!("{}d ago", delta / 86400)
+        match self.timestamp {
+            None => String::new(),
+            Some(ts) => claurst_core::format_utils::format_relative_time(ts.saturating_mul(1000)),
         }
     }
 }
@@ -2169,7 +2159,7 @@ mod tests {
             timestamp: Some(five_mins_ago),
             pinned: false,
         };
-        assert_eq!(entry.relative_time(), "5m ago");
+        assert_eq!(entry.relative_time(), "5 minutes ago");
     }
 
     #[test]
@@ -2180,7 +2170,7 @@ mod tests {
             timestamp: Some(two_hours_ago),
             pinned: false,
         };
-        assert_eq!(entry.relative_time(), "2h ago");
+        assert_eq!(entry.relative_time(), "2 hours ago");
     }
 
     #[test]
@@ -2191,7 +2181,13 @@ mod tests {
             timestamp: Some(three_days_ago),
             pinned: false,
         };
-        assert_eq!(entry.relative_time(), "3d ago");
+        // Past yesterday the entry carries a calendar date, so assert on the
+        // shape rather than on a literal that moves with the clock.
+        let rendered = entry.relative_time();
+        assert!(
+            !rendered.contains("ago") && !rendered.is_empty(),
+            "expected a calendar date, got {rendered:?}"
+        );
     }
 
     #[test]

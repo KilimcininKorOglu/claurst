@@ -7530,16 +7530,9 @@ impl App {
                     let entries: Vec<crate::session_browser::SessionEntry> = sessions
                         .into_iter()
                         .map(|s| {
-                            let age = chrono::Utc::now().signed_duration_since(s.updated_at);
-                            let last_updated = if age.num_minutes() < 1 {
-                                "just now".to_string()
-                            } else if age.num_hours() < 1 {
-                                format!("{}m ago", age.num_minutes())
-                            } else if age.num_hours() < 24 {
-                                format!("{}h ago", age.num_hours())
-                            } else {
-                                format!("{}d ago", age.num_days())
-                            };
+                            let last_updated = claurst_core::format_utils::format_relative_time(
+                                s.updated_at.timestamp_millis().max(0) as u64,
+                            );
                             crate::session_browser::SessionEntry {
                                 id: s.id,
                                 title: s.title.unwrap_or_else(|| "(untitled)".to_string()),

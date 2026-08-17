@@ -194,29 +194,17 @@ fn render_error_modal(
 // Text truncation helpers
 // -----------------------------------------------------------------------
 
-/// Short relative timestamp for the welcome screen's recent-activity list:
-/// "just now", "5m ago", "2h ago", "3d ago". Clock skew (mtime in the future)
-/// degrades gracefully to "just now".
-fn short_relative_time(mtime: std::time::SystemTime) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(mtime)
-        .map(|d| d.as_secs())
+/// Relative timestamp for the welcome screen's recent-activity list.
+///
+/// Clock skew (mtime in the future) reads as "just now": an mtime ahead of the
+/// clock has no elapsed time to report, and `format_relative_time` already
+/// answers that for a timestamp it cannot look back on.
+fn relative_mtime(mtime: std::time::SystemTime) -> String {
+    let ms = mtime
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    short_relative_secs(secs)
-}
-
-/// Formatter split out from [`short_relative_time`] so it can be unit-tested
-/// without depending on the wall clock.
-fn short_relative_secs(secs: u64) -> String {
-    if secs < 60 {
-        "just now".to_string()
-    } else if secs < 3_600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h ago", secs / 3_600)
-    } else {
-        format!("{}d ago", secs / 86_400)
-    }
+    claurst_core::format_utils::format_relative_time(ms)
 }
 
 /// Build the body lines for the welcome box's "Recent activity" section.
@@ -237,7 +225,7 @@ fn recent_activity_lines(recent: &[crate::app::RecentSession], width: usize) -> 
         .iter()
         .take(5)
         .map(|s| {
-            let when = short_relative_time(s.mtime);
+            let when = relative_mtime(s.mtime);
             // Reserve room for the trailing " <time>" so the label truncates
             // instead of wrapping onto a second line.
             let label_w = width.saturating_sub(when.chars().count() + 1);
@@ -4620,20 +4608,31 @@ mod recent_activity_tests {
     // -- relative-time formatter ------------------------------------------
 
     #[test]
-    fn short_relative_secs_buckets() {
-        assert_eq!(short_relative_secs(0), "just now");
-        assert_eq!(short_relative_secs(59), "just now");
-        assert_eq!(short_relative_secs(60), "1m ago");
-        assert_eq!(short_relative_secs(5 * 60), "5m ago");
-        assert_eq!(short_relative_secs(2 * 3_600), "2h ago");
-        assert_eq!(short_relative_secs(3 * 86_400), "3d ago");
+    fn relative_mtime_buckets() {
+        let ago = |secs| SystemTime::now() - Duration::from_secs(secs);
+        assert_eq!(relative_mtime(ago(0)), "just now");
+        assert_eq!(relative_mtime(ago(59)), "just now");
+        assert_eq!(relative_mtime(ago(60)), "1 minute ago");
+        assert_eq!(relative_mtime(ago(5 * 60)), "5 minutes ago");
+        assert_eq!(relative_mtime(ago(2 * 3_600)), "2 hours ago");
+        assert_eq!(relative_mtime(ago(30 * 3_600)), "yesterday");
     }
 
     #[test]
-    fn short_relative_time_handles_future_mtime() {
+    fn relative_mtime_older_than_two_days_is_a_calendar_date() {
+        let old = SystemTime::now() - Duration::from_secs(30 * 86_400);
+        let rendered = relative_mtime(old);
+        assert!(
+            !rendered.contains("ago"),
+            "expected a calendar date, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn relative_mtime_handles_future_mtime() {
         // Clock skew (mtime slightly in the future) must not panic.
         let future = SystemTime::now() + Duration::from_secs(120);
-        assert_eq!(short_relative_time(future), "just now");
+        assert_eq!(relative_mtime(future), "just now");
     }
 
     // -- render-from-state path -------------------------------------------
@@ -4652,14 +4651,36 @@ mod recent_activity_tests {
         ];
         let out = lines_text(&sessions, 40).join("\n");
         assert!(out.contains("Fix the parser bug"), "first title: {out:?}");
-        assert!(out.contains("2h ago"), "first time: {out:?}");
+        assert!(out.contains("2 hours ago"), "first time: {out:?}");
         assert!(out.contains("Wire up onboarding"), "second title: {out:?}");
-        assert!(out.contains("3d ago"), "second time: {out:?}");
+        // Past yesterday the entry carries a calendar date, which moves with
+        // the clock, so assert that the relative wording is gone instead.
+        assert!(!out.contains("days ago"), "second time: {out:?}");
         // The placeholder must NOT appear when there is real activity.
         assert!(
             !out.contains("No recent activity"),
             "no placeholder: {out:?}"
         );
+    }
+
+    #[test]
+    fn no_entry_outgrows_its_column() {
+        // The relative time is wordier than it used to be, and the label
+        // truncates against its width. A line wider than the column wraps and
+        // pushes the rest of the welcome box down.
+        let sessions = vec![
+            recent("short", 2 * 3_600),
+            recent("a much longer session label", 5 * 60),
+            recent("older work", 30 * 86_400),
+        ];
+        for width in [20, 30, 40, 60] {
+            for line in lines_text(&sessions, width) {
+                assert!(
+                    line.chars().count() <= width,
+                    "line {line:?} exceeds width {width}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -4680,7 +4701,10 @@ mod recent_activity_tests {
         assert_eq!(out.len(), 1);
         let line = &out[0];
         assert!(line.contains('\u{2026}'), "should be ellipsised: {line:?}");
-        assert!(line.ends_with("1m ago"), "time preserved at end: {line:?}");
+        assert!(
+            line.ends_with("1 minute ago"),
+            "time preserved at end: {line:?}"
+        );
     }
 
     #[test]
@@ -4706,6 +4730,35 @@ mod recent_activity_tests {
             "header rendered: present"
         );
         assert!(screen.contains("Sortable label"), "session label rendered");
+        assert!(screen.contains("2 hours ago"), "relative time rendered");
+    }
+
+    #[test]
+    fn welcome_box_shows_a_calendar_date_for_older_sessions() {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        let old = SystemTime::now() - Duration::from_secs(30 * 86_400);
+        app.recent_sessions = vec![recent("Older session", 30 * 86_400)];
+
+        let mut terminal = match Terminal::new(TestBackend::new(80, 24)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_welcome_box(frame, &app, frame.area())) {
+            panic!("draw: {err}");
+        }
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+
+        assert!(
+            screen.contains(&relative_mtime(old)),
+            "expected the calendar date on screen, got {screen:?}"
+        );
+        assert!(!screen.contains("days ago"), "relative wording is gone");
     }
 }
 
