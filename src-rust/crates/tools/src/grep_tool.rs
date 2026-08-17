@@ -7,7 +7,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tracing::debug;
-use walkdir::WalkDir;
 
 pub struct GrepTool;
 
@@ -80,7 +79,9 @@ impl Tool for GrepTool {
         "A powerful search tool built on regex. Supports full regex syntax. \
          Filter files with the `glob` parameter or `type` parameter. Output \
          modes: \"content\" shows matching lines, \"files_with_matches\" shows \
-         only file paths (default), \"count\" shows match counts."
+         only file paths (default), \"count\" shows match counts. Files excluded \
+         by .gitignore or .ignore are skipped unless the includeIgnoredFiles \
+         setting is on."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -200,25 +201,13 @@ impl Tool for GrepTool {
         let mut results: Vec<String> = Vec::new();
         let mut match_count = 0usize;
 
-        for entry in WalkDir::new(&search_path)
-            .follow_links(true)
-            .into_iter()
-            .filter_entry(|e| {
-                // Skip hidden directories
-                let name = e.file_name().to_string_lossy();
-                !name.starts_with('.')
-                    && name != "node_modules"
-                    && name != "target"
-                    && name != "__pycache__"
-                    && name != ".git"
-            })
-        {
+        for entry in crate::ignore_aware_walk(&search_path, ctx.config.include_ignored_files) {
             let entry = match entry {
                 Ok(e) => e,
                 Err(_) => continue,
             };
 
-            if !entry.file_type().is_file() {
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
 
@@ -377,5 +366,108 @@ impl GrepTool {
                 ToolResult::success(results.join("\n"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claurst_core::config::Config;
+    use claurst_core::permissions::AutoPermissionHandler;
+    use std::path::Path;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::Arc;
+
+    /// A tree holding the same needle in an ignored, a hidden and a plain spot.
+    fn tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let write = |rel: &str, body: &str| {
+            let path = root.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("mkdir");
+            }
+            std::fs::write(path, body).expect("write");
+        };
+
+        write(".gitignore", "dist/\n");
+        write("src/main.rs", "// NEEDLE in source\n");
+        write("dist/bundle.js", "// NEEDLE in build output\n");
+        write(".github/workflows/ci.yml", "# NEEDLE in workflow\n");
+        write(".git/COMMIT_EDITMSG", "NEEDLE in git metadata\n");
+
+        dir
+    }
+
+    fn ctx_for(root: &Path, include_ignored: bool) -> ToolContext {
+        let config = Config {
+            include_ignored_files: include_ignored,
+            ..Default::default()
+        };
+        ToolContext {
+            working_dir: root.to_path_buf(),
+            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_handler: Arc::new(AutoPermissionHandler {
+                mode: claurst_core::config::PermissionMode::Default,
+            }),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            session_id: "test-grep".to_string(),
+            file_history: Arc::new(parking_lot::Mutex::new(
+                claurst_core::file_history::FileHistory::new(),
+            )),
+            current_turn: Arc::new(AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config,
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    async fn search(root: &Path, include_ignored: bool) -> String {
+        let ctx = ctx_for(root, include_ignored);
+        let result = GrepTool.execute(json!({ "pattern": "NEEDLE" }), &ctx).await;
+        assert!(!result.is_error, "grep failed: {}", result.content);
+        result.content
+    }
+
+    #[tokio::test]
+    async fn a_gitignored_directory_is_skipped() {
+        let dir = tree();
+        let out = search(dir.path(), false).await;
+
+        assert!(out.contains("main.rs"), "{out}");
+        assert!(!out.contains("bundle.js"), "dist/ is ignored: {out}");
+    }
+
+    #[tokio::test]
+    async fn the_setting_brings_the_ignored_directory_back() {
+        let dir = tree();
+        let out = search(dir.path(), true).await;
+
+        assert!(out.contains("bundle.js"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn a_hidden_directory_is_now_searched() {
+        // The old fixed list dropped every hidden directory, so a workflow file
+        // was unreachable even though nothing ignores it.
+        let dir = tree();
+        let out = search(dir.path(), false).await;
+
+        assert!(out.contains("ci.yml"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn the_git_directory_is_never_searched() {
+        let dir = tree();
+        let out = search(dir.path(), false).await;
+
+        assert!(!out.contains("COMMIT_EDITMSG"), "{out}");
     }
 }
