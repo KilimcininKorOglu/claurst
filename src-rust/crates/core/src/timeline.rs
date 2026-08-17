@@ -271,6 +271,34 @@ impl Timeline {
     }
 }
 
+/// What `/timeline` was asked to do.
+///
+/// Parsed here rather than in either front end: the terminal owns the panel and
+/// the command layer owns the help text, and both have to agree on the words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineAction {
+    Show,
+    Hide,
+    Toggle,
+    Clear,
+}
+
+/// Parse the `/timeline` argument. An empty argument toggles the panel.
+pub fn parse_timeline_action(args: &str) -> Result<TimelineAction, String> {
+    match args.trim() {
+        "" | "toggle" => Ok(TimelineAction::Toggle),
+        "show" | "on" => Ok(TimelineAction::Show),
+        "hide" | "off" => Ok(TimelineAction::Hide),
+        "clear" => Ok(TimelineAction::Clear),
+        other => Err(format!(
+            "Unknown argument '{other}'. Use: /timeline [show|hide|toggle|clear]"
+        )),
+    }
+}
+
+/// Shown wherever the timeline is asked for while the setting is off.
+pub const TIMELINE_DISABLED_HINT: &str = "Timeline is disabled; turn it on in /settings.";
+
 #[cfg(test)]
 mod tests {
     use super::*;

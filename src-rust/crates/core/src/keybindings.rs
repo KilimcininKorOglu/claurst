@@ -166,6 +166,7 @@ pub fn default_bindings() -> Vec<ParsedBinding> {
         ("ctrl+l", "redraw", KeyContext::Global),
         ("ctrl+r", "historySearch", KeyContext::Global),
         ("ctrl+b", "createBranch", KeyContext::Global),
+        ("ctrl+shift+l", "toggleTimeline", KeyContext::Global),
         ("alt+h", "openHelp", KeyContext::Global),
         // ========== CHAT / INPUT CONTEXT ==========
         // Message submission
@@ -766,6 +767,22 @@ mod tests {
         // ctrl+l is a single-chord Global binding ("redraw"); ctrl+c is no
         // longer resolver-routed (see test_default_bindings_omit_ctrl_c_and_ctrl_d).
         let ks = parse_keystroke("ctrl+l").unwrap();
+        let result = resolver.process(ks, &KeyContext::Global);
+        assert!(matches!(result, KeybindingResult::Action(ref a) if a == "redraw"));
+    }
+
+    #[test]
+    fn ctrl_shift_l_toggles_the_timeline_without_shadowing_ctrl_l() {
+        let user = UserKeybindings::default();
+        let mut resolver = KeybindingResolver::new(&user);
+
+        let ks = parse_keystroke("ctrl+shift+l").expect("ctrl+shift+l parses");
+        let result = resolver.process(ks, &KeyContext::Global);
+        assert!(matches!(result, KeybindingResult::Action(ref a) if a == "toggleTimeline"));
+
+        // The plain chord must still redraw; adding a shifted sibling cannot
+        // turn ctrl+l into the prefix of a two-chord sequence.
+        let ks = parse_keystroke("ctrl+l").expect("ctrl+l parses");
         let result = resolver.process(ks, &KeyContext::Global);
         assert!(matches!(result, KeybindingResult::Action(ref a) if a == "redraw"));
     }

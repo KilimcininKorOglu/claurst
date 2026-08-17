@@ -1,4 +1,4 @@
-// Display commands: `/context` and `/vim` (`/vi`).
+// Display commands: `/context`, `/vim` (`/vi`) and `/timeline`.
 //
 // Extracted from lib.rs (issue #232). Behavior-preserving move.
 
@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 pub struct ContextCommand;
 pub struct VimCommand;
+pub struct TimelineCommand;
 
 // ---- /context ------------------------------------------------------------
 
@@ -127,5 +128,44 @@ impl SlashCommand for VimCommand {
             )),
             Err(e) => CommandResult::Error(format!("Failed to save setting: {}", e)),
         }
+    }
+}
+
+// ---- /timeline -----------------------------------------------------------
+
+// The terminal owns the panel, so it intercepts this command and acts on the
+// parsed argument. The implementation below is what a caller with no terminal
+// (headless `--print`, a remote client) gets instead.
+
+#[async_trait]
+impl SlashCommand for TimelineCommand {
+    fn name(&self) -> &str {
+        "timeline"
+    }
+    fn description(&self) -> &str {
+        "Show, hide or clear the live execution timeline panel"
+    }
+    fn help(&self) -> &str {
+        "Usage: /timeline [show|hide|toggle|clear]\n\n\
+         The panel lists every tool call and finished turn as it happens, with\n\
+         how long each step took and what the turn spent.\n\n\
+         Ctrl+Shift+L does the same as /timeline toggle. Once the panel has\n\
+         focus, the arrow keys move the cursor, Enter expands the selected row\n\
+         and Esc returns to the prompt.\n\n\
+         Recording is off until `timelineEnabled` is turned on in /settings."
+    }
+
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
+        if let Err(message) = claurst_core::timeline::parse_timeline_action(args) {
+            return CommandResult::Error(message);
+        }
+        if !ctx.config.timeline_enabled {
+            return CommandResult::Message(
+                claurst_core::timeline::TIMELINE_DISABLED_HINT.to_string(),
+            );
+        }
+        CommandResult::Message(
+            "The timeline panel is drawn by the terminal UI and is not available here.".to_string(),
+        )
     }
 }

@@ -475,7 +475,7 @@ fn command_category(name: &str) -> &'static str {
         | "fork" => "Conversation",
         "model" | "config" | "theme" | "color" | "vim" | "fast" | "effort" | "voice"
         | "statusline" | "output-style" | "keybindings" | "privacy-settings"
-        | "rate-limit-options" | "sandbox-toggle" => "Settings",
+        | "rate-limit-options" | "sandbox-toggle" | "timeline" => "Settings",
         "cost" | "stats" | "usage" | "extra-usage" | "context" | "ctx-viz" => "Usage & Cost",
         "status" | "doctor" | "terminal-setup" | "version" | "update" | "upgrade"
         | "release-notes" => "System",
@@ -1349,6 +1349,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(CopyCommand),
         Box::new(ChromeCommand),
         Box::new(VimCommand),
+        Box::new(TimelineCommand),
         Box::new(VoiceCommand),
         Box::new(UpgradeCommand),
         Box::new(ReleaseNotesCommand),

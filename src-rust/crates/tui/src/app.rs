@@ -33,7 +33,11 @@ use claurst_core::file_history::FileHistory;
 use claurst_core::keybindings::{
     KeyContext, KeybindingResolver, KeybindingResult, ParsedKeystroke, UserKeybindings,
 };
-use claurst_core::types::{ContentBlock, Message, Role};
+use claurst_core::timeline::{
+    parse_timeline_action, Timeline, TimelineAction, TimelineRow, TimelineStatus,
+    TIMELINE_DISABLED_HINT,
+};
+use claurst_core::types::{ContentBlock, Message, Role, UsageInfo};
 use claurst_core::{sample_completion_verb, sample_spinner_verb};
 use claurst_query::QueryEvent;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
@@ -1662,6 +1666,29 @@ pub struct App {
     /// word is checked against this set; a match silently auto-approves the request.
     pub bash_prefix_allowlist: std::collections::HashSet<String>,
 
+    // ---- Live execution timeline -----------------------------------------
+    /// Rows recorded for the execution timeline.
+    ///
+    /// Stays empty while `config.timeline_enabled` is false: the feed is
+    /// skipped rather than the panel hidden, so an uninterested session pays
+    /// nothing for it.
+    pub timeline: Timeline,
+    /// Whether the timeline panel takes a share of the screen.
+    pub timeline_visible: bool,
+    /// Whether arrow keys move the timeline cursor instead of the transcript.
+    pub timeline_focused: bool,
+    /// Whether the selected row shows its full details.
+    pub timeline_expanded: bool,
+    /// Rows added or changed since the main loop last drained this.
+    ///
+    /// The loop forwards them to a remote client, so the timeline is built
+    /// once here rather than a second time from the same events elsewhere.
+    pub timeline_outbox: Vec<TimelineRow>,
+    /// Counter behind the stable row ids for turns and status notes.
+    timeline_event_seq: u64,
+    /// When the running turn started, so its summary row spans the whole turn.
+    timeline_turn_started_at_ms: Option<u64>,
+
     // ---- Auto-update notification ----------------------------------------
     /// If a newer version was found during background update check, this holds
     /// the latest version string (e.g. "0.1.0"). Shown in the footer status bar.
@@ -1966,6 +1993,13 @@ impl App {
             scroll_accel: 3.0,
             scroll_last_time: None,
             bash_prefix_allowlist: std::collections::HashSet::new(),
+            timeline: Timeline::default(),
+            timeline_visible: false,
+            timeline_focused: false,
+            timeline_expanded: false,
+            timeline_outbox: Vec::new(),
+            timeline_event_seq: 0,
+            timeline_turn_started_at_ms: None,
             update_available: None,
             managed_agent_cost_breakdown: None,
             managed_agents_active: false,
@@ -2685,7 +2719,42 @@ impl App {
         if cmd == "mcp" && !args.trim().is_empty() {
             return false;
         }
+        if cmd == "timeline" {
+            self.close_secondary_views();
+            self.dismiss_error_notifications();
+            self.status_message = Some(self.apply_timeline_command(args));
+            return true;
+        }
         self.intercept_slash_command(cmd)
+    }
+
+    /// Run `/timeline`, returning the line to put in the status bar.
+    fn apply_timeline_command(&mut self, args: &str) -> String {
+        let action = match parse_timeline_action(args) {
+            Ok(action) => action,
+            Err(message) => return message,
+        };
+        if !self.timeline_recording() {
+            return TIMELINE_DISABLED_HINT.to_string();
+        }
+        match action {
+            TimelineAction::Toggle => self.cycle_timeline_panel(),
+            TimelineAction::Show => {
+                self.timeline_visible = true;
+                self.timeline_focused = true;
+                "Timeline shown. ↑↓ to move, enter to expand, esc to leave.".to_string()
+            }
+            TimelineAction::Hide => {
+                self.hide_timeline_panel();
+                "Timeline hidden.".to_string()
+            }
+            TimelineAction::Clear => {
+                let cleared = self.timeline.len();
+                self.timeline.clear();
+                self.timeline_expanded = false;
+                format!("Timeline cleared ({cleared} rows).")
+            }
+        }
     }
 
     /// Whether [`Self::intercept_slash_command`] answers this command by
@@ -4992,6 +5061,14 @@ impl App {
             }
         }
 
+        // ---- Timeline panel navigation ------------------------------------
+        // Runs before the keybinding processor so the arrow keys move the
+        // timeline cursor instead of walking the prompt history while the
+        // panel holds focus.
+        if self.handle_timeline_key(&key) {
+            return false;
+        }
+
         // ---- Keybinding processor (runs AFTER all dialog checks) ----------
         let key_context = self.current_key_context();
         if let Some(keystroke) = key_event_to_keystroke(&key) {
@@ -5167,6 +5244,7 @@ impl App {
                 self.streaming_thinking.clear();
                 self.tool_use_blocks.clear();
                 self.status_message = Some("Cancelled.".to_string());
+                self.timeline_cancelled();
                 self.complete_current_turn_snapshot(true);
             }
 
@@ -5199,6 +5277,7 @@ impl App {
                     self.streaming_thinking.clear();
                     self.tool_use_blocks.clear();
                     self.status_message = Some("Cancelled.".to_string());
+                    self.timeline_cancelled();
                     self.complete_current_turn_snapshot(true);
                 } else {
                     // No text selected and not streaming: handle exit confirmation sequence.
@@ -5889,6 +5968,7 @@ impl App {
                     self.streaming_thinking.clear();
                     self.tool_use_blocks.clear();
                     self.status_message = Some("Cancelled.".to_string());
+                    self.timeline_cancelled();
                 } else {
                     // Handle exit confirmation: require two exit key presses within 2 seconds.
                     // Always clear the prompt input on Ctrl+C.
@@ -6170,6 +6250,11 @@ impl App {
                     PermissionMode::Plan => "Plan mode",
                 };
                 self.status_message = Some(label.to_string());
+                false
+            }
+            "toggleTimeline" => {
+                let message = self.cycle_timeline_panel();
+                self.status_message = Some(message);
                 false
             }
             "openHelp" => {
@@ -7287,6 +7372,293 @@ impl App {
     }
 
     // -------------------------------------------------------------------
+    // Live execution timeline
+    // -------------------------------------------------------------------
+
+    /// Whether the timeline records anything at all.
+    fn timeline_recording(&self) -> bool {
+        self.config.timeline_enabled
+    }
+
+    /// Show the panel, focus it, then hide it again on repeated presses.
+    ///
+    /// Returns the line to put in the status bar.
+    pub fn cycle_timeline_panel(&mut self) -> String {
+        if !self.timeline_recording() {
+            return TIMELINE_DISABLED_HINT.to_string();
+        }
+        if !self.timeline_visible {
+            self.timeline_visible = true;
+            self.timeline_focused = true;
+            "Timeline shown. ↑↓ to move, enter to expand, esc to leave.".to_string()
+        } else if !self.timeline_focused {
+            self.timeline_focused = true;
+            "Timeline focused.".to_string()
+        } else {
+            self.hide_timeline_panel();
+            "Timeline hidden.".to_string()
+        }
+    }
+
+    /// Put the panel away and drop the state that only makes sense while it is
+    /// on screen.
+    pub fn hide_timeline_panel(&mut self) {
+        self.timeline_visible = false;
+        self.timeline_focused = false;
+        self.timeline_expanded = false;
+    }
+
+    /// Move the timeline cursor by `delta` rows, stopping at either end.
+    fn move_timeline_cursor(&mut self, delta: isize) {
+        if self.timeline.is_empty() {
+            return;
+        }
+        let last = self.timeline.len() - 1;
+        let current = self.timeline.selected_idx as isize;
+        let next = (current + delta).clamp(0, last as isize) as usize;
+        self.timeline.set_selected_idx(next);
+    }
+
+    /// Handle a key while the timeline panel holds focus.
+    ///
+    /// Returns true when the key belonged to the panel and must not fall
+    /// through to the transcript or the prompt.
+    fn handle_timeline_key(&mut self, key: &KeyEvent) -> bool {
+        if !self.timeline_visible || !self.timeline_focused {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => self.move_timeline_cursor(-1),
+            KeyCode::Down => self.move_timeline_cursor(1),
+            KeyCode::PageUp => self.move_timeline_cursor(-10),
+            KeyCode::PageDown => self.move_timeline_cursor(10),
+            KeyCode::Home => self.timeline.set_selected_idx(0),
+            KeyCode::End => {
+                let last = self.timeline.len().saturating_sub(1);
+                self.timeline.set_selected_idx(last);
+            }
+            KeyCode::Enter => self.timeline_expanded = !self.timeline_expanded,
+            KeyCode::Esc => {
+                self.timeline_focused = false;
+                self.timeline_expanded = false;
+                self.status_message = Some("Timeline unfocused.".to_string());
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Wall-clock milliseconds, the unit every timeline timestamp uses.
+    ///
+    /// A row's duration is the difference between two of these, so a clock that
+    /// steps backwards can only shorten a duration, never corrupt the row.
+    fn timeline_now_ms(&self) -> u64 {
+        chrono::Utc::now().timestamp_millis().max(0) as u64
+    }
+
+    /// A row id that stays unique for rows the model does not name itself.
+    fn next_timeline_id(&mut self, prefix: &str) -> String {
+        self.timeline_event_seq = self.timeline_event_seq.saturating_add(1);
+        format!("{prefix}-{}", self.timeline_event_seq)
+    }
+
+    /// Queue the row at `idx` for the remote client.
+    fn publish_timeline_row(&mut self, idx: usize) {
+        if let Some(row) = self.timeline.rows.get(idx) {
+            self.timeline_outbox.push(row.clone());
+        }
+    }
+
+    /// Hand every row recorded since the last call to the caller.
+    ///
+    /// The main loop drains this after the app has consumed a query event and
+    /// forwards each row over the bridge, so the terminal and a remote client
+    /// show the same rows with the same timings.
+    pub fn drain_timeline_outbox(&mut self) -> Vec<TimelineRow> {
+        std::mem::take(&mut self.timeline_outbox)
+    }
+
+    /// Open a tool row, or restart one the model reused the id of.
+    fn timeline_tool_started(&mut self, tool_name: &str, tool_id: &str, input_json: &str) {
+        if !self.timeline_recording() {
+            return;
+        }
+        let started_at_ms = self.timeline_now_ms();
+        if self.timeline_turn_started_at_ms.is_none() {
+            self.timeline_turn_started_at_ms = Some(started_at_ms);
+        }
+
+        let input: serde_json::Value =
+            serde_json::from_str(input_json).unwrap_or(serde_json::Value::Null);
+        let normalized = tool_name.to_ascii_lowercase();
+        let action = crate::render::tool_running_label(&normalized, tool_name);
+        let summary = crate::messages::extract_tool_summary(tool_name, &input);
+        let title = if summary.is_empty() {
+            action
+        } else {
+            format!("{action}: {summary}")
+        };
+        let details = if input_json.trim().is_empty() {
+            String::new()
+        } else {
+            input_json.to_string()
+        };
+
+        let idx = match self
+            .timeline
+            .rows
+            .iter()
+            .rposition(|row| row.id == tool_id && row.status == TimelineStatus::Running)
+        {
+            Some(idx) => {
+                let row = &mut self.timeline.rows[idx];
+                row.title = title;
+                row.started_at_ms = started_at_ms;
+                row.detail_preview = summary;
+                row.expandable_details = details;
+                idx
+            }
+            None => self
+                .timeline
+                .add_running_tool(tool_id, title, started_at_ms, summary, details),
+        };
+        self.follow_latest_timeline_row(idx);
+        self.publish_timeline_row(idx);
+    }
+
+    /// Close the tool row, synthesising one when the start was never seen.
+    fn timeline_tool_finished(&mut self, tool_id: &str, result: &str, is_error: bool) {
+        if !self.timeline_recording() {
+            return;
+        }
+        let finished_at_ms = self.timeline_now_ms();
+        let status = if is_error {
+            TimelineStatus::Error
+        } else {
+            TimelineStatus::Done
+        };
+        let preview =
+            claurst_core::truncate::truncate_text(result.lines().next().unwrap_or(""), 120);
+
+        let idx = match self.timeline.finish_tool(
+            tool_id,
+            finished_at_ms,
+            status,
+            preview.clone(),
+            result.to_string(),
+        ) {
+            Some(idx) => idx,
+            None => {
+                // A result with no start still belongs on the timeline; losing
+                // it would leave a gap the user cannot explain.
+                let idx = self.timeline.add_running_tool(
+                    tool_id,
+                    tool_id.to_string(),
+                    finished_at_ms,
+                    preview.clone(),
+                    result.to_string(),
+                );
+                self.timeline
+                    .finish_tool(tool_id, finished_at_ms, status, preview, result.to_string())
+                    .unwrap_or(idx)
+            }
+        };
+        self.follow_latest_timeline_row(idx);
+        self.publish_timeline_row(idx);
+    }
+
+    /// Record the finished turn, with the usage it actually spent.
+    fn timeline_turn_finished(&mut self, turn: u32, stop_reason: &str, usage: Option<&UsageInfo>) {
+        if !self.timeline_recording() {
+            return;
+        }
+        let finished_at_ms = self.timeline_now_ms();
+        let started_at_ms = self.timeline_turn_started_at_ms.unwrap_or(finished_at_ms);
+        let id = self.next_timeline_id("turn");
+        let input_tokens = usage.map(|usage| {
+            usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens
+        });
+        let output_tokens = usage.map(|usage| usage.output_tokens);
+        let preview = match (input_tokens, output_tokens) {
+            (Some(input), Some(output)) => format!("{input} in, {output} out"),
+            _ => stop_reason.to_string(),
+        };
+        let idx = self.timeline.add_turn_summary(
+            id,
+            format!("Assistant turn {turn} finished"),
+            started_at_ms,
+            finished_at_ms,
+            preview,
+            format!("stop_reason={stop_reason}"),
+            input_tokens,
+            output_tokens,
+            None,
+        );
+        self.timeline_turn_started_at_ms = None;
+        self.follow_latest_timeline_row(idx);
+        self.publish_timeline_row(idx);
+    }
+
+    /// Record a one-shot note, such as a status line or a cancellation.
+    fn timeline_note(&mut self, title: &str, status: TimelineStatus, detail: &str) {
+        if !self.timeline_recording() {
+            return;
+        }
+        let at_ms = self.timeline_now_ms();
+        let id = self.next_timeline_id("note");
+        let preview = claurst_core::truncate::truncate_text(detail, 120);
+        let idx =
+            self.timeline
+                .add_status_note(id, title.to_string(), at_ms, status, preview, detail);
+        self.follow_latest_timeline_row(idx);
+        self.publish_timeline_row(idx);
+    }
+
+    /// Close every open row when the user interrupts the turn.
+    ///
+    /// Without this a cancelled tool keeps its spinner forever, and the panel
+    /// claims work is still running after the loop has already stopped.
+    fn timeline_cancelled(&mut self) {
+        if !self.timeline_recording() {
+            return;
+        }
+        let at_ms = self.timeline_now_ms();
+        let open: Vec<String> = self
+            .timeline
+            .rows
+            .iter()
+            .filter(|row| row.status == TimelineStatus::Running)
+            .map(|row| row.id.clone())
+            .collect();
+        for id in open {
+            if let Some(idx) = self.timeline.finish_tool(
+                &id,
+                at_ms,
+                TimelineStatus::Cancelled,
+                "Cancelled",
+                "Interrupted by the user.",
+            ) {
+                self.publish_timeline_row(idx);
+            }
+        }
+        self.timeline_note(
+            "Turn cancelled",
+            TimelineStatus::Cancelled,
+            "Interrupted by the user.",
+        );
+        self.timeline_turn_started_at_ms = None;
+    }
+
+    /// Keep the cursor on the newest row unless the user took it somewhere.
+    fn follow_latest_timeline_row(&mut self, idx: usize) {
+        if !self.timeline_focused {
+            self.timeline.set_selected_idx(idx);
+        } else {
+            self.timeline.clamp_selected_idx();
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Query event handling
     // -------------------------------------------------------------------
 
@@ -7361,6 +7733,7 @@ impl App {
                 tool_id,
                 input_json,
             } => {
+                self.timeline_tool_started(&tool_name, &tool_id, &input_json);
                 if !self.is_streaming && self.spinner_verb.is_none() {
                     let seed = self.frame_count as usize ^ (self.messages.len() * 17);
                     self.spinner_verb = Some(sample_spinner_verb(seed).to_string());
@@ -7392,6 +7765,7 @@ impl App {
                 result,
                 is_error,
             } => {
+                self.timeline_tool_finished(&tool_id, &result, is_error);
                 // Build a multi-line preview: show up to 3 lines, truncate if more.
                 let all_lines: Vec<&str> = result.lines().collect();
                 let preview_lines = all_lines.len().min(3);
@@ -7424,6 +7798,7 @@ impl App {
                 ..
             } => {
                 debug!(turn, stop_reason, "Turn complete");
+                self.timeline_turn_finished(turn, &stop_reason, usage.as_ref());
                 self.is_streaming = false;
                 self.spinner_verb = None;
 
@@ -7454,6 +7829,7 @@ impl App {
             }
 
             QueryEvent::Status(msg) => {
+                self.timeline_note("Status", TimelineStatus::Done, &msg);
                 self.status_message = Some(msg);
             }
 
@@ -7463,6 +7839,7 @@ impl App {
                 self.streaming_text.clear();
                 self.streaming_thinking.clear();
                 self.invalidate_transcript();
+                self.timeline_note("Query failed", TimelineStatus::Error, &msg);
                 let err_msg = format!("Error: {}", msg);
                 self.push_assistant_message(err_msg.clone());
                 self.push_notification(NotificationKind::Error, err_msg, None);
@@ -9207,5 +9584,233 @@ mod tests {
                 "{id} should be offered on every platform"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::*;
+    use claurst_core::types::UsageInfo;
+
+    fn app_with_timeline(enabled: bool) -> App {
+        let config = Config {
+            timeline_enabled: enabled,
+            ..Default::default()
+        };
+        App::new(config, claurst_core::cost::CostTracker::new())
+    }
+
+    fn tool_start(id: &str) -> QueryEvent {
+        QueryEvent::ToolStart {
+            tool_name: "Read".to_string(),
+            tool_id: id.to_string(),
+            input_json: r#"{"file_path":"README.md"}"#.to_string(),
+        }
+    }
+
+    fn tool_end(id: &str, is_error: bool) -> QueryEvent {
+        QueryEvent::ToolEnd {
+            tool_name: "Read".to_string(),
+            tool_id: id.to_string(),
+            result: "line one\nline two".to_string(),
+            is_error,
+        }
+    }
+
+    #[test]
+    fn nothing_is_collected_while_the_setting_is_off() {
+        let mut app = app_with_timeline(false);
+        app.handle_query_event(tool_start("tool-1"));
+        app.handle_query_event(tool_end("tool-1", false));
+
+        assert!(app.timeline.is_empty(), "the setting gates the whole feed");
+        assert!(
+            app.drain_timeline_outbox().is_empty(),
+            "a disabled timeline must not publish rows to a remote client either"
+        );
+    }
+
+    #[test]
+    fn a_tool_call_opens_a_running_row_and_closes_it() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+
+        assert_eq!(app.timeline.len(), 1);
+        let row = match app.timeline.rows.first() {
+            Some(row) => row,
+            None => panic!("the start should have opened a row"),
+        };
+        assert_eq!(row.status, TimelineStatus::Running);
+        assert!(
+            row.title.contains("README.md"),
+            "the row should name what the tool touched, got {:?}",
+            row.title
+        );
+
+        app.handle_query_event(tool_end("tool-1", false));
+        let row = match app.timeline.rows.first() {
+            Some(row) => row,
+            None => panic!("finishing must not drop the row"),
+        };
+        assert_eq!(row.status, TimelineStatus::Done);
+        assert_eq!(app.timeline.len(), 1, "the result reuses the started row");
+        assert_eq!(
+            app.drain_timeline_outbox().len(),
+            2,
+            "both the start and the result travel to a remote client"
+        );
+    }
+
+    #[test]
+    fn a_failed_tool_is_marked_as_an_error() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+        app.handle_query_event(tool_end("tool-1", true));
+
+        let row = match app.timeline.rows.first() {
+            Some(row) => row,
+            None => panic!("the row should still be there"),
+        };
+        assert_eq!(row.status, TimelineStatus::Error);
+    }
+
+    #[test]
+    fn a_result_without_a_start_still_gets_a_row() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_end("orphan", false));
+
+        assert_eq!(app.timeline.len(), 1, "losing it would leave a silent gap");
+        let row = match app.timeline.rows.first() {
+            Some(row) => row,
+            None => panic!("the orphan result should have opened a row"),
+        };
+        assert_eq!(row.status, TimelineStatus::Done);
+    }
+
+    #[test]
+    fn a_finished_turn_records_the_usage_it_spent() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+        app.handle_query_event(QueryEvent::TurnComplete {
+            turn: 1,
+            stop_reason: "end_turn".to_string(),
+            usage: Some(UsageInfo {
+                input_tokens: 100,
+                output_tokens: 20,
+                cache_creation_input_tokens: 5,
+                cache_read_input_tokens: 7,
+            }),
+            model: "claude-opus-5".to_string(),
+        });
+
+        let summary = match app.timeline.rows.last() {
+            Some(row) => row,
+            None => panic!("the turn should have added a summary row"),
+        };
+        assert_eq!(
+            summary.kind,
+            claurst_core::timeline::TimelineKind::TurnSummary
+        );
+        assert_eq!(
+            summary.token_delta_input,
+            Some(112),
+            "cache reads and writes are input tokens too"
+        );
+        assert_eq!(summary.token_delta_output, Some(20));
+    }
+
+    #[test]
+    fn cancelling_closes_every_open_row() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+        app.handle_query_event(tool_start("tool-2"));
+        app.timeline_cancelled();
+
+        let open = app
+            .timeline
+            .rows
+            .iter()
+            .filter(|row| row.status == TimelineStatus::Running)
+            .count();
+        assert_eq!(open, 0, "an interrupted tool must not spin forever");
+        let note = match app.timeline.rows.last() {
+            Some(row) => row,
+            None => panic!("the cancellation should be noted"),
+        };
+        assert_eq!(note.status, TimelineStatus::Cancelled);
+    }
+
+    #[test]
+    fn the_slash_command_reports_the_setting_is_off() {
+        let mut app = app_with_timeline(false);
+        assert_eq!(app.apply_timeline_command("show"), TIMELINE_DISABLED_HINT);
+        assert!(!app.timeline_visible, "a disabled panel must stay hidden");
+    }
+
+    #[test]
+    fn the_slash_command_rejects_an_unknown_argument() {
+        let mut app = app_with_timeline(true);
+        let message = app.apply_timeline_command("sideways");
+        assert!(
+            message.contains("show|hide|toggle|clear"),
+            "the error should list what is accepted, got {message:?}"
+        );
+        assert!(!app.timeline_visible);
+    }
+
+    #[test]
+    fn the_slash_command_shows_hides_and_clears() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+
+        app.apply_timeline_command("show");
+        assert!(app.timeline_visible);
+        assert!(app.timeline_focused);
+
+        app.apply_timeline_command("hide");
+        assert!(!app.timeline_visible);
+        assert!(!app.timeline_focused);
+
+        app.apply_timeline_command("clear");
+        assert!(app.timeline.is_empty());
+    }
+
+    #[test]
+    fn the_keybinding_cycles_shown_focused_then_hidden() {
+        let mut app = app_with_timeline(true);
+
+        app.cycle_timeline_panel();
+        assert!(app.timeline_visible && app.timeline_focused);
+
+        app.timeline_focused = false;
+        app.cycle_timeline_panel();
+        assert!(
+            app.timeline_visible && app.timeline_focused,
+            "an unfocused panel takes focus back rather than disappearing"
+        );
+
+        app.cycle_timeline_panel();
+        assert!(!app.timeline_visible && !app.timeline_focused);
+    }
+
+    #[test]
+    fn the_arrow_keys_move_the_cursor_only_while_the_panel_has_focus() {
+        let mut app = app_with_timeline(true);
+        app.handle_query_event(tool_start("tool-1"));
+        app.handle_query_event(tool_start("tool-2"));
+        app.apply_timeline_command("show");
+        assert_eq!(app.timeline.selected_idx, 1, "the cursor follows new rows");
+
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        assert!(app.handle_timeline_key(&up), "the panel consumes the key");
+        assert_eq!(app.timeline.selected_idx, 0);
+
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.handle_timeline_key(&esc));
+        assert!(!app.timeline_focused, "esc returns to the prompt");
+        assert!(
+            !app.handle_timeline_key(&up),
+            "an unfocused panel leaves the arrow keys to the prompt history"
+        );
     }
 }

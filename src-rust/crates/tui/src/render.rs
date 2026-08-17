@@ -51,6 +51,7 @@ use crate::transcript_turn::{build_transcript_turns, TranscriptTurn};
 use crate::virtual_list::{VirtualItem, VirtualList};
 use crate::voice_mode_notice::render_voice_mode_notice;
 use claurst_core::constants::APP_VERSION;
+use claurst_core::timeline::{TimelineRow, TimelineStatus};
 use claurst_core::types::Role;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -629,7 +630,14 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         ])
         .split(size);
 
-    render_messages(frame, app, chunks[0]);
+    // The timeline panel takes its share out of the transcript area, so the
+    // transcript rewraps at the narrower width (the render caches key on that
+    // width, so the change invalidates them on its own).
+    let (transcript_area, timeline_area) = split_area_for_timeline(chunks[0], app.timeline_visible);
+    render_messages(frame, app, transcript_area);
+    if let Some(timeline_area) = timeline_area {
+        render_timeline_panel(frame, app, timeline_area);
+    }
     // chunks[1] is the blank separator — intentionally left empty
     if status_height > 0 {
         render_status_row(frame, app, chunks[2]);
@@ -1378,6 +1386,300 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         )]);
         frame.render_widget(Paragraph::new(vec![ind_line]), ind_area);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Live execution timeline panel
+// ---------------------------------------------------------------------------
+
+/// Below this the panel would leave nothing readable, so it is not drawn.
+const TIMELINE_MIN_WIDTH: u16 = 32;
+const TIMELINE_MIN_HEIGHT: u16 = 8;
+/// From this width on the panel sits beside the transcript instead of below it.
+const TIMELINE_SIDE_THRESHOLD: u16 = 120;
+const TIMELINE_SIDE_MIN_WIDTH: u16 = 34;
+const TIMELINE_SIDE_MAX_WIDTH: u16 = 52;
+const TIMELINE_BOTTOM_MIN_HEIGHT: u16 = 8;
+const TIMELINE_BOTTOM_MAX_HEIGHT: u16 = 12;
+/// Rows the transcript keeps for itself when the panel docks at the bottom.
+const TIMELINE_TRANSCRIPT_MIN_HEIGHT: u16 = 6;
+/// A bottom panel thinner than this shows a border and nothing else.
+const TIMELINE_BOTTOM_FLOOR: u16 = 5;
+
+/// Divide the transcript area between the transcript and the timeline panel.
+///
+/// Returns the transcript rect and, when there is room for it, the panel rect.
+pub(crate) fn split_area_for_timeline(area: Rect, visible: bool) -> (Rect, Option<Rect>) {
+    if !visible || area.width < TIMELINE_MIN_WIDTH || area.height < TIMELINE_MIN_HEIGHT {
+        return (area, None);
+    }
+
+    if area.width >= TIMELINE_SIDE_THRESHOLD {
+        // The panel caps at 52 columns and this branch needs 120, so the
+        // transcript always keeps at least 68: no floor check is needed.
+        let panel_width = (area.width / 3).clamp(TIMELINE_SIDE_MIN_WIDTH, TIMELINE_SIDE_MAX_WIDTH);
+        let transcript = Rect {
+            width: area.width - panel_width,
+            ..area
+        };
+        let panel = Rect {
+            x: area.x + transcript.width,
+            width: panel_width,
+            ..area
+        };
+        return (transcript, Some(panel));
+    }
+
+    let panel_height = (area.height / 3)
+        .clamp(TIMELINE_BOTTOM_MIN_HEIGHT, TIMELINE_BOTTOM_MAX_HEIGHT)
+        .min(area.height.saturating_sub(TIMELINE_TRANSCRIPT_MIN_HEIGHT));
+    if panel_height < TIMELINE_BOTTOM_FLOOR {
+        return (area, None);
+    }
+    let transcript = Rect {
+        height: area.height - panel_height,
+        ..area
+    };
+    let panel = Rect {
+        y: area.y + transcript.height,
+        height: panel_height,
+        ..area
+    };
+    (transcript, Some(panel))
+}
+
+/// The glyph and colour that stand for a row's status.
+fn timeline_status_marker(status: TimelineStatus, frame_count: u64) -> (String, Color) {
+    match status {
+        TimelineStatus::Running => (spinner_char(frame_count).to_string(), Color::Cyan),
+        TimelineStatus::Done => (figures::DIAMOND_FILLED.to_string(), Color::Green),
+        TimelineStatus::Error => ("×".to_string(), Color::Red),
+        TimelineStatus::Cancelled => (figures::DIAMOND_OPEN.to_string(), Color::DarkGray),
+    }
+}
+
+/// Render a duration the way the status row does: sub-second in milliseconds,
+/// then seconds, then minutes.
+fn timeline_duration_label(duration_ms: u64) -> String {
+    if duration_ms < 1000 {
+        return format!("{duration_ms}ms");
+    }
+    let seconds = duration_ms as f64 / 1000.0;
+    if seconds < 60.0 {
+        return format!("{seconds:.1}s");
+    }
+    format!("{}m{:02}s", (seconds as u64) / 60, (seconds as u64) % 60)
+}
+
+/// Compact token counts so a 34-column panel can still show them.
+fn timeline_token_label(tokens: u64) -> String {
+    if tokens < 10_000 {
+        return tokens.to_string();
+    }
+    format!("{:.1}k", tokens as f64 / 1000.0)
+}
+
+/// The trailing metric for a row: its duration, plus token deltas when the row
+/// is a turn summary that carries them.
+fn timeline_row_metrics(row: &TimelineRow) -> String {
+    let mut parts = Vec::new();
+    if let Some(duration) = row.duration_ms() {
+        parts.push(timeline_duration_label(duration));
+    }
+    if let Some(input) = row.token_delta_input {
+        parts.push(format!(
+            "{}{}",
+            figures::UP_ARROW,
+            timeline_token_label(input)
+        ));
+    }
+    if let Some(output) = row.token_delta_output {
+        parts.push(format!(
+            "{}{}",
+            figures::DOWN_ARROW,
+            timeline_token_label(output)
+        ));
+    }
+    parts.join(" ")
+}
+
+/// Build the visible rows, newest last, ending on the selected row.
+///
+/// The panel has no scrollbar: it always shows the window that contains the
+/// cursor, so a selection made with the arrow keys can never fall off-screen.
+fn timeline_window(
+    row_count: usize,
+    selected_idx: usize,
+    capacity: usize,
+) -> std::ops::Range<usize> {
+    if capacity == 0 || row_count == 0 {
+        return 0..0;
+    }
+    let capacity = capacity.min(row_count);
+    let end = (selected_idx + 1).max(capacity).min(row_count);
+    (end - capacity)..end
+}
+
+/// Draw the timeline panel into `area`.
+fn render_timeline_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.timeline_focused;
+    let border_color = if focused {
+        CLAURST_ACCENT
+    } else {
+        Color::DarkGray
+    };
+    let title = if app.timeline.is_empty() {
+        " timeline ".to_string()
+    } else {
+        format!(" timeline ({}) ", app.timeline.len())
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    if app.timeline.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "No steps recorded yet.",
+                Style::default().fg(Color::DarkGray),
+            ))),
+            inner,
+        );
+        return;
+    }
+
+    // The expanded detail of the selected row eats rows from the same budget,
+    // so reserve it before deciding how many rows fit.
+    let detail_lines = if app.timeline_expanded {
+        timeline_detail_lines(app, inner.width)
+    } else {
+        Vec::new()
+    };
+    let detail_height = (detail_lines.len() as u16).min(inner.height.saturating_sub(1));
+    let list_height = inner.height - detail_height;
+
+    let window = timeline_window(
+        app.timeline.len(),
+        app.timeline.selected_idx,
+        list_height as usize,
+    );
+    let mut lines = Vec::with_capacity(window.len());
+    for idx in window {
+        let Some(row) = app.timeline.rows.get(idx) else {
+            continue;
+        };
+        lines.push(timeline_row_line(
+            row,
+            idx == app.timeline.selected_idx,
+            focused,
+            inner.width,
+            app.frame_count,
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(lines),
+        Rect {
+            height: list_height,
+            ..inner
+        },
+    );
+
+    if detail_height > 0 {
+        frame.render_widget(
+            Paragraph::new(detail_lines).wrap(Wrap { trim: false }),
+            Rect {
+                y: inner.y + list_height,
+                height: detail_height,
+                ..inner
+            },
+        );
+    }
+}
+
+/// One row: status marker, title, and the trailing metrics, fitted to `width`.
+fn timeline_row_line(
+    row: &TimelineRow,
+    selected: bool,
+    focused: bool,
+    width: u16,
+    frame_count: u64,
+) -> Line<'static> {
+    let (marker, marker_color) = timeline_status_marker(row.status, frame_count);
+    let metrics = timeline_row_metrics(row);
+    // marker + space, then a space before the metrics when there are any.
+    let reserved = 2 + if metrics.is_empty() {
+        0
+    } else {
+        metrics.width() + 1
+    };
+    let title_width = (width as usize).saturating_sub(reserved);
+    let title = truncate_end(&row.title, title_width);
+    let padding = title_width.saturating_sub(title.width());
+
+    let title_style = if selected && focused {
+        Style::default()
+            .fg(Color::Black)
+            .bg(CLAURST_ACCENT)
+            .add_modifier(Modifier::BOLD)
+    } else if selected {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let mut spans = vec![
+        Span::styled(marker, Style::default().fg(marker_color)),
+        Span::raw(" "),
+        Span::styled(title, title_style),
+    ];
+    if !metrics.is_empty() {
+        spans.push(Span::raw(" ".repeat(padding + 1)));
+        spans.push(Span::styled(metrics, Style::default().fg(Color::DarkGray)));
+    }
+    Line::from(spans)
+}
+
+/// The detail block shown under the list while the selected row is expanded.
+fn timeline_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let Some(row) = app.timeline.selected_row() else {
+        return Vec::new();
+    };
+    let body = if row.expandable_details.trim().is_empty() {
+        row.detail_preview.as_str()
+    } else {
+        row.expandable_details.as_str()
+    };
+    if body.trim().is_empty() {
+        return Vec::new();
+    }
+    // A narrow panel gets one folded line instead of a wrapped block, so the
+    // detail never crowds the list it belongs to.
+    let max_lines = if width < TIMELINE_SIDE_MIN_WIDTH {
+        1
+    } else {
+        4
+    };
+    let mut lines = Vec::with_capacity(max_lines);
+    for raw in body.lines().take(max_lines) {
+        lines.push(Line::from(Span::styled(
+            truncate_end(raw, width as usize),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines
 }
 
 fn push_rendered_items(
@@ -2185,7 +2487,7 @@ fn shorten_home_path(s: &str) -> String {
 }
 
 /// Running-state verb shown (with shimmer) while a tool is in flight.
-fn tool_running_label(normalized: &str, fallback: &str) -> String {
+pub(crate) fn tool_running_label(normalized: &str, fallback: &str) -> String {
     match normalized {
         "bash" | "powershell" => "Running command",
         "read" => "Reading file",
@@ -4910,5 +5212,211 @@ mod status_line_tests {
             row.contains("claude-sonnet-5 · personal"),
             "expected the prefixed account to win, got {row:?}"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live execution timeline panel
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod timeline_panel_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use claurst_query::QueryEvent;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn app_with_rows(rows: usize) -> App {
+        let config = Config {
+            timeline_enabled: true,
+            ..Default::default()
+        };
+        let mut app = App::new(config, CostTracker::new());
+        for idx in 0..rows {
+            app.handle_query_event(QueryEvent::ToolStart {
+                tool_name: "Read".to_string(),
+                tool_id: format!("tool-{idx}"),
+                input_json: format!(r#"{{"file_path":"file-{idx}.rs"}}"#),
+            });
+        }
+        app.timeline_visible = true;
+        app
+    }
+
+    /// Draw the whole app and return the screen as one string per row.
+    fn screen(app: &App, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = match Terminal::new(TestBackend::new(width, height)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_app(frame, app)) {
+            panic!("draw: {err}");
+        }
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_hidden_panel_leaves_the_whole_area_to_the_transcript() {
+        let area = Rect::new(0, 0, 140, 40);
+        assert_eq!(split_area_for_timeline(area, false), (area, None));
+    }
+
+    #[test]
+    fn a_wide_terminal_puts_the_panel_beside_the_transcript() {
+        let area = Rect::new(0, 0, 140, 40);
+        let (transcript, panel) = split_area_for_timeline(area, true);
+        let panel = match panel {
+            Some(panel) => panel,
+            None => panic!("140 columns has room for a side panel"),
+        };
+        assert_eq!(
+            transcript.height, area.height,
+            "a side panel is full height"
+        );
+        assert_eq!(panel.height, area.height);
+        assert_eq!(transcript.width + panel.width, area.width);
+        assert!(
+            (TIMELINE_SIDE_MIN_WIDTH..=TIMELINE_SIDE_MAX_WIDTH).contains(&panel.width),
+            "the panel width should stay inside its bounds, got {}",
+            panel.width
+        );
+        assert_eq!(panel.x, transcript.width, "the panel sits on the right");
+    }
+
+    #[test]
+    fn the_widest_terminal_still_caps_the_panel() {
+        let (_, panel) = split_area_for_timeline(Rect::new(0, 0, 400, 40), true);
+        let panel = match panel {
+            Some(panel) => panel,
+            None => panic!("400 columns has room for a side panel"),
+        };
+        assert_eq!(panel.width, TIMELINE_SIDE_MAX_WIDTH);
+    }
+
+    #[test]
+    fn a_narrow_terminal_docks_the_panel_at_the_bottom() {
+        let area = Rect::new(0, 0, 90, 30);
+        let (transcript, panel) = split_area_for_timeline(area, true);
+        let panel = match panel {
+            Some(panel) => panel,
+            None => panic!("90x30 has room for a bottom panel"),
+        };
+        assert_eq!(transcript.width, area.width, "a bottom panel is full width");
+        assert_eq!(panel.width, area.width);
+        assert_eq!(transcript.height + panel.height, area.height);
+        assert_eq!(panel.y, transcript.height, "the panel sits below");
+        assert!(
+            transcript.height >= TIMELINE_TRANSCRIPT_MIN_HEIGHT,
+            "the transcript keeps its floor, got {}",
+            transcript.height
+        );
+    }
+
+    #[test]
+    fn a_tiny_terminal_gets_no_panel_at_all() {
+        for area in [Rect::new(0, 0, 30, 24), Rect::new(0, 0, 90, 8)] {
+            assert_eq!(
+                split_area_for_timeline(area, true),
+                (area, None),
+                "{area:?} is too small to split"
+            );
+        }
+    }
+
+    #[test]
+    fn the_window_keeps_the_selected_row_on_screen() {
+        assert_eq!(
+            timeline_window(20, 19, 5),
+            15..20,
+            "the cursor is the last row"
+        );
+        assert_eq!(
+            timeline_window(20, 2, 5),
+            0..5,
+            "an early cursor pins the top"
+        );
+        assert_eq!(timeline_window(20, 9, 5), 5..10);
+        assert_eq!(
+            timeline_window(3, 0, 5),
+            0..3,
+            "fewer rows than the capacity"
+        );
+        assert_eq!(timeline_window(0, 0, 5), 0..0, "an empty timeline");
+        assert_eq!(timeline_window(20, 5, 0), 0..0, "no room to draw");
+    }
+
+    #[test]
+    fn the_side_panel_lists_the_rows_it_recorded() {
+        let app = app_with_rows(3);
+        let screen = screen(&app, 140, 30);
+        let joined = screen.join("\n");
+        assert!(
+            joined.contains("timeline (3)"),
+            "the border should count the rows:\n{joined}"
+        );
+        assert!(
+            joined.contains("file-2.rs"),
+            "the newest row should be on screen:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn the_bottom_panel_lists_the_rows_it_recorded() {
+        let app = app_with_rows(3);
+        let joined = screen(&app, 90, 30).join("\n");
+        assert!(
+            joined.contains("timeline (3)"),
+            "the panel should be drawn at 90 columns too:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn a_tiny_terminal_draws_no_panel() {
+        let app = app_with_rows(3);
+        let joined = screen(&app, 40, 8).join("\n");
+        assert!(
+            !joined.contains("timeline"),
+            "40x8 has no room for the panel:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn an_empty_timeline_says_so() {
+        let config = Config {
+            timeline_enabled: true,
+            ..Default::default()
+        };
+        let mut app = App::new(config, CostTracker::new());
+        app.timeline_visible = true;
+        app.messages.push(claurst_core::types::Message::user("hi"));
+
+        let joined = screen(&app, 140, 30).join("\n");
+        assert!(
+            joined.contains("No steps recorded yet."),
+            "an empty panel should explain itself:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn durations_read_in_the_unit_that_fits() {
+        assert_eq!(timeline_duration_label(120), "120ms");
+        assert_eq!(timeline_duration_label(1500), "1.5s");
+        assert_eq!(timeline_duration_label(125_000), "2m05s");
+    }
+
+    #[test]
+    fn large_token_counts_are_shortened() {
+        assert_eq!(timeline_token_label(940), "940");
+        assert_eq!(timeline_token_label(12_400), "12.4k");
     }
 }
