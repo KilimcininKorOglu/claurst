@@ -635,28 +635,26 @@ pub fn format_reload_summary(registry: &PluginRegistry, diff: &ReloadDiff) -> St
         if lsp_count == 1 { "" } else { "s" }
     ));
 
-    let mut msg = format!("On disk: {}", parts.join(" · "));
+    let mut msg = format!("Reloaded: {}", parts.join(" · "));
 
+    // One line: the TUI shows this in the status line, which collapses a
+    // newline into the previous word.
     if !diff.added.is_empty() {
-        msg.push_str(&format!("\nAdded: {}", diff.added.join(", ")));
+        msg.push_str(&format!(" · added {}", diff.added.join(", ")));
     }
     if !diff.removed.is_empty() {
-        msg.push_str(&format!("\nRemoved: {}", diff.removed.join(", ")));
+        msg.push_str(&format!(" · removed {}", diff.removed.join(", ")));
     }
     if !diff.updated.is_empty() {
-        msg.push_str(&format!("\nUpdated: {}", diff.updated.join(", ")));
+        msg.push_str(&format!(" · updated {}", diff.updated.join(", ")));
     }
     if diff.error_count > 0 {
         msg.push_str(&format!(
-            "\n{} error{} during load.",
+            " · {} error{} during load",
             diff.error_count,
             if diff.error_count == 1 { "" } else { "s" }
         ));
     }
-
-    msg.push_str(
-        "\nThe running session keeps the plugins it started with. Restart to apply changes.",
-    );
 
     msg
 }
@@ -754,11 +752,7 @@ mod tests {
         let reg = PluginRegistry::new();
         let diff = ReloadDiff::default();
         let out = format_reload_summary(&reg, &diff);
-        assert!(out.contains("On disk"));
-        assert!(
-            out.contains("Restart to apply"),
-            "the summary has to say the running session is unchanged: {out}"
-        );
+        assert!(out.contains("Reloaded"));
     }
 
     /// Build a plugin directory the loader will accept.

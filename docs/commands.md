@@ -901,6 +901,12 @@ Manage plugins. Plugins are loadable modules that can register new commands, too
 /plugin reload
 ```
 
+`/plugin reload` (and its alias `/reload-plugins`) rereads the plugin
+directories and applies the result to the running session: hooks, slash
+commands, skills, agents, output styles, language servers and MCP servers.
+See [Plugins](plugins.md#reload-plugins) for what each contribution does on a
+reload.
+
 ---
 
 ### /chrome

@@ -53,3 +53,6 @@ nix = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

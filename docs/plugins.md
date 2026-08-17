@@ -382,10 +382,10 @@ The `/plugin` slash command manages plugins from within an interactive session:
 /plugin enable <name>        — enable a plugin (persisted to settings)
 /plugin disable <name>       — disable a plugin (persisted to settings)
 /plugin install <path>       — install a plugin from a local directory
-/plugin reload               — rescan the plugin directories on disk
+/plugin reload               — reread the plugin directories and apply what changed
 ```
 
-`enable` and `disable` write to `settings.json`. The running session keeps the plugin set it loaded at startup, so restart Claurst to apply the change.
+`enable` and `disable` write to `settings.json`. Run `/plugin reload` afterwards to apply the change to the running session.
 
 ### /reload-plugins
 
@@ -393,7 +393,21 @@ The `/plugin` slash command manages plugins from within an interactive session:
 /reload-plugins
 ```
 
-Rescans the user and project plugin directories, re-reads all manifests, and reports what is installed. It does not swap the running session's hook registry, commands, agents, skills, or MCP servers; restart to pick up an edited or newly installed plugin.
+Rereads the user and project plugin directories, re-reads every manifest, and applies the result to the running session:
+
+| Contribution      | On reload                                                                 |
+|-------------------|---------------------------------------------------------------------------|
+| Hooks             | The hook registry is replaced. A hook a plugin added starts firing, one from a removed or disabled plugin stops. |
+| Slash commands    | The typeahead, the command palette and the help overlay list the new set.  |
+| Skills            | A plugin's `skills/` directory joins or leaves skill discovery.            |
+| Agents            | Sub-agent prompts read the new `agents/` definitions.                      |
+| Output styles     | A new style is registered. A style already registered under the same name stays as it was. |
+| Language servers  | A server a plugin added joins the config; one it dropped leaves.           |
+| MCP servers       | A server a plugin added joins the config; one it dropped leaves. The MCP runtime reconnects only when this set actually changed, and a newly added server passes the same trust prompt as one declared in `settings.json`. |
+
+The command reports one line: how much is loaded now, plus which plugins were added, removed or updated relative to the set the session was running.
+
+Two things a reload does not undo. An output style that was already registered under a name keeps its definition for the rest of the session, and a plugin's `settings.json`-independent side effects (anything its `Setup` hook already did) stay done.
 
 ---
 

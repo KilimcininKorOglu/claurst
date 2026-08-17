@@ -59,6 +59,10 @@ pub enum CommandResult {
         /// The local callback URL waiting for the OAuth redirect.
         redirect_uri: String,
     },
+    /// Reload the plugins from disk and re-apply what they contribute.
+    /// Carried out by the session loop, which owns every surface a plugin
+    /// touches.
+    ReloadPlugins,
     /// Clear the conversation.
     ClearConversation,
     /// Replace the conversation with a specific message list (used by /rewind).

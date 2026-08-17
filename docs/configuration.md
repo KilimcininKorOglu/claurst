@@ -71,8 +71,9 @@ unknown models lives in the `modelOverrides` map — see
 | `disabledPlugins` | array of strings | []      | Plugin names to skip. A listed plugin contributes no commands, hooks, skills, agents, or MCP servers. |
 
 `/plugin enable <name>` and `/plugin disable <name>` write these lists. The
-running session keeps the plugin set it loaded at startup, so the change
-applies on the next session. A name in `disabledPlugins` that matches no
+running session keeps the plugin set it loaded at startup until `/plugin
+reload` rereads the directories and applies the change. A name in
+`disabledPlugins` that matches no
 discovered plugin is ignored. `claurst --bare` skips plugin discovery
 entirely, regardless of both lists.
 

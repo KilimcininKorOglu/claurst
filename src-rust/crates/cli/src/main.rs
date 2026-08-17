@@ -843,40 +843,7 @@ async fn main() -> anyhow::Result<()> {
         // every hook a plugin declares is parsed and then never runs.
         claurst_plugins::set_global_hooks(hook_registry);
 
-        let existing_names: std::collections::HashSet<String> =
-            config.mcp_servers.iter().map(|s| s.name.clone()).collect();
-        for mcp_server in plugin_registry.all_mcp_servers() {
-            if !existing_names.contains(&mcp_server.name) {
-                config.mcp_servers.push(mcp_server);
-            }
-        }
-
-        // Feed the plugins' `skills/` directories into skill discovery, which
-        // is the only route by which a skill can be listed and then run.
-        for skill_dir in plugin_registry.all_skill_paths() {
-            let path = skill_dir.display().to_string();
-            if !config.skills.paths.contains(&path) {
-                config.skills.paths.push(path);
-            }
-        }
-
-        // Same for language servers: the LSP tool seeds its manager from the
-        // config, so a plugin's server has to be in there to ever start.
-        let existing_lsp: std::collections::HashSet<String> =
-            config.lsp_servers.iter().map(|s| s.name.clone()).collect();
-        for lsp_server in plugin_registry.all_lsp_servers() {
-            if !existing_lsp.contains(&lsp_server.name) {
-                config.lsp_servers.push(lsp_server);
-            }
-        }
-
-        // Output styles live in a runtime registry rather than the config,
-        // because a style is chosen by name and resolved on demand.
-        for style_dir in plugin_registry.all_output_style_paths() {
-            for style in claurst_core::output_styles::load_output_styles_dir(&style_dir) {
-                claurst_core::output_styles::register_runtime_style(style);
-            }
-        }
+        apply_plugin_contributions(&plugin_registry, None, &mut config);
     }
 
     // Publish the registry: sub-agent prompts read the plugins' `agents/`
@@ -1124,6 +1091,115 @@ async fn main() -> anyhow::Result<()> {
 
     cron_cancel.cancel();
     result
+}
+
+/// The names of the MCP servers a registry contributes, sorted, so two
+/// registries can be compared for "did the plugin servers move".
+fn plugin_mcp_names(registry: &claurst_plugins::PluginRegistry) -> Vec<String> {
+    let mut names: Vec<String> = registry
+        .all_mcp_servers()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    names.sort();
+    names
+}
+
+/// Merge everything the plugins contribute into a `Config`.
+///
+/// Each contribution has its own consumer: MCP servers and language servers
+/// are read from the config, skills join the discovery search path, and output
+/// styles go into a process-wide registry that the style lookup consults.
+/// Called at startup and again on a reload, so a config that already carries a
+/// contribution keeps exactly one copy.
+///
+/// `previous` is the registry this one replaces. What that registry
+/// contributed and this one no longer does is dropped from the config, which is
+/// how a disabled or deleted plugin stops providing an MCP server, a language
+/// server or a skill directory without a restart. Matching is by name, so an
+/// entry that also comes from the settings file survives: the current registry
+/// still names it.
+fn apply_plugin_contributions(
+    registry: &claurst_plugins::PluginRegistry,
+    previous: Option<&claurst_plugins::PluginRegistry>,
+    config: &mut claurst_core::Config,
+) {
+    if let Some(previous) = previous {
+        let current_mcp: std::collections::HashSet<String> = registry
+            .all_mcp_servers()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        let stale_mcp: std::collections::HashSet<String> = previous
+            .all_mcp_servers()
+            .into_iter()
+            .map(|s| s.name)
+            .filter(|name| !current_mcp.contains(name))
+            .collect();
+        config.mcp_servers.retain(|s| !stale_mcp.contains(&s.name));
+
+        let current_lsp: std::collections::HashSet<String> = registry
+            .all_lsp_servers()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        let stale_lsp: std::collections::HashSet<String> = previous
+            .all_lsp_servers()
+            .into_iter()
+            .map(|s| s.name)
+            .filter(|name| !current_lsp.contains(name))
+            .collect();
+        config.lsp_servers.retain(|s| !stale_lsp.contains(&s.name));
+
+        let current_skills: std::collections::HashSet<String> = registry
+            .all_skill_paths()
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        let stale_skills: std::collections::HashSet<String> = previous
+            .all_skill_paths()
+            .iter()
+            .map(|p| p.display().to_string())
+            .filter(|path| !current_skills.contains(path))
+            .collect();
+        config.skills.paths.retain(|p| !stale_skills.contains(p));
+    }
+
+    let existing_names: std::collections::HashSet<String> =
+        config.mcp_servers.iter().map(|s| s.name.clone()).collect();
+    for mcp_server in registry.all_mcp_servers() {
+        if !existing_names.contains(&mcp_server.name) {
+            config.mcp_servers.push(mcp_server);
+        }
+    }
+
+    // Feed the plugins' `skills/` directories into skill discovery, which is
+    // the only route by which a skill can be listed and then run.
+    for skill_dir in registry.all_skill_paths() {
+        let path = skill_dir.display().to_string();
+        if !config.skills.paths.contains(&path) {
+            config.skills.paths.push(path);
+        }
+    }
+
+    // Same for language servers: the LSP tool seeds its manager from the
+    // config, so a plugin's server has to be in there to ever start.
+    let existing_lsp: std::collections::HashSet<String> =
+        config.lsp_servers.iter().map(|s| s.name.clone()).collect();
+    for lsp_server in registry.all_lsp_servers() {
+        if !existing_lsp.contains(&lsp_server.name) {
+            config.lsp_servers.push(lsp_server);
+        }
+    }
+
+    // Output styles live in a runtime registry rather than the config, because
+    // a style is chosen by name and resolved on demand. Registering the same
+    // name twice is ignored there.
+    for style_dir in registry.all_output_style_paths() {
+        for style in claurst_core::output_styles::load_output_styles_dir(&style_dir) {
+            claurst_core::output_styles::register_runtime_style(style);
+        }
+    }
 }
 
 /// Slash commands that exist only because of this session's plugins and
@@ -3406,6 +3482,62 @@ async fn run_interactive(
                                     if from_remote =>
                                 {
                                     app.status_message = Some(terminal_only_notice(&cmd_name));
+                                }
+                                Some(CommandResult::ReloadPlugins) => {
+                                    let previous = claurst_plugins::global_plugin_registry();
+                                    let registry =
+                                        claurst_plugins::load_plugins(&tool_ctx.working_dir, &[])
+                                            .await;
+                                    let diff = previous
+                                        .as_ref()
+                                        .map(|old| registry.diff_against(old))
+                                        .unwrap_or_default();
+
+                                    claurst_plugins::set_global_hooks(
+                                        registry.build_hook_registry(),
+                                    );
+                                    // Every cwd-aware copy of the config, or a
+                                    // contribution would reach one surface and
+                                    // not the next.
+                                    let previous_ref = previous.as_deref();
+                                    apply_plugin_contributions(
+                                        &registry,
+                                        previous_ref,
+                                        &mut cmd_ctx.config,
+                                    );
+                                    apply_plugin_contributions(
+                                        &registry,
+                                        previous_ref,
+                                        &mut tool_ctx.config,
+                                    );
+                                    apply_plugin_contributions(
+                                        &registry,
+                                        previous_ref,
+                                        &mut app.config,
+                                    );
+                                    let summary =
+                                        claurst_plugins::format_reload_summary(&registry, &diff);
+                                    // Reconnecting drops every live MCP session,
+                                    // and it reports its own outcome over this
+                                    // summary, so it happens only when the set of
+                                    // plugin servers actually moved. One that the
+                                    // reload added still passes the trust gate on
+                                    // that path.
+                                    let mcp_changed = previous_ref
+                                        .map(|old| {
+                                            plugin_mcp_names(old) != plugin_mcp_names(&registry)
+                                        })
+                                        .unwrap_or(false);
+                                    claurst_plugins::set_global_registry(registry);
+
+                                    app.set_extra_slash_commands(session_slash_commands(
+                                        &tool_ctx.working_dir,
+                                        &cmd_ctx.config,
+                                    ));
+                                    if mcp_changed {
+                                        app.pending_mcp_reconnect = true;
+                                    }
+                                    app.status_message = Some(summary);
                                 }
                                 Some(CommandResult::OpenHooksOverlay) => {
                                     // Open the 4-screen hooks configuration browser.
@@ -6416,6 +6548,103 @@ mod bare_mode_tests {
             !(normal.no_claude_md || normal.bare),
             "AGENTS.md stays enabled without --bare/--no-claude-md"
         );
+    }
+
+    /// Write a plugin directory whose manifest declares one MCP server and one
+    /// language server, both named after the plugin.
+    #[cfg(test)]
+    fn write_contributing_plugin(root: &std::path::Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).expect("plugin dir");
+        std::fs::write(
+            dir.join("plugin.json"),
+            format!(
+                r#"{{
+                  "name": "{name}",
+                  "version": "0.1.0",
+                  "mcpServers": {{ "{name}": {{ "command": "true" }} }},
+                  "lspServers": [ {{ "name": "{name}", "command": "true" }} ]
+                }}"#
+            ),
+        )
+        .expect("manifest");
+    }
+
+    #[cfg(test)]
+    async fn registry_from(dir: &std::path::Path) -> claurst_plugins::PluginRegistry {
+        let mut registry = claurst_plugins::PluginRegistry::new();
+        let (plugins, errors) = claurst_plugins::discover_plugins(
+            &[dir.to_path_buf()],
+            claurst_plugins::PluginSource::User,
+        )
+        .await;
+        registry.extend(plugins, errors);
+        registry
+    }
+
+    #[tokio::test]
+    async fn a_reload_drops_what_a_removed_plugin_contributed() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        write_contributing_plugin(tmp.path(), "alpha");
+        write_contributing_plugin(tmp.path(), "beta");
+
+        let before = registry_from(tmp.path()).await;
+        let mut config = claurst_core::Config::default();
+        apply_plugin_contributions(&before, None, &mut config);
+        assert_eq!(
+            config.mcp_servers.len(),
+            2,
+            "both plugin servers registered"
+        );
+        assert_eq!(config.lsp_servers.len(), 2);
+
+        // A server that came from the settings file, not from a plugin.
+        config
+            .mcp_servers
+            .push(claurst_core::config::McpServerConfig {
+                name: "from-settings".to_string(),
+                command: Some("true".to_string()),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                url: None,
+                server_type: "stdio".to_string(),
+                origin: claurst_core::config::McpServerOrigin::User,
+            });
+
+        std::fs::remove_dir_all(tmp.path().join("beta")).expect("remove plugin");
+        let after = registry_from(tmp.path()).await;
+        apply_plugin_contributions(&after, Some(&before), &mut config);
+
+        let mcp_names: Vec<&str> = config.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            mcp_names.contains(&"alpha"),
+            "surviving plugin keeps its server"
+        );
+        assert!(
+            !mcp_names.contains(&"beta"),
+            "removed plugin loses its server"
+        );
+        assert!(
+            mcp_names.contains(&"from-settings"),
+            "a reload must not touch a server the settings file declared"
+        );
+
+        let lsp_names: Vec<&str> = config.lsp_servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(lsp_names, vec!["alpha"]);
+    }
+
+    #[tokio::test]
+    async fn applying_the_same_registry_twice_keeps_one_copy() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        write_contributing_plugin(tmp.path(), "alpha");
+
+        let registry = registry_from(tmp.path()).await;
+        let mut config = claurst_core::Config::default();
+        apply_plugin_contributions(&registry, None, &mut config);
+        apply_plugin_contributions(&registry, None, &mut config);
+
+        assert_eq!(config.mcp_servers.len(), 1, "no duplicate MCP server");
+        assert_eq!(config.lsp_servers.len(), 1, "no duplicate language server");
     }
 
     #[test]
