@@ -1,5 +1,8 @@
 //! Git utilities for Claurst.
-//! Mirrors src/utils/git.ts (926 lines) and src/utils/git/ subdirectory.
+//!
+//! Read-only: every helper here reports on a repository and none of them
+//! writes to one. Anything that changes a user's checkout belongs somewhere
+//! that can explain itself, not behind a one-line wrapper.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,15 +52,6 @@ pub fn get_current_branch(repo_root: &Path) -> String {
     }
 }
 
-/// Return list of files modified (staged or unstaged).
-pub fn list_modified_files(repo_root: &Path) -> Vec<PathBuf> {
-    let output = git_output(repo_root, &["diff", "--name-only", "HEAD"]);
-    if output.is_empty() {
-        return Vec::new();
-    }
-    output.lines().map(|l| repo_root.join(l)).collect()
-}
-
 // ---------------------------------------------------------------------------
 // Diff
 // ---------------------------------------------------------------------------
@@ -70,127 +64,6 @@ pub fn get_staged_diff(repo_root: &Path) -> String {
 /// Return the unstaged diff (working tree vs index).
 pub fn get_unstaged_diff(repo_root: &Path) -> String {
     git_output(repo_root, &["diff"])
-}
-
-/// Return the diff for a specific file since a given commit (or HEAD).
-pub fn get_file_diff(repo_root: &Path, path: &Path, since_commit: Option<&str>) -> String {
-    let commit = since_commit.unwrap_or("HEAD");
-    let path_str = path.to_string_lossy();
-    git_output(repo_root, &["diff", commit, "--", &path_str])
-}
-
-// ---------------------------------------------------------------------------
-// History
-// ---------------------------------------------------------------------------
-
-/// A single git commit summary.
-#[derive(Debug, Clone)]
-pub struct CommitInfo {
-    pub hash: String,
-    pub short_hash: String,
-    pub author: String,
-    pub date: String,
-    pub subject: String,
-}
-
-/// Return the last `n` commits in the repository.
-pub fn get_commit_history(repo_root: &Path, n: usize) -> Vec<CommitInfo> {
-    let format = "%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e";
-    let n_str = n.to_string();
-    let output = git_output(
-        repo_root,
-        &[
-            "log",
-            &format!("-{}", n_str),
-            &format!("--format={}", format),
-            "--date=short",
-        ],
-    );
-
-    output
-        .split('\x1e')
-        .filter(|s| !s.trim().is_empty())
-        .filter_map(|entry| {
-            let parts: Vec<&str> = entry.trim().splitn(5, '\x1f').collect();
-            if parts.len() == 5 {
-                Some(CommitInfo {
-                    hash: parts[0].to_string(),
-                    short_hash: parts[1].to_string(),
-                    author: parts[2].to_string(),
-                    date: parts[3].to_string(),
-                    subject: parts[4].to_string(),
-                })
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
-// Branch operations
-// ---------------------------------------------------------------------------
-
-/// Create and switch to a new branch.
-pub fn create_branch(repo_root: &Path, name: &str) -> bool {
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(["checkout", "-b", name])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Switch to an existing branch.
-pub fn switch_branch(repo_root: &Path, name: &str) -> bool {
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(["checkout", name])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-// ---------------------------------------------------------------------------
-// Stash
-// ---------------------------------------------------------------------------
-
-/// Stash uncommitted changes with an optional message.
-pub fn stash(repo_root: &Path, message: Option<&str>) -> bool {
-    let mut cmd = Command::new("git");
-    cmd.current_dir(repo_root).args(["stash", "push"]);
-    if let Some(m) = message {
-        // Two argv elements. git also accepts the value glued to the flag, so
-        // one `"-m <message>"` token parses as `-m` plus a value that keeps the
-        // separating space, and the stash is recorded with a leading blank.
-        cmd.arg("-m").arg(m);
-    }
-    cmd.status().map(|s| s.success()).unwrap_or(false)
-}
-
-/// Pop the top stash entry.
-pub fn stash_pop(repo_root: &Path) -> bool {
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(["stash", "pop"])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-// ---------------------------------------------------------------------------
-// .gitignore check
-// ---------------------------------------------------------------------------
-
-/// Returns `true` if the given path is git-ignored.
-pub fn is_ignored(repo_root: &Path, path: &Path) -> bool {
-    let path_str = path.to_string_lossy();
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(["check-ignore", "-q", &path_str])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -208,54 +81,21 @@ mod tests {
     }
 
     #[test]
-    fn commit_info_parse() {
-        // smoke test — just ensure it doesn't panic with empty output
-        let commits = get_commit_history(Path::new("."), 0);
-        assert!(commits.is_empty());
-    }
-
-    /// Run `git` in `dir` and return its stdout, panicking on a failed spawn.
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .output()
-            .unwrap_or_else(|err| panic!("git {args:?}: {err}"));
-        String::from_utf8_lossy(&output.stdout).to_string()
-    }
-
-    /// A repository with one commit and one uncommitted edit, ready to stash.
-    fn repo_with_an_edit() -> tempfile::TempDir {
+    fn a_directory_outside_any_repository_has_no_root() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path();
-        git(path, &["init", "--quiet"]);
-        git(path, &["config", "user.email", "test@example.com"]);
-        git(path, &["config", "user.name", "test"]);
-        git(path, &["config", "commit.gpgsign", "false"]);
-        std::fs::write(path.join("file.txt"), "first").expect("write");
-        git(path, &["add", "file.txt"]);
-        git(path, &["commit", "--quiet", "-m", "initial"]);
-        std::fs::write(path.join("file.txt"), "second").expect("rewrite");
-        dir
+        assert_eq!(get_repo_root(dir.path()), None);
     }
 
     #[test]
-    fn a_stash_message_reaches_git_without_a_leading_space() {
-        let dir = repo_with_an_edit();
-        let path = dir.path();
+    fn a_path_that_is_not_a_repository_reads_as_detached() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(get_current_branch(dir.path()), "HEAD");
+    }
 
-        assert!(stash(path, Some("message with spaces")), "the stash failed");
-
-        // git accepts `-m<value>` too, so the single-token form stored the
-        // message with a leading space rather than failing. `git stash list`
-        // trims it; the stash commit's own subject does not.
-        let subject = git(path, &["log", "-g", "--format=%s", "refs/stash"]);
-        let stored = subject
-            .trim_end()
-            .split_once(": ")
-            .map(|(_, message)| message)
-            .unwrap_or_default();
-
-        assert_eq!(stored, "message with spaces", "in subject {subject:?}");
+    #[test]
+    fn the_diffs_of_a_non_repository_are_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(get_staged_diff(dir.path()).is_empty());
+        assert!(get_unstaged_diff(dir.path()).is_empty());
     }
 }
