@@ -813,6 +813,43 @@ async fn main() -> anyhow::Result<()> {
     ));
     let current_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
+    // Load plugins and register any plugin-provided MCP servers into the
+    // in-memory config (does not modify the settings file on disk). This runs
+    // before the MCP runtime is built so a plugin server connects at startup
+    // rather than only after a manual reconnect, and so a project-scoped one
+    // passes the same trust gate as a server declared in the repository's
+    // settings file.
+    // Bare mode skips plugin discovery entirely and uses an empty registry so
+    // no plugin commands, hooks, or MCP servers are loaded from an untrusted
+    // repo. Downstream code still works against the empty registry.
+    let plugin_registry = if cli.bare {
+        claurst_plugins::PluginRegistry::new()
+    } else {
+        claurst_plugins::load_plugins(&cwd, &[]).await
+    };
+    {
+        let plugin_cmd_count = plugin_registry.all_command_defs().len();
+        let plugin_hook_count = plugin_registry
+            .build_hook_registry()
+            .values()
+            .map(|v| v.len())
+            .sum::<usize>();
+        info!(
+            plugins = plugin_registry.enabled_count(),
+            commands = plugin_cmd_count,
+            hooks = plugin_hook_count,
+            "Plugins loaded"
+        );
+
+        let existing_names: std::collections::HashSet<String> =
+            config.mcp_servers.iter().map(|s| s.name.clone()).collect();
+        for mcp_server in plugin_registry.all_mcp_servers() {
+            if !existing_names.contains(&mcp_server.name) {
+                config.mcp_servers.push(mcp_server);
+            }
+        }
+    }
+
     // Initialize MCP servers first (needed for ToolContext.mcp_manager).
     //
     // SECURITY (issue #123): project-defined MCP servers (from a repo's
@@ -922,41 +959,6 @@ async fn main() -> anyhow::Result<()> {
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
     let tools = build_tools_with_mcp(mcp_manager_arc.clone(), config.advisor_model.as_deref());
-
-    // Load plugins and register any plugin-provided MCP servers into the
-    // in-memory config (does not modify the settings file on disk).
-    // Bare mode skips plugin discovery entirely and uses an empty registry so
-    // no plugin commands, hooks, or MCP servers are loaded from an untrusted
-    // repo. Downstream code still works against the empty registry.
-    let plugin_registry = if cli.bare {
-        claurst_plugins::PluginRegistry::new()
-    } else {
-        claurst_plugins::load_plugins(&cwd, &[]).await
-    };
-    {
-        let plugin_cmd_count = plugin_registry.all_command_defs().len();
-        let plugin_hook_count = plugin_registry
-            .build_hook_registry()
-            .values()
-            .map(|v| v.len())
-            .sum::<usize>();
-        info!(
-            plugins = plugin_registry.enabled_count(),
-            commands = plugin_cmd_count,
-            hooks = plugin_hook_count,
-            "Plugins loaded"
-        );
-
-        // Register plugin MCP servers into the in-memory config so they are
-        // picked up by any subsequent MCP manager construction.
-        let existing_names: std::collections::HashSet<String> =
-            config.mcp_servers.iter().map(|s| s.name.clone()).collect();
-        for mcp_server in plugin_registry.all_mcp_servers() {
-            if !existing_names.contains(&mcp_server.name) {
-                config.mcp_servers.push(mcp_server);
-            }
-        }
-    }
 
     // Build model registry for dynamic model/provider resolution.
     // The registry is pre-populated with a hardcoded snapshot and enriched
