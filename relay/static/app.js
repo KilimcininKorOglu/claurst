@@ -52,6 +52,9 @@ const el = {
   attach: document.getElementById('attach'),
   fileInput: document.getElementById('file-input'),
   attachments: document.getElementById('attachments'),
+  timeline: document.getElementById('timeline'),
+  timelineSummary: document.getElementById('timeline-summary'),
+  timelineRows: document.getElementById('timeline-rows'),
 };
 
 /** Live session view state. Reset whenever a session is opened or left. */
@@ -61,6 +64,7 @@ const live = {
   lastSeq: 0,
   bubbles: new Map(),  // message_id -> assistant bubble element
   tools: new Map(),    // tool_id -> tool row element
+  timeline: new Map(), // timeline row id -> <li> element, replaced on update
   permission: null,    // the request currently shown on the card
   mcp: null,           // the MCP trust prompt currently shown on the card
   question: null,      // the AskUserQuestion currently shown on the card
@@ -245,6 +249,7 @@ function leaveSession() {
   live.lastSeq = 0;
   live.bubbles.clear();
   live.tools.clear();
+  live.timeline.clear();
   live.permission = null;
   live.mcp = null;
   live.question = null;
@@ -254,6 +259,7 @@ function leaveSession() {
   el.mcp.hidden = true;
   el.question.hidden = true;
   closeRename();
+  resetTimeline();
   el.stream.replaceChildren();
   el.status.hidden = true;
   el.busy.hidden = true;
@@ -598,6 +604,160 @@ function usageLine(usage) {
   return node;
 }
 
+/**
+ * Longest detail line kept on a timeline row.
+ *
+ * The machine already trims the preview, but `expandable_details` carries the
+ * raw tool input, which can be a whole file.
+ */
+const TIMELINE_DETAIL_LIMIT = 600;
+
+/** Rows kept in the panel, matching the cap the machine records to. */
+const TIMELINE_ROW_LIMIT = 200;
+
+/** Empty the panel and put it away. */
+function resetTimeline() {
+  live.timeline.clear();
+  el.timelineRows.replaceChildren();
+  el.timeline.hidden = true;
+  el.timeline.open = false;
+  el.timelineSummary.textContent = 'Timeline';
+}
+
+/** Render a duration the same way the terminal panel does. */
+function timelineDuration(row) {
+  if (typeof row.finished_at_ms !== 'number') {
+    return null;
+  }
+  const ms = Math.max(0, row.finished_at_ms - row.started_at_ms);
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}m${String(whole % 60).padStart(2, '0')}s`;
+}
+
+/** The trailing figures for a row: how long it took and what it spent. */
+function timelineMetrics(row) {
+  const parts = [];
+  const duration = timelineDuration(row);
+  if (duration) {
+    parts.push(duration);
+  }
+  if (typeof row.token_delta_input === 'number') {
+    parts.push(labelled(row.token_delta_input.toLocaleString(), 'in'));
+  }
+  if (typeof row.token_delta_output === 'number') {
+    parts.push(labelled(row.token_delta_output.toLocaleString(), 'out'));
+  }
+  if (typeof row.cost_delta_usd === 'number') {
+    parts.push(money(row.cost_delta_usd));
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * Build the <li> for one timeline row.
+ *
+ * Every string goes in through `textContent`: a row title carries a file path
+ * and a tool result carries whatever the machine read, and neither is markup.
+ */
+function timelineRowNode(row) {
+  const node = document.createElement('li');
+  node.className = `timeline-row ${row.status || 'running'}`;
+
+  const title = document.createElement('span');
+  title.className = 'timeline-title';
+  title.textContent = row.title || row.id;
+
+  const metrics = timelineMetrics(row);
+  let figure = null;
+  if (metrics) {
+    figure = document.createElement('span');
+    figure.className = 'timeline-metrics';
+    figure.textContent = metrics;
+  }
+
+  const detail = row.expandable_details || row.detail_preview || '';
+  if (!detail.trim()) {
+    // Nothing to open, so no disclosure: a summary that reveals an empty box
+    // invites a tap that does nothing.
+    const head = document.createElement('div');
+    head.className = 'timeline-head';
+    head.append(title);
+    if (figure) {
+      head.append(figure);
+    }
+    node.append(head);
+    return node;
+  }
+
+  // <details> so the row opens without a click handler, the same way the tool
+  // rows in the transcript do.
+  const body = document.createElement('details');
+  const head = document.createElement('summary');
+  head.className = 'timeline-head';
+  head.append(title);
+  if (figure) {
+    head.append(figure);
+  }
+  body.append(head);
+
+  const text = document.createElement('pre');
+  text.className = 'timeline-detail';
+  text.textContent = truncate(detail, TIMELINE_DETAIL_LIMIT);
+  body.append(text);
+
+  // A failure is the one detail worth seeing without asking for it.
+  body.open = row.status === 'error';
+  node.append(body);
+  return node;
+}
+
+/**
+ * Add or update one timeline row.
+ *
+ * A row arrives again each time it changes, so it is replaced in place rather
+ * than appended: otherwise a finished tool would appear twice, once running
+ * and once done.
+ */
+function applyTimelineRow(row) {
+  if (!row || typeof row.id !== 'string') {
+    return;
+  }
+  const node = timelineRowNode(row);
+  const existing = live.timeline.get(row.id);
+  if (existing && existing.isConnected) {
+    existing.replaceWith(node);
+  } else {
+    el.timelineRows.append(node);
+  }
+  live.timeline.set(row.id, node);
+
+  // The machine prunes its own timeline, so an old row will never be updated
+  // again and dropping the matching node here keeps the two in step.
+  while (el.timelineRows.children.length > TIMELINE_ROW_LIMIT) {
+    const oldest = el.timelineRows.firstElementChild;
+    if (!oldest) {
+      break;
+    }
+    for (const [id, tracked] of live.timeline) {
+      if (tracked === oldest) {
+        live.timeline.delete(id);
+        break;
+      }
+    }
+    oldest.remove();
+  }
+
+  el.timeline.hidden = false;
+  el.timelineSummary.textContent = `Timeline (${el.timelineRows.children.length})`;
+}
+
 function render(event) {
   switch (event.type) {
     case 'text_delta': {
@@ -677,6 +837,9 @@ function render(event) {
       el.stream.replaceChildren();
       live.bubbles.clear();
       live.tools.clear();
+      // The timeline describes the conversation that was just replaced, and
+      // the history carries no rows to rebuild it from.
+      resetTimeline();
 
       if (event.omitted > 0) {
         append(notice(`${event.omitted} earlier turn(s) not shown`));
@@ -741,6 +904,10 @@ function render(event) {
       // transcript, because whoever ran the command needs the answer to
       // still be there after the next event arrives.
       append(notice(event.message, event.is_error));
+      break;
+
+    case 'timeline_row':
+      applyTimelineRow(event.row);
       break;
 
     case 'status':

@@ -366,6 +366,97 @@ input, textarea {
   overflow-wrap: anywhere;
 }
 
+/* Execution timeline
+   A folded strip above the transcript. It never takes flex space away from
+   the transcript when closed, and when open it is capped and scrolls, so a
+   two-hundred-row timeline cannot push the composer off a phone screen. */
+
+.timeline {
+  flex: 0 0 auto;
+  width: var(--measure);
+  margin-inline: auto;
+  padding: 0 max(var(--gutter), var(--safe-l));
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.timeline[hidden] { display: none; }
+
+.timeline > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  color: var(--muted);
+  list-style: none;
+}
+
+.timeline > summary::-webkit-details-marker { display: none; }
+
+/* The strip is a control as much as a heading, so it says it can be opened. */
+.timeline > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.timeline[open] > summary::before { content: "▾ "; }
+
+.timeline-rows {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  /* Phone: roughly five rows. Enough to see the shape of the work while the
+     transcript keeps the larger half of what is left after the composer. */
+  max-height: 28vh;
+  overflow-y: auto;
+}
+
+.timeline-row {
+  border-left: 2px solid var(--line);
+  padding: 3px 0 3px 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.timeline-row.running { border-left-color: var(--accent); }
+.timeline-row.done { border-left-color: var(--ok); }
+.timeline-row.error { border-left-color: var(--danger); color: var(--danger); }
+.timeline-row.cancelled { border-left-color: var(--muted); }
+
+/* Title left, figures right. The gap collapses first, then the title wraps,
+   so a duration is never pushed off the row. */
+.timeline-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.timeline-title { min-width: 0; }
+
+.timeline-metrics {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* Each row that has a detail is a disclosure of its own, closed by default:
+   the detail is the raw tool input and would drown the list. */
+.timeline-row > details > summary { cursor: pointer; list-style: none; }
+.timeline-row > details > summary::-webkit-details-marker { display: none; }
+
+.timeline-detail {
+  margin: 6px 0 2px;
+  padding: 6px 8px;
+  background: #000;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
 /* Permission card */
 
 .permission {
@@ -497,6 +588,9 @@ input, textarea {
     width: var(--measure);
     margin-inline: auto;
   }
+  /* A tablet has the rows to spare, so the timeline shows more of itself
+     before it starts scrolling. */
+  .timeline-rows { max-height: 40vh; }
 }
 
 /* Tablet landscape and laptop. */
@@ -507,6 +601,9 @@ input, textarea {
 /* Desktop. */
 @media (min-width: 1400px) {
   :root { --measure: min(900px, 100%); --gutter: 20px; }
+  /* Still capped: past half the window the timeline stops being a strip above
+     the transcript and starts being the view. */
+  .timeline-rows { max-height: 45vh; }
 }
 
 @media (pointer: fine) {

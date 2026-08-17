@@ -51,6 +51,16 @@
     <button type="button" id="rename-cancel" class="ghost">Cancel</button>
   </form>
 
+  <!-- Sibling of the transcript, not part of it: the rows update in place as
+       the machine reports them, and mixing them into the append-only stream
+       would put a running step above answers that came after it.
+       A <details> so a phone can fold it away without a click handler, and
+       closed by default because the transcript is what was asked for. -->
+  <details id="timeline" class="timeline" hidden>
+    <summary id="timeline-summary">Timeline</summary>
+    <ol id="timeline-rows" class="timeline-rows"></ol>
+  </details>
+
   <div id="stream" class="stream" aria-live="polite"></div>
 
   <div id="permission" class="permission" hidden>
