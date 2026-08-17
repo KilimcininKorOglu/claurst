@@ -326,17 +326,49 @@ fn read_image_windows() -> Option<PastedImage> {
 /// Write text to the system clipboard. Returns `true` on success.
 pub fn write_clipboard_text(text: &str) -> bool {
     #[cfg(target_os = "macos")]
-    {
-        write_text_macos_w(text)
-    }
+    let native = write_text_macos_w(text);
     #[cfg(target_os = "windows")]
-    {
-        write_text_windows_w(text)
-    }
+    let native = write_text_windows_w(text);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        write_text_linux_w(text)
+    let native = write_text_linux_w(text);
+
+    // Last resort. Over SSH, or on a headless host with no `wl-copy` or
+    // `xclip`, nothing above can reach a clipboard, but the terminal on the
+    // other end of the connection has one.
+    native || osc52_write(text)
+}
+
+/// Longest text handed to the terminal through OSC 52.
+///
+/// xterm's default `maxStringParm` is 1000 bytes and other terminals cap the
+/// sequence too. A payload past the cap is not truncated by the terminal, it is
+/// discarded, so a silent partial copy is not a risk; the limit keeps a large
+/// transcript from spending the write at all. Base64 costs four bytes per
+/// three, so the source text bound is the sequence bound times 3/4.
+const OSC52_MAX_TEXT_BYTES: usize = 72_000;
+
+/// Hand text to the terminal emulator's clipboard with OSC 52.
+///
+/// The sequence is a terminal instruction, not screen content, so it is written
+/// straight to stdout the same way `osc8::emit_hits` writes its hyperlinks; the
+/// next frame repaints over nothing.
+pub fn osc52_write(text: &str) -> bool {
+    use std::io::Write;
+
+    if text.is_empty() || text.len() > OSC52_MAX_TEXT_BYTES {
+        return false;
     }
+    let payload = osc52_sequence(text);
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(payload.as_bytes()).is_ok() && stdout.flush().is_ok()
+}
+
+/// Build the OSC 52 sequence for `text`, targeting the clipboard selection.
+fn osc52_sequence(text: &str) -> String {
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, text);
+    // BEL-terminated rather than ST: every terminal that speaks OSC 52 accepts
+    // BEL, and some older ones never learned ST.
+    format!("\x1b]52;c;{encoded}\x07")
 }
 
 #[cfg(target_os = "macos")]
@@ -519,5 +551,35 @@ mod tests {
             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).unwrap();
         assert_eq!(decoded, b"hello world");
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn the_osc52_sequence_carries_the_text_base64_encoded() {
+        let sequence = osc52_sequence("hello world");
+
+        assert!(sequence.starts_with("\u{1b}]52;c;"), "got {sequence:?}");
+        assert!(
+            sequence.ends_with('\u{7}'),
+            "BEL terminates it, got {sequence:?}"
+        );
+
+        let body = sequence
+            .trim_start_matches("\u{1b}]52;c;")
+            .trim_end_matches('\u{7}');
+        let decoded = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body)
+        {
+            Ok(decoded) => decoded,
+            Err(error) => panic!("the payload should decode: {error}"),
+        };
+        assert_eq!(decoded, b"hello world");
+    }
+
+    #[test]
+    fn a_payload_past_the_terminal_cap_is_not_written() {
+        // A terminal discards an over-long sequence rather than truncating it,
+        // so reporting success would claim a copy that never happened.
+        let oversized = "x".repeat(OSC52_MAX_TEXT_BYTES + 1);
+        assert!(!osc52_write(&oversized));
+        assert!(!osc52_write(""), "an empty copy is not a copy");
     }
 }
