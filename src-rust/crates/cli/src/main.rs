@@ -829,17 +829,18 @@ async fn main() -> anyhow::Result<()> {
     };
     {
         let plugin_cmd_count = plugin_registry.all_command_defs().len();
-        let plugin_hook_count = plugin_registry
-            .build_hook_registry()
-            .values()
-            .map(|v| v.len())
-            .sum::<usize>();
+        let hook_registry = plugin_registry.build_hook_registry();
+        let plugin_hook_count = hook_registry.values().map(|v| v.len()).sum::<usize>();
         info!(
             plugins = plugin_registry.enabled_count(),
             commands = plugin_cmd_count,
             hooks = plugin_hook_count,
             "Plugins loaded"
         );
+
+        // The tool loop reads its plugin hooks from this static; without it
+        // every hook a plugin declares is parsed and then never runs.
+        claurst_plugins::set_global_hooks(hook_registry);
 
         let existing_names: std::collections::HashSet<String> =
             config.mcp_servers.iter().map(|s| s.name.clone()).collect();
