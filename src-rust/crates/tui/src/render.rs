@@ -1626,7 +1626,7 @@ fn timeline_row_line(
         metrics.width() + 1
     };
     let title_width = (width as usize).saturating_sub(reserved);
-    let title = truncate_end(&row.title, title_width);
+    let title = truncate_end(&expand_tabs(&row.title), title_width);
     let padding = title_width.saturating_sub(title.width());
 
     let title_style = if selected && focused {
@@ -1675,7 +1675,7 @@ fn timeline_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::with_capacity(max_lines);
     for raw in body.lines().take(max_lines) {
         lines.push(Line::from(Span::styled(
-            truncate_end(raw, width as usize),
+            truncate_end(&expand_tabs(raw), width as usize),
             Style::default().fg(Color::DarkGray),
         )));
     }
@@ -2486,6 +2486,23 @@ fn shorten_home_path(s: &str) -> String {
     s.to_string()
 }
 
+/// Replace tabs with spaces before text reaches a buffer cell.
+///
+/// ratatui puts a tab in one cell and counts it as one column, but a terminal
+/// advances the cursor to the next tab stop instead. Everything after it on the
+/// row then sits one or more columns right of where ratatui believes it is, the
+/// skipped cells keep whatever the terminal had there, and a redraw cannot
+/// repair it because ratatui sees those cells as already correct. Tool output is
+/// full of tabs, so every line built from external text goes through here.
+///
+/// Four spaces, matching `paste_viewer`.
+fn expand_tabs(text: &str) -> String {
+    if !text.contains('\t') {
+        return text.to_string();
+    }
+    text.replace('\t', "    ")
+}
+
 /// Running-state verb shown (with shimmer) while a tool is in flight.
 pub(crate) fn tool_running_label(normalized: &str, fallback: &str) -> String {
     match normalized {
@@ -2596,7 +2613,7 @@ fn render_tool_block_lines(
                 lines.push(Line::from(vec![
                     Span::raw("     "),
                     Span::styled(
-                        line_text.to_string(),
+                        expand_tabs(line_text),
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::DIM),
@@ -2605,7 +2622,7 @@ fn render_tool_block_lines(
             } else {
                 lines.push(Line::from(vec![
                     Span::raw("     "),
-                    Span::styled(shorten_home_path(line_text), preview_style),
+                    Span::styled(expand_tabs(&shorten_home_path(line_text)), preview_style),
                 ]));
             }
         }
@@ -5418,5 +5435,72 @@ mod timeline_panel_tests {
     fn large_token_counts_are_shortened() {
         assert_eq!(timeline_token_label(940), "940");
         assert_eq!(timeline_token_label(12_400), "12.4k");
+    }
+}
+
+#[cfg(test)]
+mod tab_expansion_tests {
+    use super::*;
+    use crate::app::{ToolStatus, ToolUseBlock};
+
+    /// Flatten a rendered line to the text a terminal would receive.
+    fn flatten(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn a_tab_never_reaches_a_buffer_cell() {
+        assert_eq!(expand_tabs("1\talpha"), "1    alpha");
+        assert_eq!(expand_tabs("no tabs here"), "no tabs here");
+    }
+
+    #[test]
+    fn tool_output_with_tabs_renders_without_them() {
+        // `Read` numbers its lines with a tab, so this is the common case, not
+        // an edge one: the terminal jumps to its own tab stop and every column
+        // after it on the row is off by what ratatui counted.
+        let block = ToolUseBlock {
+            id: "tool-1".to_string(),
+            name: "Read".to_string(),
+            input_json: r#"{"file_path":"notes.txt"}"#.to_string(),
+            turn_index: None,
+            status: ToolStatus::Done,
+            output_preview: Some("1\talpha\n2\tbeta\n3\tgamma".to_string()),
+        };
+
+        let mut lines = Vec::new();
+        render_tool_block_lines(&mut lines, &block, 0, None);
+
+        let rendered: Vec<String> = lines.iter().map(flatten).collect();
+        for line in &rendered {
+            assert!(!line.contains('\t'), "a tab survived in {line:?}");
+        }
+        assert!(
+            rendered.iter().any(|line| line.contains("1    alpha")),
+            "the numbered line should keep its columns, got {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn a_timeline_row_renders_without_tabs() {
+        let row = TimelineRow {
+            id: "tool-1".to_string(),
+            title: "Reading file:\tnotes.txt".to_string(),
+            kind: claurst_core::timeline::TimelineKind::ToolCall,
+            status: TimelineStatus::Done,
+            started_at_ms: 0,
+            finished_at_ms: Some(5),
+            token_delta_input: None,
+            token_delta_output: None,
+            cost_delta_usd: None,
+            detail_preview: String::new(),
+            expandable_details: String::new(),
+        };
+
+        let line = flatten(&timeline_row_line(&row, false, false, 60, 0));
+        assert!(!line.contains('\t'), "a tab survived in {line:?}");
     }
 }
