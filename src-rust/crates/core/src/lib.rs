@@ -121,7 +121,7 @@ pub use permissions::{
     PermissionDecision, PermissionHandler, PermissionLevel, PermissionManager, PermissionRequest,
     PermissionRule, PermissionScope, SerializedPermissionRule,
 };
-pub use skill_discovery::{discover_skills, parse_skill_file, DiscoveredSkill};
+pub use skill_discovery::{discover_skills, parse_skill_file, strip_frontmatter, DiscoveredSkill};
 
 // ---------------------------------------------------------------------------
 // error module

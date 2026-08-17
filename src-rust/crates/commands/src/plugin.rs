@@ -216,13 +216,29 @@ impl SlashCommand for PluginSlashCommandAdapter {
                 file_path,
                 plugin_root: _,
             } => {
-                // Read the markdown file and inject it into the conversation
+                // Read the markdown file and inject it into the conversation.
+                // A plugin command is written like a skill, so it expands like
+                // one: the frontmatter goes, and the placeholders take the
+                // arguments. Only a body with no placeholder gets them
+                // appended, which is how an author who wrote none still sees
+                // what the user typed.
                 match std::fs::read_to_string(file_path) {
                     Ok(content) => {
-                        let full_prompt = if args.is_empty() {
-                            content
+                        let body = claurst_core::strip_frontmatter(&content);
+                        let mut words = args.split_whitespace();
+                        let arg1 = words.next().unwrap_or("");
+                        let arg2 = words.next().unwrap_or("");
+                        let has_placeholder = body.contains("$ARGUMENTS")
+                            || body.contains("$1")
+                            || body.contains("$2");
+                        let expanded = body
+                            .replace("$ARGUMENTS", args)
+                            .replace("$1", arg1)
+                            .replace("$2", arg2);
+                        let full_prompt = if args.is_empty() || has_placeholder {
+                            expanded
                         } else {
-                            format!("{}\n\nArguments: {}", content, args)
+                            format!("{}\n\nArguments: {}", expanded, args)
                         };
                         CommandResult::UserMessage(full_prompt)
                     }

@@ -89,6 +89,20 @@ pub fn parse_skill_file(content: &str, path: &Path) -> Option<DiscoveredSkill> {
     })
 }
 
+/// Drop a leading `---` YAML frontmatter block from a prompt body.
+///
+/// Every caller that expands a markdown prompt needs this, because the
+/// frontmatter describes the file to the loader and means nothing to a model.
+pub fn strip_frontmatter(content: &str) -> String {
+    if let Some(after_open) = content.strip_prefix("---") {
+        if let Some(close_pos) = after_open.find("\n---") {
+            let rest = &after_open[close_pos + 4..];
+            return rest.trim_start_matches(['\r', '\n']).to_string();
+        }
+    }
+    content.to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Directory scanning
 // ---------------------------------------------------------------------------
@@ -424,6 +438,23 @@ mod tests {
         write_file(&package, "README.md", "Not a skill entry point.");
 
         assert!(scan_dir(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn frontmatter_goes_and_the_body_stays() {
+        let stripped = strip_frontmatter("---\nname: x\n---\nBody line.");
+        assert_eq!(stripped, "Body line.");
+    }
+
+    #[test]
+    fn a_body_without_frontmatter_is_untouched() {
+        assert_eq!(strip_frontmatter("Just a body."), "Just a body.");
+    }
+
+    #[test]
+    fn an_unclosed_frontmatter_block_is_left_alone() {
+        let content = "---\nname: x\nBody with no close.";
+        assert_eq!(strip_frontmatter(content), content);
     }
 
     #[test]

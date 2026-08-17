@@ -114,7 +114,7 @@ impl Tool for SkillTool {
         }
 
         // Strip YAML frontmatter if present (--- ... ---)
-        let content = strip_frontmatter(&raw);
+        let content = claurst_core::strip_frontmatter(&raw);
 
         // Substitute $ARGUMENTS
         let prompt = if let Some(args) = &params.args {
@@ -210,7 +210,7 @@ async fn read_skill_description(path: &std::path::Path) -> String {
     let Ok(content) = tokio::fs::read_to_string(path).await else {
         return "(no description)".to_string();
     };
-    let body = strip_frontmatter(&content);
+    let body = claurst_core::strip_frontmatter(&content);
     // First non-empty, non-heading line
     for line in body.lines() {
         let t = line.trim().trim_start_matches('#').trim();
@@ -220,17 +220,4 @@ async fn read_skill_description(path: &std::path::Path) -> String {
         }
     }
     "(no description)".to_string()
-}
-
-/// Remove YAML frontmatter delimited by `---` at the start of the file.
-fn strip_frontmatter(content: &str) -> String {
-    if let Some(after_open) = content.strip_prefix("---") {
-        // Find closing ---
-        if let Some(close_pos) = after_open.find("\n---") {
-            // Skip past the closing delimiter and any leading newline
-            let rest = &after_open[close_pos + 4..];
-            return rest.trim_start_matches('\n').to_string();
-        }
-    }
-    content.to_string()
 }
