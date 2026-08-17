@@ -890,16 +890,24 @@ please ultracode <task>    — activate ultracode for this one turn via the inli
 ### /plugin
 **Aliases:** `plugins`, `marketplace`
 
-Manage plugins. Plugins are loadable modules that can register new commands, tools, and hooks. Browse the marketplace or install from a local path.
+Manage plugins. A plugin registers slash commands, hooks, skills, agents, output styles, MCP servers and language servers.
 
 ```
 /plugin
 /plugin list
-/plugin install <name>
-/plugin install <path>
+/plugin info <name>
+/plugin enable <name>
+/plugin disable <name>
+/plugin install <source>
+/plugin update <name>
 /plugin remove <name>
 /plugin reload
 ```
+
+`install` takes a local directory, an `owner/repo` on GitHub (optionally
+`owner/repo@branch`), or a git URL. A repository holding a
+`.claude-plugin/marketplace.json` installs every plugin it lists. See
+[Plugins](plugins.md#installing-from-a-repository).
 
 `/plugin reload` (and its alias `/reload-plugins`) rereads the plugin
 directories and applies the result to the running session: hooks, slash

@@ -7,14 +7,18 @@
 // cc-commands → cc-plugins (not the other way around).
 
 pub mod hooks;
+pub mod install;
 pub mod loader;
 pub mod manifest;
-pub mod marketplace;
 pub mod plugin;
 pub mod registry;
 
 // Re-export the most commonly used items at the crate root.
 pub use hooks::{register_plugin_hooks, HookOutcome, HookRegistry, RegisteredHook};
+pub use install::{
+    install_from_git, install_from_local, list_installed, parse_install_source, uninstall,
+    update_installed, InstallSource, InstalledPlugin, UpdateOutcome,
+};
 pub use loader::{default_user_plugins_dir, discover_plugins, project_plugins_dir};
 pub use manifest::{
     HookEventKind, PluginAuthor, PluginHookEntry, PluginHookMatcher, PluginHooksConfig,
@@ -312,8 +316,14 @@ pub enum PluginSubCommand {
     Disable(String),
     /// `/plugin info <name>` — show details about a plugin.
     Info(String),
-    /// `/plugin install <path>` — install a plugin from a local path.
+    /// `/plugin install <source>` — install from a local path or a git
+    /// repository.
     Install(String),
+    /// `/plugin update <name>` — pull the latest commit for a plugin
+    /// installed from git.
+    Update(String),
+    /// `/plugin remove <name>` — delete an installed plugin's directory.
+    Remove(String),
     /// `/plugin reload` — reload plugins from disk.
     Reload,
     /// Show usage / help.
@@ -335,8 +345,14 @@ pub fn parse_plugin_args(args: &str) -> PluginSubCommand {
         Some("info") | Some("show") => {
             PluginSubCommand::Info(parts.get(1).unwrap_or(&"").to_string())
         }
-        Some("install") | Some("i") => {
+        Some("install") | Some("i") | Some("add") => {
             PluginSubCommand::Install(parts.get(1).unwrap_or(&"").to_string())
+        }
+        Some("update") | Some("upgrade") => {
+            PluginSubCommand::Update(parts.get(1).unwrap_or(&"").to_string())
+        }
+        Some("remove") | Some("uninstall") | Some("rm") => {
+            PluginSubCommand::Remove(parts.get(1).unwrap_or(&"").to_string())
         }
         Some("reload") | Some("refresh") => PluginSubCommand::Reload,
         Some("help") | Some("--help") | Some("-h") => PluginSubCommand::Help,
@@ -351,7 +367,9 @@ pub fn format_plugin_list(registry: &PluginRegistry) -> String {
     all.sort_by(|a, b| a.name.cmp(&b.name));
 
     if all.is_empty() {
-        return "No plugins installed.\n\nUse `/plugin install <path>` to install a plugin from a local directory.".to_string();
+        return "No plugins installed.\n\nUse `/plugin install <source>` with a local directory, an \
+                owner/repo on GitHub, or a git URL."
+            .to_string();
     }
 
     let total = all.len();
@@ -496,92 +514,6 @@ pub fn format_plugin_info(registry: &PluginRegistry, name: &str) -> String {
             out
         }
     }
-}
-
-/// Install a plugin from a local path.
-///
-/// Copies the plugin directory into `~/.claurst/plugins/` and returns the
-/// loaded plugin name on success.
-pub fn install_plugin_from_path(source_path: &Path) -> Result<String, PluginError> {
-    // Validate that the source looks like a plugin directory.
-    if !source_path.exists() {
-        return Err(PluginError::Io {
-            path: source_path.to_string_lossy().into_owned(),
-            message: "Path does not exist".to_string(),
-        });
-    }
-
-    let Some(manifest_path) = loader::find_manifest(source_path) else {
-        return Err(PluginError::InvalidManifest {
-            path: source_path.to_string_lossy().into_owned(),
-            message: format!(
-                "No plugin manifest in directory (looked for {})",
-                loader::MANIFEST_LOCATIONS.join(", ")
-            ),
-        });
-    };
-
-    let bytes = std::fs::read(&manifest_path).map_err(|e| PluginError::Io {
-        path: manifest_path.to_string_lossy().into_owned(),
-        message: e.to_string(),
-    })?;
-
-    let manifest = if manifest_path
-        .extension()
-        .map(|e| e == "toml")
-        .unwrap_or(false)
-    {
-        PluginManifest::from_toml(&bytes)
-    } else {
-        PluginManifest::from_json(&bytes)
-    }
-    .map_err(|e| PluginError::InvalidManifest {
-        path: manifest_path.to_string_lossy().into_owned(),
-        message: e.to_string(),
-    })?;
-
-    let plugin_name = manifest.name.clone();
-
-    // Determine install destination.
-    let dest = match default_user_plugins_dir() {
-        Some(d) => d.join(&plugin_name),
-        None => {
-            return Err(PluginError::Io {
-                path: String::new(),
-                message: "Cannot determine home directory for plugin installation".to_string(),
-            })
-        }
-    };
-
-    // Copy source to dest.
-    copy_dir_all(source_path, &dest).map_err(|e| PluginError::Io {
-        path: dest.to_string_lossy().into_owned(),
-        message: e.to_string(),
-    })?;
-
-    tracing::info!(
-        "Installed plugin '{}' from '{}' to '{}'",
-        plugin_name,
-        source_path.display(),
-        dest.display()
-    );
-
-    Ok(plugin_name)
-}
-
-/// Recursively copy a directory.
-fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        if ty.is_dir() {
-            copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
-        } else {
-            std::fs::copy(entry.path(), dst.join(entry.file_name()))?;
-        }
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

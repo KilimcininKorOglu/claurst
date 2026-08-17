@@ -389,9 +389,13 @@ The `/plugin` slash command manages plugins from within an interactive session:
 /plugin info <name>          — show detailed info about a plugin
 /plugin enable <name>        — enable a plugin (persisted to settings)
 /plugin disable <name>       — disable a plugin (persisted to settings)
-/plugin install <path>       — install a plugin from a local directory
+/plugin install <source>     — install from a directory, an owner/repo, or a git URL
+/plugin update <name>        — pull the latest commit for a plugin installed from git
+/plugin remove <name>        — delete an installed plugin's directory
 /plugin reload               — reread the plugin directories and apply what changed
 ```
+
+See [Installing from a Repository](#installing-from-a-repository) for the sources `install` accepts.
 
 `enable` and `disable` write to `settings.json`. Run `/plugin reload` afterwards to apply the change to the running session.
 
@@ -419,11 +423,52 @@ Two things a reload does not undo. An output style that was already registered u
 
 ---
 
-## Plugin Marketplace Integration
+## Installing from a Repository
 
-A plugin can carry a `marketplace_id` field in its manifest (e.g. `"author/plugin-name"`). Nothing reads it here: `/plugin install` takes a local directory path only, and a marketplace name passed to it is treated as a path and fails. Search, install-by-ID and update against a remote registry are not reachable from any command in this build.
+`/plugin install <source>` reads a plugin from a directory on this machine or from a git repository:
 
-Install a plugin by copying or cloning it, then pointing `/plugin install` at the directory.
+```
+/plugin install ./my-plugin                          local directory
+/plugin install ~/work/my-plugin                     ~ is expanded
+/plugin install acme/my-plugin                       github.com/acme/my-plugin
+/plugin install acme/my-plugin@v1.2.0                a branch or tag
+/plugin install https://gitlab.com/acme/my-plugin.git
+/plugin install git@github.com:acme/my-plugin.git
+/plugin install file:///srv/repos/my-plugin.git
+```
+
+A path that exists on disk wins over the `owner/repo` reading, so a local directory named like a repository still installs from disk.
+
+**What the repository has to contain.** Either a manifest at its root (see [Plugin Discovery](#plugin-discovery)), in which case the repository is one plugin, or a `.claude-plugin/marketplace.json` listing several:
+
+```json
+{
+  "name": "acme",
+  "plugins": [
+    { "name": "one", "source": "./plugins/one" },
+    { "name": "two", "source": "./plugins/two" }
+  ]
+}
+```
+
+Every listed entry whose `source` is a path inside the repository is installed. An entry that names another repository is skipped rather than followed, and so is one whose path leaves the clone.
+
+**Where it lands.** Each plugin is installed as `<claurst home>/plugins/<name>`, taking the name from its manifest rather than from the repository. The install refuses rather than overwriting when that directory already exists, and a repository holding several plugins is checked in full before anything moves, so a collision leaves nothing half-installed. The clone keeps its `.git` directory, which is what `/plugin update` needs.
+
+Run `/plugin reload` afterwards to use the plugin in the running session.
+
+### Updating and removing
+
+```
+/plugin update <name>    pull the latest commit (git installs only)
+/plugin remove <name>    delete the installed directory
+```
+
+`update` is a fast-forward pull and reports the commit range it moved through, or that the plugin was already current. A plugin installed from a local directory has no remote to pull from and says so.
+
+### What is not installed
+
+`http://`, `git://` and `ext::` sources are refused: the first two fetch code over a connection nobody authenticated, and `ext::` makes git run a command the URL chooses. There is no plugin registry service behind `/plugin install`; a name that is not a path, an `owner/repo` or a URL is an error rather than a registry lookup. The `marketplace_id` manifest field is metadata and nothing reads it.
 
 ---
 

@@ -12,7 +12,6 @@ claurst-core = { workspace = true }
 # Async
 tokio = { workspace = true }
 async-trait = { workspace = true }
-futures = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -30,21 +29,7 @@ tracing = { workspace = true }
 walkdir = { workspace = true }
 dirs = { workspace = true }
 
-# HTTP (marketplace downloads)
-reqwest = { workspace = true }
-
-# Hash verification
-sha2 = { workspace = true }
-hex = { workspace = true }
-
-# URL encoding for search queries
-urlencoding = { workspace = true }
-
-# Zip extraction for plugin archives
-zip = { version = "2", default-features = false, features = ["deflate"] }
-
 # Utilities
-once_cell = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]

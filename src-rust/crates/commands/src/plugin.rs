@@ -22,7 +22,7 @@ impl SlashCommand for PluginCommand {
         "Manage plugins"
     }
     fn help(&self) -> &str {
-        "Usage: /plugin [list|info <name>|enable <name>|disable <name>|install <path>|reload]\n\
+        "Usage: /plugin [list|info <name>|enable <name>|disable <name>|install <source>|update <name>|remove <name>|reload]\n\
          Manage Claurst plugins.\n\n\
          Subcommands:\n\
            /plugin              — list all installed plugins\n\
@@ -30,8 +30,18 @@ impl SlashCommand for PluginCommand {
            /plugin info <name>  — show detailed info about a plugin\n\
            /plugin enable <name>   — enable a plugin (persisted to settings)\n\
            /plugin disable <name>  — disable a plugin (persisted to settings)\n\
-           /plugin install <path>  — install a plugin from a local directory\n\
-           /plugin reload       — reread the plugin directories and apply what changed"
+           /plugin install <source> — install from a local directory, an owner/repo\n\
+                                      on GitHub, or a git URL\n\
+           /plugin update <name>   — pull the latest commit for a plugin from git\n\
+           /plugin remove <name>   — delete an installed plugin\n\
+           /plugin reload       — reread the plugin directories and apply what changed\n\n\
+         Install sources:\n\
+           /plugin install ./my-plugin\n\
+           /plugin install acme/my-plugin\n\
+           /plugin install acme/my-plugin@v1.2.0\n\
+           /plugin install https://gitlab.com/acme/my-plugin.git\n\n\
+         A repository holding a .claude-plugin/marketplace.json installs every\n\
+         plugin it lists."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -116,20 +126,75 @@ impl SlashCommand for PluginCommand {
                 let registry = get_registry(&project_dir).await;
                 CommandResult::Message(claurst_plugins::format_plugin_info(&registry, &name))
             }
-            claurst_plugins::PluginSubCommand::Install(ref path) if path.is_empty() => {
+            claurst_plugins::PluginSubCommand::Install(ref source) if source.is_empty() => {
                 CommandResult::Error(
-                    "Usage: /plugin install <path>\nProvide the path to a local plugin directory."
+                    "Usage: /plugin install <source>\n\
+                     A source is a local directory, an owner/repo on GitHub \
+                     (optionally owner/repo@branch), or a git URL."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Install(path) => {
-                let result = claurst_plugins::install_plugin_from_path(std::path::Path::new(&path));
-                match result {
-                    Ok(name) => CommandResult::Message(format!(
-                        "Plugin '{}' installed. Run /plugin reload to activate it.",
-                        name
+            claurst_plugins::PluginSubCommand::Install(source) => {
+                let parsed = match claurst_plugins::parse_install_source(&source) {
+                    Ok(parsed) => parsed,
+                    Err(reason) => return CommandResult::Error(reason),
+                };
+                let installed = match parsed {
+                    claurst_plugins::InstallSource::Local(path) => {
+                        claurst_plugins::install_from_local(&path).map(|one| vec![one])
+                    }
+                    claurst_plugins::InstallSource::Git { url, reference } => {
+                        claurst_plugins::install_from_git(&url, reference.as_deref()).await
+                    }
+                };
+                match installed {
+                    Ok(plugins) => {
+                        let names: Vec<String> = plugins
+                            .iter()
+                            .map(|p| format!("{} v{}", p.name, p.version))
+                            .collect();
+                        CommandResult::Message(format!(
+                            "Installed {}. Run /plugin reload to activate {}.",
+                            names.join(", "),
+                            if plugins.len() == 1 { "it" } else { "them" }
+                        ))
+                    }
+                    Err(reason) => CommandResult::Error(format!("Install failed: {}", reason)),
+                }
+            }
+            claurst_plugins::PluginSubCommand::Update(ref name) if name.is_empty() => {
+                CommandResult::Error(
+                    "Usage: /plugin update <name>\nRun /plugin list to see installed plugins."
+                        .to_string(),
+                )
+            }
+            claurst_plugins::PluginSubCommand::Update(name) => {
+                match claurst_plugins::update_installed(&name).await {
+                    Ok(claurst_plugins::UpdateOutcome::AlreadyCurrent) => {
+                        CommandResult::Message(format!("Plugin '{}' is already current.", name))
+                    }
+                    Ok(claurst_plugins::UpdateOutcome::Updated(range)) => {
+                        CommandResult::Message(format!(
+                            "Plugin '{}' updated ({}). Run /plugin reload to apply it.",
+                            name, range
+                        ))
+                    }
+                    Err(reason) => CommandResult::Error(format!("Update failed: {}", reason)),
+                }
+            }
+            claurst_plugins::PluginSubCommand::Remove(ref name) if name.is_empty() => {
+                CommandResult::Error(
+                    "Usage: /plugin remove <name>\nRun /plugin list to see installed plugins."
+                        .to_string(),
+                )
+            }
+            claurst_plugins::PluginSubCommand::Remove(name) => {
+                match claurst_plugins::uninstall(&name) {
+                    Ok(path) => CommandResult::Message(format!(
+                        "Removed {}. Run /plugin reload to drop it from this session.",
+                        path.display()
                     )),
-                    Err(e) => CommandResult::Error(format!("Install failed: {}", e)),
+                    Err(reason) => CommandResult::Error(format!("Remove failed: {}", reason)),
                 }
             }
             claurst_plugins::PluginSubCommand::Reload => CommandResult::ReloadPlugins,
@@ -140,7 +205,9 @@ impl SlashCommand for PluginCommand {
                      /plugin info <name>  — show plugin details\n\
                      /plugin enable <name>   — enable a plugin\n\
                      /plugin disable <name>  — disable a plugin\n\
-                     /plugin install <path>  — install plugin from local path\n\
+                     /plugin install <source> — install from a directory, owner/repo, or git URL\n\
+                     /plugin update <name>   — pull the latest commit for a plugin from git\n\
+                     /plugin remove <name>   — delete an installed plugin\n\
                      /plugin reload       — reread the plugin directories and apply what changed"
                     .to_string(),
             ),
