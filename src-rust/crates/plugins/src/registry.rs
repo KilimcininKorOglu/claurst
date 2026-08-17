@@ -3,8 +3,25 @@
 /// Ported from the TS "enabled plugins" concept in `pluginLoader.ts` and the
 /// app-state plugin arrays.
 use crate::hooks::{register_plugin_hooks, HookRegistry};
-use crate::plugin::{LoadedPlugin, PluginCommandDef, PluginError, ReloadDiff};
+use crate::plugin::{LoadedPlugin, PluginCommandDef, PluginError, PluginSource, ReloadDiff};
 use std::collections::HashMap;
+
+/// How much to trust an MCP server a plugin contributed.
+///
+/// It follows where the plugin came from, not the fact that a plugin declared
+/// it. A plugin under `<project>/.claurst/plugins` arrives with a cloned
+/// repository, so its server is project-scoped and has to pass the same
+/// approval as one declared in the repository's settings file. Everything else
+/// is on the machine because someone put it there.
+fn mcp_origin_for(source: &PluginSource) -> claurst_core::config::McpServerOrigin {
+    match source {
+        PluginSource::Project => claurst_core::config::McpServerOrigin::Project,
+        PluginSource::User
+        | PluginSource::Extra(_)
+        | PluginSource::Inline
+        | PluginSource::Builtin => claurst_core::config::McpServerOrigin::User,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // PluginRegistry
@@ -195,8 +212,7 @@ impl PluginRegistry {
                     env: mcp.env.clone(),
                     url: mcp.url.clone(),
                     server_type: mcp.server_type.clone(),
-                    // Plugins are enabled explicitly by the user: trusted.
-                    origin: Default::default(),
+                    origin: mcp_origin_for(&plugin.source),
                 });
             }
         }
@@ -299,6 +315,17 @@ mod tests {
         }
     }
 
+    fn make_mcp_server(name: &str) -> crate::manifest::PluginMcpServer {
+        crate::manifest::PluginMcpServer {
+            name: name.to_string(),
+            command: Some("/usr/bin/true".to_string()),
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+            url: None,
+            server_type: "stdio".to_string(),
+        }
+    }
+
     #[test]
     fn enable_disable() {
         let mut reg = PluginRegistry::new();
@@ -323,6 +350,49 @@ mod tests {
         reg.insert(dup);
         assert_eq!(reg.plugin_count(), 1);
         assert_eq!(reg.error_count(), 1);
+    }
+
+    #[test]
+    fn a_project_plugin_server_needs_approval_but_a_user_one_does_not() {
+        use claurst_core::config::McpServerOrigin;
+
+        let mut reg = PluginRegistry::new();
+
+        let mut from_repo = make_plugin("from-repo");
+        from_repo.source = PluginSource::Project;
+        from_repo.manifest.mcp_servers = vec![make_mcp_server("repo-server")];
+        reg.insert(from_repo);
+
+        let mut from_home = make_plugin("from-home");
+        from_home.manifest.mcp_servers = vec![make_mcp_server("home-server")];
+        reg.insert(from_home);
+
+        let origins: std::collections::HashMap<String, McpServerOrigin> = reg
+            .all_mcp_servers()
+            .into_iter()
+            .map(|s| (s.name, s.origin))
+            .collect();
+
+        assert_eq!(origins.get("repo-server"), Some(&McpServerOrigin::Project));
+        assert_eq!(origins.get("home-server"), Some(&McpServerOrigin::User));
+    }
+
+    #[test]
+    fn every_plugin_source_off_the_machine_stays_trusted() {
+        use claurst_core::config::McpServerOrigin;
+
+        for source in [
+            PluginSource::User,
+            PluginSource::Extra("cli-flag".to_string()),
+            PluginSource::Inline,
+            PluginSource::Builtin,
+        ] {
+            assert_eq!(mcp_origin_for(&source), McpServerOrigin::User);
+        }
+        assert_eq!(
+            mcp_origin_for(&PluginSource::Project),
+            McpServerOrigin::Project
+        );
     }
 
     #[test]
