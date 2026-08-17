@@ -130,6 +130,8 @@ The pattern is evaluated against the hook input's `tool_name` and `tool_input` f
 
 Each event has specific semantics for how it uses the hook's exit code and output.
 
+Five events fire in this build: `PreToolUse`, `PostToolUse`, `PostModelTurn`, `Stop` and `UserPromptSubmit`. The others below are accepted in `settings.json` and stored, but no call site raises them yet, so a hook attached to one never runs.
+
 ### `PreToolUse`
 
 Fires **before** any tool executes. The matcher field is compared against `tool_name`.
@@ -488,7 +490,9 @@ Multiple hook definitions inside a single `hooks` array run in order. Multiple m
 
 ## Configuring hooks in plugin manifests
 
-Plugins can ship their own hooks by declaring them in their manifest. Plugin hooks are registered at plugin load time and are scoped to the plugin's root. They appear in `/hooks` as `pluginHook` source entries.
+Plugins can ship their own hooks by declaring them in their manifest or in `hooks/hooks.json`. They are registered at startup and appear in `/hooks` with `plugin:<name>` as their source.
+
+A plugin hook runs as a shell command with `CLAUDE_PLUGIN_ROOT` set to the plugin directory and `CLAUDE_PLUGIN_NAME` to its name, and receives the event JSON on stdin. `PreToolUse` and `PostToolUse` are the events that fire; see [Plugins](plugins.md#available-events) for what happens to the rest.
 
 A plugin `plugin.json` excerpt:
 
@@ -502,7 +506,7 @@ A plugin `plugin.json` excerpt:
         "hooks": [
           {
             "type": "command",
-            "command": "node $PLUGIN_ROOT/format.js"
+            "command": "node $CLAUDE_PLUGIN_ROOT/format.js"
           }
         ]
       }
@@ -511,7 +515,7 @@ A plugin `plugin.json` excerpt:
 }
 ```
 
-Plugin hooks are subject to the same policy controls as user-defined hooks. If `allowManagedHooksOnly` is set in policy settings, plugin hooks still run; user and project hooks are suppressed.
+A plugin hook runs whenever its plugin is enabled. There is no policy setting that suppresses hooks by source, so disable the plugin (`/plugin disable <name>`) when you do not want its hooks.
 
 ---
 

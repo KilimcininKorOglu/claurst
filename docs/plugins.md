@@ -175,15 +175,27 @@ marketplace_id = "you/my-plugin"
 | `skills`        | array of strings | Paths to extra skill directories (each must contain a `SKILL.md`). Supplements the `skills/` directory.                      |
 | `output_styles` | array of strings | Paths to extra output style definitions.                                                                                     |
 
+### commands
+
+Each `*.md` file under the plugin's `commands/` directory becomes a slash command named `<plugin>:<file stem>`, so `commands/greet.md` in the `toolkit` plugin runs as `/toolkit:greet`. The name is always namespaced, which is what keeps two plugins from claiming the same command.
+
+The file is expanded like a skill: the YAML frontmatter is dropped, `$ARGUMENTS`, `$1` and `$2` take what the user typed, and a body with no placeholder gets the arguments appended on a trailing line. The command's description comes from the frontmatter's `description:` when it has one, and from the first line of the body otherwise.
+
+Both the command and its description appear in the prompt typeahead, in the command palette and in the `?` help overlay.
+
 ### skills
 
-Each subdirectory of the plugin's `skills/` directory that holds a `SKILL.md` becomes a skill named after the directory, unless the file's frontmatter sets `name:`. The session adds these directories to skill discovery at startup, so `/skills` lists them and the skill runs as a slash command under its own name. A built-in command of the same name wins, so pick a name that no built-in uses.
+Each subdirectory of the plugin's `skills/` directory that holds a `SKILL.md` becomes a skill named after the directory, unless the file's frontmatter sets `name:`. The session adds these directories to skill discovery at startup, so `/skills` lists them and the skill runs as a slash command under its own name.
+
+A skill is not namespaced, so a name can collide. The slash router answers with a built-in command first and a command from `settings.json` second, which means a skill that shares either name never runs; `/skills` marks such an entry with the winner. Pick a name no built-in uses.
 
 Skill directories named in the manifest's `skills` array are treated the same way.
 
 ### agents
 
-Each `*.md` file in the plugin's `agents/` directory is appended to a sub-agent's system prompt as a `## Agent: <file stem>` section, so a delegated task knows which specialised agents the installed plugins describe.
+Each `*.md` file in the plugin's `agents/` directory becomes an agent definition. `/agents` lists it with `plugin:<name>` as its source, and it is appended to a sub-agent's system prompt as a `## Agent: <file stem>` section, so a delegated task knows which specialised agents the installed plugins describe.
+
+A definition whose name is already taken by a project or user agent is listed with the source that shadows it.
 
 ### mcp_servers
 
@@ -193,7 +205,9 @@ These servers connect at startup along with the ones declared in `settings.json`
 
 ### lsp_servers
 
-An array of LSP server definitions for language-aware editing support:
+An array of LSP server definitions for language-aware editing support. They join the servers from `settings.json` at startup, and the LSP tool routes a file to one of them by `extension_to_language`.
+
+The LSP manager speaks stdio and owns the server's lifecycle, so `transport`, `workspace_folder`, `startup_timeout`, `shutdown_timeout`, `restart_on_crash` and `max_restarts` are read but not applied. A `transport` other than `"stdio"` is reported in the log and the server is started over stdio anyway.
 
 | Field                   | Type   | Description                               |
 |-------------------------|--------|-------------------------------------------|
@@ -209,13 +223,17 @@ An array of LSP server definitions for language-aware editing support:
 | `restart_on_crash`      | bool   | Automatically restart on unexpected exit  |
 | `max_restarts`          | number | Maximum restart attempts                  |
 
+### output_styles (directory)
+
+Each `*.md` or `*.json` file in the plugin's `output-styles/` directory is registered at startup under its `name`. Select one with `/output-style <name>`, and its prompt is injected into the system prompt exactly like a built-in or user style. `/output-style` lists them, and the settings screen shows them under **Available**.
+
 ### hooks
 
 Either a path string pointing to a `hooks.json` file inside the plugin directory, or an inline hooks configuration object (see the Hooks section below).
 
 ### user_config
 
-A map of option keys to `PluginUserConfigOption` objects, allowing the plugin to declare user-configurable settings that are surfaced by `/plugin info`:
+A map of option keys to `PluginUserConfigOption` objects. The manifest parser accepts them, but no screen reads or writes them yet, so declaring one has no effect:
 
 | Field         | Type   | Description                                                              |
 |---------------|--------|--------------------------------------------------------------------------|
@@ -232,6 +250,8 @@ An optional array of capability category strings. When present, the plugin is re
 
 Known categories: `"read_files"`, `"write_files"`, `"network"`, `"shell"`, `"browser"`, `"mcp"`.
 
+The check runs when a plugin slash command executes. A plugin's MCP servers, hooks, skills, agents and output styles are not filtered by it, so treat the list as a guard on the plugin's own commands rather than a sandbox around everything it ships.
+
 ---
 
 ## Hook Events
@@ -239,6 +259,10 @@ Known categories: `"read_files"`, `"write_files"`, `"network"`, `"shell"`, `"bro
 Plugins can run shell commands in response to lifecycle events. Hooks receive a JSON payload on stdin describing the event.
 
 ### Available Events
+
+`PreToolUse` and `PostToolUse` are the two events the session fires today. They run for every tool call, on every provider. A `PreToolUse` hook marked `blocking` stops the call when it exits non-zero, and the model is told the plugin blocked it.
+
+The rest of the table is accepted by the manifest parser and stored, but nothing fires it yet. Declaring one is harmless and does nothing.
 
 | Event                | When it fires                                    |
 |----------------------|--------------------------------------------------|
@@ -375,17 +399,9 @@ Rescans the user and project plugin directories, re-reads all manifests, and rep
 
 ## Plugin Marketplace Integration
 
-Plugins published to the Claurst marketplace have a `marketplace_id` field in their manifest (e.g. `"author/plugin-name"`). The marketplace integration allows:
+A plugin can carry a `marketplace_id` field in its manifest (e.g. `"author/plugin-name"`). Nothing reads it here: `/plugin install` takes a local directory path only, and a marketplace name passed to it is treated as a path and fails. Search, install-by-ID and update against a remote registry are not reachable from any command in this build.
 
-- Browsing available plugins
-- Installing plugins by ID
-- Updating installed plugins to newer versions
-
-```
-/plugin install author/plugin-name     — install from the marketplace
-```
-
-Locally installed plugins (via a file path) do not require a `marketplace_id`.
+Install a plugin by copying or cloning it, then pointing `/plugin install` at the directory.
 
 ---
 
