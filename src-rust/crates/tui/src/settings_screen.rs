@@ -84,6 +84,7 @@ pub struct SettingsScreen {
     pub auto_commits: bool,
     pub include_ignored_files: bool,
     pub web_search_fallback: bool,
+    pub timeline_enabled: bool,
     /// Empty when no SearXNG instance is configured.
     pub searxng_url: String,
     pub output_format: String,
@@ -125,6 +126,7 @@ impl SettingsScreen {
             auto_commits: false,
             include_ignored_files: false,
             web_search_fallback: false,
+            timeline_enabled: false,
             searxng_url: String::new(),
             output_format: "text".to_string(),
             disable_claude_mds: false,
@@ -168,6 +170,7 @@ impl SettingsScreen {
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
         self.include_ignored_files = self.settings_snapshot.config.include_ignored_files;
         self.web_search_fallback = self.settings_snapshot.config.web_search_fallback;
+        self.timeline_enabled = self.settings_snapshot.config.timeline_enabled;
         self.searxng_url = self
             .settings_snapshot
             .config
@@ -511,6 +514,19 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Base address of the instance, for example http://localhost:8080. Empty turns SearXNG off.",
             kind: SettingKind::Text,
             value: screen.searxng_url.clone(),
+        },
+        SettingsEntry {
+            key: "timeline_enabled",
+            label: "Execution timeline",
+            description:
+                "Record each tool call and turn, and offer the panel through /timeline and Ctrl+Shift+L.",
+            kind: SettingKind::Bool,
+            value: if screen.timeline_enabled {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
         },
         SettingsEntry {
             key: "web_search_fallback",
@@ -1038,6 +1054,10 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         screen.web_search_fallback = new_value;
                         screen.settings_snapshot.config.web_search_fallback = new_value;
                     }
+                    "timeline_enabled" => {
+                        screen.timeline_enabled = new_value;
+                        screen.settings_snapshot.config.timeline_enabled = new_value;
+                    }
                     "disable_claude_mds" => {
                         screen.disable_claude_mds = new_value;
                         screen.settings_snapshot.config.disable_claude_mds = new_value;
@@ -1115,8 +1135,8 @@ mod tests {
             entries.len()
         );
         assert!(
-            entries.len() <= 24,
-            "Should have at most 24 editable settings, got {}",
+            entries.len() <= 25,
+            "Should have at most 25 editable settings, got {}",
             entries.len()
         );
     }
@@ -1238,6 +1258,31 @@ mod tests {
             .find(|e| e.key == key)
             .unwrap_or_else(|| panic!("no {key} entry"))
             .value
+    }
+
+    #[test]
+    fn the_timeline_toggle_is_listed_and_reaches_the_config() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        let entry = all_entries(&screen)
+            .into_iter()
+            .find(|e| e.key == "timeline_enabled")
+            .expect("timeline entry");
+        assert_eq!(entry.label, "Execution timeline");
+        assert!(matches!(entry.kind, SettingKind::Bool));
+
+        screen.search_query = "Execution timeline".to_string();
+        screen.selected_idx = 0;
+        toggle_or_cycle_current(&mut screen);
+
+        assert!(screen.timeline_enabled);
+        assert!(screen.settings_snapshot.config.timeline_enabled);
+        assert_eq!(screen.save_error, None);
     }
 
     #[test]

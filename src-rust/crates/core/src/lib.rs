@@ -1330,6 +1330,15 @@ pub mod config {
         /// [`include_ignored_files`](Self::include_ignored_files).
         #[serde(default, rename = "webSearchFallback")]
         pub web_search_fallback: bool,
+        /// Whether the live execution timeline is collected and offered.
+        ///
+        /// Off by default. While off nothing is recorded at all, so the panel
+        /// costs neither memory nor work in a session that never opens it.
+        ///
+        /// Stated in the positive for the same reason as
+        /// [`include_ignored_files`](Self::include_ignored_files).
+        #[serde(default, rename = "timelineEnabled")]
+        pub timeline_enabled: bool,
         /// Base address of the SearXNG instance WebSearch prefers, for example
         /// `http://localhost:8080`. `None` means no instance is configured, and
         /// the tool then falls back to the `SEARXNG_URL` environment variable.
@@ -2541,6 +2550,7 @@ pub mod config {
                     || base.config.include_ignored_files,
                 web_search_fallback: over.config.web_search_fallback
                     || base.config.web_search_fallback,
+                timeline_enabled: over.config.timeline_enabled || base.config.timeline_enabled,
                 searxng_url: over
                     .config
                     .searxng_url
@@ -2846,6 +2856,37 @@ pub mod config {
                     .searxng_url
                     .as_deref(),
                 Some("http://base")
+            );
+        }
+
+        #[test]
+        fn the_timeline_setting_starts_off_and_reads_its_json_key() {
+            assert!(!Config::default().timeline_enabled);
+
+            let config: Config =
+                serde_json::from_str(r#"{"timelineEnabled":true}"#).expect("config");
+            assert!(config.timeline_enabled);
+        }
+
+        #[test]
+        fn either_side_of_a_merge_can_turn_the_timeline_on() {
+            let mut enabled = Settings::default();
+            enabled.config.timeline_enabled = true;
+
+            assert!(
+                Settings::merge(enabled.clone(), Settings::default())
+                    .config
+                    .timeline_enabled
+            );
+            assert!(
+                Settings::merge(Settings::default(), enabled)
+                    .config
+                    .timeline_enabled
+            );
+            assert!(
+                !Settings::merge(Settings::default(), Settings::default())
+                    .config
+                    .timeline_enabled
             );
         }
 
