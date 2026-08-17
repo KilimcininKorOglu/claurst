@@ -277,7 +277,7 @@ fn import_config_picker_items() -> Vec<SelectItem> {
 }
 
 fn provider_picker_items() -> Vec<SelectItem> {
-    vec![
+    let mut items = vec![
         SelectItem {
             id: "free".into(),
             title: "Free Mode".into(),
@@ -670,7 +670,23 @@ fn provider_picker_items() -> Vec<SelectItem> {
             category: "Other".into(),
             badge: None,
         },
-    ]
+    ];
+
+    // MLX runs on Apple Silicon, so offering it elsewhere would put an entry in
+    // front of the user that cannot start a server locally. The provider itself
+    // stays available on every platform through `settings.json`, because
+    // `MLX_LM_HOST` can point at a Mac on the network.
+    if cfg!(target_os = "macos") {
+        items.push(SelectItem {
+            id: "mlxlm".into(),
+            title: "MLX LM".into(),
+            description: "Apple MLX local inference".into(),
+            category: "Other".into(),
+            badge: Some("LOCAL".into()),
+        });
+    }
+
+    items
 }
 
 // ---------------------------------------------------------------------------
@@ -4306,7 +4322,7 @@ impl App {
 
                         match selected.id.as_str() {
                             // Local providers — activate immediately, no key needed
-                            "ollama" | "lmstudio" | "llamacpp" => {
+                            "ollama" | "lmstudio" | "llamacpp" | "mlxlm" => {
                                 self.activate_provider(
                                     selected.id.clone(),
                                     selected.title.clone(),
@@ -9168,5 +9184,28 @@ mod tests {
         let taken = app.take_pending_model_sync();
         assert_eq!(taken.len(), 2);
         assert!(app.pending_model_sync.is_empty());
+    }
+
+    #[test]
+    fn mlx_lm_is_offered_only_on_macos() {
+        let items = provider_picker_items();
+        let offered = items.iter().any(|item| item.id == "mlxlm");
+
+        assert_eq!(
+            offered,
+            cfg!(target_os = "macos"),
+            "MLX needs Apple Silicon, so the entry belongs on macOS only"
+        );
+    }
+
+    #[test]
+    fn the_local_runtimes_are_still_offered_everywhere() {
+        let items = provider_picker_items();
+        for id in ["ollama", "lmstudio", "llamacpp"] {
+            assert!(
+                items.iter().any(|item| item.id == id),
+                "{id} should be offered on every platform"
+            );
+        }
     }
 }

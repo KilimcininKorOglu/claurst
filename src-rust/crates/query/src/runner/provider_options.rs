@@ -78,6 +78,8 @@ pub(crate) fn is_openaiish_provider(provider_id: &str) -> bool {
             | "alibaba"
             | "nebius"
             | "novita"
+            | "mlxlm"
+            | "mlx-lm"
             | "ovhcloud"
             | "scaleway"
             | "vultr"

@@ -16,6 +16,7 @@ pub fn provider_for_id(provider_id: &str) -> Option<OpenAiCompatProvider> {
         "ollama" => Some(ollama()),
         "lmstudio" | "lm-studio" => Some(lm_studio()),
         "llamacpp" | "llama-cpp" | "llama-server" => Some(llama_cpp()),
+        "mlxlm" | "mlx-lm" => Some(mlx_lm()),
         "deepseek" => Some(deepseek()),
         "groq" => Some(groq()),
         "xai" => Some(xai()),
@@ -134,6 +135,21 @@ pub fn llama_cpp() -> OpenAiCompatProvider {
             ..Default::default()
         },
     )
+}
+
+/// MLX LM — Apple's MLX inference server, which runs on Apple Silicon.
+///
+/// Reads `MLX_LM_HOST` for the base URL; defaults to `http://localhost:8080`,
+/// which is what `mlx_lm.server` binds without a `--port` flag. The server
+/// takes an API key only when started with `--api-key`.
+pub fn mlx_lm() -> OpenAiCompatProvider {
+    let host = std::env::var("MLX_LM_HOST").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let base_url = format!("{}/v1", host.trim_end_matches('/'));
+    OpenAiCompatProvider::new(ProviderId::MLX_LM, "MLX LM", base_url).with_quirks(ProviderQuirks {
+        overflow_patterns: vec!["exceeds maximum context length".to_string()],
+        no_api_key_required: true,
+        ..Default::default()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -621,5 +637,58 @@ mod tests {
         let qwen = provider_for_id("qwen").expect("qwen should resolve");
         assert_eq!(alibaba.id(), qwen.id());
         assert_eq!(alibaba.name(), qwen.name());
+    }
+
+    /// `MLX_LM_HOST` is process-global, so the two tests that set it cannot run
+    /// side by side.
+    static MLX_HOST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HostGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HostGuard {
+        fn set(value: Option<&str>) -> Self {
+            let saved = std::env::var_os("MLX_LM_HOST");
+            match value {
+                Some(value) => std::env::set_var("MLX_LM_HOST", value),
+                None => std::env::remove_var("MLX_LM_HOST"),
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for HostGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MLX_LM_HOST", value),
+                None => std::env::remove_var("MLX_LM_HOST"),
+            }
+        }
+    }
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        match MLX_HOST_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    #[test]
+    fn mlx_lm_defaults_to_the_port_the_server_binds() {
+        let _lock = lock();
+        let _host = HostGuard::set(None);
+
+        let provider = mlx_lm();
+        assert_eq!(provider.base_url(), "http://localhost:8080/v1");
+        assert_eq!(&**provider.id(), ProviderId::MLX_LM);
+    }
+
+    #[test]
+    fn mlx_lm_reads_its_host_variable_without_doubling_the_slash() {
+        let _lock = lock();
+        let _host = HostGuard::set(Some("http://mac.local:9000/"));
+
+        assert_eq!(mlx_lm().base_url(), "http://mac.local:9000/v1");
     }
 }

@@ -559,7 +559,14 @@ pub fn provider_uses_catalog_projection(provider_id: &str) -> bool {
 pub fn provider_has_authoritative_live_models(provider_id: &str) -> bool {
     matches!(
         provider_id,
-        "ollama" | "lmstudio" | "lm-studio" | "llamacpp" | "llama-cpp" | "llama-server"
+        "ollama"
+            | "lmstudio"
+            | "lm-studio"
+            | "llamacpp"
+            | "llama-cpp"
+            | "llama-server"
+            | "mlxlm"
+            | "mlx-lm"
     )
 }
 

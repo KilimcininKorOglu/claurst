@@ -438,6 +438,48 @@ caching), model guidance, and cache-accounting details, see the
 
 ---
 
+### MLX LM (local)
+
+Connects to a locally running `mlx_lm.server`. Runs on Apple Silicon, so the
+entry appears in the `/connect` list only on macOS. No API key required unless
+the server was started with `--api-key`.
+
+**Base URL:** Reads `MLX_LM_HOST` (defaults to `http://localhost:8080`, the port
+`mlx_lm.server` binds without a `--port` flag). Claurst appends `/v1`.
+
+**Default model:** taken from the server's own `GET /v1/models`.
+
+**Configuration:**
+
+```json
+{
+  "provider": "mlxlm",
+  "providers": {
+    "mlxlm": {
+      "api_base": "http://localhost:8080/v1"
+    }
+  }
+}
+```
+
+Start the server before connecting, naming the model to load:
+
+```bash
+mlx_lm.server --model mlx-community/Qwen3.5-9B-MLX-4bit
+```
+
+`llama.cpp` defaults to the same port, so move one of them if both run at once:
+
+```bash
+mlx_lm.server --model <model> --port 9000
+MLX_LM_HOST=http://localhost:9000 claurst --provider mlxlm "hello"
+```
+
+Writing the `providers.mlxlm` block by hand works on any platform, which is how
+a Linux or Windows machine reaches an `mlx_lm.server` running on a Mac.
+
+---
+
 ### Groq
 
 Fast inference cloud with OpenAI-compatible API.

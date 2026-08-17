@@ -2500,6 +2500,14 @@ mod tests {
         assert!(is_openaiish_provider("qwen"));
     }
 
+    #[test]
+    fn mlx_lm_is_openaiish_under_both_spellings() {
+        // The connect dialog writes "mlxlm"; the registry canonicalises to
+        // "mlx-lm". Reasoning-parameter shaping has to recognise both.
+        assert!(is_openaiish_provider("mlxlm"));
+        assert!(is_openaiish_provider("mlx-lm"));
+    }
+
     // ---- apply_compact_result / #213 data-loss guard ------------------------
 
     fn sample_conversation() -> Vec<Message> {

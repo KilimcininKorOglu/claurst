@@ -39,6 +39,7 @@ fn canonical_local_provider_id(provider_id: &str) -> &str {
     match provider_id {
         "lmstudio" => ProviderId::LM_STUDIO,
         "llamacpp" | "llama-server" => ProviderId::LLAMA_CPP,
+        "mlxlm" => ProviderId::MLX_LM,
         _ => provider_id,
     }
 }
@@ -330,6 +331,13 @@ pub fn provider_from_config(
             }
             Some(Arc::new(provider))
         }
+        "mlxlm" | "mlx-lm" => {
+            let mut provider = providers::mlx_lm();
+            if let Some(base) = api_base {
+                provider = provider.with_base_url(base);
+            }
+            Some(Arc::new(provider))
+        }
         "deepseek" => {
             let mut provider = providers::deepseek();
             if let Some(key) = api_key {
@@ -395,6 +403,7 @@ pub fn runtime_provider_for(provider_id: &str) -> Option<Arc<dyn LlmProvider>> {
         "lmstudio" | "lm-studio" => return Some(Arc::new(p::lm_studio())),
         // "llama-server" is the binary name for the modern llama.cpp server.
         "llamacpp" | "llama-cpp" | "llama-server" => return Some(Arc::new(p::llama_cpp())),
+        "mlxlm" | "mlx-lm" => return Some(Arc::new(p::mlx_lm())),
         "codex" | "openai-codex" => {
             return CodexProvider::from_stored().map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
         }
@@ -716,6 +725,7 @@ impl ProviderRegistry {
         self.register(Arc::new(p::ollama()));
         self.register(Arc::new(p::lm_studio()));
         self.register(Arc::new(p::llama_cpp()));
+        self.register(Arc::new(p::mlx_lm()));
 
         // Remote providers — only register when an API key is present.
         if std::env::var("DEEPSEEK_API_KEY")
@@ -919,6 +929,7 @@ pub fn provider_lookup_ids(provider_id: &str) -> Vec<&str> {
         "llamacpp" | "llama-cpp" | "llama-server" => {
             vec!["llamacpp", "llama-cpp", "llama-server"]
         }
+        "mlxlm" | "mlx-lm" => vec!["mlxlm", "mlx-lm"],
         "moonshot" | "moonshotai" => vec!["moonshot", "moonshotai"],
         "zhipu" | "zhipuai" => vec!["zhipu", "zhipuai"],
         "vultr" | "vultr-ai" => vec!["vultr", "vultr-ai"],
@@ -1061,6 +1072,7 @@ mod tests {
         let mut registry = ProviderRegistry::new();
         registry.register(Arc::new(providers::lm_studio()));
         registry.register(Arc::new(providers::llama_cpp()));
+        registry.register(Arc::new(providers::mlx_lm()));
 
         let lm_studio = registry
             .get(&ProviderId::new("lmstudio"))
@@ -1068,9 +1080,13 @@ mod tests {
         let llama_cpp = registry
             .get(&ProviderId::new("llamacpp"))
             .expect("llamacpp alias should resolve");
+        let mlx_lm = registry
+            .get(&ProviderId::new("mlxlm"))
+            .expect("mlxlm alias should resolve");
 
         assert_eq!(&**lm_studio.id(), ProviderId::LM_STUDIO);
         assert_eq!(&**llama_cpp.id(), ProviderId::LLAMA_CPP);
+        assert_eq!(&**mlx_lm.id(), ProviderId::MLX_LM);
     }
 
     #[test]

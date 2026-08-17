@@ -182,6 +182,11 @@ impl OpenAiCompatProvider {
         self
     }
 
+    /// The endpoint this provider will send requests to.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     /// Override the base URL (e.g. from a user-supplied --api-base flag).
     ///
     /// Keep any native API host in sync with the OpenAI-compatible base URL.

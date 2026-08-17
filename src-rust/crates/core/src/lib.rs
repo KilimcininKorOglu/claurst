@@ -7396,4 +7396,24 @@ mod account_schema_tests {
         assert_eq!(entry.models, ["claude-opus-5", "gpt-5.6-sol"]);
         assert_eq!(entry.api_base.as_deref(), Some("http://127.0.0.1:8789"));
     }
+    #[test]
+    fn every_local_runtime_spelling_splits_off_the_model() {
+        // The connect dialog writes the hyphenless spelling, so both have to be
+        // well known or `"mlxlm/qwen"` is read as one long model id and the
+        // request goes to the active account instead.
+        let config = Config::default();
+        for id in [
+            "lmstudio",
+            "lm-studio",
+            "llamacpp",
+            "llama-cpp",
+            "mlxlm",
+            "mlx-lm",
+            "ollama",
+        ] {
+            let route = config.resolve_route(&format!("{id}/foo"));
+            assert_eq!(route.account, id, "account for {id}");
+            assert_eq!(route.model, "foo", "model for {id}");
+        }
+    }
 }

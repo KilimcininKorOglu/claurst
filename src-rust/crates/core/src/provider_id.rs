@@ -49,6 +49,8 @@ impl ProviderId {
     pub const OLLAMA: &'static str = "ollama";
     pub const LM_STUDIO: &'static str = "lm-studio";
     pub const LLAMA_CPP: &'static str = "llama-cpp";
+    /// Apple MLX inference server, reached over its OpenAI-compatible endpoint.
+    pub const MLX_LM: &'static str = "mlx-lm";
     /// User-supplied endpoint speaking the OpenAI wire format.
     pub const CUSTOM_OPENAI: &'static str = "custom-openai";
     /// User-supplied endpoint speaking the Anthropic wire format.
@@ -116,6 +118,7 @@ impl ProviderId {
         Self::OLLAMA,
         Self::LM_STUDIO,
         Self::LLAMA_CPP,
+        Self::MLX_LM,
         Self::CUSTOM_OPENAI,
         Self::CUSTOM_ANTHROPIC,
         Self::DEEPSEEK,
@@ -153,6 +156,7 @@ impl ProviderId {
         "lmstudio",
         "llamacpp",
         "llama-server",
+        "mlxlm",
         "togetherai",
         "qwen",
         "alibaba",
