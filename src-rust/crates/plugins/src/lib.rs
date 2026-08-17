@@ -30,6 +30,60 @@ pub use plugin::{
 pub use registry::PluginRegistry;
 
 // ---------------------------------------------------------------------------
+// User configuration
+// ---------------------------------------------------------------------------
+
+/// The environment a plugin's own process sees for the options it declares
+/// under `userConfig`.
+///
+/// Two shapes, because a plugin written in a shell script and one written in
+/// something that parses JSON want different things:
+/// - `CLAUDE_PLUGIN_CONFIG`, the whole object as JSON
+/// - `CLAUDE_PLUGIN_CONFIG_<OPTION>` per option, upper-cased, with anything
+///   outside `A-Z0-9` replaced by `_`
+///
+/// A string value is passed through unquoted; anything else is its JSON form,
+/// so a boolean reads as `true` rather than `"true"`.
+///
+/// Returns nothing when the plugin has no values set, which keeps a hook's
+/// environment as it was.
+pub fn plugin_config_env(plugin_name: &str) -> Vec<(String, String)> {
+    let Ok(settings) = claurst_core::config::Settings::load_sync() else {
+        return Vec::new();
+    };
+    let Some(options) = settings.plugin_config.get(plugin_name) else {
+        return Vec::new();
+    };
+    if options.is_empty() {
+        return Vec::new();
+    }
+
+    let mut env: Vec<(String, String)> = Vec::new();
+    if let Ok(whole) = serde_json::to_string(options) {
+        env.push(("CLAUDE_PLUGIN_CONFIG".to_string(), whole));
+    }
+    for (key, value) in options {
+        let name: String = key
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let rendered = match value {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        env.push((format!("CLAUDE_PLUGIN_CONFIG_{name}"), rendered));
+    }
+    env.sort();
+    env
+}
+
+// ---------------------------------------------------------------------------
 // Capability enforcement
 // ---------------------------------------------------------------------------
 
@@ -766,6 +820,43 @@ mod tests {
                 None => unsafe { std::env::remove_var("CLAURST_HOME") },
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_plugins_configured_options_reach_its_environment() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::with_settings(
+            r#"{"pluginConfig": {"acme": {"apiKey": "k-1", "maxDepth": 3, "verbose": true}}}"#,
+        );
+
+        let env = plugin_config_env("acme");
+        let lookup = |name: &str| {
+            env.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.as_str())
+        };
+
+        assert_eq!(
+            lookup("CLAUDE_PLUGIN_CONFIG_APIKEY"),
+            Some("k-1"),
+            "a string is passed through unquoted"
+        );
+        assert_eq!(lookup("CLAUDE_PLUGIN_CONFIG_MAXDEPTH"), Some("3"));
+        assert_eq!(
+            lookup("CLAUDE_PLUGIN_CONFIG_VERBOSE"),
+            Some("true"),
+            "a boolean reads as true, not as a quoted string"
+        );
+
+        let whole = lookup("CLAUDE_PLUGIN_CONFIG").expect("the object as JSON");
+        let parsed: serde_json::Value = serde_json::from_str(whole).expect("valid JSON");
+        assert_eq!(parsed["apiKey"], serde_json::json!("k-1"));
+        assert_eq!(parsed["maxDepth"], serde_json::json!(3));
+
+        assert!(
+            plugin_config_env("other").is_empty(),
+            "a plugin with nothing configured leaves the environment alone"
+        );
     }
 
     #[tokio::test]

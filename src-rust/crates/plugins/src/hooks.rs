@@ -187,6 +187,7 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
         .stderr(Stdio::piped())
         .env("CLAUDE_PLUGIN_ROOT", &hook.plugin_root)
         .env("CLAUDE_PLUGIN_NAME", &hook.plugin_name)
+        .envs(crate::plugin_config_env(&hook.plugin_name))
         .spawn()
     {
         Ok(c) => c,

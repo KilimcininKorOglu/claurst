@@ -320,6 +320,8 @@ impl SlashCommand for PluginSlashCommandAdapter {
                             vec!["-c", &full_cmd]
                         })
                         .env("CLAUDE_PLUGIN_ROOT", plugin_root)
+                        .env("CLAUDE_PLUGIN_NAME", &self.def.plugin_name)
+                        .envs(claurst_plugins::plugin_config_env(&self.def.plugin_name))
                         .output();
                 match cmd_result {
                     Ok(out) => {

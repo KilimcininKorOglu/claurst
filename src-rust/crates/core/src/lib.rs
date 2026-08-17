@@ -1529,6 +1529,15 @@ pub mod config {
         /// Names of plugins that have been explicitly disabled by the user.
         #[serde(default, rename = "disabledPlugins")]
         pub disabled_plugins: std::collections::HashSet<String>,
+        /// Values the user set for the options a plugin declares under
+        /// `userConfig`, keyed by plugin name and then by option name.
+        ///
+        /// A plugin reads these from its environment: every hook and shell
+        /// command it runs gets `CLAUDE_PLUGIN_CONFIG` with the whole object
+        /// and `CLAUDE_PLUGIN_CONFIG_<OPTION>` per value.
+        #[serde(default, rename = "pluginConfig")]
+        pub plugin_config:
+            std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
         /// Whether the user has completed the first-launch onboarding flow.
         /// Mirrors TS `hasAcknowledgedSafetyNotice` / `hasCompletedOnboarding`.
         #[serde(default, rename = "hasCompletedOnboarding")]
@@ -2599,6 +2608,15 @@ pub mod config {
                     let mut s = base.disabled_plugins;
                     s.extend(over.disabled_plugins);
                     s
+                },
+                plugin_config: {
+                    // Per option, not per plugin: a project file that sets one
+                    // option must not drop the rest of that plugin's values.
+                    let mut merged = base.plugin_config;
+                    for (plugin, options) in over.plugin_config {
+                        merged.entry(plugin).or_default().extend(options);
+                    }
+                    merged
                 },
                 has_completed_onboarding: over.has_completed_onboarding
                     || base.has_completed_onboarding,

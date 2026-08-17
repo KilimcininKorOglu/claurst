@@ -69,6 +69,7 @@ unknown models lives in the `modelOverrides` map — see
 |-------------------|------------------|---------|--------------------------------------------------------------------------|
 | `enabledPlugins`  | array of strings | []      | Names `/plugin enable` has recorded. Discovery already loads every plugin it finds, so this list only cancels a previous `disable`. |
 | `disabledPlugins` | array of strings | []      | Plugin names to skip. A listed plugin contributes no commands, hooks, skills, agents, or MCP servers. |
+| `pluginConfig`    | object           | {}      | Values for the options a plugin declares under `userConfig`, keyed by plugin name then option name. Edited in `/settings`; the plugin reads them from `CLAUDE_PLUGIN_CONFIG`. See [Plugins](plugins.md#user_config). |
 
 `/plugin enable <name>` and `/plugin disable <name>` write these lists. The
 running session keeps the plugin set it loaded at startup until `/plugin

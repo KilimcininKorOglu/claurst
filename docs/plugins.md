@@ -82,7 +82,7 @@ restart_on_crash = true
 [lsp_servers.extension_to_language]
 ".py" = "python"
 
-# User-configurable options (surfaced in /plugin info)
+# User-configurable options (edited in /settings)
 [user_config.api_token]
 type        = "string"
 title       = "API Token"
@@ -241,7 +241,7 @@ Either a path string pointing to a `hooks.json` file inside the plugin directory
 
 ### user_config
 
-A map of option keys to `PluginUserConfigOption` objects. The manifest parser accepts them, but no screen reads or writes them yet, so declaring one has no effect:
+A map of option keys to `PluginUserConfigOption` objects. Each option becomes a row in `/settings`, listed as `<plugin>: <title>`:
 
 | Field         | Type   | Description                                                              |
 |---------------|--------|--------------------------------------------------------------------------|
@@ -249,8 +249,33 @@ A map of option keys to `PluginUserConfigOption` objects. The manifest parser ac
 | `title`       | string | Display label                                                            |
 | `description` | string | Explanation of the option                                                |
 | `required`    | bool   | Whether the user must supply a value                                     |
-| `default`     | any    | Default value (optional)                                                 |
-| `sensitive`   | bool   | When `true`, the value is masked in UI output                            |
+| `default`     | any    | Value shown until the user sets one (optional)                           |
+| `sensitive`   | bool   | Adds a note that the value is stored in `settings.json` in the clear     |
+
+A `boolean` option is a toggle; every other type opens an edit prompt. Confirming an empty value clears the option rather than storing a blank.
+
+**Where the values go.** `settings.json`, under `pluginConfig`, keyed by plugin name:
+
+```json
+{
+  "pluginConfig": {
+    "my-plugin": { "apiToken": "…", "maxResults": 20, "verbose": true }
+  }
+}
+```
+
+**How the plugin reads them.** Every hook and shell command the plugin runs gets them in its environment:
+
+| Variable                        | Value                                                            |
+|---------------------------------|------------------------------------------------------------------|
+| `CLAUDE_PLUGIN_CONFIG`          | The whole object as JSON                                          |
+| `CLAUDE_PLUGIN_CONFIG_<OPTION>` | One option, upper-cased, non-alphanumerics replaced by `_`        |
+
+A string arrives unquoted; every other type arrives in its JSON form, so a boolean reads as `true` rather than `"true"`. A plugin with nothing configured gets neither variable, so a shell script can test for the variable to detect that case.
+
+The type is taken from what was typed, not from the manifest: `true`/`false` store a boolean, a number stores a number, anything else stores a string. A value set while the session is running applies to the next hook that runs, with no reload needed, because the environment is built per invocation.
+
+Options are read from the plugins the session has loaded, so a plugin installed mid-session shows its options in `/settings` after `/plugin reload`.
 
 ### capabilities
 
@@ -376,6 +401,8 @@ When a blocking hook exits non-zero, Claurst denies the operation and reports th
 | `CLAUDE_TOOL_NAME`   | Tool name (PostToolUse hooks only)                  |
 | `CLAUDE_TOOL_INPUT`  | Tool input as JSON string (PostToolUse hooks only)  |
 | `CLAUDE_TOOL_RESULT` | Tool result as JSON string (PostToolUse hooks only) |
+| `CLAUDE_PLUGIN_CONFIG` | The plugin's `userConfig` values as JSON, when any are set |
+| `CLAUDE_PLUGIN_CONFIG_<OPTION>` | One `userConfig` value (see [user_config](#user_config)) |
 
 ---
 

@@ -38,9 +38,9 @@ pub const DEFAULT_SEARXNG_URL: &str = "http://localhost:8080";
 
 #[derive(Debug, Clone)]
 pub struct SettingsEntry {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub description: &'static str,
+    pub key: String,
+    pub label: String,
+    pub description: String,
     pub kind: SettingKind,
     pub value: String,
 }
@@ -301,6 +301,9 @@ impl SettingsScreen {
     /// would drop every toggle made earlier on this screen, because a toggle
     /// only ever writes to the snapshot.
     pub fn apply_and_save(&mut self, config: &mut Config) {
+        // Collected rather than written inside the loop: the loop borrows
+        // `pending_changes`, and writing a plugin option needs the screen.
+        let mut plugin_options: Vec<(String, String, serde_json::Value)> = Vec::new();
         for (field, value) in &self.pending_changes {
             let saved = &mut self.settings_snapshot.config;
             match field.as_str() {
@@ -354,12 +357,65 @@ impl SettingsScreen {
                         self.file_injection_max_size = value.clone();
                     }
                 }
-                _ => {}
+                key => {
+                    if let Some((plugin, option)) = split_plugin_option_key(key) {
+                        plugin_options.push((
+                            plugin.to_string(),
+                            option.to_string(),
+                            parse_plugin_option_value(value),
+                        ));
+                    }
+                }
             }
+        }
+        for (plugin, option, value) in plugin_options {
+            self.set_plugin_option(&plugin, &option, value);
         }
         self.persist();
         self.pending_changes.clear();
     }
+
+    /// Record a value for one option a plugin declares.
+    ///
+    /// An empty string clears the option instead of storing a blank, which is
+    /// how the edit prompt takes a value back off a plugin.
+    pub fn set_plugin_option(&mut self, plugin: &str, option: &str, value: serde_json::Value) {
+        let clears = matches!(&value, serde_json::Value::String(s) if s.is_empty());
+        let values = self
+            .settings_snapshot
+            .plugin_config
+            .entry(plugin.to_string())
+            .or_default();
+        if clears {
+            values.remove(option);
+        } else {
+            values.insert(option.to_string(), value);
+        }
+        if values.is_empty() {
+            self.settings_snapshot.plugin_config.remove(plugin);
+        }
+    }
+}
+
+/// Read an edited plugin option back into JSON.
+///
+/// A number stays a number and `true`/`false` stay booleans, so a plugin that
+/// parses `CLAUDE_PLUGIN_CONFIG` reads the type its manifest declared. Anything
+/// else is a string.
+fn parse_plugin_option_value(raw: &str) -> serde_json::Value {
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("true") {
+        return serde_json::Value::Bool(true);
+    }
+    if trimmed.eq_ignore_ascii_case("false") {
+        return serde_json::Value::Bool(false);
+    }
+    if let Ok(number) = trimmed.parse::<f64>() {
+        if let Some(number) = serde_json::Number::from_f64(number) {
+            return serde_json::Value::Number(number);
+        }
+    }
+    serde_json::Value::String(trimmed.to_string())
 }
 
 impl Default for SettingsScreen {
@@ -375,132 +431,132 @@ impl Default for SettingsScreen {
 fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
     let mut entries = vec![
         SettingsEntry {
-            key: "max_tokens",
-            label: "Max Tokens",
-            description: "Maximum tokens per response.",
+            key: "max_tokens".into(),
+            label: "Max Tokens".into(),
+            description: "Maximum tokens per response.".into(),
             kind: SettingKind::Number,
             value: screen.settings_snapshot.config.max_tokens
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| claurst_core::constants::DEFAULT_MAX_TOKENS.to_string()),
         },
         SettingsEntry {
-            key: "auto_compact",
-            label: "Auto-compact",
-            description: "Automatically compact turns at threshold.",
+            key: "auto_compact".into(),
+            label: "Auto-compact".into(),
+            description: "Automatically compact turns at threshold.".into(),
             kind: SettingKind::Bool,
             value: if screen.auto_compact { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "notifications",
-            label: "Desktop notifications",
-            description: "Notify when a turn completes.",
+            key: "notifications".into(),
+            label: "Desktop notifications".into(),
+            description: "Notify when a turn completes.".into(),
             kind: SettingKind::Bool,
             value: if screen.notifications { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "show_turn_duration",
-            label: "Show turn duration",
-            description: "Display elapsed time per turn in status bar.",
+            key: "show_turn_duration".into(),
+            label: "Show turn duration".into(),
+            description: "Display elapsed time per turn in status bar.".into(),
             kind: SettingKind::Bool,
             value: if screen.show_turn_duration { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "show_message_timestamps",
-            label: "Show message timestamps",
-            description: "Display the local time under each message.",
+            key: "show_message_timestamps".into(),
+            label: "Show message timestamps".into(),
+            description: "Display the local time under each message.".into(),
             kind: SettingKind::Bool,
             value: if screen.show_message_timestamps { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "output_style",
-            label: "Output Style",
-            description: "Controls the verbosity and format of responses.",
+            key: "output_style".into(),
+            label: "Output Style".into(),
+            description: "Controls the verbosity and format of responses.".into(),
             kind: SettingKind::Enum {
                 options: vec!["default", "concise", "explanatory", "learning"],
             },
             value: screen.output_style.clone(),
         },
         SettingsEntry {
-            key: "reduce_motion",
-            label: "Reduce motion",
-            description: "Disable UI animations.",
+            key: "reduce_motion".into(),
+            label: "Reduce motion".into(),
+            description: "Disable UI animations.".into(),
             kind: SettingKind::Bool,
             value: if screen.reduce_motion { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "companion_enabled",
-            label: "Companion",
-            description: "Show a small creature beside the input box. See /buddy.",
+            key: "companion_enabled".into(),
+            label: "Companion".into(),
+            description: "Show a small creature beside the input box. See /buddy.".into(),
             kind: SettingKind::Bool,
             value: if screen.companion_enabled { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "terminal_progress_bar",
-            label: "Terminal progress bar",
-            description: "Show progress during tool use.",
+            key: "terminal_progress_bar".into(),
+            label: "Terminal progress bar".into(),
+            description: "Show progress during tool use.".into(),
             kind: SettingKind::Bool,
             value: if screen.terminal_progress_bar { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "verbose",
-            label: "Verbose logging",
-            description: "Log additional debug information. Takes effect on next session.",
+            key: "verbose".into(),
+            label: "Verbose logging".into(),
+            description: "Log additional debug information. Takes effect on next session.".into(),
             kind: SettingKind::Bool,
             value: if screen.verbose { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "cursor_blink_enabled",
-            label: "Cursor blinking",
-            description: "Enable cursor blinking in the chat prompt.",
+            key: "cursor_blink_enabled".into(),
+            label: "Cursor blinking".into(),
+            description: "Enable cursor blinking in the chat prompt.".into(),
             kind: SettingKind::Bool,
             value: if screen.cursor_blink_enabled { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "auto_copy_enabled",
-            label: "Auto-copy on highlight",
-            description: "Automatically copy highlighted text to clipboard.",
+            key: "auto_copy_enabled".into(),
+            label: "Auto-copy on highlight".into(),
+            description: "Automatically copy highlighted text to clipboard.".into(),
             kind: SettingKind::Bool,
             value: if screen.auto_copy_enabled { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "mouse_capture",
-            label: "Mouse capture",
-            description: "Capture the mouse for scroll/right-click/drag-select. Turn off for native terminal text selection. Takes effect on next session.",
+            key: "mouse_capture".into(),
+            label: "Mouse capture".into(),
+            description: "Capture the mouse for scroll/right-click/drag-select. Turn off for native terminal text selection. Takes effect on next session.".into(),
             kind: SettingKind::Bool,
             value: if screen.mouse_capture { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "show_cwd",
-            label: "Show current directory",
-            description: "Display the current working directory in the footer.",
+            key: "show_cwd".into(),
+            label: "Show current directory".into(),
+            description: "Display the current working directory in the footer.".into(),
             kind: SettingKind::Bool,
             value: if screen.show_cwd { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "show_git_branch",
-            label: "Show git branch",
-            description: "Display the current git branch in the footer.",
+            key: "show_git_branch".into(),
+            label: "Show git branch".into(),
+            description: "Display the current git branch in the footer.".into(),
             kind: SettingKind::Bool,
             value: if screen.show_git_branch { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "compact_threshold",
-            label: "Auto-compact threshold",
-            description: "Context usage % at which to trigger auto-compact (0-100).",
+            key: "compact_threshold".into(),
+            label: "Auto-compact threshold".into(),
+            description: "Context usage % at which to trigger auto-compact (0-100).".into(),
             kind: SettingKind::Number,
             value: screen.compact_threshold.clone(),
         },
         SettingsEntry {
-            key: "auto_commits",
-            label: "Auto-commits",
-            description: "Automatically snapshot changes to git via shadow-git.",
+            key: "auto_commits".into(),
+            label: "Auto-commits".into(),
+            description: "Automatically snapshot changes to git via shadow-git.".into(),
             kind: SettingKind::Bool,
             value: if screen.auto_commits { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "include_ignored_files",
-            label: "Search ignored files",
-            description: "Let Glob and Grep search files that .gitignore excludes.",
+            key: "include_ignored_files".into(),
+            label: "Search ignored files".into(),
+            description: "Let Glob and Grep search files that .gitignore excludes.".into(),
             kind: SettingKind::Bool,
             value: if screen.include_ignored_files {
                 "true"
@@ -510,9 +566,9 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             .to_string(),
         },
         SettingsEntry {
-            key: "searxng",
-            label: "SearXNG",
-            description: "Search through a self-hosted SearXNG instance. Turning it on asks for the address.",
+            key: "searxng".into(),
+            label: "SearXNG".into(),
+            description: "Search through a self-hosted SearXNG instance. Turning it on asks for the address.".into(),
             kind: SettingKind::Bool,
             value: if screen.searxng_url.is_empty() {
                 "false"
@@ -522,17 +578,18 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             .to_string(),
         },
         SettingsEntry {
-            key: "searxng_url",
-            label: "SearXNG URL",
-            description: "Base address of the instance, for example http://localhost:8080. Empty turns SearXNG off.",
+            key: "searxng_url".into(),
+            label: "SearXNG URL".into(),
+            description: "Base address of the instance, for example http://localhost:8080. Empty turns SearXNG off.".into(),
             kind: SettingKind::Text,
             value: screen.searxng_url.clone(),
         },
         SettingsEntry {
-            key: "timeline_enabled",
-            label: "Execution timeline",
+            key: "timeline_enabled".into(),
+            label: "Execution timeline".into(),
             description:
-                "Record each tool call and turn, and offer the panel through /timeline and Ctrl+Shift+L.",
+                "Record each tool call and turn, and offer the panel through /timeline and Ctrl+Shift+L."
+                    .into(),
             kind: SettingKind::Bool,
             value: if screen.timeline_enabled {
                 "true"
@@ -542,9 +599,9 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             .to_string(),
         },
         SettingsEntry {
-            key: "web_search_fallback",
-            label: "Web search fallback",
-            description: "Let WebSearch continue with Brave or DuckDuckGo when SearXNG is down.",
+            key: "web_search_fallback".into(),
+            label: "Web search fallback".into(),
+            description: "Let WebSearch continue with Brave or DuckDuckGo when SearXNG is down.".into(),
             kind: SettingKind::Bool,
             value: if screen.web_search_fallback {
                 "true"
@@ -554,25 +611,25 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             .to_string(),
         },
         SettingsEntry {
-            key: "output_format",
-            label: "Output format",
-            description: "How responses are formatted: text, JSON, or streaming JSON.",
+            key: "output_format".into(),
+            label: "Output format".into(),
+            description: "How responses are formatted: text, JSON, or streaming JSON.".into(),
             kind: SettingKind::Enum {
                 options: vec!["text", "json", "streamjson"],
             },
             value: screen.output_format.clone(),
         },
         SettingsEntry {
-            key: "disable_claude_mds",
-            label: "Disable CLAUDE.md",
-            description: "Ignore CLAUDE.md files in projects (use defaults instead).",
+            key: "disable_claude_mds".into(),
+            label: "Disable CLAUDE.md".into(),
+            description: "Ignore CLAUDE.md files in projects (use defaults instead).".into(),
             kind: SettingKind::Bool,
             value: if screen.disable_claude_mds { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
-            key: "fileInjectionEnabled",
-            label: "File injection (@)",
-            description: "Auto-inject @file references into message context.",
+            key: "fileInjectionEnabled".into(),
+            label: "File injection (@)".into(),
+            description: "Auto-inject @file references into message context.".into(),
             kind: SettingKind::Bool,
             value: if screen.file_injection_enabled { "true" } else { "false" }.to_string(),
         },
@@ -581,16 +638,17 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
     // Only show these if file injection is enabled
     if screen.file_injection_enabled {
         entries.push(SettingsEntry {
-            key: "fileAutocompleteLimit",
-            label: "File autocomplete limit",
-            description: "Max suggestions shown in @ autocomplete (type more to narrow results).",
+            key: "fileAutocompleteLimit".into(),
+            label: "File autocomplete limit".into(),
+            description: "Max suggestions shown in @ autocomplete (type more to narrow results)."
+                .into(),
             kind: SettingKind::Number,
             value: screen.file_autocomplete_limit.clone(),
         });
         entries.push(SettingsEntry {
-            key: "fileAutocompleteShowHiddenFiles",
-            label: "Show hidden files",
-            description: "Include hidden files (.) in @ autocomplete.",
+            key: "fileAutocompleteShowHiddenFiles".into(),
+            label: "Show hidden files".into(),
+            description: "Include hidden files (.) in @ autocomplete.".into(),
             kind: SettingKind::Bool,
             value: if screen.file_autocomplete_show_hidden_files {
                 "true"
@@ -600,14 +658,83 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             .to_string(),
         });
         entries.push(SettingsEntry {
-            key: "fileInjectionMaxSize",
-            label: "File injection max size",
-            description: "Max file size to auto-inject (KB, 0=no limit).",
+            key: "fileInjectionMaxSize".into(),
+            label: "File injection max size".into(),
+            description: "Max file size to auto-inject (KB, 0=no limit).".into(),
             kind: SettingKind::Number,
             value: screen.file_injection_max_size.clone(),
         });
     }
 
+    entries.extend(plugin_config_entries(screen));
+
+    entries
+}
+
+/// The prefix a plugin option's key carries in this screen and in
+/// `pending_changes`.
+const PLUGIN_OPTION_PREFIX: &str = "plugin.";
+
+/// Split `plugin.<plugin>.<option>` back into its two names.
+pub fn split_plugin_option_key(key: &str) -> Option<(&str, &str)> {
+    key.strip_prefix(PLUGIN_OPTION_PREFIX)?.split_once('.')
+}
+
+/// One entry per option the session's plugins declare under `userConfig`.
+///
+/// Without these the options are parsed out of every manifest and then never
+/// shown, so no value can be set and the plugin reads nothing.
+fn plugin_config_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
+    let Some(registry) = claurst_plugins::global_plugin_registry() else {
+        return Vec::new();
+    };
+
+    let mut plugins = registry.enabled();
+    plugins.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut entries = Vec::new();
+    for plugin in plugins {
+        let mut options: Vec<_> = plugin.manifest.user_config.iter().collect();
+        options.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (option_key, option) in options {
+            let key = format!("{PLUGIN_OPTION_PREFIX}{}.{option_key}", plugin.name);
+            let stored = screen
+                .settings_snapshot
+                .plugin_config
+                .get(&plugin.name)
+                .and_then(|values| values.get(option_key));
+            let value = match stored.or(option.default.as_ref()) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => match option.value_type {
+                    claurst_plugins::UserConfigValueType::Boolean => "false".to_string(),
+                    _ => String::new(),
+                },
+            };
+            let kind = match option.value_type {
+                claurst_plugins::UserConfigValueType::Boolean => SettingKind::Bool,
+                claurst_plugins::UserConfigValueType::Number => SettingKind::Number,
+                _ => SettingKind::Text,
+            };
+
+            let mut description = option.description.clone();
+            if option.required {
+                description.push_str(" (required)");
+            }
+            if option.sensitive {
+                description.push_str(" Stored in settings.json in the clear.");
+            }
+
+            entries.push(SettingsEntry {
+                key,
+                label: format!("{}: {}", plugin.name, option.title),
+                description,
+                kind,
+                value,
+            });
+        }
+    }
     entries
 }
 
@@ -843,7 +970,7 @@ fn render_settings_list(frame: &mut Frame, screen: &SettingsScreen, area: Rect) 
         let label_len = 40usize;
 
         // Show edit value if currently editing this field, otherwise show the entry value
-        let value_str = if screen.edit_field.as_deref() == Some(entry.key) && is_selected {
+        let value_str = if screen.edit_field.as_deref() == Some(entry.key.as_str()) && is_selected {
             format!("{}_ ", screen.edit_value) // Add cursor indicator
         } else {
             entry.value.clone()
@@ -989,7 +1116,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
         match entry.kind {
             SettingKind::Bool => {
                 let new_value = entry.value != "true";
-                match entry.key {
+                match entry.key.as_str() {
                     "auto_compact" => {
                         screen.auto_compact = new_value;
                         screen.settings_snapshot.auto_compact = new_value;
@@ -1109,7 +1236,15 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                             .file_autocomplete_show_hidden_files = new_value;
                         config.file_autocomplete_show_hidden_files = new_value;
                     }
-                    _ => {}
+                    key => {
+                        if let Some((plugin, option)) = split_plugin_option_key(key) {
+                            screen.set_plugin_option(
+                                plugin,
+                                option,
+                                serde_json::Value::Bool(new_value),
+                            );
+                        }
+                    }
                 }
                 screen.persist();
             }
@@ -1118,7 +1253,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                 let next_idx = (current_idx + 1) % options.len();
                 let new_value = options[next_idx];
 
-                match entry.key {
+                match entry.key.as_str() {
                     "output_style" => {
                         screen.output_style = new_value.to_string();
                         screen.settings_snapshot.config.output_style = Some(new_value.to_string());
@@ -1139,7 +1274,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                 screen.persist();
             }
             SettingKind::Number | SettingKind::Text => {
-                screen.start_edit(entry.key, &entry.value);
+                screen.start_edit(&entry.key, &entry.value);
             }
         }
     }
@@ -1177,6 +1312,48 @@ mod tests {
             entries.len() <= 25,
             "Should have at most 25 editable settings, got {}",
             entries.len()
+        );
+    }
+
+    #[test]
+    fn a_plugin_option_key_splits_into_plugin_and_option() {
+        assert_eq!(
+            split_plugin_option_key("plugin.my-plugin.apiKey"),
+            Some(("my-plugin", "apiKey"))
+        );
+        assert_eq!(split_plugin_option_key("max_tokens"), None);
+        assert_eq!(split_plugin_option_key("plugin.no-option"), None);
+    }
+
+    #[test]
+    fn an_edited_option_keeps_the_type_its_manifest_declared() {
+        assert_eq!(parse_plugin_option_value("true"), serde_json::json!(true));
+        assert_eq!(parse_plugin_option_value(" 42 "), serde_json::json!(42.0));
+        assert_eq!(
+            parse_plugin_option_value("/srv/data"),
+            serde_json::json!("/srv/data")
+        );
+    }
+
+    #[test]
+    fn setting_an_option_stores_it_and_an_empty_value_clears_it() {
+        let mut screen = SettingsScreen::new();
+        screen.set_plugin_option("acme", "apiKey", serde_json::json!("k-1"));
+        assert_eq!(
+            screen.settings_snapshot.plugin_config["acme"]["apiKey"],
+            serde_json::json!("k-1")
+        );
+
+        screen.set_plugin_option("acme", "verbose", serde_json::json!(true));
+        assert_eq!(screen.settings_snapshot.plugin_config["acme"].len(), 2);
+
+        screen.set_plugin_option("acme", "apiKey", serde_json::json!(""));
+        assert!(!screen.settings_snapshot.plugin_config["acme"].contains_key("apiKey"));
+
+        screen.set_plugin_option("acme", "verbose", serde_json::json!(""));
+        assert!(
+            !screen.settings_snapshot.plugin_config.contains_key("acme"),
+            "a plugin with no values left is dropped rather than kept as an empty object"
         );
     }
 
@@ -1503,7 +1680,7 @@ mod tests {
         // The edit buffer only renders on the row it belongs to.
         let visible = visible_entries(&screen);
         assert_eq!(
-            visible.get(screen.selected_idx).map(|e| e.key),
+            visible.get(screen.selected_idx).map(|e| e.key.as_str()),
             Some("searxng_url"),
             "the cursor must sit on the address row or the prompt is invisible"
         );
