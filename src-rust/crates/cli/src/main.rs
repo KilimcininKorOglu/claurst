@@ -2082,6 +2082,13 @@ fn permission_request_from_core(
 /// the live events straight back out of it.
 const BRIDGE_HISTORY_TURNS: usize = 40;
 
+/// Timeline rows kept in the backfill sent to a remote client on connect.
+///
+/// Same reasoning as `BRIDGE_HISTORY_TURNS`, and the ring buffer is shared
+/// between the two: the timeline caps at 200 rows, and replaying all of them
+/// would push the transcript back out of the buffer it just arrived in.
+const BRIDGE_TIMELINE_ROWS: usize = 40;
+
 /// Characters kept per turn in the backfill.
 const BRIDGE_HISTORY_CHARS: usize = 4_000;
 
@@ -2205,6 +2212,16 @@ fn session_snapshot(
         if !entries.is_empty() || omitted > 0 {
             snapshot.push(claurst_bridge::BridgeOutbound::History { entries, omitted });
         }
+    }
+
+    // After History, which a client treats as the whole transcript and which
+    // clears the timeline with it. The ring buffer may still hold rows this
+    // client is about to replay, but those arrive before History and would be
+    // wiped by it, so the current rows are resent here.
+    let rows = &app.timeline.rows;
+    let dropped = rows.len().saturating_sub(BRIDGE_TIMELINE_ROWS);
+    for row in &rows[dropped..] {
+        snapshot.push(claurst_bridge::BridgeOutbound::TimelineRow(row.clone()));
     }
 
     if let Some(request) = app.permission_request.as_ref() {
@@ -6758,6 +6775,52 @@ mod session_snapshot_tests {
                 ]
             ),
             "history must lead, or it replaces the card behind it"
+        );
+    }
+
+    #[test]
+    fn the_timeline_is_rebuilt_after_the_history_that_clears_it() {
+        let mut app = app();
+        app.timeline
+            .add_running_tool("tool-1", "Reading", 10, "", "");
+        app.timeline
+            .add_running_tool("tool-2", "Editing", 20, "", "");
+
+        let snapshot = session_snapshot(&app, None, None, &[Message::user("hello")]);
+        assert!(
+            matches!(
+                snapshot[..],
+                [
+                    BridgeOutbound::History { .. },
+                    BridgeOutbound::TimelineRow(_),
+                    BridgeOutbound::TimelineRow(_),
+                ]
+            ),
+            "a client clears its timeline on history, so the rows have to follow it"
+        );
+    }
+
+    #[test]
+    fn a_long_timeline_is_trimmed_before_it_is_replayed() {
+        let mut app = app();
+        for idx in 0..BRIDGE_TIMELINE_ROWS + 15 {
+            app.timeline
+                .add_running_tool(format!("tool-{idx}"), "Reading", 10, "", "");
+        }
+
+        let rows: Vec<_> = session_snapshot(&app, None, None, &[])
+            .into_iter()
+            .filter_map(|event| match event {
+                BridgeOutbound::TimelineRow(row) => Some(row),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rows.len(), BRIDGE_TIMELINE_ROWS);
+        assert_eq!(
+            rows.first().map(|row| row.id.as_str()),
+            Some("tool-15"),
+            "the oldest rows are the ones dropped"
         );
     }
 }
