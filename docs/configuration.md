@@ -191,6 +191,15 @@ Tool names match the internal names: `Bash`, `Read`, `Write`, `Edit`, `Glob`,
 `Grep`, `WebSearch`, `WebFetch`, `TodoWrite`, `TodoRead`, and MCP tool names
 prefixed with their server name (`myserver_toolname`).
 
+### Tool behaviour
+
+| Key                   | Type    | Default | Description                                                                                                                                                                          |
+|-----------------------|---------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `includeIgnoredFiles` | boolean | false   | Let `Glob` and `Grep` search files that `.gitignore` and `.ignore` exclude. Off by default, so a build directory does not drown the results.                                        |
+| `webSearchFallback`   | boolean | false   | Let `WebSearch` continue with Brave or DuckDuckGo when the SearXNG instance named by `SEARXNG_URL` is unreachable. Off by default, so a query aimed at a private instance stays there. |
+
+Both are also editable from `/settings`.
+
 ### Directory access
 
 | Key               | Type             | Default | Description                                                                                                              |

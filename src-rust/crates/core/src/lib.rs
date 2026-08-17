@@ -1320,6 +1320,15 @@ pub mod config {
         /// would silently start out disabled there.
         #[serde(default, rename = "includeIgnoredFiles")]
         pub include_ignored_files: bool,
+        /// Whether WebSearch tries another backend when the SearXNG instance
+        /// named by `SEARXNG_URL` cannot be reached. Defaults to false, so an
+        /// instance going down surfaces as an error instead of quietly sending
+        /// the query on to Brave or DuckDuckGo.
+        ///
+        /// Stated in the positive for the same reason as
+        /// [`include_ignored_files`](Self::include_ignored_files).
+        #[serde(default, rename = "webSearchFallback")]
+        pub web_search_fallback: bool,
         /// Total request timeout in seconds applied to provider HTTP clients.
         /// Slow local models (CPU inference, large MoE) can take several minutes
         /// to first token; raise this to avoid premature cut-off. `None` (or 0)
@@ -2517,6 +2526,8 @@ pub mod config {
                 },
                 include_ignored_files: over.config.include_ignored_files
                     || base.config.include_ignored_files,
+                web_search_fallback: over.config.web_search_fallback
+                    || base.config.web_search_fallback,
                 request_timeout_secs: over
                     .config
                     .request_timeout_secs
@@ -2755,6 +2766,51 @@ pub mod config {
 
             assert!(settings.config.file_injection_enabled);
             assert_eq!(settings.config.file_injection_max_size, 100);
+        }
+    }
+
+    #[cfg(test)]
+    mod web_search_fallback_tests {
+        use super::*;
+
+        #[test]
+        fn the_setting_starts_off() {
+            assert!(!Config::default().web_search_fallback);
+            assert!(
+                !serde_json::from_str::<Config>("{}")
+                    .expect("empty config")
+                    .web_search_fallback
+            );
+        }
+
+        #[test]
+        fn the_setting_reads_its_json_key() {
+            let config: Config =
+                serde_json::from_str(r#"{"webSearchFallback":true}"#).expect("config");
+
+            assert!(config.web_search_fallback);
+        }
+
+        #[test]
+        fn either_side_of_a_merge_can_turn_the_setting_on() {
+            let mut enabled = Settings::default();
+            enabled.config.web_search_fallback = true;
+
+            assert!(
+                Settings::merge(enabled.clone(), Settings::default())
+                    .config
+                    .web_search_fallback
+            );
+            assert!(
+                Settings::merge(Settings::default(), enabled)
+                    .config
+                    .web_search_fallback
+            );
+            assert!(
+                !Settings::merge(Settings::default(), Settings::default())
+                    .config
+                    .web_search_fallback
+            );
         }
     }
 

@@ -341,10 +341,27 @@ The backend is selected by environment, in priority order:
 2. **Brave Search** — set `BRAVE_SEARCH_API_KEY`.
 3. **DuckDuckGo** — no-config fallback used when neither of the above is set.
 
-| Parameter     | Type    | Required | Description                 |
-|---------------|---------|----------|-----------------------------|
-| `query`       | string  | yes      | Search query                |
-| `num_results` | integer | no       | Number of results to return |
+A backend is only tried when its own variable is set. No address is guessed,
+because whatever answers a guessed port would receive the search query.
+
+SearXNG results carry the upstream engines that surfaced them, rendered as
+`[engines: google, duckduckgo]`. The instance already returns them ranked.
+
+| Parameter     | Type    | Required | Description                                    |
+|---------------|---------|----------|--------------------------------------------------|
+| `query`       | string  | yes      | Search query                                   |
+| `num_results` | integer | no       | Number of results to return. Default 5, max 20 |
+
+#### When SearXNG is unreachable
+
+By default the tool reports the failure and stops. It does not move on to Brave
+or DuckDuckGo, so a query aimed at a private instance never reaches a third
+party by surprise.
+
+Set `"webSearchFallback": true` in the `config` block of `settings.json`, or
+turn on **Web search fallback** in `/settings`, to let the tool continue with
+Brave (when `BRAVE_SEARCH_API_KEY` is set) or DuckDuckGo. The result then opens
+with the name of the backend that took over.
 
 ---
 

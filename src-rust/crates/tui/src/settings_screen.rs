@@ -69,6 +69,7 @@ pub struct SettingsScreen {
     pub compact_threshold: String,
     pub auto_commits: bool,
     pub include_ignored_files: bool,
+    pub web_search_fallback: bool,
     pub output_format: String,
     pub disable_claude_mds: bool,
     pub file_injection_enabled: bool,
@@ -106,6 +107,7 @@ impl SettingsScreen {
             compact_threshold: "95".to_string(),
             auto_commits: false,
             include_ignored_files: false,
+            web_search_fallback: false,
             output_format: "text".to_string(),
             disable_claude_mds: false,
             file_injection_enabled: true,
@@ -147,6 +149,7 @@ impl SettingsScreen {
         self.compact_threshold = self.settings_snapshot.config.compact_threshold.to_string();
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
         self.include_ignored_files = self.settings_snapshot.config.include_ignored_files;
+        self.web_search_fallback = self.settings_snapshot.config.web_search_fallback;
         self.output_format = match &self.settings_snapshot.config.output_format {
             claurst_core::config::OutputFormat::Text => "text".to_string(),
             claurst_core::config::OutputFormat::Json => "json".to_string(),
@@ -426,6 +429,18 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Let Glob and Grep search files that .gitignore excludes.",
             kind: SettingKind::Bool,
             value: if screen.include_ignored_files {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
+        },
+        SettingsEntry {
+            key: "web_search_fallback",
+            label: "Web search fallback",
+            description: "Let WebSearch continue with Brave or DuckDuckGo when SearXNG is down.",
+            kind: SettingKind::Bool,
+            value: if screen.web_search_fallback {
                 "true"
             } else {
                 "false"
@@ -931,6 +946,11 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         screen.settings_snapshot.config.include_ignored_files = new_value;
                         let _ = screen.settings_snapshot.save_sync();
                     }
+                    "web_search_fallback" => {
+                        screen.web_search_fallback = new_value;
+                        screen.settings_snapshot.config.web_search_fallback = new_value;
+                        let _ = screen.settings_snapshot.save_sync();
+                    }
                     "disable_claude_mds" => {
                         screen.disable_claude_mds = new_value;
                         screen.settings_snapshot.config.disable_claude_mds = new_value;
@@ -1011,8 +1031,8 @@ mod tests {
             entries.len()
         );
         assert!(
-            entries.len() <= 21,
-            "Should have at most 21 editable settings, got {}",
+            entries.len() <= 22,
+            "Should have at most 22 editable settings, got {}",
             entries.len()
         );
     }
@@ -1114,5 +1134,88 @@ mod tests {
 
         assert_eq!(matches.len(), 1, "expected one match, got {matches:?}");
         assert_eq!(matches[0].key, "include_ignored_files");
+    }
+
+    fn entry_value(screen: &SettingsScreen, key: &str) -> String {
+        all_entries(screen)
+            .into_iter()
+            .find(|e| e.key == key)
+            .unwrap_or_else(|| panic!("no {key} entry"))
+            .value
+    }
+
+    #[test]
+    fn web_search_fallback_is_listed_as_a_toggle() {
+        let screen = SettingsScreen::new();
+        let entry = all_entries(&screen)
+            .into_iter()
+            .find(|e| e.key == "web_search_fallback")
+            .expect("web search fallback entry");
+
+        assert_eq!(entry.label, "Web search fallback");
+        assert!(matches!(entry.kind, SettingKind::Bool));
+    }
+
+    /// `CLAURST_HOME` is process-global and `toggle_or_cycle_current` saves, so
+    /// the toggle test needs the config root to itself.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self { saved, _dir: dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn toggling_web_search_fallback_reaches_the_config() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "Web search fallback".to_string();
+        screen.selected_idx = 0;
+
+        toggle_or_cycle_current(&mut screen);
+
+        assert!(screen.web_search_fallback);
+        assert!(screen.settings_snapshot.config.web_search_fallback);
+
+        toggle_or_cycle_current(&mut screen);
+
+        assert!(!screen.web_search_fallback);
+        assert!(!screen.settings_snapshot.config.web_search_fallback);
+    }
+
+    #[test]
+    fn web_search_fallback_renders_the_state_it_holds() {
+        // Built by hand rather than through `new()`, which reads the machine's
+        // own settings.json and would make the expected value environmental.
+        let mut screen = SettingsScreen::new();
+
+        screen.web_search_fallback = false;
+        assert_eq!(entry_value(&screen, "web_search_fallback"), "false");
+
+        screen.web_search_fallback = true;
+        assert_eq!(entry_value(&screen, "web_search_fallback"), "true");
     }
 }
