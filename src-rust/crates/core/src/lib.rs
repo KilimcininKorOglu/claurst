@@ -1195,7 +1195,14 @@ pub mod config {
     // ---- Config ----------------------------------------------------------
 
     /// Top-level configuration values, merged from CLI args + settings file + env.
+    ///
+    /// The container-level `default` is what lets a hand-written `settings.json`
+    /// carry a partial `config` block. Without it `permission_mode`, `theme` and
+    /// every other attribute-free field is mandatory, so `{"config":{"model":"x"}}`
+    /// is rejected as malformed. Fields that need a non-`Default` starting value
+    /// keep their own `#[serde(default = "…")]`, which still wins.
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    #[serde(default)]
     pub struct Config {
         pub api_key: Option<String>,
         pub model: Option<String>,
@@ -2725,6 +2732,29 @@ pub mod config {
 
             let merged = Settings::merge(user, Settings::default());
             assert!(merged.remote_control.is_some());
+        }
+    }
+
+    #[cfg(test)]
+    mod partial_config_tests {
+        use super::*;
+
+        #[test]
+        fn a_partial_config_block_parses() {
+            let settings: Settings =
+                serde_json::from_str(r#"{"config":{"model":"x"}}"#).expect("partial config");
+
+            assert_eq!(settings.config.model.as_deref(), Some("x"));
+            assert_eq!(settings.config.permission_mode, PermissionMode::Default);
+        }
+
+        #[test]
+        fn a_field_with_its_own_default_keeps_it_when_absent() {
+            let settings: Settings =
+                serde_json::from_str(r#"{"config":{"model":"x"}}"#).expect("partial config");
+
+            assert!(settings.config.file_injection_enabled);
+            assert_eq!(settings.config.file_injection_max_size, 100);
         }
     }
 
