@@ -893,6 +893,25 @@ impl HistorySearch {
     }
 }
 
+/// What to tell the user when no clipboard answered a paste.
+///
+/// The advice differs by where the failure comes from. On a remote host there
+/// is usually no clipboard to install, and the way through is to stop capturing
+/// the mouse so the terminal's own paste works again. Locally the tool is
+/// simply missing.
+fn clipboard_unavailable_hint() -> &'static str {
+    let over_ssh =
+        std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CLIENT").is_some();
+    if over_ssh {
+        return "Clipboard unavailable over SSH. Try Shift+Insert, or turn Mouse capture off in /settings to use your terminal's own paste.";
+    }
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
+        "Clipboard unavailable."
+    } else {
+        "Clipboard unavailable. Install wl-clipboard or xclip, or try Shift+Insert."
+    }
+}
+
 /// Copy text to the system clipboard. Returns true when it landed.
 ///
 /// One writer serves every copy path. The second implementation that used to
@@ -5141,6 +5160,14 @@ impl App {
             } else if let Some(text) = read_clipboard_text().or_else(read_primary_text) {
                 self.handle_paste_data(text);
                 self.refresh_prompt_input();
+            } else {
+                // Saying nothing here reads as a broken key: the user presses
+                // Ctrl+V, the prompt does not change, and nothing explains why.
+                self.push_notification(
+                    NotificationKind::Info,
+                    clipboard_unavailable_hint().to_string(),
+                    Some(5),
+                );
             }
             return false;
         }
@@ -9800,5 +9827,77 @@ mod timeline_noise_tests {
             "a transient status line already has the status row, and a spinner \
              verb would bury the tool calls it sits between"
         );
+    }
+}
+
+#[cfg(test)]
+mod clipboard_hint_tests {
+    use super::*;
+
+    /// `CLAURST_HOME` is not involved, but the env is process-global, so the
+    /// two cases cannot run at once.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct SshEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl SshEnvGuard {
+        fn set(value: Option<&str>) -> Self {
+            let previous = std::env::var_os("SSH_TTY");
+            match value {
+                // SAFETY: the lock above serialises every test that reads or
+                // writes this variable, and no other thread touches it.
+                Some(value) => unsafe { std::env::set_var("SSH_TTY", value) },
+                None => unsafe { std::env::remove_var("SSH_TTY") },
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for SshEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                // SAFETY: same as above.
+                Some(value) => unsafe { std::env::set_var("SSH_TTY", value) },
+                None => unsafe { std::env::remove_var("SSH_TTY") },
+            }
+        }
+    }
+
+    #[test]
+    fn a_remote_session_is_pointed_at_the_setting_that_frees_the_mouse() {
+        let _lock = match ENV_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _guard = SshEnvGuard::set(Some("/dev/pts/0"));
+
+        let hint = clipboard_unavailable_hint();
+        assert!(
+            hint.contains("Mouse capture"),
+            "installing a clipboard tool does not help a remote host, got {hint:?}"
+        );
+        assert!(!hint.contains("xclip"), "got {hint:?}");
+    }
+
+    #[test]
+    fn a_local_session_is_told_what_to_install() {
+        let _lock = match ENV_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _guard = SshEnvGuard::set(None);
+        if std::env::var_os("SSH_CLIENT").is_some() {
+            return;
+        }
+
+        let hint = clipboard_unavailable_hint();
+        assert!(!hint.contains("SSH"), "got {hint:?}");
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            assert!(!hint.contains("xclip"), "got {hint:?}");
+        } else {
+            assert!(hint.contains("xclip"), "got {hint:?}");
+        }
     }
 }
