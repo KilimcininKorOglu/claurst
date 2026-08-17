@@ -353,9 +353,14 @@ const OSC52_MAX_TEXT_BYTES: usize = 72_000;
 /// straight to stdout the same way `osc8::emit_hits` writes its hyperlinks; the
 /// next frame repaints over nothing.
 pub fn osc52_write(text: &str) -> bool {
-    use std::io::Write;
+    use std::io::{IsTerminal, Write};
 
     if text.is_empty() || text.len() > OSC52_MAX_TEXT_BYTES {
+        return false;
+    }
+    // Only a terminal reads the sequence as an instruction. Piped stdout would
+    // carry the escape bytes into whatever is reading the output.
+    if !std::io::stdout().is_terminal() {
         return false;
     }
     let payload = osc52_sequence(text);
