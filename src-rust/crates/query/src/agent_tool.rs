@@ -123,6 +123,38 @@ fn resolve_subagent_model(params: &AgentInput, ctx: &ToolContext) -> String {
     }
 }
 
+/// Render the `*.md` agent definitions found in `dirs` as prompt sections.
+///
+/// Returns an empty string when no directory holds one, which is the signal
+/// the caller uses to leave the sub-agent's prompt untouched.
+fn plugin_agent_definitions(dirs: &[PathBuf]) -> String {
+    let mut defs = String::new();
+    for dir in dirs {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::debug!(dir = %dir.display(), error = %err, "plugin agents: read_dir failed");
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("agent");
+                        defs.push_str(&format!("\n\n## Agent: {}\n{}", name, content.trim()));
+                    }
+                    Err(err) => {
+                        tracing::debug!(path = %path.display(), error = %err, "plugin agents: read failed");
+                    }
+                }
+            }
+        }
+    }
+    defs
+}
+
 #[derive(Debug, Deserialize)]
 struct AgentInput {
     /// Short description of the agent's task (used for logging).
@@ -267,30 +299,12 @@ impl Tool for AgentTool {
 
             // Append plugin-contributed agent definitions so the sub-agent
             // is aware of any specialised agents declared by plugins.
-            if let Some(registry) = claurst_plugins::global_plugin_registry() {
-                let mut agent_defs = String::new();
-                for agent_dir in registry.all_agent_paths() {
-                    if let Ok(entries) = std::fs::read_dir(&agent_dir) {
-                        for entry in entries.flatten() {
-                            let p = entry.path();
-                            if p.extension().is_some_and(|e| e == "md") {
-                                if let Ok(content) = std::fs::read_to_string(&p) {
-                                    let name =
-                                        p.file_stem().and_then(|s| s.to_str()).unwrap_or("agent");
-                                    agent_defs.push_str(&format!(
-                                        "\n\n## Agent: {}\n{}",
-                                        name,
-                                        content.trim()
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-                if !agent_defs.is_empty() {
-                    prompt.push_str("\n\nThe following specialized agents are available:");
-                    prompt.push_str(&agent_defs);
-                }
+            let agent_defs = claurst_plugins::global_plugin_registry()
+                .map(|registry| plugin_agent_definitions(&registry.all_agent_paths()))
+                .unwrap_or_default();
+            if !agent_defs.is_empty() {
+                prompt.push_str("\n\nThe following specialized agents are available:");
+                prompt.push_str(&agent_defs);
             }
 
             prompt
@@ -680,4 +694,28 @@ pub fn init_team_swarm_runner() {
     );
 
     claurst_tools::register_agent_runner(runner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_agent_definition_becomes_a_prompt_section() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("reviewer.md"), "Report only defects.").expect("write");
+        std::fs::write(dir.path().join("notes.txt"), "ignored").expect("write");
+
+        let defs = plugin_agent_definitions(&[dir.path().to_path_buf()]);
+
+        assert!(defs.contains("## Agent: reviewer"), "{defs}");
+        assert!(defs.contains("Report only defects."), "{defs}");
+        assert!(!defs.contains("ignored"), "{defs}");
+    }
+
+    #[test]
+    fn a_directory_that_does_not_exist_contributes_nothing() {
+        let defs = plugin_agent_definitions(&[PathBuf::from("/nonexistent/agents")]);
+        assert!(defs.is_empty());
+    }
 }
