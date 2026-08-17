@@ -15,10 +15,14 @@ that directory to your `PATH` automatically.
 | Linux    | x86_64       | glibc 2.17+ (most distros from 2014 onward)      |
 | Linux    | aarch64      | glibc 2.17+ (Raspberry Pi 4, AWS Graviton, etc.) |
 | macOS    | x86_64       | macOS 11 Big Sur                                 |
-| macOS    | aarch64      | macOS 11 Big Sur (Apple Silicon: M1/M2/M3)       |
+| macOS    | aarch64      | macOS 11 Big Sur (Apple Silicon)                 |
 
 There are no other runtime dependencies. The binary is statically linked where
 possible; on Linux it links against the system glibc.
+
+Every Apple Silicon Mac is `aarch64`, whichever chip it carries: M1 through M5,
+and the A-series parts used in the MacBook Neo. They all take the same
+`claurst-macos-aarch64` archive.
 
 ---
 
@@ -90,11 +94,11 @@ bunx claurst         # via bun
 
 **Supported platforms via npm:**
 
-| Platform | Architecture                            |
-|----------|-----------------------------------------|
-| Linux    | x86_64, aarch64                         |
-| macOS    | x86_64 (Intel), aarch64 (Apple Silicon) |
-| Windows  | x86_64                                  |
+| Platform | Architecture                                |
+|----------|---------------------------------------------|
+| Linux    | x86_64, aarch64                             |
+| macOS    | x86_64 (Intel), aarch64 (all Apple Silicon) |
+| Windows  | x86_64                                      |
 
 ---
 
@@ -119,13 +123,13 @@ new binary, and replaces the running executable atomically. Settings in
 If you'd rather not run an install script, grab archives directly from
 [**GitHub Releases**](https://github.com/KilimcininKorOglu/claurst/releases):
 
-| Archive                        | Platform            |
-|--------------------------------|---------------------|
-| `claurst-windows-x86_64.zip`   | Windows 64-bit      |
-| `claurst-linux-x86_64.tar.gz`  | Linux x86_64        |
-| `claurst-linux-aarch64.tar.gz` | Linux ARM64         |
-| `claurst-macos-x86_64.tar.gz`  | macOS Intel         |
-| `claurst-macos-aarch64.tar.gz` | macOS Apple Silicon |
+| Archive                        | Platform                                 |
+|--------------------------------|------------------------------------------|
+| `claurst-windows-x86_64.zip`   | Windows 64-bit                           |
+| `claurst-linux-x86_64.tar.gz`  | Linux x86_64                             |
+| `claurst-linux-aarch64.tar.gz` | Linux ARM64                              |
+| `claurst-macos-x86_64.tar.gz`  | macOS Intel                              |
+| `claurst-macos-aarch64.tar.gz` | macOS Apple Silicon (M1 to M5, A-series) |
 
 Every archive contains a single binary named `claurst` (or `claurst.exe`).
 Extract it and put it somewhere on your `PATH`. For example on Linux:
@@ -153,11 +157,31 @@ Environment Variables**.
 ```bash
 mkdir -p ~/.local/bin
 mv claurst ~/.local/bin/claurst
+```
+
+Then put that directory on your `PATH`.
+
+```bash
+# bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-For Zsh users, substitute `.zshrc` for `.bashrc`.
+```zsh
+# zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+```fish
+# fish
+fish_add_path ~/.local/bin
+```
+
+`fish_add_path` writes `$fish_user_paths`, a universal variable, so the entry
+survives new sessions and is not duplicated on a second run. Nothing needs to
+be sourced and no config file needs editing. The one-liner installers already
+do this for you.
 
 ---
 
@@ -272,8 +296,8 @@ cross build --release --locked --package claurst --target aarch64-unknown-linux-
 ## Shell Completions
 
 Claurst does not currently ship a dedicated `completions` subcommand. All
-flags can be discovered via `claurst --help`. If you want basic tab completion
-in bash or zsh you can use the generic completion helper built into your shell:
+flags can be discovered via `claurst --help`. For basic tab completion you can
+use the generic helper built into your shell:
 
 ```bash
 # bash — add to ~/.bashrc
@@ -282,6 +306,15 @@ complete -C claurst claurst
 # zsh — add to ~/.zshrc (requires compinit)
 compdef _gnu_generic claurst
 ```
+
+```fish
+# fish — add to ~/.config/fish/completions/claurst.fish
+complete -c claurst -a '(claurst --help 2>&1 | string match -r -- "--\S+")'
+```
+
+The fish line scrapes the long flags out of `--help` on every completion. It
+deliberately omits `-f`: that switch would turn off filename completion for the
+whole command, and `--add-dir` and `--system-prompt-file` both take a path.
 
 Richer completion scripts may be added in a future release.
 
