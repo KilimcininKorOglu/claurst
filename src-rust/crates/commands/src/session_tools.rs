@@ -29,6 +29,9 @@ impl SlashCommand for SkillsCommand {
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
+        // `commands/` holds prompt templates the Skill tool loads by name.
+        // They are not slash commands: nothing in the slash router reads this
+        // directory, so the list names them without a leading slash.
         let mut found: Vec<String> = Vec::new();
         let dirs = [
             ctx.working_dir.join(".claurst").join("commands"),
@@ -69,11 +72,11 @@ impl SlashCommand for SkillsCommand {
         } else {
             found.sort();
             format!(
-                "Available skills ({}):\n{}",
+                "Skills the model can load ({}):\n{}",
                 found.len(),
                 found
                     .iter()
-                    .map(|s| format!("  /{}", s))
+                    .map(|s| format!("  {}", s))
                     .collect::<Vec<_>>()
                     .join("\n")
             )
@@ -87,11 +90,12 @@ impl SlashCommand for SkillsCommand {
             if !output.is_empty() {
                 output.push('\n');
             }
-            output.push_str(&format!("\nDiscovered skills ({}):\n", disc_list.len()));
+            output.push_str(&format!("\nSkills you can type ({}):\n", disc_list.len()));
             for (name, skill) in disc_list {
                 output.push_str(&format!(
-                    "  /{} — {} ({})\n",
+                    "  /{}{} — {} ({})\n",
                     name,
+                    shadow_note(name, ctx),
                     skill.description,
                     skill.source_path.display()
                 ));
@@ -100,6 +104,22 @@ impl SlashCommand for SkillsCommand {
 
         CommandResult::Message(output.trim_end().to_string())
     }
+}
+
+/// Say what answers a skill's name instead of the skill.
+///
+/// `execute_command` resolves a built-in command first and a command defined
+/// in settings second, so a skill that shares either name can never run.
+/// Returning the winner here is what keeps the list from promising a command
+/// that does nothing.
+fn shadow_note(name: &str, ctx: &CommandContext) -> String {
+    if crate::find_command(name).is_some() {
+        return " (shadowed by the built-in command)".to_string();
+    }
+    if ctx.config.commands.contains_key(name) {
+        return " (shadowed by a command in settings)".to_string();
+    }
+    String::new()
 }
 
 // ---- /rewind -------------------------------------------------------------
