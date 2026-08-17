@@ -902,7 +902,7 @@ pub fn handle_settings_key(
     // Navigation mode
     match key.code {
         KeyCode::Enter => {
-            toggle_or_cycle_current(screen);
+            toggle_or_cycle_current(screen, config);
         }
         KeyCode::Esc => {
             if !screen.search_query.is_empty() {
@@ -949,7 +949,14 @@ fn update_scroll_offset_for_selection(screen: &mut SettingsScreen) {
     }
 }
 
-fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
+/// Flip the selected setting.
+///
+/// Writes each value three times on purpose: to the screen's own copy so the
+/// row redraws, to the snapshot that is about to be written to disk, and to
+/// `config`, which is the one the running session reads. Skipping the last one
+/// leaves a setting that looks changed, saves correctly, and does nothing until
+/// the next launch.
+fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
     let all = all_entries(screen);
     let filtered: Vec<_> = all
         .iter()
@@ -1002,10 +1009,12 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "verbose" => {
                         screen.verbose = new_value;
                         screen.settings_snapshot.config.verbose = new_value;
+                        config.verbose = new_value;
                     }
                     "cursor_blink_enabled" => {
                         screen.cursor_blink_enabled = new_value;
                         screen.settings_snapshot.config.cursor_blink_enabled = new_value;
+                        config.cursor_blink_enabled = new_value;
                     }
                     "auto_copy_enabled" => {
                         screen.auto_copy_enabled = new_value;
@@ -1016,6 +1025,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         // Persist only the off state; on is the default, so clear the key.
                         screen.settings_snapshot.config.mouse_capture =
                             if new_value { None } else { Some(false) };
+                        config.mouse_capture = if new_value { None } else { Some(false) };
                     }
                     "show_cwd" => {
                         screen.show_cwd = new_value;
@@ -1029,10 +1039,12 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         screen.auto_commits = new_value;
                         screen.settings_snapshot.config.auto_commits =
                             if new_value { Some(true) } else { None };
+                        config.auto_commits = if new_value { Some(true) } else { None };
                     }
                     "include_ignored_files" => {
                         screen.include_ignored_files = new_value;
                         screen.settings_snapshot.config.include_ignored_files = new_value;
+                        config.include_ignored_files = new_value;
                     }
                     "searxng" => {
                         if new_value {
@@ -1049,22 +1061,27 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         }
                         screen.searxng_url.clear();
                         screen.settings_snapshot.config.searxng_url = None;
+                        config.searxng_url = None;
                     }
                     "web_search_fallback" => {
                         screen.web_search_fallback = new_value;
                         screen.settings_snapshot.config.web_search_fallback = new_value;
+                        config.web_search_fallback = new_value;
                     }
                     "timeline_enabled" => {
                         screen.timeline_enabled = new_value;
                         screen.settings_snapshot.config.timeline_enabled = new_value;
+                        config.timeline_enabled = new_value;
                     }
                     "disable_claude_mds" => {
                         screen.disable_claude_mds = new_value;
                         screen.settings_snapshot.config.disable_claude_mds = new_value;
+                        config.disable_claude_mds = new_value;
                     }
                     "fileInjectionEnabled" => {
                         screen.file_injection_enabled = new_value;
                         screen.settings_snapshot.config.file_injection_enabled = new_value;
+                        config.file_injection_enabled = new_value;
                     }
                     "fileAutocompleteShowHiddenFiles" => {
                         screen.file_autocomplete_show_hidden_files = new_value;
@@ -1072,6 +1089,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                             .settings_snapshot
                             .config
                             .file_autocomplete_show_hidden_files = new_value;
+                        config.file_autocomplete_show_hidden_files = new_value;
                     }
                     _ => {}
                 }
@@ -1086,14 +1104,17 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "output_style" => {
                         screen.output_style = new_value.to_string();
                         screen.settings_snapshot.config.output_style = Some(new_value.to_string());
+                        config.output_style = Some(new_value.to_string());
                     }
                     "output_format" => {
                         screen.output_format = new_value.to_string();
-                        screen.settings_snapshot.config.output_format = match new_value {
+                        let format = match new_value {
                             "json" => claurst_core::config::OutputFormat::Json,
                             "stream_json" => claurst_core::config::OutputFormat::StreamJson,
                             _ => claurst_core::config::OutputFormat::Text,
                         };
+                        screen.settings_snapshot.config.output_format = format.clone();
+                        config.output_format = format;
                     }
                     _ => {}
                 }
@@ -1278,11 +1299,54 @@ mod tests {
 
         screen.search_query = "Execution timeline".to_string();
         screen.selected_idx = 0;
-        toggle_or_cycle_current(&mut screen);
+        let mut config = Config::default();
+        toggle_or_cycle_current(&mut screen, &mut config);
 
         assert!(screen.timeline_enabled);
         assert!(screen.settings_snapshot.config.timeline_enabled);
+        assert!(
+            config.timeline_enabled,
+            "the running session reads this config, so a toggle that misses it \
+             looks applied but does nothing until the next launch"
+        );
         assert_eq!(screen.save_error, None);
+    }
+
+    /// Every boolean that lives in `Config` has to reach the running session,
+    /// not just the file. These are the ones the session reads back.
+    #[test]
+    fn a_config_backed_toggle_reaches_the_running_session() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        /// A label to search for, and the config field its toggle must reach.
+        type ToggleCase = (&'static str, fn(&Config) -> bool);
+
+        let cases: Vec<ToggleCase> = vec![
+            ("Verbose logging", |config| config.verbose),
+            ("Search ignored files", |config| {
+                config.include_ignored_files
+            }),
+            ("Web search fallback", |config| config.web_search_fallback),
+            ("Execution timeline", |config| config.timeline_enabled),
+            ("File injection (@)", |config| config.file_injection_enabled),
+        ];
+
+        for (label, reads) in cases {
+            let mut screen = SettingsScreen::new();
+            screen.search_query = label.to_string();
+            screen.selected_idx = 0;
+            let mut config = Config::default();
+            toggle_or_cycle_current(&mut screen, &mut config);
+
+            assert!(
+                reads(&config),
+                "toggling {label:?} never reached the live config"
+            );
+        }
     }
 
     #[test]
@@ -1341,7 +1405,7 @@ mod tests {
         screen.search_query = "Web search fallback".to_string();
         screen.selected_idx = 0;
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         let error = screen
             .save_error
@@ -1367,7 +1431,7 @@ mod tests {
         screen.search_query = "Web search fallback".to_string();
         screen.selected_idx = 0;
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         assert_eq!(screen.save_error, None);
     }
@@ -1382,7 +1446,7 @@ mod tests {
 
         let mut screen = SettingsScreen::new();
         screen.search_query = "Web search fallback".to_string();
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
         assert!(screen.settings_snapshot.config.web_search_fallback);
 
         // The caller's live config knows nothing about that toggle, which is
@@ -1409,7 +1473,7 @@ mod tests {
         screen.search_query = "SearXNG".to_string();
         screen.selected_idx = 0;
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         assert_eq!(screen.edit_field.as_deref(), Some("searxng_url"));
         assert_eq!(screen.edit_value, DEFAULT_SEARXNG_URL);
@@ -1439,7 +1503,7 @@ mod tests {
         let mut screen = SettingsScreen::new();
         screen.search_query = "SearXNG".to_string();
         screen.selected_idx = 0;
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
         screen.edit_value = "  http://searx.lan:9000  ".to_string();
         screen.commit_edit();
         screen.apply_and_save(&mut config);
@@ -1470,7 +1534,7 @@ mod tests {
         screen.search_query = "SearXNG".to_string();
         screen.selected_idx = 0;
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         assert!(screen.edit_field.is_none());
         assert!(screen.searxng_url.is_empty());
@@ -1511,12 +1575,12 @@ mod tests {
         screen.search_query = "Web search fallback".to_string();
         screen.selected_idx = 0;
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         assert!(screen.web_search_fallback);
         assert!(screen.settings_snapshot.config.web_search_fallback);
 
-        toggle_or_cycle_current(&mut screen);
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
 
         assert!(!screen.web_search_fallback);
         assert!(!screen.settings_snapshot.config.web_search_fallback);
