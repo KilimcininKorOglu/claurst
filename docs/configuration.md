@@ -76,6 +76,22 @@ applies on the next session. A name in `disabledPlugins` that matches no
 discovered plugin is ignored. `claurst --bare` skips plugin discovery
 entirely, regardless of both lists.
 
+### Skills
+
+| Key            | Type             | Default | Description                                                            |
+|----------------|------------------|---------|------------------------------------------------------------------------|
+| `skills.paths` | array of strings | []      | Extra directories to search for skills. A relative path resolves against the working directory. |
+| `skills.urls`  | array of strings | []      | Git repository URLs to fetch skills from. Each is cloned once and then cached. |
+
+A skill is a prompt template. Discovery reads two layouts in every searched
+directory: a flat `<name>.md` file, and a `<name>/SKILL.md` package, which
+takes its name from the directory unless the frontmatter sets `name:`. The
+searched directories are `.claurst/skills/` and `.agents/skills/` walking up
+from the working directory, then `<claurst home>/skills/`, then `skills.paths`,
+then `skills.urls`. Each installed plugin's `skills/` directory is added to the
+search at startup. Run a skill by its name as a slash command, and list them
+all with `/skills`.
+
 ### Transcript display
 
 | Key                     | Type    | Default | Description                                                                                                                                                                    |

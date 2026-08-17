@@ -175,6 +175,16 @@ marketplace_id = "you/my-plugin"
 | `skills`        | array of strings | Paths to extra skill directories (each must contain a `SKILL.md`). Supplements the `skills/` directory.                      |
 | `output_styles` | array of strings | Paths to extra output style definitions.                                                                                     |
 
+### skills
+
+Each subdirectory of the plugin's `skills/` directory that holds a `SKILL.md` becomes a skill named after the directory, unless the file's frontmatter sets `name:`. The session adds these directories to skill discovery at startup, so `/skills` lists them and the skill runs as a slash command under its own name. A built-in command of the same name wins, so pick a name that no built-in uses.
+
+Skill directories named in the manifest's `skills` array are treated the same way.
+
+### agents
+
+Each `*.md` file in the plugin's `agents/` directory is appended to a sub-agent's system prompt as a `## Agent: <file stem>` section, so a delegated task knows which specialised agents the installed plugins describe.
+
 ### mcp_servers
 
 An array of inline MCP server definitions. Each entry is identical to an `McpServerConfig` (see the MCP documentation). In `plugin.json` the field can also be written as `"mcpServers"` with an object mapping (the loader converts it to the array form automatically).
