@@ -192,12 +192,22 @@ impl SettingsScreen {
 
     pub fn push_search_char(&mut self, c: char) {
         self.search_query.push(c);
-        self.selected_idx = 0;
+        self.reset_selection();
     }
 
     pub fn pop_search_char(&mut self) {
         self.search_query.pop();
+        self.reset_selection();
+    }
+
+    /// Put the cursor back on the first row and scroll back to it.
+    ///
+    /// The filtered list is usually shorter than the scroll position the user
+    /// left behind, so keeping the old offset renders an empty pane: the rows
+    /// exist but every one of them is skipped.
+    fn reset_selection(&mut self) {
         self.selected_idx = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn select_prev(&mut self) {
@@ -1059,5 +1069,50 @@ mod tests {
 
         idx = (idx + 1) % options.len();
         assert_eq!(options[idx], "default"); // Wraps around
+    }
+
+    #[test]
+    fn typing_a_search_scrolls_back_to_the_first_match() {
+        // The filtered list is shorter than wherever the user had scrolled to,
+        // so an offset left behind skips every row and the pane renders empty.
+        let mut screen = SettingsScreen::new();
+        screen.scroll_offset = 12;
+        screen.selected_idx = 12;
+
+        screen.push_search_char('i');
+
+        assert_eq!(screen.selected_idx, 0);
+        assert_eq!(screen.scroll_offset, 0);
+    }
+
+    #[test]
+    fn clearing_a_search_character_scrolls_back_too() {
+        let mut screen = SettingsScreen::new();
+        screen.push_search_char('i');
+        screen.push_search_char('g');
+        screen.scroll_offset = 9;
+        screen.selected_idx = 9;
+
+        screen.pop_search_char();
+
+        assert_eq!(screen.selected_idx, 0);
+        assert_eq!(screen.scroll_offset, 0);
+    }
+
+    #[test]
+    fn a_search_matches_a_label_case_insensitively() {
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "ignored".to_string();
+        let matches: Vec<_> = all_entries(&screen)
+            .into_iter()
+            .filter(|e| {
+                e.label
+                    .to_lowercase()
+                    .contains(&screen.search_query.to_lowercase())
+            })
+            .collect();
+
+        assert_eq!(matches.len(), 1, "expected one match, got {matches:?}");
+        assert_eq!(matches[0].key, "include_ignored_files");
     }
 }
