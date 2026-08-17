@@ -195,10 +195,12 @@ prefixed with their server name (`myserver_toolname`).
 
 | Key                   | Type    | Default | Description                                                                                                                                                                          |
 |-----------------------|---------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `includeIgnoredFiles` | boolean | false   | Let `Glob` and `Grep` search files that `.gitignore` and `.ignore` exclude. Off by default, so a build directory does not drown the results.                                        |
-| `webSearchFallback`   | boolean | false   | Let `WebSearch` continue with Brave or DuckDuckGo when the SearXNG instance named by `SEARXNG_URL` is unreachable. Off by default, so a query aimed at a private instance stays there. |
+| `includeIgnoredFiles` | boolean         | false   | Let `Glob` and `Grep` search files that `.gitignore` and `.ignore` exclude. Off by default, so a build directory does not drown the results.                                     |
+| `searxngUrl`          | string \| unset | unset   | Base address of the SearXNG instance `WebSearch` prefers, for example `http://localhost:8080`. Overrides the `SEARXNG_URL` environment variable. Unset means no instance.        |
+| `webSearchFallback`   | boolean         | false   | Let `WebSearch` continue with Brave or DuckDuckGo when the SearXNG instance is unreachable. Off by default, so a query aimed at a private instance stays there.                  |
 
-Both are also editable from `/settings`.
+All three are editable from `/settings`. Turning **SearXNG** on there prompts for
+the address and writes it to `searxngUrl`; turning it off clears the key.
 
 ### Directory access
 

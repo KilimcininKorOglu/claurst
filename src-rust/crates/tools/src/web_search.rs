@@ -81,7 +81,7 @@ impl Tool for WebSearchTool {
 
         // SearXNG is only tried when the user named an instance. Its failure
         // hands over to the next backend only if the operator asked for that.
-        if let Some(base) = std::env::var("SEARXNG_URL").ok().filter(|s| !s.is_empty()) {
+        if let Some(base) = searxng_base_url(ctx.config.searxng_url.as_deref()) {
             let error = match search_searxng(&params.query, num_results, &base).await {
                 Ok(result) => return result,
                 Err(e) => e,
@@ -105,6 +105,22 @@ impl Tool for WebSearchTool {
             search_duckduckgo(&params.query, num_results).await
         }
     }
+}
+
+/// The SearXNG instance to query, or `None` when the user named none.
+///
+/// `settings.json` wins over the environment, matching how `config.api_key`
+/// outranks `ANTHROPIC_API_KEY`. No address is guessed when both are absent.
+fn searxng_base_url(configured: Option<&str>) -> Option<String> {
+    configured
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var("SEARXNG_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 /// What the tool does after a SearXNG request fails.
@@ -539,6 +555,38 @@ mod tests {
                 None => std::env::remove_var(self.key),
             }
         }
+    }
+
+    #[test]
+    fn a_configured_address_outranks_the_environment() {
+        let _lock = SEARXNG_URL_LOCK.blocking_lock();
+        let _env = EnvGuard::set("SEARXNG_URL", Some("http://from-env"));
+
+        assert_eq!(
+            searxng_base_url(Some("http://from-settings")).as_deref(),
+            Some("http://from-settings")
+        );
+    }
+
+    #[test]
+    fn a_blank_setting_falls_through_to_the_environment() {
+        let _lock = SEARXNG_URL_LOCK.blocking_lock();
+        let _env = EnvGuard::set("SEARXNG_URL", Some("http://from-env"));
+
+        assert_eq!(
+            searxng_base_url(Some("   ")).as_deref(),
+            Some("http://from-env")
+        );
+        assert_eq!(searxng_base_url(None).as_deref(), Some("http://from-env"));
+    }
+
+    #[test]
+    fn no_address_anywhere_means_no_searxng() {
+        let _lock = SEARXNG_URL_LOCK.blocking_lock();
+        let _env = EnvGuard::set("SEARXNG_URL", None);
+
+        assert_eq!(searxng_base_url(None), None);
+        assert_eq!(searxng_base_url(Some("")), None);
     }
 
     fn ctx_with_fallback(fallback: bool) -> ToolContext {

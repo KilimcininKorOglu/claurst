@@ -337,11 +337,15 @@ Perform a web search and return a list of results with titles, URLs, and snippet
 
 The backend is selected by environment, in priority order:
 
-1. **SearXNG** — set `SEARXNG_URL` to a self-hosted instance's base URL (its `settings.yml` must have the JSON `format` enabled).
+1. **SearXNG** — a self-hosted instance's base URL, from the `searxngUrl` setting or, failing that, the `SEARXNG_URL` environment variable. The instance's `settings.yml` must have the JSON `format` enabled.
 2. **Brave Search** — set `BRAVE_SEARCH_API_KEY`.
 3. **DuckDuckGo** — no-config fallback used when neither of the above is set.
 
-A backend is only tried when its own variable is set. No address is guessed,
+The easiest way to configure SearXNG is `/settings`: turn on **SearXNG** and it
+asks for the address, seeded with `http://localhost:8080`, which is the port
+SearXNG binds by default. Turning it off clears the address.
+
+A backend is only tried when it has been configured. No address is guessed,
 because whatever answers a guessed port would receive the search query.
 
 SearXNG results carry the upstream engines that surfaced them, rendered as

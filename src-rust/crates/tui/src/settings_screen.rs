@@ -24,9 +24,17 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub enum SettingKind {
     Bool,
-    Enum { options: Vec<&'static str> },
+    Enum {
+        options: Vec<&'static str>,
+    },
     Number,
+    /// Free text, edited the same way as `Number` but never parsed.
+    Text,
 }
+
+/// Seeded into the SearXNG address prompt. It is the port SearXNG binds in its
+/// own `settings.yml` template and in the official `searxng-docker` compose.
+pub const DEFAULT_SEARXNG_URL: &str = "http://localhost:8080";
 
 #[derive(Debug, Clone)]
 pub struct SettingsEntry {
@@ -76,6 +84,8 @@ pub struct SettingsScreen {
     pub auto_commits: bool,
     pub include_ignored_files: bool,
     pub web_search_fallback: bool,
+    /// Empty when no SearXNG instance is configured.
+    pub searxng_url: String,
     pub output_format: String,
     pub disable_claude_mds: bool,
     pub file_injection_enabled: bool,
@@ -115,6 +125,7 @@ impl SettingsScreen {
             auto_commits: false,
             include_ignored_files: false,
             web_search_fallback: false,
+            searxng_url: String::new(),
             output_format: "text".to_string(),
             disable_claude_mds: false,
             file_injection_enabled: true,
@@ -157,6 +168,12 @@ impl SettingsScreen {
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
         self.include_ignored_files = self.settings_snapshot.config.include_ignored_files;
         self.web_search_fallback = self.settings_snapshot.config.web_search_fallback;
+        self.searxng_url = self
+            .settings_snapshot
+            .config
+            .searxng_url
+            .clone()
+            .unwrap_or_default();
         self.output_format = match &self.settings_snapshot.config.output_format {
             claurst_core::config::OutputFormat::Text => "text".to_string(),
             claurst_core::config::OutputFormat::Json => "json".to_string(),
@@ -262,43 +279,68 @@ impl SettingsScreen {
     }
 
     /// Apply all pending changes to settings and persist them.
+    ///
+    /// Each field is written to the caller's live config *and* to the snapshot
+    /// that gets saved. Copying the whole live config over the snapshot instead
+    /// would drop every toggle made earlier on this screen, because a toggle
+    /// only ever writes to the snapshot.
     pub fn apply_and_save(&mut self, config: &mut Config) {
         for (field, value) in &self.pending_changes {
+            let saved = &mut self.settings_snapshot.config;
             match field.as_str() {
                 "max_tokens" => {
                     if let Ok(n) = value.parse::<u32>() {
                         config.max_tokens = Some(n);
+                        saved.max_tokens = Some(n);
                     }
                 }
                 "output_style" => {
-                    config.output_style = if value.is_empty() {
+                    let style = if value.is_empty() {
                         None
                     } else {
                         Some(value.clone())
                     };
+                    config.output_style = style.clone();
+                    saved.output_style = style;
+                }
+                "searxng_url" => {
+                    // An empty address is how the user switches SearXNG off
+                    // from the edit prompt, so it clears the key rather than
+                    // storing a blank one.
+                    let trimmed = value.trim();
+                    let url = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                    config.searxng_url = url.clone();
+                    saved.searxng_url = url;
+                    self.searxng_url = trimmed.to_string();
                 }
                 "compact_threshold" => {
                     if let Ok(n) = value.parse::<f32>() {
                         config.compact_threshold = n;
+                        saved.compact_threshold = n;
                         self.compact_threshold = value.clone();
                     }
                 }
                 "fileAutocompleteLimit" => {
                     if let Ok(n) = value.parse::<usize>() {
                         config.file_autocomplete_limit = n;
+                        saved.file_autocomplete_limit = n;
                         self.file_autocomplete_limit = value.clone();
                     }
                 }
                 "fileInjectionMaxSize" => {
                     if let Ok(n) = value.parse::<usize>() {
                         config.file_injection_max_size = n;
+                        saved.file_injection_max_size = n;
                         self.file_injection_max_size = value.clone();
                     }
                 }
                 _ => {}
             }
         }
-        self.settings_snapshot.config = config.clone();
         self.persist();
         self.pending_changes.clear();
     }
@@ -450,6 +492,25 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
                 "false"
             }
             .to_string(),
+        },
+        SettingsEntry {
+            key: "searxng",
+            label: "SearXNG",
+            description: "Search through a self-hosted SearXNG instance. Turning it on asks for the address.",
+            kind: SettingKind::Bool,
+            value: if screen.searxng_url.is_empty() {
+                "false"
+            } else {
+                "true"
+            }
+            .to_string(),
+        },
+        SettingsEntry {
+            key: "searxng_url",
+            label: "SearXNG URL",
+            description: "Base address of the instance, for example http://localhost:8080. Empty turns SearXNG off.",
+            kind: SettingKind::Text,
+            value: screen.searxng_url.clone(),
         },
         SettingsEntry {
             key: "web_search_fallback",
@@ -957,6 +1018,22 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                         screen.include_ignored_files = new_value;
                         screen.settings_snapshot.config.include_ignored_files = new_value;
                     }
+                    "searxng" => {
+                        if new_value {
+                            // Enabling a backend with no address would configure
+                            // nothing, so ask for it and let the edit save.
+                            screen.start_edit("searxng_url", DEFAULT_SEARXNG_URL);
+                            // The edit buffer is drawn on its own row, so the
+                            // cursor has to move there or the prompt is invisible.
+                            if let Some(idx) = filtered.iter().position(|e| e.key == "searxng_url")
+                            {
+                                screen.selected_idx = idx;
+                            }
+                            return;
+                        }
+                        screen.searxng_url.clear();
+                        screen.settings_snapshot.config.searxng_url = None;
+                    }
                     "web_search_fallback" => {
                         screen.web_search_fallback = new_value;
                         screen.settings_snapshot.config.web_search_fallback = new_value;
@@ -1002,7 +1079,7 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                 }
                 screen.persist();
             }
-            SettingKind::Number => {
+            SettingKind::Number | SettingKind::Text => {
                 screen.start_edit(entry.key, &entry.value);
             }
         }
@@ -1038,8 +1115,8 @@ mod tests {
             entries.len()
         );
         assert!(
-            entries.len() <= 22,
-            "Should have at most 22 editable settings, got {}",
+            entries.len() <= 24,
+            "Should have at most 24 editable settings, got {}",
             entries.len()
         );
     }
@@ -1143,6 +1220,18 @@ mod tests {
         assert_eq!(matches[0].key, "include_ignored_files");
     }
 
+    /// The rows the list actually draws, in order, for the current search.
+    fn visible_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
+        all_entries(screen)
+            .into_iter()
+            .filter(|e| {
+                e.label
+                    .to_lowercase()
+                    .contains(&screen.search_query.to_lowercase())
+            })
+            .collect()
+    }
+
     fn entry_value(screen: &SettingsScreen, key: &str) -> String {
         all_entries(screen)
             .into_iter()
@@ -1236,6 +1325,133 @@ mod tests {
         toggle_or_cycle_current(&mut screen);
 
         assert_eq!(screen.save_error, None);
+    }
+
+    #[test]
+    fn an_edit_keeps_a_toggle_made_earlier_on_the_same_screen() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "Web search fallback".to_string();
+        toggle_or_cycle_current(&mut screen);
+        assert!(screen.settings_snapshot.config.web_search_fallback);
+
+        // The caller's live config knows nothing about that toggle, which is
+        // what used to overwrite it.
+        let mut config = Config::default();
+        screen.start_edit("max_tokens", "1000");
+        screen.commit_edit();
+        screen.apply_and_save(&mut config);
+
+        assert!(screen.settings_snapshot.config.web_search_fallback);
+        assert_eq!(screen.settings_snapshot.config.max_tokens, Some(1000));
+        assert_eq!(config.max_tokens, Some(1000));
+    }
+
+    #[test]
+    fn enabling_searxng_asks_for_the_address() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "SearXNG".to_string();
+        screen.selected_idx = 0;
+
+        toggle_or_cycle_current(&mut screen);
+
+        assert_eq!(screen.edit_field.as_deref(), Some("searxng_url"));
+        assert_eq!(screen.edit_value, DEFAULT_SEARXNG_URL);
+        assert_eq!(
+            screen.settings_snapshot.config.searxng_url, None,
+            "nothing is stored until the address is confirmed"
+        );
+
+        // The edit buffer only renders on the row it belongs to.
+        let visible = visible_entries(&screen);
+        assert_eq!(
+            visible.get(screen.selected_idx).map(|e| e.key),
+            Some("searxng_url"),
+            "the cursor must sit on the address row or the prompt is invisible"
+        );
+    }
+
+    #[test]
+    fn confirming_the_address_writes_it_to_the_file() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+        let mut config = Config::default();
+
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "SearXNG".to_string();
+        screen.selected_idx = 0;
+        toggle_or_cycle_current(&mut screen);
+        screen.edit_value = "  http://searx.lan:9000  ".to_string();
+        screen.commit_edit();
+        screen.apply_and_save(&mut config);
+
+        assert_eq!(screen.save_error, None);
+        assert_eq!(screen.searxng_url, "http://searx.lan:9000");
+        assert_eq!(config.searxng_url.as_deref(), Some("http://searx.lan:9000"));
+
+        let written = std::fs::read_to_string(claurst_core::claurst_home().join("settings.json"))
+            .expect("settings.json");
+        assert!(
+            written.contains("\"searxngUrl\": \"http://searx.lan:9000\""),
+            "address missing from the file: {written}"
+        );
+    }
+
+    #[test]
+    fn turning_searxng_off_clears_the_address() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.searxng_url = "http://searx.lan:9000".to_string();
+        screen.settings_snapshot.config.searxng_url = Some("http://searx.lan:9000".to_string());
+        screen.search_query = "SearXNG".to_string();
+        screen.selected_idx = 0;
+
+        toggle_or_cycle_current(&mut screen);
+
+        assert!(screen.edit_field.is_none());
+        assert!(screen.searxng_url.is_empty());
+        assert_eq!(screen.settings_snapshot.config.searxng_url, None);
+    }
+
+    #[test]
+    fn an_empty_address_turns_searxng_off() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+        let mut config = Config {
+            searxng_url: Some("http://searx.lan:9000".to_string()),
+            ..Default::default()
+        };
+
+        let mut screen = SettingsScreen::new();
+        screen.start_edit("searxng_url", "http://searx.lan:9000");
+        screen.edit_value = "   ".to_string();
+        screen.commit_edit();
+        screen.apply_and_save(&mut config);
+
+        assert_eq!(config.searxng_url, None);
+        assert!(screen.searxng_url.is_empty());
     }
 
     #[test]

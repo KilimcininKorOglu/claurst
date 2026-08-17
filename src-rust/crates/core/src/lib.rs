@@ -1329,6 +1329,18 @@ pub mod config {
         /// [`include_ignored_files`](Self::include_ignored_files).
         #[serde(default, rename = "webSearchFallback")]
         pub web_search_fallback: bool,
+        /// Base address of the SearXNG instance WebSearch prefers, for example
+        /// `http://localhost:8080`. `None` means no instance is configured, and
+        /// the tool then falls back to the `SEARXNG_URL` environment variable.
+        ///
+        /// Nothing is guessed when both are absent, because whatever answers a
+        /// guessed port would receive the search query.
+        #[serde(
+            default,
+            rename = "searxngUrl",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub searxng_url: Option<String>,
         /// Total request timeout in seconds applied to provider HTTP clients.
         /// Slow local models (CPU inference, large MoE) can take several minutes
         /// to first token; raise this to avoid premature cut-off. `None` (or 0)
@@ -2528,6 +2540,11 @@ pub mod config {
                     || base.config.include_ignored_files,
                 web_search_fallback: over.config.web_search_fallback
                     || base.config.web_search_fallback,
+                searxng_url: over
+                    .config
+                    .searxng_url
+                    .clone()
+                    .or_else(|| base.config.searxng_url.clone()),
                 request_timeout_secs: over
                     .config
                     .request_timeout_secs
@@ -2770,7 +2787,7 @@ pub mod config {
     }
 
     #[cfg(test)]
-    mod web_search_fallback_tests {
+    mod web_search_setting_tests {
         use super::*;
 
         #[test]
@@ -2789,6 +2806,46 @@ pub mod config {
                 serde_json::from_str(r#"{"webSearchFallback":true}"#).expect("config");
 
             assert!(config.web_search_fallback);
+        }
+
+        #[test]
+        fn the_searxng_address_round_trips_through_its_json_key() {
+            let config: Config =
+                serde_json::from_str(r#"{"searxngUrl":"http://searx.lan:9000"}"#).expect("config");
+            assert_eq!(config.searxng_url.as_deref(), Some("http://searx.lan:9000"));
+
+            let written = serde_json::to_string(&config).expect("serialize");
+            assert!(written.contains(r#""searxngUrl":"http://searx.lan:9000""#));
+        }
+
+        #[test]
+        fn an_unset_searxng_address_stays_out_of_the_file() {
+            let written = serde_json::to_string(&Config::default()).expect("serialize");
+
+            assert!(!written.contains("searxngUrl"));
+        }
+
+        #[test]
+        fn a_merge_prefers_the_overriding_searxng_address() {
+            let mut base = Settings::default();
+            base.config.searxng_url = Some("http://base".to_string());
+            let mut over = Settings::default();
+            over.config.searxng_url = Some("http://over".to_string());
+
+            assert_eq!(
+                Settings::merge(base.clone(), over)
+                    .config
+                    .searxng_url
+                    .as_deref(),
+                Some("http://over")
+            );
+            assert_eq!(
+                Settings::merge(base, Settings::default())
+                    .config
+                    .searxng_url
+                    .as_deref(),
+                Some("http://base")
+            );
         }
 
         #[test]
