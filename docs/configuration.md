@@ -202,6 +202,15 @@ prefixed with their server name (`myserver_toolname`).
 All three are editable from `/settings`. Turning **SearXNG** on there prompts for
 the address and writes it to `searxngUrl`; turning it off clears the key.
 
+### Interface
+
+| Key              | Type    | Default | Description                                                                                                                                              |
+|------------------|---------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `timelineEnabled`| boolean | false   | Record every tool call and finished turn, and offer the panel through `/timeline` and `Ctrl+Shift+L`. Off by default; while off nothing is collected at all. |
+
+Editable from `/settings` as **Execution timeline**. See
+[Commands](commands.md#timeline) for what the panel shows.
+
 ### Directory access
 
 | Key               | Type             | Default | Description                                                                                                              |

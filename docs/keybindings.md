@@ -31,14 +31,20 @@ This document covers all keyboard shortcuts in Claurst, how to customize them, v
 
 These bindings are active in all contexts.
 
-| Key      | Action        | Description                                      |
-|----------|---------------|--------------------------------------------------|
-| `Ctrl+C` | interrupt     | Interrupt the current operation (non-rebindable) |
-| `Ctrl+D` | exit          | Exit Claurst (non-rebindable)                    |
-| `Ctrl+L` | redraw        | Redraw the terminal screen                       |
-| `Ctrl+R` | historySearch | Open interactive history search                  |
-| `Ctrl+B` | createBranch  | Create a new git branch                          |
-| `Alt+H`  | openHelp      | Open the help panel                              |
+| Key            | Action         | Description                                             |
+|----------------|----------------|---------------------------------------------------------|
+| `Ctrl+C`       | interrupt      | Interrupt the current operation (non-rebindable)        |
+| `Ctrl+D`       | exit           | Exit Claurst (non-rebindable)                           |
+| `Ctrl+L`       | redraw         | Redraw the terminal screen                              |
+| `Ctrl+R`       | historySearch  | Open interactive history search                         |
+| `Ctrl+B`       | createBranch   | Create a new git branch                                 |
+| `Ctrl+Shift+L` | toggleTimeline | Show the execution timeline panel, focus it, then hide it |
+| `Alt+H`        | openHelp       | Open the help panel                                     |
+
+`Ctrl+Shift+L` needs `timelineEnabled` (see
+[Configuration](configuration.md#interface)); while the setting is off it says
+so and does nothing. Once the panel has focus the arrow keys move its cursor,
+`Enter` expands the selected row and `Esc` returns to the prompt.
 
 ### Chat Context
 

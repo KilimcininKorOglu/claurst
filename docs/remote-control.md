@@ -147,6 +147,18 @@ A command sent while a turn is running is queued and runs when the turn ends, ex
 
 ---
 
+## The execution timeline
+
+When `timelineEnabled` is on (see [Configuration](configuration.md#interface)), the browser gets the same step-by-step panel the terminal draws: every tool call and finished turn, with its status, how long it took and what the turn spent. It sits folded above the transcript; tap the header to open it, and tap a row to read its detail.
+
+The rows arrive as `timeline_row` events carrying the row the terminal built, timings included. A row is sent when it opens and again whenever it changes, and `row.id` says which one, so a client replaces the row it already holds rather than appending a second copy.
+
+The timings are the machine's, not the browser's. A long poll can hold a batch of events for its whole interval, so a client that stamped its own arrival times would report transport delay as step duration.
+
+A client that attaches mid-session gets the recent rows in the same backfill as the transcript, after the `history` event that clears them. The backfill is bounded at 40 rows; older steps stay on the terminal only.
+
+---
+
 ## Questions
 
 The model can call `AskUserQuestion` to ask you something mid-turn. That also blocks the turn, and it can be answered from either side.

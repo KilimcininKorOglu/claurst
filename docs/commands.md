@@ -9,7 +9,7 @@ This document is the complete reference for every slash command available in Cla
 1. [Command System Overview](#command-system-overview)
 2. [Session & Navigation](#session--navigation)
 3. [Model & Provider](#model--provider) — `/model`, `/providers`, `/connect`, `/thinking`, `/effort`, `/advisor`, `/fast`
-4. [Configuration & Settings](#configuration--settings) — `/config`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/vim`, `/voice`, `/terminal-setup`
+4. [Configuration & Settings](#configuration--settings) — `/config`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/timeline`, `/vim`, `/voice`, `/terminal-setup`
 5. [Code & Git](#code--git) — `/commit`, `/diff`, `/undo`, `/review`, `/security-review`, `/init`, `/search`
 6. [Search & Files](#search--files) — `/files`, `/context`
 7. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
@@ -17,7 +17,7 @@ This document is the complete reference for every slash command available in Cla
 9. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
 10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
 11. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
-12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
+12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
 13. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
 14. [Export & Sharing](#export--sharing) — `/export`, `/copy`
 15. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
@@ -446,6 +446,25 @@ Configure the status line displayed at the bottom of the TUI. Toggle individual 
 /statusline toggle model
 /statusline toggle tokens
 ```
+
+---
+
+### /timeline
+
+Show, hide or clear the live execution timeline panel. The panel lists every tool call and finished turn as it happens, with the status of each step, how long it took, and what the turn spent.
+
+```
+/timeline
+/timeline show
+/timeline hide
+/timeline clear
+```
+
+With no argument it toggles, the same as `Ctrl+Shift+L`. Once the panel has focus the arrow keys move its cursor, `Enter` expands the selected row and `Esc` returns to the prompt.
+
+The panel takes its share out of the transcript: on a wide terminal it sits to the right, on a narrow one along the bottom, and below 32×8 it is not drawn at all.
+
+Recording is off until `timelineEnabled` is turned on in `/settings` (see [Configuration](configuration.md#interface)); while it is off nothing is collected and every entry point says so.
 
 ---
 
