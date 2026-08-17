@@ -395,30 +395,72 @@ impl Default for AgentsMenuState {
 // Data loading
 // ---------------------------------------------------------------------------
 
-/// Load agent definitions from `.claurst/agents/` in project root and home dir.
+/// Load agent definitions from the project, the user directory, and every
+/// installed plugin, highest precedence first.
+///
+/// A name that appears more than once keeps every copy, and each losing copy
+/// records the source that shadows it, so the list shows what actually applies.
 pub fn load_agent_definitions(project_root: &std::path::Path) -> Vec<AgentDefinition> {
-    let mut defs = Vec::new();
-    let dirs = [
-        Some(claurst_core::config::Settings::config_dir().join("agents")),
-        Some(project_root.join(".claurst").join("agents")),
+    let mut sources: Vec<(String, std::path::PathBuf)> = vec![
+        (
+            "project".to_string(),
+            project_root.join(".claurst").join("agents"),
+        ),
+        (
+            "user".to_string(),
+            claurst_core::config::Settings::config_dir().join("agents"),
+        ),
     ];
+    sources.extend(plugin_agent_sources());
+    collect_agent_defs(&sources)
+}
 
-    for dir_opt in &dirs {
-        let Some(dir) = dir_opt else { continue };
+/// Read every `*.md` agent under `sources`, in the given precedence order.
+fn collect_agent_defs(sources: &[(String, std::path::PathBuf)]) -> Vec<AgentDefinition> {
+    let mut defs: Vec<AgentDefinition> = Vec::new();
+    for (source, dir) in sources {
         let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(def) = parse_agent_def(&path) {
-                    defs.push(def);
-                }
+        let mut paths: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|e| e == "md"))
+            .collect();
+        // read_dir order is filesystem order; sort so one directory's listing
+        // does not reshuffle between runs.
+        paths.sort();
+
+        for path in paths {
+            if let Some(mut def) = parse_agent_def(&path) {
+                def.source.clone_from(source);
+                def.shadowed_by = defs
+                    .iter()
+                    .find(|earlier| earlier.name == def.name)
+                    .map(|winner| winner.source.clone());
+                defs.push(def);
             }
         }
     }
 
     defs
+}
+
+/// The `agents/` directory of every installed plugin, labelled by plugin name.
+fn plugin_agent_sources() -> Vec<(String, std::path::PathBuf)> {
+    let Some(registry) = claurst_plugins::global_plugin_registry() else {
+        return Vec::new();
+    };
+    registry
+        .enabled()
+        .into_iter()
+        .filter_map(|plugin| {
+            plugin
+                .agents_path
+                .as_ref()
+                .map(|dir| (format!("plugin:{}", plugin.name), dir.clone()))
+        })
+        .collect()
 }
 
 fn parse_agent_def(path: &std::path::Path) -> Option<AgentDefinition> {
@@ -968,5 +1010,66 @@ pub fn render_coordinator_status(agents: &[AgentInfo], area: Rect, buf: &mut Buf
 
         let line = Line::from(spans);
         Paragraph::new(line).render(row_area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_agent(dir: &std::path::Path, file: &str, body: &str) {
+        std::fs::create_dir_all(dir).expect("agent dir");
+        std::fs::write(dir.join(file), body).expect("agent file");
+    }
+
+    #[test]
+    fn a_lower_source_records_what_shadows_it() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let project = tmp.path().join("project");
+        let plugin = tmp.path().join("plugin");
+        write_agent(
+            &project,
+            "reviewer.md",
+            "---\nname: reviewer\ndescription: Project copy\n---\nProject body.",
+        );
+        write_agent(
+            &plugin,
+            "reviewer.md",
+            "---\nname: reviewer\ndescription: Plugin copy\n---\nPlugin body.",
+        );
+
+        let defs = collect_agent_defs(&[
+            ("project".to_string(), project),
+            ("plugin:toolkit".to_string(), plugin),
+        ]);
+
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].source, "project");
+        assert_eq!(defs[0].shadowed_by, None);
+        assert_eq!(defs[1].source, "plugin:toolkit");
+        assert_eq!(defs[1].shadowed_by.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn a_plugin_agent_is_listed_under_its_plugin() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let plugin = tmp.path().join("agents");
+        write_agent(&plugin, "auditor.md", "Audit the diff.");
+
+        let defs = collect_agent_defs(&[("plugin:toolkit".to_string(), plugin)]);
+
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "auditor");
+        assert_eq!(defs[0].source, "plugin:toolkit");
+        assert_eq!(defs[0].shadowed_by, None);
+    }
+
+    #[test]
+    fn a_missing_directory_is_skipped() {
+        let defs = collect_agent_defs(&[(
+            "user".to_string(),
+            std::path::PathBuf::from("/nonexistent/agents"),
+        )]);
+        assert!(defs.is_empty());
     }
 }
