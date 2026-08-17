@@ -858,6 +858,16 @@ async fn main() -> anyhow::Result<()> {
                 config.skills.paths.push(path);
             }
         }
+
+        // Same for language servers: the LSP tool seeds its manager from the
+        // config, so a plugin's server has to be in there to ever start.
+        let existing_lsp: std::collections::HashSet<String> =
+            config.lsp_servers.iter().map(|s| s.name.clone()).collect();
+        for lsp_server in plugin_registry.all_lsp_servers() {
+            if !existing_lsp.contains(&lsp_server.name) {
+                config.lsp_servers.push(lsp_server);
+            }
+        }
     }
 
     // Publish the registry: sub-agent prompts read the plugins' `agents/`

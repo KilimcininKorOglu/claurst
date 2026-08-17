@@ -6,6 +6,32 @@ use crate::hooks::{register_plugin_hooks, HookRegistry};
 use crate::plugin::{LoadedPlugin, PluginCommandDef, PluginError, PluginSource, ReloadDiff};
 use std::collections::HashMap;
 
+/// Convert a plugin's LSP declaration into the config the LSP manager reads.
+///
+/// The manager routes a file by `extension_to_language`, so a plugin needs no
+/// `file_patterns`. It speaks stdio only, and it owns its own lifecycle, so a
+/// declared transport, workspace folder, timeout or restart policy has nowhere
+/// to go; a transport that is not stdio is reported rather than dropped in
+/// silence.
+fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> claurst_core::lsp::LspServerConfig {
+    if server.transport != "stdio" {
+        tracing::warn!(
+            server = %server.name,
+            transport = %server.transport,
+            "Plugin LSP server declares a transport the LSP manager does not speak; starting it over stdio"
+        );
+    }
+    claurst_core::lsp::LspServerConfig {
+        name: server.name.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        file_patterns: Vec::new(),
+        initialization_options: None,
+        extension_to_language: server.extension_to_language.clone(),
+        env: server.env.clone(),
+    }
+}
+
 /// How much to trust an MCP server a plugin contributed.
 ///
 /// It follows where the plugin came from, not the fact that a plugin declared
@@ -219,12 +245,13 @@ impl PluginRegistry {
         servers
     }
 
-    /// Collect all LSP server configs contributed by enabled plugins.
-    pub fn all_lsp_servers(&self) -> Vec<crate::manifest::PluginLspServer> {
-        let mut servers: Vec<crate::manifest::PluginLspServer> = Vec::new();
+    /// Collect all LSP server configs contributed by enabled plugins, in the
+    /// shape the LSP manager consumes.
+    pub fn all_lsp_servers(&self) -> Vec<claurst_core::lsp::LspServerConfig> {
+        let mut servers: Vec<claurst_core::lsp::LspServerConfig> = Vec::new();
         for plugin in self.enabled() {
             for lsp in &plugin.manifest.lsp_servers {
-                servers.push(lsp.clone());
+                servers.push(lsp_config_for(lsp));
             }
         }
         servers
@@ -393,6 +420,34 @@ mod tests {
             mcp_origin_for(&PluginSource::Project),
             McpServerOrigin::Project
         );
+    }
+
+    #[test]
+    fn an_lsp_declaration_routes_by_its_extension_map() {
+        let mut extensions = std::collections::HashMap::new();
+        extensions.insert(".ts".to_string(), "typescript".to_string());
+
+        let declared = crate::manifest::PluginLspServer {
+            name: "ts-server".to_string(),
+            command: "typescript-language-server".to_string(),
+            args: vec!["--stdio".to_string()],
+            extension_to_language: extensions.clone(),
+            transport: "stdio".to_string(),
+            env: std::collections::HashMap::new(),
+            workspace_folder: None,
+            startup_timeout: None,
+            shutdown_timeout: None,
+            restart_on_crash: false,
+            max_restarts: None,
+        };
+
+        let config = lsp_config_for(&declared);
+
+        assert_eq!(config.name, "ts-server");
+        assert_eq!(config.command, "typescript-language-server");
+        assert_eq!(config.args, vec!["--stdio".to_string()]);
+        assert_eq!(config.extension_to_language, extensions);
+        assert_eq!(config.language_for_file("app.ts"), "typescript");
     }
 
     #[test]
