@@ -162,7 +162,7 @@ pub(crate) async fn run_pre_tool_hooks(
     }
 
     if let claurst_plugins::HookOutcome::Deny(reason) =
-        claurst_plugins::run_global_pre_tool_hook(name, input)
+        claurst_plugins::run_global_pre_tool_hook(name, input).await
     {
         tracing::warn!(tool = %name, reason = %reason, "Plugin PreToolUse hook blocked execution");
         return Some(claurst_tools::ToolResult::error(format!(
@@ -197,5 +197,5 @@ pub(crate) async fn run_post_tool_hooks(
     )
     .await;
 
-    claurst_plugins::run_global_post_tool_hook(name, input, &result.content, result.is_error);
+    claurst_plugins::run_global_post_tool_hook(name, input, &result.content, result.is_error).await;
 }

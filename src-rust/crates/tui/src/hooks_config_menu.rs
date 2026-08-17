@@ -391,7 +391,7 @@ fn plugin_hook_entries() -> Vec<HookEntry> {
     };
 
     let mut entries: Vec<HookEntry> = Vec::new();
-    for (event, hooks) in registry {
+    for (event, hooks) in registry.iter() {
         for hook in hooks {
             entries.push(HookEntry {
                 event: event.clone(),

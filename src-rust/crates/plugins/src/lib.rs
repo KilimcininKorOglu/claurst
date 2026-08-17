@@ -67,127 +67,138 @@ pub fn check_plugin_capability(def: &PluginCommandDef) -> Result<(), String> {
 }
 
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Global hook registry (set once at startup, read during tool execution)
 // ---------------------------------------------------------------------------
 
-static GLOBAL_HOOK_REGISTRY: OnceLock<HookRegistry> = OnceLock::new();
+static GLOBAL_HOOK_REGISTRY: parking_lot::RwLock<Option<Arc<HookRegistry>>> =
+    parking_lot::RwLock::new(None);
 
 // ---------------------------------------------------------------------------
-// Global plugin registry (set once at startup, read by commands / tools)
+// Global plugin registry (replaced on every load, read by commands / tools)
 // ---------------------------------------------------------------------------
 
-static GLOBAL_PLUGIN_REGISTRY: OnceLock<PluginRegistry> = OnceLock::new();
+static GLOBAL_PLUGIN_REGISTRY: parking_lot::RwLock<Option<Arc<PluginRegistry>>> =
+    parking_lot::RwLock::new(None);
 
-/// Store the fully-loaded `PluginRegistry` into a process-global static so
-/// that slash commands and tools can query it without carrying the registry
-/// through every call frame.
+/// Publish the loaded `PluginRegistry` so slash commands and tools can query
+/// it without carrying the registry through every call frame.
+///
+/// A later call replaces the previous registry, which is what makes
+/// `/plugin reload` change the running session. A reader that already holds
+/// the old `Arc` keeps using it until it drops the handle.
 pub fn set_global_registry(registry: PluginRegistry) {
-    // OnceLock::set fails silently if already initialised (e.g. during tests).
-    let _ = GLOBAL_PLUGIN_REGISTRY.set(registry);
+    *GLOBAL_PLUGIN_REGISTRY.write() = Some(Arc::new(registry));
 }
 
-/// Access the global `PluginRegistry`, if it has been set.
-pub fn global_plugin_registry() -> Option<&'static PluginRegistry> {
-    GLOBAL_PLUGIN_REGISTRY.get()
+/// Access the published `PluginRegistry`, if a session has published one.
+pub fn global_plugin_registry() -> Option<Arc<PluginRegistry>> {
+    GLOBAL_PLUGIN_REGISTRY.read().clone()
 }
 
-/// Store the hook registry built from loaded plugins into a process-global
-/// static so that `run_global_pre_tool_hook` / `run_global_post_tool_hook`
-/// can access it from anywhere without passing the registry around.
+/// Publish the hook registry built from the loaded plugins so the tool loop
+/// and the `/hooks` browser can reach it. A later call replaces it.
 pub fn set_global_hooks(registry: HookRegistry) {
-    // OnceLock::set fails silently if already initialised (e.g. during tests).
-    let _ = GLOBAL_HOOK_REGISTRY.set(registry);
+    *GLOBAL_HOOK_REGISTRY.write() = Some(Arc::new(registry));
 }
 
 /// Access the hooks the session registered from its plugins, if any.
 ///
 /// The `/hooks` browser reads this so a plugin's hook is visible next to the
 /// ones from `settings.json`.
-pub fn global_hook_registry() -> Option<&'static HookRegistry> {
-    GLOBAL_HOOK_REGISTRY.get()
+pub fn global_hook_registry() -> Option<Arc<HookRegistry>> {
+    GLOBAL_HOOK_REGISTRY.read().clone()
 }
 
-/// Run all `PreToolUse` hooks registered by plugins for the given tool.
+/// Run every plugin hook registered for `event`.
 ///
-/// Returns `HookOutcome::Deny` if any blocking hook returns a non-zero exit
-/// code, otherwise `HookOutcome::Allow`.
-pub fn run_global_pre_tool_hook(
-    tool_name: &str,
-    tool_input: &serde_json::Value,
+/// `matcher_target` is what a hook's `matcher` is tested against, which is the
+/// tool name for the tool events and `None` for an event that carries no such
+/// subject. `payload` is written to each hook's stdin with the event name
+/// folded in.
+///
+/// Returns the first `Deny` a blocking hook produced, so a caller that can
+/// stop the operation has one thing to check. A caller that cannot stop
+/// anything may ignore the result.
+pub async fn run_global_hook(
+    event: HookEventKind,
+    matcher_target: Option<&str>,
+    payload: serde_json::Value,
 ) -> hooks::HookOutcome {
-    let registry = match GLOBAL_HOOK_REGISTRY.get() {
-        Some(r) => r,
-        None => return hooks::HookOutcome::Allow,
+    let Some(registry) = global_hook_registry() else {
+        return hooks::HookOutcome::Allow;
     };
 
-    let event_key = HookEventKind::PreToolUse.to_string();
-    let hooks_for_event = match registry.get(&event_key) {
-        Some(h) => h,
-        None => return hooks::HookOutcome::Allow,
+    let event_key = event.to_string();
+    let Some(hooks_for_event) = registry.get(&event_key) else {
+        return hooks::HookOutcome::Allow;
     };
 
-    let event_json = serde_json::json!({
-        "event": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-    })
-    .to_string();
+    let mut event_json = payload;
+    if let Some(object) = event_json.as_object_mut() {
+        object.insert(
+            "event".to_string(),
+            serde_json::Value::String(event_key.clone()),
+        );
+    }
+    let event_json = event_json.to_string();
 
     for hook in hooks_for_event {
-        // Apply matcher filter if present
-        if let Some(ref matcher) = hook.matcher {
-            if !matcher.is_empty() && matcher != tool_name && matcher != "*" {
+        if let Some(target) = matcher_target {
+            if !hooks::matcher_selects(hook.matcher.as_deref(), target) {
                 continue;
             }
         }
-        match hooks::run_hook_sync(hook, &event_json) {
-            hooks::HookOutcome::Deny(reason) => return hooks::HookOutcome::Deny(reason),
-            hooks::HookOutcome::Allow | hooks::HookOutcome::Error(_) => {}
+        if let hooks::HookOutcome::Deny(reason) = hooks::run_hook(hook, &event_json).await {
+            return hooks::HookOutcome::Deny(reason);
         }
     }
 
     hooks::HookOutcome::Allow
 }
 
-/// Run all `PostToolUse` hooks registered by plugins for the given tool.
-/// Post-tool hooks are informational; the return value is not used to block.
-pub fn run_global_post_tool_hook(
+/// Run the `PreToolUse` hooks for one tool call.
+pub async fn run_global_pre_tool_hook(
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+) -> hooks::HookOutcome {
+    run_global_hook(
+        HookEventKind::PreToolUse,
+        Some(tool_name),
+        serde_json::json!({
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+        }),
+    )
+    .await
+}
+
+/// Run the `PostToolUse` hooks for one tool call, or the
+/// `PostToolUseFailure` hooks when the tool returned an error.
+pub async fn run_global_post_tool_hook(
     tool_name: &str,
     tool_input: &serde_json::Value,
     tool_output: &str,
     is_error: bool,
 ) {
-    let registry = match GLOBAL_HOOK_REGISTRY.get() {
-        Some(r) => r,
-        None => return,
+    let event = if is_error {
+        HookEventKind::PostToolUseFailure
+    } else {
+        HookEventKind::PostToolUse
     };
-
-    let event_key = HookEventKind::PostToolUse.to_string();
-    let hooks_for_event = match registry.get(&event_key) {
-        Some(h) => h,
-        None => return,
-    };
-
-    let event_json = serde_json::json!({
-        "event": "PostToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-        "tool_output": tool_output,
-        "is_error": is_error,
-    })
-    .to_string();
-
-    for hook in hooks_for_event {
-        if let Some(ref matcher) = hook.matcher {
-            if !matcher.is_empty() && matcher != tool_name && matcher != "*" {
-                continue;
-            }
-        }
-        hooks::run_hook_sync(hook, &event_json);
-    }
+    run_global_hook(
+        event,
+        Some(tool_name),
+        serde_json::json!({
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "tool_output": tool_output,
+            "is_error": is_error,
+        }),
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
