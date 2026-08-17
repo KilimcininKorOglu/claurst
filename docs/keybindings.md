@@ -43,8 +43,9 @@ These bindings are active in all contexts.
 
 `Ctrl+Shift+L` needs `timelineEnabled` (see
 [Configuration](configuration.md#interface)); while the setting is off it says
-so and does nothing. Once the panel has focus the arrow keys move its cursor,
-`Enter` expands the selected row and `Esc` returns to the prompt.
+so and does nothing. Once the panel has focus, `Up` and `Down` move its cursor,
+`Right` expands the selected row, `Left` collapses it and `Esc` returns to the
+prompt. `Enter` always submits the prompt, never the panel.
 
 ### Chat Context
 

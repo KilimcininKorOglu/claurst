@@ -150,8 +150,8 @@ impl SlashCommand for TimelineCommand {
          The panel lists every tool call and finished turn as it happens, with\n\
          how long each step took and what the turn spent.\n\n\
          Ctrl+Shift+L does the same as /timeline toggle. Once the panel has\n\
-         focus, the arrow keys move the cursor, Enter expands the selected row\n\
-         and Esc returns to the prompt.\n\n\
+         focus, up and down move the cursor, right expands the selected row,\n\
+         left collapses it and Esc returns to the prompt.\n\n\
          Recording is off until `timelineEnabled` is turned on in /settings."
     }
 

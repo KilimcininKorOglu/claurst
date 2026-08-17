@@ -460,7 +460,9 @@ Show, hide or clear the live execution timeline panel. The panel lists every too
 /timeline clear
 ```
 
-With no argument it toggles, the same as `Ctrl+Shift+L`. Once the panel has focus the arrow keys move its cursor, `Enter` expands the selected row and `Esc` returns to the prompt.
+With no argument it toggles, the same as `Ctrl+Shift+L`. Once the panel has focus, `Up` and `Down` move its cursor, `Right` expands the selected row, `Left` collapses it and `Esc` returns to the prompt.
+
+`Enter` always belongs to the prompt, so a message can still be sent while the panel holds focus.
 
 The panel takes its share out of the transcript: on a wide terminal it sits to the right, on a narrow one along the bottom, and below 32×8 it is not drawn at all.
 

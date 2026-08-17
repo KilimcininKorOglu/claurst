@@ -2742,7 +2742,7 @@ impl App {
             TimelineAction::Show => {
                 self.timeline_visible = true;
                 self.timeline_focused = true;
-                "Timeline shown. ↑↓ to move, enter to expand, esc to leave.".to_string()
+                "Timeline shown. ↑↓ to move, → to expand, esc to leave.".to_string()
             }
             TimelineAction::Hide => {
                 self.hide_timeline_panel();
@@ -7390,7 +7390,7 @@ impl App {
         if !self.timeline_visible {
             self.timeline_visible = true;
             self.timeline_focused = true;
-            "Timeline shown. ↑↓ to move, enter to expand, esc to leave.".to_string()
+            "Timeline shown. ↑↓ to move, → to expand, esc to leave.".to_string()
         } else if !self.timeline_focused {
             self.timeline_focused = true;
             "Timeline focused.".to_string()
@@ -7437,7 +7437,12 @@ impl App {
                 let last = self.timeline.len().saturating_sub(1);
                 self.timeline.set_selected_idx(last);
             }
-            KeyCode::Enter => self.timeline_expanded = !self.timeline_expanded,
+            // Right and left rather than enter: the command loop answers a
+            // plain enter itself, before this runs, so binding expansion to it
+            // would look dead here and would steal the prompt's submit key if
+            // it ever did reach us.
+            KeyCode::Right => self.timeline_expanded = true,
+            KeyCode::Left => self.timeline_expanded = false,
             KeyCode::Esc => {
                 self.timeline_focused = false;
                 self.timeline_expanded = false;
@@ -9807,6 +9812,17 @@ mod timeline_tests {
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
         assert!(app.handle_timeline_key(&up), "the panel consumes the key");
         assert_eq!(app.timeline.selected_idx, 0);
+
+        let right = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
+        assert!(app.handle_timeline_key(&right));
+        assert!(app.timeline_expanded, "right expands the selected row");
+
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(
+            !app.handle_timeline_key(&enter),
+            "enter belongs to the prompt; the command loop answers it before \
+             this handler ever runs"
+        );
 
         let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         assert!(app.handle_timeline_key(&esc));
