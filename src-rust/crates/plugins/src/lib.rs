@@ -616,7 +616,7 @@ pub fn format_reload_summary(registry: &PluginRegistry, diff: &ReloadDiff) -> St
         if lsp_count == 1 { "" } else { "s" }
     ));
 
-    let mut msg = format!("Reloaded: {}", parts.join(" · "));
+    let mut msg = format!("On disk: {}", parts.join(" · "));
 
     if !diff.added.is_empty() {
         msg.push_str(&format!("\nAdded: {}", diff.added.join(", ")));
@@ -634,6 +634,10 @@ pub fn format_reload_summary(registry: &PluginRegistry, diff: &ReloadDiff) -> St
             if diff.error_count == 1 { "" } else { "s" }
         ));
     }
+
+    msg.push_str(
+        "\nThe running session keeps the plugins it started with. Restart to apply changes.",
+    );
 
     msg
 }
@@ -731,7 +735,11 @@ mod tests {
         let reg = PluginRegistry::new();
         let diff = ReloadDiff::default();
         let out = format_reload_summary(&reg, &diff);
-        assert!(out.contains("Reloaded"));
+        assert!(out.contains("On disk"));
+        assert!(
+            out.contains("Restart to apply"),
+            "the summary has to say the running session is unchanged: {out}"
+        );
     }
 
     /// Build a plugin directory the loader will accept.

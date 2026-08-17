@@ -31,7 +31,7 @@ impl SlashCommand for PluginCommand {
            /plugin enable <name>   — enable a plugin (persisted to settings)\n\
            /plugin disable <name>  — disable a plugin (persisted to settings)\n\
            /plugin install <path>  — install a plugin from a local directory\n\
-           /plugin reload       — reload plugins from disk"
+           /plugin reload       — rescan the plugin directories on disk"
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -81,7 +81,7 @@ impl SlashCommand for PluginCommand {
                     ));
                 }
                 CommandResult::Message(format!(
-                    "Plugin '{}' enabled. Run `/plugin reload` to apply changes in this session.",
+                    "Plugin '{}' enabled. It loads on the next session.",
                     name
                 ))
             }
@@ -109,7 +109,7 @@ impl SlashCommand for PluginCommand {
                     ));
                 }
                 CommandResult::Message(format!(
-                    "Plugin '{}' disabled. Run `/plugin reload` to apply changes in this session.",
+                    "Plugin '{}' disabled. Its hooks and MCP servers stop on the next session.",
                     name
                 ))
             }
@@ -140,10 +140,13 @@ impl SlashCommand for PluginCommand {
                 }
             }
             claurst_plugins::PluginSubCommand::Reload => {
-                let old_registry = get_registry(&project_dir).await;
-                let (new_registry, diff) =
-                    claurst_plugins::reload_plugins(&old_registry, &project_dir, &[]).await;
-                CommandResult::Message(claurst_plugins::format_reload_summary(&new_registry, &diff))
+                // The session's plugin set is fixed at startup, so there is
+                // nothing to diff against: report what is on disk now.
+                let registry = claurst_plugins::load_plugins(&project_dir, &[]).await;
+                CommandResult::Message(claurst_plugins::format_reload_summary(
+                    &registry,
+                    &claurst_plugins::ReloadDiff::default(),
+                ))
             }
             claurst_plugins::PluginSubCommand::Help => CommandResult::Message(
                 "Plugin commands:\n\
@@ -153,7 +156,7 @@ impl SlashCommand for PluginCommand {
                      /plugin enable <name>   — enable a plugin\n\
                      /plugin disable <name>  — disable a plugin\n\
                      /plugin install <path>  — install plugin from local path\n\
-                     /plugin reload       — reload plugins from disk"
+                     /plugin reload       — rescan the plugin directories on disk"
                     .to_string(),
             ),
         }
@@ -168,21 +171,22 @@ impl SlashCommand for ReloadPluginsCommand {
         "reload-plugins"
     }
     fn description(&self) -> &str {
-        "Reload all plugins without restarting"
+        "Rescan the plugin directories on disk"
     }
     fn help(&self) -> &str {
         "Usage: /reload-plugins\n\
-         Reloads all plugins and shows what changed."
+         Rescans the plugin directories and reports what is installed. \
+         The running session keeps the plugins it started with."
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
         let project_dir = ctx.working_dir.clone();
+        let registry = claurst_plugins::load_plugins(&project_dir, &[]).await;
 
-        let old_registry = claurst_plugins::load_plugins(&project_dir, &[]).await;
-        let (new_registry, diff) =
-            claurst_plugins::reload_plugins(&old_registry, &project_dir, &[]).await;
-
-        CommandResult::Message(claurst_plugins::format_reload_summary(&new_registry, &diff))
+        CommandResult::Message(claurst_plugins::format_reload_summary(
+            &registry,
+            &claurst_plugins::ReloadDiff::default(),
+        ))
     }
 }
 
