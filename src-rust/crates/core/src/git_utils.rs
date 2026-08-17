@@ -157,18 +157,15 @@ pub fn switch_branch(repo_root: &Path, name: &str) -> bool {
 
 /// Stash uncommitted changes with an optional message.
 pub fn stash(repo_root: &Path, message: Option<&str>) -> bool {
-    let mut args = vec!["stash", "push"];
-    let msg_flag;
+    let mut cmd = Command::new("git");
+    cmd.current_dir(repo_root).args(["stash", "push"]);
     if let Some(m) = message {
-        msg_flag = format!("-m {}", m);
-        args.push(&msg_flag);
+        // Two argv elements. git also accepts the value glued to the flag, so
+        // one `"-m <message>"` token parses as `-m` plus a value that keeps the
+        // separating space, and the stash is recorded with a leading blank.
+        cmd.arg("-m").arg(m);
     }
-    Command::new("git")
-        .current_dir(repo_root)
-        .args(&args)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Pop the top stash entry.
@@ -215,5 +212,50 @@ mod tests {
         // smoke test — just ensure it doesn't panic with empty output
         let commits = get_commit_history(Path::new("."), 0);
         assert!(commits.is_empty());
+    }
+
+    /// Run `git` in `dir` and return its stdout, panicking on a failed spawn.
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap_or_else(|err| panic!("git {args:?}: {err}"));
+        String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
+    /// A repository with one commit and one uncommitted edit, ready to stash.
+    fn repo_with_an_edit() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path();
+        git(path, &["init", "--quiet"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "test"]);
+        git(path, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(path.join("file.txt"), "first").expect("write");
+        git(path, &["add", "file.txt"]);
+        git(path, &["commit", "--quiet", "-m", "initial"]);
+        std::fs::write(path.join("file.txt"), "second").expect("rewrite");
+        dir
+    }
+
+    #[test]
+    fn a_stash_message_reaches_git_without_a_leading_space() {
+        let dir = repo_with_an_edit();
+        let path = dir.path();
+
+        assert!(stash(path, Some("message with spaces")), "the stash failed");
+
+        // git accepts `-m<value>` too, so the single-token form stored the
+        // message with a leading space rather than failing. `git stash list`
+        // trims it; the stash commit's own subject does not.
+        let subject = git(path, &["log", "-g", "--format=%s", "refs/stash"]);
+        let stored = subject
+            .trim_end()
+            .split_once(": ")
+            .map(|(_, message)| message)
+            .unwrap_or_default();
+
+        assert_eq!(stored, "message with spaces", "in subject {subject:?}");
     }
 }
