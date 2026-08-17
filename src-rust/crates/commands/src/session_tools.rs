@@ -51,35 +51,10 @@ impl SlashCommand for SkillsCommand {
             }
         }
 
-        // Include skills contributed by installed plugins.
-        if let Some(registry) = claurst_plugins::global_plugin_registry() {
-            for skill_dir in registry.all_skill_paths() {
-                if let Ok(entries) = std::fs::read_dir(&skill_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        // Skills can be individual .md files or subdirs with SKILL.md.
-                        if p.is_dir() {
-                            if p.join("SKILL.md").exists() || p.join("skill.md").exists() {
-                                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                                    let skill_name = name.to_string();
-                                    if !found.contains(&skill_name) {
-                                        found.push(skill_name);
-                                    }
-                                }
-                            }
-                        } else if p.extension().is_some_and(|e| e == "md") {
-                            if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                                let name = stem.to_string();
-                                if !found.contains(&name) {
-                                    found.push(name);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // Skills a plugin contributed arrive through discovery below: the
+        // session adds each plugin's `skills/` directory to `config.skills`,
+        // so they are listed by the same route that can run them.
+        //
         // Include discovered skills from .claurst/skills/ and configured paths/URLs.
         let discovered = claurst_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
 

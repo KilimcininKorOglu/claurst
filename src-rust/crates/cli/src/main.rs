@@ -848,7 +848,20 @@ async fn main() -> anyhow::Result<()> {
                 config.mcp_servers.push(mcp_server);
             }
         }
+
+        // Feed the plugins' `skills/` directories into skill discovery, which
+        // is the only route by which a skill can be listed and then run.
+        for skill_dir in plugin_registry.all_skill_paths() {
+            let path = skill_dir.display().to_string();
+            if !config.skills.paths.contains(&path) {
+                config.skills.paths.push(path);
+            }
+        }
     }
+
+    // Publish the registry: sub-agent prompts read the plugins' `agents/`
+    // definitions from here.
+    claurst_plugins::set_global_registry(plugin_registry);
 
     // Initialize MCP servers first (needed for ToolContext.mcp_manager).
     //
