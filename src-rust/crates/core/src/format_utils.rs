@@ -54,6 +54,10 @@ pub fn format_usage_summary(tokens: u64, cost_cents: f64) -> String {
 
 /// Format a relative time string (for session listings).
 /// "just now", "2 minutes ago", "3 hours ago", "yesterday", "Mar 15"
+///
+/// Anything past "yesterday" carries a calendar date instead of a count of
+/// days, because "31 days ago" makes the reader do the arithmetic. The date is
+/// the one on the machine's own clock, like [`format_message_time`].
 pub fn format_relative_time(ts_ms: u64) -> String {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -74,8 +78,18 @@ pub fn format_relative_time(ts_ms: u64) -> String {
     } else if diff_secs < 172800 {
         "yesterday".to_string()
     } else {
-        let days = diff_secs / 86400;
-        format!("{} days ago", days)
+        // A timestamp too far out to represent falls back to the elapsed
+        // count, which is imprecise but never names a wrong date.
+        match i64::try_from(ts_ms)
+            .ok()
+            .and_then(chrono::DateTime::from_timestamp_millis)
+        {
+            Some(instant) => instant
+                .with_timezone(&chrono::Local)
+                .format("%b %-d")
+                .to_string(),
+            None => format!("{} days ago", diff_secs / 86400),
+        }
     }
 }
 
@@ -166,5 +180,59 @@ mod tests {
             date.contains("Mar") || date.contains("Feb") || date.contains("Apr"),
             "date part should name the month, got {date:?}"
         );
+    }
+
+    /// Milliseconds since the epoch, `secs` ago.
+    fn ms_ago(secs: u64) -> u64 {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        now_ms.saturating_sub(secs * 1000)
+    }
+
+    #[test]
+    fn relative_time_buckets_up_to_yesterday() {
+        assert_eq!(format_relative_time(ms_ago(0)), "just now");
+        assert_eq!(format_relative_time(ms_ago(59)), "just now");
+        assert_eq!(format_relative_time(ms_ago(60)), "1 minute ago");
+        assert_eq!(format_relative_time(ms_ago(5 * 60)), "5 minutes ago");
+        assert_eq!(format_relative_time(ms_ago(3_600)), "1 hour ago");
+        assert_eq!(format_relative_time(ms_ago(2 * 3_600)), "2 hours ago");
+        assert_eq!(format_relative_time(ms_ago(30 * 3_600)), "yesterday");
+    }
+
+    #[test]
+    fn relative_time_past_yesterday_is_a_calendar_date() {
+        let ts_ms = ms_ago(30 * 86_400);
+        let formatted = format_relative_time(ts_ms);
+
+        assert!(
+            !formatted.contains("ago"),
+            "expected a calendar date, got {formatted:?}"
+        );
+
+        let expected = chrono::DateTime::from_timestamp_millis(ts_ms as i64)
+            .expect("a timestamp from 30 days ago is representable")
+            .with_timezone(&chrono::Local)
+            .format("%b %-d")
+            .to_string();
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn relative_time_reads_the_local_calendar_day() {
+        // 23:30 UTC. West of UTC that is still the 14th; east of it, the 15th.
+        // Either way the month and day must be the ones on the local clock,
+        // never the UTC ones, or a session listed at night jumps a day.
+        let instant = chrono::DateTime::parse_from_rfc3339("2020-03-14T23:30:00Z")
+            .expect("fixed instant is valid");
+        let ts_ms = instant.timestamp_millis() as u64;
+
+        let expected = instant
+            .with_timezone(&chrono::Local)
+            .format("%b %-d")
+            .to_string();
+        assert_eq!(format_relative_time(ts_ms), expected);
     }
 }
