@@ -334,14 +334,81 @@ fn command_name_from_file(path: &Path, plugin_name: &str) -> String {
     format!("{}:{}", plugin_name, stem)
 }
 
-/// Pull the first non-empty line from a markdown file as a description.
+/// Describe a command markdown file: its frontmatter `description:` when it
+/// has one, otherwise the first line of the body.
+///
+/// Reading the raw first line instead would return the `---` that opens the
+/// frontmatter, which is what the command lists then show.
 fn extract_description_from_markdown_file(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    for line in content.lines() {
+
+    if let Some(after_open) = content.strip_prefix("---") {
+        if let Some(close_pos) = after_open.find("\n---") {
+            for line in after_open[..close_pos].lines() {
+                if let Some(value) = line.trim().strip_prefix("description:") {
+                    let value = value.trim().trim_matches('"').trim_matches('\'');
+                    if !value.is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    for line in claurst_core::strip_frontmatter(&content).lines() {
         let trimmed = line.trim_start_matches('#').trim();
         if !trimmed.is_empty() {
             return Some(trimmed.to_string());
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("command file");
+        path
+    }
+
+    #[test]
+    fn frontmatter_supplies_the_description() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = write(
+            tmp.path(),
+            "greet.md",
+            "---\ndescription: Greet someone\n---\nSay hello to $ARGUMENTS.",
+        );
+        assert_eq!(
+            extract_description_from_markdown_file(&path).as_deref(),
+            Some("Greet someone")
+        );
+    }
+
+    #[test]
+    fn without_frontmatter_the_first_body_line_describes_it() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = write(tmp.path(), "audit.md", "# Audit the diff\nDetails follow.");
+        assert_eq!(
+            extract_description_from_markdown_file(&path).as_deref(),
+            Some("Audit the diff")
+        );
+    }
+
+    #[test]
+    fn frontmatter_without_a_description_falls_back_to_the_body() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = write(
+            tmp.path(),
+            "notes.md",
+            "---\nname: notes\n---\nWrite the notes.",
+        );
+        assert_eq!(
+            extract_description_from_markdown_file(&path).as_deref(),
+            Some("Write the notes.")
+        );
+    }
 }
