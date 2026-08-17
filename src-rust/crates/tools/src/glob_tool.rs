@@ -31,7 +31,8 @@ impl Tool for GlobTool {
         "Fast file pattern matching tool that works with any codebase size. \
          Supports glob patterns like \"**/*.rs\" or \"src/**/*.ts\". Returns \
          matching file paths sorted by modification time. Use this tool when \
-         you need to find files by name patterns."
+         you need to find files by name patterns. Files excluded by .gitignore \
+         or .ignore are skipped unless the includeIgnoredFiles setting is on."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -89,28 +90,41 @@ impl Tool for GlobTool {
         // On Windows, normalize backslashes to forward slashes for the glob crate
         let pattern_str = pattern_str.replace('\\', "/");
 
-        let entries: Vec<PathBuf> = match glob::glob(&pattern_str) {
-            Ok(paths) => {
-                let mut out = Vec::new();
-                for path in paths.filter_map(|p| p.ok()) {
-                    if !ctx.path_is_within_workspace(&path) {
-                        if let Err(e) = ctx.check_permission_for_path(
-                            self.name(),
-                            &format!("Glob result {}", path.display()),
-                            path.clone(),
-                            true,
-                        ) {
-                            return ToolResult::error(e.to_string());
-                        }
-                    }
-                    out.push(path);
-                }
-                out
-            }
-            Err(e) => {
-                return ToolResult::error(format!("Invalid glob pattern: {}", e));
-            }
+        // The walk decides which files the pattern gets to see; the pattern
+        // itself is still matched by the glob crate, so a pattern keeps meaning
+        // what it meant. `require_literal_separator` is the one option that has
+        // to be set: `glob()` walked the tree component by component, so `*`
+        // could never cross a `/`, while `matches_path` runs against the whole
+        // path and would let `*.rs` swallow `src/lib.rs`. `**` crosses
+        // directories either way.
+        let options = glob::MatchOptions {
+            require_literal_separator: true,
+            ..glob::MatchOptions::new()
         };
+        let pattern = match glob::Pattern::new(&pattern_str) {
+            Ok(pattern) => pattern,
+            Err(e) => return ToolResult::error(format!("Invalid glob pattern: {}", e)),
+        };
+
+        let mut entries: Vec<PathBuf> = Vec::new();
+        for entry in crate::ignore_aware_walk(&base_dir, ctx.config.include_ignored_files) {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            if !pattern.matches_path_with(path, options) {
+                continue;
+            }
+            if !ctx.path_is_within_workspace(path) {
+                if let Err(e) = ctx.check_permission_for_path(
+                    self.name(),
+                    &format!("Glob result {}", path.display()),
+                    path.to_path_buf(),
+                    true,
+                ) {
+                    return ToolResult::error(e.to_string());
+                }
+            }
+            entries.push(path.to_path_buf());
+        }
 
         if entries.is_empty() {
             return ToolResult::success(format!(
@@ -150,5 +164,125 @@ impl Tool for GlobTool {
         }
 
         ToolResult::success(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claurst_core::config::Config;
+    use claurst_core::permissions::AutoPermissionHandler;
+    use std::path::Path;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::Arc;
+
+    /// A tree with one ignored directory, one hidden directory, and a `.git`.
+    fn tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let write = |rel: &str, body: &str| {
+            let path = root.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("mkdir");
+            }
+            std::fs::write(path, body).expect("write");
+        };
+
+        write(".gitignore", "build/\n");
+        write("top.txt", "top");
+        write("src/nested.txt", "nested");
+        write("build/artifact.txt", "artifact");
+        write(".github/workflows/ci.txt", "ci");
+        write(".git/config", "gitdir");
+        write("top.rs", "fn main() {}");
+        write("src/lib.rs", "pub fn f() {}");
+
+        dir
+    }
+
+    fn ctx_for(root: &Path, include_ignored: bool) -> ToolContext {
+        let config = Config {
+            include_ignored_files: include_ignored,
+            ..Default::default()
+        };
+        ToolContext {
+            working_dir: root.to_path_buf(),
+            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_handler: Arc::new(AutoPermissionHandler {
+                mode: claurst_core::config::PermissionMode::Default,
+            }),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            session_id: "test-glob".to_string(),
+            file_history: Arc::new(parking_lot::Mutex::new(
+                claurst_core::file_history::FileHistory::new(),
+            )),
+            current_turn: Arc::new(AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config,
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    async fn run(root: &Path, pattern: &str, include_ignored: bool) -> String {
+        let ctx = ctx_for(root, include_ignored);
+        let result = GlobTool.execute(json!({ "pattern": pattern }), &ctx).await;
+        assert!(!result.is_error, "glob failed: {}", result.content);
+        result.content
+    }
+
+    #[tokio::test]
+    async fn a_gitignored_directory_is_skipped() {
+        let dir = tree();
+        let out = run(dir.path(), "**/*.txt", false).await;
+
+        assert!(out.contains("top.txt"), "{out}");
+        assert!(out.contains("nested.txt"), "{out}");
+        assert!(!out.contains("artifact.txt"), "build/ is ignored: {out}");
+    }
+
+    #[tokio::test]
+    async fn the_setting_brings_the_ignored_directory_back() {
+        let dir = tree();
+        let out = run(dir.path(), "**/*.txt", true).await;
+
+        assert!(out.contains("artifact.txt"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn a_hidden_directory_is_still_searched() {
+        // Being hidden is not an ignore rule, and .github/workflows holds real
+        // source that a search has to reach.
+        let dir = tree();
+        let out = run(dir.path(), "**/*.txt", false).await;
+
+        assert!(out.contains("ci.txt"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn the_git_directory_is_never_searched() {
+        let dir = tree();
+        let out = run(dir.path(), "**/*", false).await;
+
+        assert!(!out.contains(".git/config"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn pattern_semantics_are_unchanged() {
+        let dir = tree();
+
+        let recursive = run(dir.path(), "**/*.rs", false).await;
+        assert!(recursive.contains("top.rs"), "{recursive}");
+        assert!(recursive.contains("lib.rs"), "{recursive}");
+
+        let shallow = run(dir.path(), "*.rs", false).await;
+        assert!(shallow.contains("top.rs"), "{shallow}");
+        assert!(!shallow.contains("lib.rs"), "one level only: {shallow}");
     }
 }

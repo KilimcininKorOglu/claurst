@@ -176,6 +176,33 @@ pub enum PermissionLevel {
     Forbidden,
 }
 
+/// Walk `root` the way the Glob and Grep tools agree to walk it.
+///
+/// Reads `.gitignore`, `.ignore`, `.git/info/exclude` and the global git rules,
+/// and never descends into a directory they exclude, so a build tree costs
+/// nothing rather than filling the result window.
+///
+/// Two deliberate departures from the crate defaults:
+///
+/// - Hidden entries are kept. Being hidden is not an ignore rule, and dropping
+///   them would hide `.github/workflows/` from both tools.
+/// - `.git` is dropped anyway, because keeping hidden entries would otherwise
+///   walk straight into it and there is nothing to find there.
+///
+/// `include_ignored` turns every standard filter off, which is what
+/// `Config::include_ignored_files` is for.
+pub(crate) fn ignore_aware_walk(root: &std::path::Path, include_ignored: bool) -> ignore::Walk {
+    let mut builder = ignore::WalkBuilder::new(root);
+    if include_ignored {
+        builder.standard_filters(false);
+    }
+    builder
+        .hidden(false)
+        .follow_links(true)
+        .filter_entry(|entry| entry.file_name() != ".git")
+        .build()
+}
+
 #[derive(Debug)]
 pub struct PendingPermissionRequest {
     pub tool_use_id: String,

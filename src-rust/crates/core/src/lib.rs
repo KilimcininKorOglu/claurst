@@ -1305,6 +1305,14 @@ pub mod config {
             rename = "fileInjectionMaxSize"
         )]
         pub file_injection_max_size: usize,
+        /// Whether the Glob and Grep tools search files that `.gitignore` and
+        /// `.ignore` exclude. Defaults to false.
+        ///
+        /// Stated in the positive so the default survives `Config::default()`,
+        /// which derives every `bool` as `false`. A `respect_gitignore` field
+        /// would silently start out disabled there.
+        #[serde(default, rename = "includeIgnoredFiles")]
+        pub include_ignored_files: bool,
         /// Total request timeout in seconds applied to provider HTTP clients.
         /// Slow local models (CPU inference, large MoE) can take several minutes
         /// to first token; raise this to avoid premature cut-off. `None` (or 0)
@@ -2500,6 +2508,8 @@ pub mod config {
                 } else {
                     base.config.file_injection_max_size
                 },
+                include_ignored_files: over.config.include_ignored_files
+                    || base.config.include_ignored_files,
                 request_timeout_secs: over
                     .config
                     .request_timeout_secs

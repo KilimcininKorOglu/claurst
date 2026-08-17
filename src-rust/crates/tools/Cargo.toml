@@ -20,6 +20,7 @@ async-trait = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }
 walkdir = { workspace = true }
+ignore = { workspace = true }
 similar = { workspace = true }
 tempfile = { workspace = true }
 bytes = { workspace = true }

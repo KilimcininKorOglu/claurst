@@ -68,6 +68,7 @@ pub struct SettingsScreen {
     pub show_git_branch: bool,
     pub compact_threshold: String,
     pub auto_commits: bool,
+    pub include_ignored_files: bool,
     pub output_format: String,
     pub disable_claude_mds: bool,
     pub file_injection_enabled: bool,
@@ -104,6 +105,7 @@ impl SettingsScreen {
             show_git_branch: false,
             compact_threshold: "95".to_string(),
             auto_commits: false,
+            include_ignored_files: false,
             output_format: "text".to_string(),
             disable_claude_mds: false,
             file_injection_enabled: true,
@@ -144,6 +146,7 @@ impl SettingsScreen {
         self.show_git_branch = self.settings_snapshot.show_git_branch;
         self.compact_threshold = self.settings_snapshot.config.compact_threshold.to_string();
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
+        self.include_ignored_files = self.settings_snapshot.config.include_ignored_files;
         self.output_format = match &self.settings_snapshot.config.output_format {
             claurst_core::config::OutputFormat::Text => "text".to_string(),
             claurst_core::config::OutputFormat::Json => "json".to_string(),
@@ -406,6 +409,18 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Automatically snapshot changes to git via shadow-git.",
             kind: SettingKind::Bool,
             value: if screen.auto_commits { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "include_ignored_files",
+            label: "Search ignored files",
+            description: "Let Glob and Grep search files that .gitignore excludes.",
+            kind: SettingKind::Bool,
+            value: if screen.include_ignored_files {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
         },
         SettingsEntry {
             key: "output_format",
@@ -901,6 +916,11 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                             if new_value { Some(true) } else { None };
                         let _ = screen.settings_snapshot.save_sync();
                     }
+                    "include_ignored_files" => {
+                        screen.include_ignored_files = new_value;
+                        screen.settings_snapshot.config.include_ignored_files = new_value;
+                        let _ = screen.settings_snapshot.save_sync();
+                    }
                     "disable_claude_mds" => {
                         screen.disable_claude_mds = new_value;
                         screen.settings_snapshot.config.disable_claude_mds = new_value;
@@ -981,8 +1001,8 @@ mod tests {
             entries.len()
         );
         assert!(
-            entries.len() <= 20,
-            "Should have at most 20 editable settings, got {}",
+            entries.len() <= 21,
+            "Should have at most 21 editable settings, got {}",
             entries.len()
         );
     }
