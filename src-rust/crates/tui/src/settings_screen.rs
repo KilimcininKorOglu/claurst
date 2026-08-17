@@ -50,6 +50,12 @@ pub struct SettingsScreen {
     pub settings_snapshot: Settings,
     /// Pending changes (field_name → new_value string).
     pub pending_changes: HashMap<String, String>,
+    /// Why the last write to `settings.json` failed, if it did.
+    ///
+    /// A settings screen that reports "true" while the file on disk still says
+    /// "false" is worse than one that refuses the change, so every save records
+    /// its outcome here and the footer shows it.
+    pub save_error: Option<String>,
 
     // ---- Real settings fields ----
     pub auto_compact: bool,
@@ -90,6 +96,7 @@ impl SettingsScreen {
             edit_value: String::new(),
             settings_snapshot: settings_snapshot.clone(),
             pending_changes: HashMap::new(),
+            save_error: None,
             auto_compact: false,
             notifications: true,
             show_turn_duration: false,
@@ -176,6 +183,7 @@ impl SettingsScreen {
     pub fn open(&mut self) {
         self.settings_snapshot = Settings::load_sync().unwrap_or_default();
         self.pending_changes.clear();
+        self.save_error = None;
         self.edit_field = None;
         self.edit_value.clear();
         self.search_query.clear();
@@ -223,6 +231,14 @@ impl SettingsScreen {
         if total_visible > 0 && self.selected_idx + 1 < total_visible {
             self.selected_idx += 1;
         }
+    }
+
+    /// Write the snapshot back to `settings.json` and keep the outcome.
+    fn persist(&mut self) {
+        self.save_error = match self.settings_snapshot.save_sync() {
+            Ok(()) => None,
+            Err(error) => Some(error.to_string()),
+        };
     }
 
     /// Start editing a field by name, seeding the buffer with current value.
@@ -283,7 +299,7 @@ impl SettingsScreen {
             }
         }
         self.settings_snapshot.config = config.clone();
-        let _ = self.settings_snapshot.save_sync();
+        self.persist();
         self.pending_changes.clear();
     }
 }
@@ -642,8 +658,18 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
         .block(Block::default().padding(ratatui::widgets::Padding::new(1, 0, 1, 0)));
     frame.render_widget(desc_para, description_area);
 
-    // Footer
-    let footer = if screen.edit_field.is_some() {
+    // Footer. A failed write outranks the key hints: the list above already
+    // shows the new value, so without this the screen would claim a change
+    // that never reached disk.
+    let footer = if let Some(error) = &screen.save_error {
+        Line::from(vec![
+            Span::styled(
+                " Not saved ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(error.clone(), Style::default().fg(Color::Red)),
+        ])
+    } else if screen.edit_field.is_some() {
         Line::from(vec![
             Span::styled(
                 " Enter ",
@@ -865,27 +891,22 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "auto_compact" => {
                         screen.auto_compact = new_value;
                         screen.settings_snapshot.auto_compact = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "notifications" => {
                         screen.notifications = new_value;
                         screen.settings_snapshot.notifications = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "show_turn_duration" => {
                         screen.show_turn_duration = new_value;
                         screen.settings_snapshot.show_turn_duration = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "show_message_timestamps" => {
                         screen.show_message_timestamps = new_value;
                         screen.settings_snapshot.show_message_timestamps = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "reduce_motion" => {
                         screen.reduce_motion = new_value;
                         screen.settings_snapshot.reduce_motion = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "companion_enabled" => {
                         screen.companion_enabled = new_value;
@@ -896,70 +917,57 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                             .unwrap_or_default();
                         companion.enabled = new_value;
                         screen.settings_snapshot.companion = Some(companion);
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "terminal_progress_bar" => {
                         screen.terminal_progress_bar = new_value;
                         screen.settings_snapshot.terminal_progress_bar = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "verbose" => {
                         screen.verbose = new_value;
                         screen.settings_snapshot.config.verbose = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "cursor_blink_enabled" => {
                         screen.cursor_blink_enabled = new_value;
                         screen.settings_snapshot.config.cursor_blink_enabled = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "auto_copy_enabled" => {
                         screen.auto_copy_enabled = new_value;
                         screen.settings_snapshot.auto_copy_on_highlight = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "mouse_capture" => {
                         screen.mouse_capture = new_value;
                         // Persist only the off state; on is the default, so clear the key.
                         screen.settings_snapshot.config.mouse_capture =
                             if new_value { None } else { Some(false) };
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "show_cwd" => {
                         screen.show_cwd = new_value;
                         screen.settings_snapshot.show_cwd = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "show_git_branch" => {
                         screen.show_git_branch = new_value;
                         screen.settings_snapshot.show_git_branch = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "auto_commits" => {
                         screen.auto_commits = new_value;
                         screen.settings_snapshot.config.auto_commits =
                             if new_value { Some(true) } else { None };
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "include_ignored_files" => {
                         screen.include_ignored_files = new_value;
                         screen.settings_snapshot.config.include_ignored_files = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "web_search_fallback" => {
                         screen.web_search_fallback = new_value;
                         screen.settings_snapshot.config.web_search_fallback = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "disable_claude_mds" => {
                         screen.disable_claude_mds = new_value;
                         screen.settings_snapshot.config.disable_claude_mds = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "fileInjectionEnabled" => {
                         screen.file_injection_enabled = new_value;
                         screen.settings_snapshot.config.file_injection_enabled = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "fileAutocompleteShowHiddenFiles" => {
                         screen.file_autocomplete_show_hidden_files = new_value;
@@ -967,10 +975,10 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                             .settings_snapshot
                             .config
                             .file_autocomplete_show_hidden_files = new_value;
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     _ => {}
                 }
+                screen.persist();
             }
             SettingKind::Enum { ref options } => {
                 let current_idx = options.iter().position(|&o| o == entry.value).unwrap_or(0);
@@ -981,7 +989,6 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                     "output_style" => {
                         screen.output_style = new_value.to_string();
                         screen.settings_snapshot.config.output_style = Some(new_value.to_string());
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     "output_format" => {
                         screen.output_format = new_value.to_string();
@@ -990,10 +997,10 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen) {
                             "stream_json" => claurst_core::config::OutputFormat::StreamJson,
                             _ => claurst_core::config::OutputFormat::Text,
                         };
-                        let _ = screen.settings_snapshot.save_sync();
                     }
                     _ => {}
                 }
+                screen.persist();
             }
             SettingKind::Number => {
                 screen.start_edit(entry.key, &entry.value);
@@ -1181,6 +1188,54 @@ mod tests {
                 None => std::env::remove_var("CLAURST_HOME"),
             }
         }
+    }
+
+    /// `save_sync` refuses to overwrite a settings file it cannot parse, which
+    /// is the failure the screen used to discard.
+    #[test]
+    fn a_refused_save_is_reported_instead_of_discarded() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+        let path = claurst_core::claurst_home().join("settings.json");
+        std::fs::create_dir_all(claurst_core::claurst_home()).expect("mkdir");
+        std::fs::write(&path, r#"{"config":{"model":"x",}}"#).expect("write");
+
+        let mut screen = SettingsScreen::new();
+        screen.search_query = "Web search fallback".to_string();
+        screen.selected_idx = 0;
+
+        toggle_or_cycle_current(&mut screen);
+
+        let error = screen
+            .save_error
+            .expect("the refused write must be reported");
+        assert!(error.contains("settings"), "unexpected message: {error}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            r#"{"config":{"model":"x",}}"#,
+            "the malformed file must be left alone"
+        );
+    }
+
+    #[test]
+    fn a_save_that_lands_leaves_no_error_behind() {
+        let _lock = match HOME_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _home = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.save_error = Some("stale".to_string());
+        screen.search_query = "Web search fallback".to_string();
+        screen.selected_idx = 0;
+
+        toggle_or_cycle_current(&mut screen);
+
+        assert_eq!(screen.save_error, None);
     }
 
     #[test]
