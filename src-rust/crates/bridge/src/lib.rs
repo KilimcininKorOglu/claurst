@@ -18,6 +18,7 @@
 
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use claurst_core::timeline::TimelineRow;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -496,6 +497,16 @@ pub enum BridgeEvent {
         message: String,
         code: Option<String>,
     },
+    /// One row of the live execution timeline, new or updated.
+    ///
+    /// A row arrives once when it opens and again each time it changes, and
+    /// `row.id` identifies which one: a client replaces the row it already
+    /// holds under that id rather than appending a second copy.
+    ///
+    /// The timings are the ones the machine measured. A long poll can hold a
+    /// batch for up to its full interval, so a client that stamped its own
+    /// arrival times would report durations that are pure transport delay.
+    TimelineRow { row: TimelineRow },
     /// Response to a `Ping` message.
     Pong { server_time: Option<u64> },
     /// Session lifecycle state change.
@@ -1675,6 +1686,11 @@ pub enum BridgeOutbound {
     SessionBusy {
         busy: bool,
     },
+    /// One row of the live execution timeline, new or updated.
+    ///
+    /// The terminal builds the row and hands over a copy, so both screens show
+    /// the same step with the same timings.
+    TimelineRow(TimelineRow),
     /// The conversation that happened before the bridge connected.
     ///
     /// Without it a client attaching to a session already in progress sees an
@@ -2008,6 +2024,9 @@ pub async fn run_bridge_loop(
                     }
                     Some(BridgeOutbound::Status { message }) => {
                         let _ = bridge_ev_tx.send(BridgeEvent::Status { message }).await;
+                    }
+                    Some(BridgeOutbound::TimelineRow(row)) => {
+                        let _ = bridge_ev_tx.send(BridgeEvent::TimelineRow { row }).await;
                     }
                     Some(BridgeOutbound::TokenWarning { level, pct_used }) => {
                         let _ = bridge_ev_tx
@@ -2523,5 +2542,73 @@ mod tests {
             back,
             BridgeEvent::TurnComplete { usage: None, .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod timeline_event_tests {
+    use super::*;
+    use claurst_core::timeline::{TimelineKind, TimelineStatus};
+
+    fn sample_row() -> TimelineRow {
+        TimelineRow {
+            id: "tool-1".to_string(),
+            title: "Reading file: README.md".to_string(),
+            kind: TimelineKind::ToolCall,
+            status: TimelineStatus::Done,
+            started_at_ms: 1_000,
+            finished_at_ms: Some(1_450),
+            token_delta_input: None,
+            token_delta_output: None,
+            cost_delta_usd: None,
+            detail_preview: "12 lines".to_string(),
+            expandable_details: "{\"file_path\":\"README.md\"}".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_timeline_row_travels_under_its_wire_name() {
+        let event = BridgeEvent::TimelineRow { row: sample_row() };
+        let json = match serde_json::to_value(&event) {
+            Ok(json) => json,
+            Err(error) => panic!("the event should serialise: {error}"),
+        };
+
+        assert_eq!(json["type"], "timeline_row");
+        assert_eq!(json["row"]["id"], "tool-1");
+        assert_eq!(json["row"]["kind"], "tool_call");
+        assert_eq!(json["row"]["status"], "done");
+    }
+
+    #[test]
+    fn a_timeline_row_survives_the_round_trip() {
+        let row = sample_row();
+        let json = match serde_json::to_string(&BridgeEvent::TimelineRow { row: row.clone() }) {
+            Ok(json) => json,
+            Err(error) => panic!("the event should serialise: {error}"),
+        };
+        let decoded: BridgeEvent = match serde_json::from_str(&json) {
+            Ok(decoded) => decoded,
+            Err(error) => panic!("the event should decode: {error}"),
+        };
+
+        match decoded {
+            BridgeEvent::TimelineRow { row: decoded } => assert_eq!(decoded, row),
+            other => panic!("expected a timeline row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_server_timings_are_the_ones_that_travel() {
+        let json = match serde_json::to_value(BridgeEvent::TimelineRow { row: sample_row() }) {
+            Ok(json) => json,
+            Err(error) => panic!("the event should serialise: {error}"),
+        };
+
+        assert_eq!(json["row"]["started_at_ms"], 1_000);
+        assert_eq!(
+            json["row"]["finished_at_ms"], 1_450,
+            "a client must not have to time the step itself"
+        );
     }
 }

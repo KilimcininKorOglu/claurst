@@ -4302,6 +4302,22 @@ async fn run_interactive(
                 }
             }
             app.handle_query_event(evt);
+
+            // The timeline is built once, by the app, and the rows it just
+            // recorded go out as they are. Deriving them a second time from the
+            // raw events would give the remote client its own timings, and a
+            // long poll can sit on a batch for its whole interval, so those
+            // durations would measure the transport rather than the work.
+            if let Some(ref runtime) = bridge_runtime {
+                for row in app.drain_timeline_outbox() {
+                    let _ = runtime
+                        .outbound_tx
+                        .try_send(BridgeOutbound::TimelineRow(row));
+                }
+            } else {
+                // Nobody is listening, so the queue would only grow.
+                app.drain_timeline_outbox();
+            }
         }
 
         // Auto-compact: when context usage hits 99% and no query is running,
