@@ -20,6 +20,7 @@ This document covers all keyboard shortcuts in Claurst, how to customize them, v
 6. [Special Input Behaviors](#special-input-behaviors)
    - [Shift+Enter for Newline](#shiftenter-for-newline)
    - [ESC During Streaming](#esc-during-streaming)
+   - [Pasting](#pasting)
    - [@file Injection with Typeahead](#file-injection-with-typeahead)
 7. [Non-English Keyboard Layout Support](#non-english-keyboard-layout-support)
 
@@ -309,6 +310,16 @@ In vim insert mode, `Enter` also submits. Use `Shift+Enter` for newlines in vim 
 Pressing `Escape` while the model is streaming a response interrupts the stream. The partial response is preserved in the conversation history and the model stops generating. The input field regains focus and you can send a follow-up message.
 
 This is equivalent to pressing `Ctrl+C` during streaming, except that `Ctrl+C` also signals any tool calls in progress to abort (via `AbortController`), while `Escape` only stops the stream and allows running tools to finish.
+
+---
+
+### Pasting
+
+`Ctrl+V` (or `Cmd+V`) reads the system clipboard. An image on the clipboard is attached to the message; text is inserted into the prompt. `Shift+Insert` pastes the primary selection and works in terminals that never send `Ctrl+V` through.
+
+A paste that arrives as a flood of key events, which is what happens when a terminal has no bracketed paste, is collected as one paste rather than typed key by key, so a trailing newline cannot submit the message before you have read it.
+
+When nothing answers, Claurst says so and what to do about it. Over SSH the usual fix is to set `mouseCapture` to `false` (see [Configuration](configuration.md#interface)) so the terminal's own paste works again.
 
 ---
 

@@ -204,12 +204,23 @@ the address and writes it to `searxngUrl`; turning it off clears the key.
 
 ### Interface
 
-| Key              | Type    | Default | Description                                                                                                                                              |
-|------------------|---------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `timelineEnabled`| boolean | false   | Record every tool call and finished turn, and offer the panel through `/timeline` and `Ctrl+Shift+L`. Off by default; while off nothing is collected at all. |
+| Key               | Type    | Default | Description                                                                                                                                                  |
+|-------------------|---------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `timelineEnabled` | boolean | false   | Record every tool call and finished turn, and offer the panel through `/timeline` and `Ctrl+Shift+L`. Off by default; while off nothing is collected at all. |
+| `mouseCapture`    | boolean | true    | Let Claurst handle the mouse: wheel scrolling, right-click menus and drag-select. Turn it off to give the mouse back to the terminal. Applies at next start. |
 
-Editable from `/settings` as **Execution timeline**. See
-[Commands](commands.md#timeline) for what the panel shows.
+Both are editable from `/settings`, as **Execution timeline** and **Mouse
+capture**. See [Commands](commands.md#timeline) for what the timeline panel
+shows.
+
+While Claurst captures the mouse, the terminal no longer sees it, so its own
+selection and its right-click paste stop working. That matters most over SSH,
+where the remote host often has no `wl-copy` or `xclip` for `Ctrl+V` to reach:
+set `mouseCapture` to `false` and paste with the terminal's own shortcut
+instead. `Shift+Insert` works either way.
+
+Copying out needs nothing installed. When no clipboard tool answers, Claurst
+hands the text to the terminal emulator with OSC 52, which works over SSH.
 
 ### Directory access
 
