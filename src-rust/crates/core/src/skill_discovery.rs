@@ -93,7 +93,11 @@ pub fn parse_skill_file(content: &str, path: &Path) -> Option<DiscoveredSkill> {
 // Directory scanning
 // ---------------------------------------------------------------------------
 
-/// Scan a single directory for `*.md` skill files.
+/// Scan a single directory for skills.
+///
+/// Two layouts are accepted: a flat `<dir>/<name>.md` file, and a
+/// `<dir>/<name>/SKILL.md` package, which is what a plugin's `skills/`
+/// directory holds.
 fn scan_dir(dir: &Path) -> Vec<DiscoveredSkill> {
     let mut skills = Vec::new();
     if !dir.is_dir() {
@@ -110,7 +114,11 @@ fn scan_dir(dir: &Path) -> Vec<DiscoveredSkill> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+        if path.is_dir() {
+            if let Some(skill) = scan_skill_package(&path) {
+                skills.push(skill);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
             match std::fs::read_to_string(&path) {
                 Ok(content) => {
                     if let Some(skill) = parse_skill_file(&content, &path) {
@@ -125,6 +133,34 @@ fn scan_dir(dir: &Path) -> Vec<DiscoveredSkill> {
     }
 
     skills
+}
+
+/// Read `<dir>/SKILL.md` (or `skill.md`) as one skill named after `dir`.
+///
+/// The file stem is the same for every package, so the directory name is the
+/// only usable fallback when the frontmatter carries no `name:`.
+fn scan_skill_package(dir: &Path) -> Option<DiscoveredSkill> {
+    let manifest = ["SKILL.md", "skill.md"]
+        .iter()
+        .map(|f| dir.join(f))
+        .find(|p| p.is_file())?;
+
+    let content = match std::fs::read_to_string(&manifest) {
+        Ok(c) => c,
+        Err(err) => {
+            tracing::debug!(path = %manifest.display(), error = %err, "skill_discovery: read failed");
+            return None;
+        }
+    };
+
+    let mut skill = parse_skill_file(&content, &manifest)?;
+    let stem = manifest.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if skill.name == stem {
+        if let Some(dir_name) = dir.file_name().and_then(|n| n.to_str()) {
+            skill.name = dir_name.to_string();
+        }
+    }
+    Some(skill)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +385,45 @@ mod tests {
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"review"));
         assert!(names.contains(&"debug"));
+    }
+
+    #[test]
+    fn a_skill_package_is_named_after_its_directory() {
+        let tmp = make_temp_dir();
+        let package = tmp.path().join("release-notes");
+        std::fs::create_dir_all(&package).unwrap();
+        write_file(&package, "SKILL.md", "Write the notes.");
+
+        let skills = scan_dir(tmp.path());
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "release-notes");
+    }
+
+    #[test]
+    fn a_skill_package_keeps_the_name_its_frontmatter_gives() {
+        let tmp = make_temp_dir();
+        let package = tmp.path().join("release-notes");
+        std::fs::create_dir_all(&package).unwrap();
+        write_file(
+            &package,
+            "SKILL.md",
+            "---\nname: notes\ndescription: Ship it\n---\nWrite the notes.",
+        );
+
+        let skills = scan_dir(tmp.path());
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "notes");
+        assert_eq!(skills[0].description, "Ship it");
+    }
+
+    #[test]
+    fn a_directory_without_a_skill_file_is_skipped() {
+        let tmp = make_temp_dir();
+        let package = tmp.path().join("empty-dir");
+        std::fs::create_dir_all(&package).unwrap();
+        write_file(&package, "README.md", "Not a skill entry point.");
+
+        assert!(scan_dir(tmp.path()).is_empty());
     }
 
     #[test]
