@@ -179,6 +179,8 @@ marketplace_id = "you/my-plugin"
 
 An array of inline MCP server definitions. Each entry is identical to an `McpServerConfig` (see the MCP documentation). In `plugin.json` the field can also be written as `"mcpServers"` with an object mapping (the loader converts it to the array form automatically).
 
+These servers connect at startup along with the ones declared in `settings.json`. A server carries the scope of the plugin that declared it: one from `~/.claurst/plugins/` launches directly, while one from `<project>/.claurst/plugins/` is project-scoped and waits for the same approval as a project-defined server, because it arrives with a cloned repository. Approve it in the TUI prompt, or pass `--trust-project-mcp` (or set `trustProjectMcpServers`) for headless runs.
+
 ### lsp_servers
 
 An array of LSP server definitions for language-aware editing support:
@@ -346,10 +348,10 @@ The `/plugin` slash command manages plugins from within an interactive session:
 /plugin enable <name>        — enable a plugin (persisted to settings)
 /plugin disable <name>       — disable a plugin (persisted to settings)
 /plugin install <path>       — install a plugin from a local directory
-/plugin reload               — reload all plugins from disk
+/plugin reload               — rescan the plugin directories on disk
 ```
 
-After enabling or disabling a plugin, run `/plugin reload` or use `/reload-plugins` to apply changes in the current session without restarting.
+`enable` and `disable` write to `settings.json`. The running session keeps the plugin set it loaded at startup, so restart Claurst to apply the change.
 
 ### /reload-plugins
 
@@ -357,7 +359,7 @@ After enabling or disabling a plugin, run `/plugin reload` or use `/reload-plugi
 /reload-plugins
 ```
 
-Rescans `~/.claurst/plugins/`, re-reads all manifests, and refreshes the active hook registry, commands, agents, skills, and MCP server definitions. Use this after making changes to a plugin directory or after installing a new plugin.
+Rescans the user and project plugin directories, re-reads all manifests, and reports what is installed. It does not swap the running session's hook registry, commands, agents, skills, or MCP servers; restart to pick up an edited or newly installed plugin.
 
 ---
 
