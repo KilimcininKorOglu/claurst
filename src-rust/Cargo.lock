@@ -1047,6 +1047,7 @@ dependencies = [
  "claurst-buddy",
  "claurst-core",
  "claurst-mcp",
+ "claurst-plugins",
  "claurst-query",
  "claurst-tools",
  "cpal",
