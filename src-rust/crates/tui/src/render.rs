@@ -1561,52 +1561,37 @@ fn render_timeline_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // The expanded detail of the selected row eats rows from the same budget,
-    // so reserve it before deciding how many rows fit.
+    // The detail goes directly under the row it belongs to, so it spends rows
+    // from the same budget and the window has to be shortened by its height.
     let detail_lines = if app.timeline_expanded {
         timeline_detail_lines(app, inner.width)
     } else {
         Vec::new()
     };
-    let detail_height = (detail_lines.len() as u16).min(inner.height.saturating_sub(1));
-    let list_height = inner.height - detail_height;
+    let capacity = (inner.height as usize)
+        .saturating_sub(detail_lines.len())
+        .max(1);
 
-    let window = timeline_window(
-        app.timeline.len(),
-        app.timeline.selected_idx,
-        list_height as usize,
-    );
-    let mut lines = Vec::with_capacity(window.len());
+    let window = timeline_window(app.timeline.len(), app.timeline.selected_idx, capacity);
+    let mut lines = Vec::with_capacity(window.len() + detail_lines.len());
     for idx in window {
         let Some(row) = app.timeline.rows.get(idx) else {
             continue;
         };
+        let selected = idx == app.timeline.selected_idx;
         lines.push(timeline_row_line(
             row,
-            idx == app.timeline.selected_idx,
+            selected,
             focused,
             inner.width,
             app.frame_count,
         ));
+        if selected {
+            lines.extend(detail_lines.iter().cloned());
+        }
     }
-    frame.render_widget(
-        Paragraph::new(lines),
-        Rect {
-            height: list_height,
-            ..inner
-        },
-    );
-
-    if detail_height > 0 {
-        frame.render_widget(
-            Paragraph::new(detail_lines).wrap(Wrap { trim: false }),
-            Rect {
-                y: inner.y + list_height,
-                height: detail_height,
-                ..inner
-            },
-        );
-    }
+    lines.truncate(inner.height as usize);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// One row: status marker, title, and the trailing metrics, fitted to `width`.
@@ -5421,6 +5406,48 @@ mod timeline_panel_tests {
         assert!(
             joined.contains("No steps recorded yet."),
             "an empty panel should explain itself:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn an_expanded_detail_sits_directly_under_its_row() {
+        let mut app = app_with_rows(2);
+        app.timeline.add_turn_summary(
+            "turn-1",
+            "Assistant turn 1 finished",
+            0,
+            26,
+            "1800 in, 830 out",
+            "stop_reason=end_turn",
+            Some(1800),
+            Some(830),
+            None,
+        );
+        app.timeline.set_selected_idx(2);
+        app.timeline_focused = true;
+        app.timeline_expanded = true;
+
+        let screen = screen(&app, 140, 30);
+        let row = screen
+            .iter()
+            .position(|line| line.contains("Assistant turn 1 finished"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the selected row should be on screen:\n{}",
+                    screen.join("\n")
+                )
+            });
+        let detail = screen
+            .iter()
+            .position(|line| line.contains("stop_reason=end_turn"))
+            .unwrap_or_else(|| panic!("the detail should be on screen:\n{}", screen.join("\n")));
+
+        assert_eq!(
+            detail,
+            row + 1,
+            "a detail parked at the far end of the panel cannot be read against \
+             the row it explains:\n{}",
+            screen.join("\n")
         );
     }
 
