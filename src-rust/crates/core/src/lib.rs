@@ -41,6 +41,7 @@ pub mod crypto_utils;
 pub mod format_utils;
 pub mod spinner;
 pub mod status_notices;
+pub mod timeline;
 pub mod token_budget;
 pub mod truncate;
 pub use spinner::{
