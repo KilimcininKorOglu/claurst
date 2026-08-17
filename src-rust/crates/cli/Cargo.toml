@@ -39,12 +39,17 @@ url = { workspace = true }
 crossterm = { workspace = true }
 parking_lot = { workspace = true }
 dirs = { workspace = true }
-nix = { workspace = true }
 base64 = "0.22"
 sha2 = "0.10"
 open = "5"
 urlencoding = "2"
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+[target.'cfg(unix)'.dependencies]
+# Only the root/sudo check in main.rs reaches for this, and that check is itself
+# cfg(unix). On Windows nix collapses to an empty crate, so leaving it in the
+# unconditional table only bought a wasted build of nix, libc and cfg_aliases.
+nix = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
