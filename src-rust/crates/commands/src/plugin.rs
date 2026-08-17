@@ -37,18 +37,11 @@ impl SlashCommand for PluginCommand {
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let project_dir = ctx.working_dir.clone();
 
-        // Helper: prefer the already-loaded global registry, falling back to a
-        // fresh disk scan so the command still works without the global being set.
+        // Helper: read the directories every time rather than the registry the
+        // session published at startup, so an install or an edit made since
+        // then shows up here.
         async fn get_registry(project_dir: &std::path::Path) -> claurst_plugins::PluginRegistry {
-            if let Some(global) = claurst_plugins::global_plugin_registry() {
-                let mut reg = claurst_plugins::PluginRegistry::new();
-                for p in global.all() {
-                    reg.insert(p.clone());
-                }
-                reg
-            } else {
-                claurst_plugins::load_plugins(project_dir, &[]).await
-            }
+            claurst_plugins::load_plugins(project_dir, &[]).await
         }
 
         let parsed = claurst_plugins::parse_plugin_args(args);
