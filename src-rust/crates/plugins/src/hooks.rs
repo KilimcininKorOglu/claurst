@@ -25,7 +25,13 @@ pub struct RegisteredHook {
     pub plugin_name: String,
     /// Plugin source identifier (e.g. `"myplugin@builtin"`).
     pub plugin_source: String,
+    /// How long the command may run before it is killed, in milliseconds.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
+
+/// How long a hook may run when its manifest names no timeout.
+pub const DEFAULT_HOOK_TIMEOUT_MS: u64 = 30_000;
 
 /// All registered hooks for a running session, keyed by event name.
 pub type HookRegistry = HashMap<String, Vec<RegisteredHook>>;
@@ -55,6 +61,7 @@ pub fn register_plugin_hooks(
                     plugin_root: plugin_root.to_string(),
                     plugin_name: plugin_name.to_string(),
                     plugin_source: plugin_source.to_string(),
+                    timeout_ms: hook.timeout_ms,
                 });
             }
         }
@@ -166,6 +173,9 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
+    let timeout =
+        std::time::Duration::from_millis(hook.timeout_ms.unwrap_or(DEFAULT_HOOK_TIMEOUT_MS));
+
     let mut child = match Command::new(if cfg!(windows) { "cmd" } else { "sh" })
         .args(if cfg!(windows) {
             vec!["/C", &hook.command]
@@ -193,6 +203,44 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
     // Write event JSON to stdin, ignoring errors (child may not read it).
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(event_json.as_bytes());
+    }
+
+    // Poll rather than block for good: a hook that never exits would hold the
+    // operation open forever, and killing it is the only way back.
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let msg = format!(
+                        "Plugin '{}' hook '{}' exceeded {} ms and was killed",
+                        hook.plugin_name,
+                        hook.command,
+                        timeout.as_millis()
+                    );
+                    tracing::warn!("{}", msg);
+                    // A blocking hook that never answered cannot be read as
+                    // approval, so the operation stops.
+                    return if hook.blocking {
+                        HookOutcome::Deny(msg)
+                    } else {
+                        HookOutcome::Error(msg)
+                    };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => {
+                let msg = format!(
+                    "Plugin '{}' hook '{}' wait error: {}",
+                    hook.plugin_name, hook.command, e
+                );
+                tracing::warn!("{}", msg);
+                return HookOutcome::Error(msg);
+            }
+        }
     }
 
     let output = match child.wait_with_output() {
@@ -227,6 +275,63 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
         );
         HookOutcome::Allow
     }
+}
+
+/// Run one hook off the async runtime's worker threads.
+///
+/// `run_hook_sync` spawns a process and waits on it, so calling it directly
+/// from an async task would park a runtime thread for as long as the hook
+/// runs.
+pub async fn run_hook(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
+    let hook = hook.clone();
+    let payload = event_json.to_string();
+    match tokio::task::spawn_blocking(move || run_hook_sync(&hook, &payload)).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let msg = format!("Plugin hook task failed: {err}");
+            tracing::warn!("{}", msg);
+            HookOutcome::Error(msg)
+        }
+    }
+}
+
+/// Whether a hook's `matcher` selects `target`.
+///
+/// An absent or empty matcher, and `*`, take everything. Otherwise `*` stands
+/// for any run of characters, so `File*`, `*Tool` and `*Read*` all work, and a
+/// pattern without one has to match in full.
+pub fn matcher_selects(matcher: Option<&str>, target: &str) -> bool {
+    let pattern = match matcher {
+        None => return true,
+        Some(p) if p.is_empty() || p == "*" => return true,
+        Some(p) => p,
+    };
+
+    let segments: Vec<&str> = pattern.split('*').collect();
+    if segments.len() == 1 {
+        return pattern == target;
+    }
+
+    let mut rest = target;
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            match rest.strip_prefix(segment) {
+                Some(tail) => rest = tail,
+                None => return false,
+            }
+        } else if i == segments.len() - 1 {
+            return rest.ends_with(segment) && rest.len() >= segment.len();
+        } else {
+            match rest.find(segment) {
+                Some(pos) => rest = &rest[pos + segment.len()..],
+                None => return false,
+            }
+        }
+    }
+    true
 }
 
 /// Return the canonical string key for a `HookEventKind`.
@@ -346,6 +451,69 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hook(command: &str, blocking: bool, timeout_ms: Option<u64>) -> RegisteredHook {
+        RegisteredHook {
+            command: command.to_string(),
+            matcher: None,
+            blocking,
+            plugin_root: "/tmp".to_string(),
+            plugin_name: "toolkit".to_string(),
+            plugin_source: "toolkit@user".to_string(),
+            timeout_ms,
+        }
+    }
+
+    #[test]
+    fn a_matcher_without_a_star_has_to_match_in_full() {
+        assert!(matcher_selects(Some("Bash"), "Bash"));
+        assert!(!matcher_selects(Some("Bash"), "BashOutput"));
+    }
+
+    #[test]
+    fn a_star_stands_for_any_run_of_characters() {
+        assert!(matcher_selects(Some("File*"), "FileWrite"));
+        assert!(!matcher_selects(Some("File*"), "WriteFile"));
+        assert!(matcher_selects(Some("*Tool"), "AgentTool"));
+        assert!(!matcher_selects(Some("*Tool"), "ToolAgent"));
+        assert!(matcher_selects(Some("*Read*"), "FileReadTool"));
+    }
+
+    #[test]
+    fn an_absent_or_wildcard_matcher_takes_everything() {
+        assert!(matcher_selects(None, "Bash"));
+        assert!(matcher_selects(Some(""), "Bash"));
+        assert!(matcher_selects(Some("*"), "Bash"));
+    }
+
+    #[test]
+    fn a_hook_that_hangs_is_killed_at_its_timeout() {
+        let started = std::time::Instant::now();
+        let outcome = run_hook_sync(&hook("sleep 30", false, Some(300)), "{}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the runner waited for the sleep instead of killing it"
+        );
+        assert!(matches!(outcome, HookOutcome::Error(_)), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_blocking_hook_that_hangs_denies_the_operation() {
+        let outcome = run_hook_sync(&hook("sleep 30", true, Some(300)), "{}");
+        assert!(matches!(outcome, HookOutcome::Deny(_)), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_blocking_hook_that_fails_denies_the_operation() {
+        let outcome = run_hook_sync(&hook("exit 3", true, None), "{}");
+        assert!(matches!(outcome, HookOutcome::Deny(_)), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_non_blocking_failure_allows_the_operation() {
+        let outcome = run_hook_sync(&hook("exit 3", false, None), "{}");
+        assert!(matches!(outcome, HookOutcome::Allow), "{outcome:?}");
+    }
 
     #[test]
     fn parse_wrapped_hooks_value() {

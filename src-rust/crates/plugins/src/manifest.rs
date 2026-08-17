@@ -173,6 +173,10 @@ pub struct PluginHookEntry {
     /// If true, a non-zero exit code blocks the operation.
     #[serde(default)]
     pub blocking: bool,
+    /// How long the command may run before it is killed, in milliseconds.
+    /// Defaults to `DEFAULT_HOOK_TIMEOUT_MS` when absent.
+    #[serde(default, alias = "timeout")]
+    pub timeout_ms: Option<u64>,
 }
 
 /// A matcher + list of hooks for one event.
