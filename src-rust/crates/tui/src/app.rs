@@ -7829,7 +7829,10 @@ impl App {
             }
 
             QueryEvent::Status(msg) => {
-                self.timeline_note("Status", TimelineStatus::Done, &msg);
+                // Deliberately not fed to the timeline. A status line is
+                // transient, it already has the status row, and a spinner verb
+                // is not a step: four of them buried the two tool calls in a
+                // live turn.
                 self.status_message = Some(msg);
             }
 
@@ -9811,6 +9814,29 @@ mod timeline_tests {
         assert!(
             !app.handle_timeline_key(&up),
             "an unfocused panel leaves the arrow keys to the prompt history"
+        );
+    }
+}
+
+#[cfg(test)]
+mod timeline_noise_tests {
+    use super::*;
+
+    #[test]
+    fn a_status_line_is_not_a_timeline_step() {
+        let config = Config {
+            timeline_enabled: true,
+            ..Default::default()
+        };
+        let mut app = App::new(config, claurst_core::cost::CostTracker::new());
+
+        app.handle_query_event(QueryEvent::Status("\u{2733} Herding\u{2026}".to_string()));
+        app.handle_query_event(QueryEvent::Status("Compacting context...".to_string()));
+
+        assert!(
+            app.timeline.is_empty(),
+            "a transient status line already has the status row, and a spinner \
+             verb would bury the tool calls it sits between"
         );
     }
 }
