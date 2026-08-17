@@ -511,14 +511,13 @@ pub fn install_plugin_from_path(source_path: &Path) -> Result<String, PluginErro
         });
     }
 
-    let manifest_path = if source_path.join("plugin.json").exists() {
-        source_path.join("plugin.json")
-    } else if source_path.join("plugin.toml").exists() {
-        source_path.join("plugin.toml")
-    } else {
+    let Some(manifest_path) = loader::find_manifest(source_path) else {
         return Err(PluginError::InvalidManifest {
             path: source_path.to_string_lossy().into_owned(),
-            message: "No plugin.json or plugin.toml found in directory".to_string(),
+            message: format!(
+                "No plugin manifest in directory (looked for {})",
+                loader::MANIFEST_LOCATIONS.join(", ")
+            ),
         });
     };
 

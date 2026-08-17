@@ -6,7 +6,15 @@ Claurst's plugin system lets you extend the agent with additional slash commands
 
 ## Plugin Discovery
 
-Plugins are loaded from the `~/.claurst/plugins/` directory. Each subdirectory that contains a valid `plugin.toml` or `plugin.json` manifest is treated as a plugin.
+Plugins are loaded from the `~/.claurst/plugins/` directory. Each subdirectory that carries a valid manifest is treated as a plugin. The manifest is looked for at three paths, in order:
+
+| Path                          | Notes                                                        |
+|-------------------------------|--------------------------------------------------------------|
+| `plugin.json`                 | Checked first, so it wins when a plugin carries more than one |
+| `plugin.toml`                 | Same fields, TOML syntax                                      |
+| `.claude-plugin/plugin.json`  | Where a plugin written for Claude Code keeps it               |
+
+The plugin's root stays the directory itself in every case: `commands/`, `agents/`, `skills/`, `hooks/` and `output-styles/` are resolved against it, not against `.claude-plugin/`.
 
 ```
 ~/.claurst/plugins/

@@ -5,9 +5,9 @@
 /// 2. `<project>/.claurst/plugins/<name>/`  — project-local plugins
 /// 3. Extra paths from `settings.plugin_paths` (if the field exists)
 ///
-/// Each plugin directory must contain a `plugin.json` or `plugin.toml`
-/// manifest file.  A bare manifest file (no containing directory) is also
-/// accepted.
+/// Each plugin directory must contain a manifest at one of
+/// [`MANIFEST_LOCATIONS`].  A bare manifest file (no containing directory) is
+/// also accepted.
 use crate::manifest::{PluginHooksConfig, PluginManifest};
 use crate::plugin::{LoadedPlugin, PluginError, PluginSource};
 use std::path::{Path, PathBuf};
@@ -70,10 +70,32 @@ pub async fn discover_plugins(
     (plugins, errors)
 }
 
+/// Where a plugin directory is allowed to keep its manifest, in the order the
+/// loader looks.
+///
+/// `.claude-plugin/plugin.json` is where a plugin written for Claude Code puts
+/// it, and a repository cloned from GitHub almost always uses that layout. The
+/// two root-level names come first so a plugin that carries both keeps the one
+/// at its root.
+pub const MANIFEST_LOCATIONS: [&str; 3] =
+    ["plugin.json", "plugin.toml", ".claude-plugin/plugin.json"];
+
+/// The manifest inside `dir`, if the directory holds one.
+///
+/// The returned path is the manifest itself; the plugin's root stays `dir`,
+/// which is what `commands/`, `skills/` and `hooks/` are resolved against even
+/// when the manifest sits one level down.
+pub fn find_manifest(dir: &Path) -> Option<std::path::PathBuf> {
+    MANIFEST_LOCATIONS
+        .iter()
+        .map(|rel| dir.join(rel))
+        .find(|candidate| candidate.exists())
+}
+
 /// Try to load a plugin from a filesystem path.
 ///
 /// `path` can be:
-/// - A directory containing `plugin.json` or `plugin.toml`
+/// - A directory holding any of [`MANIFEST_LOCATIONS`]
 /// - A direct `plugin.json` or `plugin.toml` file
 ///
 /// Returns `Ok(None)` if the path does not look like a plugin (no manifest
@@ -83,24 +105,24 @@ pub fn try_load_from_path(
     source: PluginSource,
 ) -> Result<Option<LoadedPlugin>, PluginError> {
     let (plugin_dir, manifest_path) = if path.is_dir() {
-        // Look for manifest inside the directory.
-        let json_path = path.join("plugin.json");
-        let toml_path = path.join("plugin.toml");
-
-        if json_path.exists() {
-            (path.to_path_buf(), json_path)
-        } else if toml_path.exists() {
-            (path.to_path_buf(), toml_path)
-        } else {
+        match find_manifest(path) {
+            Some(manifest) => (path.to_path_buf(), manifest),
             // Directory with no manifest — not a plugin, skip silently.
-            return Ok(None);
+            None => return Ok(None),
         }
     } else if path.is_file() {
         // Accept a bare manifest file.
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if name == "plugin.json" || name == "plugin.toml" {
-            let parent = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-            (parent, path.to_path_buf())
+            let mut root = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+            // A manifest under `.claude-plugin/` describes the directory above
+            // it, not the metadata directory it sits in.
+            if root.file_name().and_then(|n| n.to_str()) == Some(".claude-plugin") {
+                if let Some(parent) = root.parent() {
+                    root = parent.to_path_buf();
+                }
+            }
+            (root, path.to_path_buf())
         } else {
             return Ok(None);
         }
@@ -372,6 +394,69 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, body).expect("command file");
         path
+    }
+
+    #[test]
+    fn a_manifest_under_claude_plugin_still_names_the_directory_above_it() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("my-plugin");
+        std::fs::create_dir_all(root.join(".claude-plugin")).expect("metadata dir");
+        std::fs::create_dir_all(root.join("commands")).expect("commands dir");
+        std::fs::write(
+            root.join(".claude-plugin").join("plugin.json"),
+            r#"{"name": "my-plugin", "version": "1.0.0"}"#,
+        )
+        .expect("manifest");
+
+        let loaded = try_load_from_path(&root, PluginSource::User)
+            .expect("load")
+            .expect("a directory with a Claude Code manifest is a plugin");
+        assert_eq!(loaded.name, "my-plugin");
+        assert_eq!(
+            loaded.path, root,
+            "the plugin root is the directory, not the metadata folder"
+        );
+        assert_eq!(
+            loaded.commands_path,
+            Some(root.join("commands")),
+            "commands resolve against the root"
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_wins_over_the_claude_plugin_one() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("dual");
+        std::fs::create_dir_all(root.join(".claude-plugin")).expect("metadata dir");
+        std::fs::write(
+            root.join("plugin.json"),
+            r#"{"name": "from-root", "version": "1.0.0"}"#,
+        )
+        .expect("root manifest");
+        std::fs::write(
+            root.join(".claude-plugin").join("plugin.json"),
+            r#"{"name": "from-metadata", "version": "1.0.0"}"#,
+        )
+        .expect("metadata manifest");
+
+        let loaded = try_load_from_path(&root, PluginSource::User)
+            .expect("load")
+            .expect("plugin");
+        assert_eq!(loaded.name, "from-root");
+    }
+
+    #[test]
+    fn a_bare_claude_plugin_manifest_path_resolves_to_the_plugin_root() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("bare");
+        std::fs::create_dir_all(root.join(".claude-plugin")).expect("metadata dir");
+        let manifest = root.join(".claude-plugin").join("plugin.json");
+        std::fs::write(&manifest, r#"{"name": "bare", "version": "1.0.0"}"#).expect("manifest");
+
+        let loaded = try_load_from_path(&manifest, PluginSource::User)
+            .expect("load")
+            .expect("plugin");
+        assert_eq!(loaded.path, root);
     }
 
     #[test]
