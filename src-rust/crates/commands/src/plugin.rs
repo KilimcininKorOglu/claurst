@@ -126,7 +126,7 @@ impl SlashCommand for PluginCommand {
                 let result = claurst_plugins::install_plugin_from_path(std::path::Path::new(&path));
                 match result {
                     Ok(name) => CommandResult::Message(format!(
-                        "Plugin '{}' installed successfully. Run `/plugin reload` to activate it.",
+                        "Plugin '{}' installed. Restart Claurst to activate it.",
                         name
                     )),
                     Err(e) => CommandResult::Error(format!("Install failed: {}", e)),
