@@ -410,7 +410,7 @@ fn current_output_style_name(config: &Config) -> &str {
 }
 
 fn available_output_style_names() -> Vec<String> {
-    claurst_core::output_styles::all_styles(&Settings::config_dir())
+    claurst_core::output_styles::all_styles_with_runtime(&Settings::config_dir())
         .into_iter()
         .map(|style| style.name)
         .collect()

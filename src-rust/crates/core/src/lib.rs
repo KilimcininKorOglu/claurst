@@ -1879,11 +1879,12 @@ pub mod config {
         }
 
         /// Resolve the prompt text for the selected output style, including
-        /// user-defined styles loaded from `~/.claurst/output-styles/`.
+        /// user-defined styles loaded from `~/.claurst/output-styles/` and the
+        /// ones a plugin registered at startup.
         pub fn resolve_output_style_prompt(&self) -> Option<String> {
             let style_name = self.output_style.as_deref().unwrap_or("default");
             let styles = crate::output_styles::all_styles(&Settings::config_dir());
-            crate::output_styles::find_style(&styles, style_name)
+            crate::output_styles::find_style_runtime(&styles, style_name)
                 .map(|style| style.prompt.clone())
                 .filter(|prompt| !prompt.trim().is_empty())
         }

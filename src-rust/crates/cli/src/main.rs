@@ -868,6 +868,14 @@ async fn main() -> anyhow::Result<()> {
                 config.lsp_servers.push(lsp_server);
             }
         }
+
+        // Output styles live in a runtime registry rather than the config,
+        // because a style is chosen by name and resolved on demand.
+        for style_dir in plugin_registry.all_output_style_paths() {
+            for style in claurst_core::output_styles::load_output_styles_dir(&style_dir) {
+                claurst_core::output_styles::register_runtime_style(style);
+            }
+        }
     }
 
     // Publish the registry: sub-agent prompts read the plugins' `agents/`

@@ -9,7 +9,7 @@ use crate::overlays::{
     CLAURST_MUTED, CLAURST_PANEL_BG,
 };
 use claurst_core::config::{Config, Settings};
-use claurst_core::output_styles::{builtin_styles, find_style};
+use claurst_core::output_styles::find_style;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -704,7 +704,12 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
         if entry.key == "output_style" {
             let mut lines = vec![entry.description.to_string(), String::new()];
 
-            let all_styles = builtin_styles();
+            // Every style the session can resolve, not just the built-in
+            // ones: the field takes a name, so listing less than the resolver
+            // accepts would hide a user's or a plugin's style.
+            let all_styles = claurst_core::output_styles::all_styles_with_runtime(
+                &claurst_core::config::Settings::config_dir(),
+            );
             let current_style_name = if screen.output_style.is_empty() {
                 "default"
             } else {
@@ -719,7 +724,7 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
             }
 
             lines.push("Available:".to_string());
-            for style in builtin_styles() {
+            for style in &all_styles {
                 lines.push(format!("  {} — {}", style.name, style.description));
             }
             lines.join("\n")
