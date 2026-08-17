@@ -74,7 +74,12 @@ impl SlashCommand for PluginCommand {
                 let mut settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
                 settings.enabled_plugins.insert(name.clone());
                 settings.disabled_plugins.remove(&name);
-                let _ = settings.save_sync();
+                if let Err(err) = settings.save_sync() {
+                    return CommandResult::Error(format!(
+                        "Plugin '{}' not enabled: settings could not be saved ({}).",
+                        name, err
+                    ));
+                }
                 CommandResult::Message(format!(
                     "Plugin '{}' enabled. Run `/plugin reload` to apply changes in this session.",
                     name
@@ -97,7 +102,12 @@ impl SlashCommand for PluginCommand {
                 let mut settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
                 settings.disabled_plugins.insert(name.clone());
                 settings.enabled_plugins.remove(&name);
-                let _ = settings.save_sync();
+                if let Err(err) = settings.save_sync() {
+                    return CommandResult::Error(format!(
+                        "Plugin '{}' not disabled: settings could not be saved ({}).",
+                        name, err
+                    ));
+                }
                 CommandResult::Message(format!(
                     "Plugin '{}' disabled. Run `/plugin reload` to apply changes in this session.",
                     name
