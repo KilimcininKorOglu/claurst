@@ -23,6 +23,7 @@
 //! This will be resolved as part of the planned unified MCP routing work
 //! (see `src-rust/plan/migration-todo.md`).
 
+mod commands;
 mod connection;
 mod listing;
 mod permission;

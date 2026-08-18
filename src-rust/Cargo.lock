@@ -738,6 +738,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "claurst-api",
+ "claurst-commands",
  "claurst-core",
  "claurst-mcp",
  "claurst-plugins",

@@ -38,12 +38,29 @@ impl AgentServer {
             match msg {
                 Inbound::Request { id, method, params } => {
                     let response = this.handle_request(&method, params).await;
-                    let result = match response {
-                        Ok(value) => this.connection.send_response(id, value).await,
-                        Err(err) => this.connection.send_error_response(id, err).await,
+                    let (result, after) = match response {
+                        Ok(Answer { value, after }) => {
+                            (this.connection.send_response(id, value).await, after)
+                        }
+                        Err(err) => (
+                            this.connection.send_error_response(id, err).await,
+                            Vec::new(),
+                        ),
                     };
                     if let Err(e) = result {
                         warn!(?e, method = %method, "ACP: failed to send response");
+                    }
+                    // Sent after the response on purpose: a notification about
+                    // a session the client has not been told the id of yet has
+                    // nowhere to land.
+                    for notification in after {
+                        if let Err(e) = this
+                            .connection
+                            .send_notification("session/update", notification)
+                            .await
+                        {
+                            warn!(?e, method = %method, "ACP: failed to send a follow-up update");
+                        }
                     }
                 }
                 Inbound::Notification { method, params } => {
@@ -57,69 +74,77 @@ impl AgentServer {
         self: &Arc<Self>,
         method: &str,
         params: Option<Value>,
-    ) -> Result<Value, acp::Error> {
+    ) -> Result<Answer, acp::Error> {
         debug!(method, "ACP: dispatch request");
         match method {
             "initialize" => {
                 let req: acp::InitializeRequest = parse_params(params)?;
                 let result = self.on_initialize(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "authenticate" => {
                 let _req: acp::AuthenticateRequest = parse_params(params)?;
                 // Claurst uses local credentials; clients don't need to authenticate.
-                serde_json::to_value(acp::AuthenticateResponse::default())
-                    .map_err(|_| acp::Error::internal_error())
+                answer(acp::AuthenticateResponse::default())
             }
             "session/new" => {
                 let req: acp::NewSessionRequest = parse_params(params)?;
                 let result = self.on_new_session(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                let commands = acp::SessionNotification::new(
+                    result.session_id.clone(),
+                    acp::SessionUpdate::AvailableCommandsUpdate(acp::AvailableCommandsUpdate::new(
+                        crate::commands::available_commands(),
+                    )),
+                );
+                Ok(Answer {
+                    after: vec![commands],
+                    ..answer(result)?
+                })
             }
             "session/load" => {
                 let req: acp::LoadSessionRequest = parse_params(params)?;
                 let result = self.on_load_session(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/resume" => {
                 let req: acp::ResumeSessionRequest = parse_params(params)?;
                 let result = self.on_resume_session(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/list" => {
                 let req: acp::ListSessionsRequest = parse_params(params)?;
                 let result = self.on_list_sessions(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/fork" => {
                 let req: acp::ForkSessionRequest = parse_params(params)?;
                 let result = self.on_fork_session(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/close" => {
                 let req: acp::CloseSessionRequest = parse_params(params)?;
                 let result = self.on_close_session(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/prompt" => {
                 let req: acp::PromptRequest = parse_params(params)?;
                 let result = self.on_prompt(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/set_mode" => {
                 let req: acp::SetSessionModeRequest = parse_params(params)?;
                 let result = self.on_set_mode(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/set_model" => {
                 let req: acp::SetSessionModelRequest = parse_params(params)?;
                 let result = self.on_set_model(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             "session/set_config_option" => {
                 let req: acp::SetSessionConfigOptionRequest = parse_params(params)?;
                 let result = self.on_set_config_option(req).await?;
-                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+                answer(result)
             }
             other => {
                 warn!(method = other, "ACP: method not found");
@@ -604,6 +629,21 @@ async fn reopen(
     let session = SessionState::restored(session_id.clone(), cwd.to_path_buf(), &stored);
     sessions.insert(session.clone());
     Ok(session)
+}
+
+/// What a request is answered with: the result, and anything the client is
+/// told once it has that result in hand.
+struct Answer {
+    value: Value,
+    after: Vec<acp::SessionNotification>,
+}
+
+/// The plain case: a result and nothing to follow it.
+fn answer<T: serde::Serialize>(result: T) -> Result<Answer, acp::Error> {
+    Ok(Answer {
+        value: serde_json::to_value(result).map_err(|_| acp::Error::internal_error())?,
+        after: Vec::new(),
+    })
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, acp::Error> {
