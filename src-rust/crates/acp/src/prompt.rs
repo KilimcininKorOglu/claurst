@@ -93,6 +93,7 @@ pub async fn handle(
     let forwarder = tokio::spawn(forward_events(
         connection.clone(),
         session.session_id.clone(),
+        session.file_history.clone(),
         ev_rx,
     ));
 
@@ -199,9 +200,14 @@ fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> String {
 }
 
 /// Pump QueryEvents → `session/update` SessionNotifications.
+///
+/// `file_history` is the session's own recorder. Every editing tool writes the
+/// before and after text of each file it touches there, which is what lets a
+/// finished tool call carry a diff instead of a paragraph about one.
 async fn forward_events(
     connection: Arc<Connection>,
     session_id: acp::SessionId,
+    file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
     mut rx: mpsc::UnboundedReceiver<QueryEvent>,
 ) {
     // Track tool calls so ToolEnd updates carry the right title and kind.
@@ -233,6 +239,9 @@ async fn forward_events(
                     ToolMeta {
                         title: title.clone(),
                         kind,
+                        // Where the file recorder stood before this tool ran.
+                        // Everything appended past this point belongs to it.
+                        history_len: file_history.lock().entries().len(),
                     },
                 );
                 let mut tool_call =
@@ -260,9 +269,15 @@ async fn forward_events(
                 } else {
                     acp::ToolCallStatus::Completed
                 };
-                let content = vec![acp::ToolCallContent::Content(acp::Content::new(
+                let mut content = vec![acp::ToolCallContent::Content(acp::Content::new(
                     acp::ContentBlock::Text(acp::TextContent::new(result.clone())),
                 ))];
+                // Whatever this tool wrote to disk, said in the protocol's own
+                // terms. The tool's name is not consulted: a recorded change is
+                // a change, so a new editing tool needs nothing added here.
+                if let Some(meta) = active_tools.get(&tool_id) {
+                    content.extend(diffs_since(&file_history, meta.history_len));
+                }
                 let raw_output = serde_json::from_str::<serde_json::Value>(&result)
                     .ok()
                     .or_else(|| Some(serde_json::Value::String(result.clone())));
@@ -301,6 +316,31 @@ struct ToolMeta {
     title: String,
     #[allow(dead_code)]
     kind: acp::ToolKind,
+    /// Length of the file recorder when this tool started.
+    history_len: usize,
+}
+
+/// Every file change recorded after `from`, as protocol diffs.
+///
+/// A binary change is skipped: the protocol's diff carries text, and there is
+/// nothing truthful to put in it.
+fn diffs_since(
+    file_history: &parking_lot::Mutex<claurst_core::file_history::FileHistory>,
+    from: usize,
+) -> Vec<acp::ToolCallContent> {
+    let history = file_history.lock();
+    history
+        .entries()
+        .iter()
+        .skip(from)
+        .filter(|entry| !entry.binary)
+        .filter_map(|entry| {
+            let after = entry.after_text.clone()?;
+            Some(acp::ToolCallContent::Diff(
+                acp::Diff::new(entry.path.clone(), after).old_text(entry.before_text.clone()),
+            ))
+        })
+        .collect()
 }
 
 async fn send_text_chunk(
@@ -367,6 +407,7 @@ fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claurst_core::file_history::FileHistory;
 
     #[test]
     fn two_text_blocks_are_separated_by_a_blank_line() {
@@ -400,6 +441,62 @@ mod tests {
             acp::ContentBlock::Image(acp::ImageContent::new("base64data", "image/png")),
         ];
         assert_eq!(render_prompt_blocks(&blocks), "caption");
+    }
+
+    fn history_with(changes: &[(&str, &[u8], &[u8])]) -> parking_lot::Mutex<FileHistory> {
+        let mut history = FileHistory::new();
+        for (path, before, after) in changes {
+            history.record_modification(std::path::PathBuf::from(path), before, after, 0, "Edit");
+        }
+        parking_lot::Mutex::new(history)
+    }
+
+    fn diff_of(content: &acp::ToolCallContent) -> &acp::Diff {
+        match content {
+            acp::ToolCallContent::Diff(diff) => diff,
+            other => panic!("expected a diff, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn each_file_a_tool_touched_becomes_its_own_diff() {
+        let history = history_with(&[
+            ("/repo/a.rs", b"one", b"ONE"),
+            ("/repo/b.rs", b"two", b"TWO"),
+        ]);
+
+        let diffs = diffs_since(&history, 0);
+        assert_eq!(diffs.len(), 2);
+        assert_eq!(
+            diff_of(&diffs[0]).path,
+            std::path::PathBuf::from("/repo/a.rs")
+        );
+        assert_eq!(diff_of(&diffs[0]).old_text.as_deref(), Some("one"));
+        assert_eq!(diff_of(&diffs[0]).new_text, "ONE");
+        assert_eq!(diff_of(&diffs[1]).new_text, "TWO");
+    }
+
+    #[test]
+    fn only_the_changes_this_tool_made_are_reported() {
+        // The recorder is per session, so a tool that starts after two earlier
+        // edits must not claim them.
+        let history = history_with(&[
+            ("/repo/old.rs", b"before", b"after"),
+            ("/repo/new.rs", b"x", b"y"),
+        ]);
+
+        let diffs = diffs_since(&history, 1);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(
+            diff_of(&diffs[0]).path,
+            std::path::PathBuf::from("/repo/new.rs")
+        );
+    }
+
+    #[test]
+    fn a_binary_change_is_left_out_rather_than_shown_as_text() {
+        let history = history_with(&[("/repo/logo.png", &[0xff, 0xfe], &[0x00, 0x01])]);
+        assert!(diffs_since(&history, 0).is_empty());
     }
 
     #[test]
