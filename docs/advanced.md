@@ -556,7 +556,7 @@ The agent uses whatever the editor offered to host:
 
 Each is honoured on its own, and anything the editor does not host stays with the agent.
 
-A session can also bring its own MCP servers: whatever `session/new`, `session/load`, `session/resume` or `session/fork` names is connected for that session alone, over stdio, HTTP or SSE. A request that names none shares the agent's configured servers.
+A session can also bring its own MCP servers: whatever `session/new`, `session/load`, `session/resume` or `session/fork` names is connected for that session alone, over stdio, HTTP or SSE, headers included. A request that names none shares the agent's configured servers.
 
 Images in a prompt reach the model. Audio does not, and `initialize` says so.
 

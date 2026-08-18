@@ -60,13 +60,16 @@ Each entry in the `mcpServers` / `mcp_servers` array (or the `config.mcp_servers
 | `args`    | array of strings | No         | Arguments passed to `command`                            |
 | `env`     | object           | No         | Extra environment variables set for the child process    |
 | `url`     | string           | HTTP only  | Full URL of the SSE endpoint                             |
+| `headers` | object           | No         | Extra HTTP headers sent with every request; ignored for `stdio` |
 | `type`    | string           | No         | Transport type: `"stdio"` (default) or `"http"`          |
+
+A header whose name or value the HTTP layer would reject is reported by name before the server is contacted, rather than dropped, because a request missing the credential it was given fails much later and says nothing about the header. The value is never named in the error.
 
 ---
 
 ## Environment Variable Expansion
 
-All string fields in `McpServerConfig` (`command`, `args`, `env` values, `url`) support shell-style variable expansion before the server is launched.
+All string fields in `McpServerConfig` (`command`, `args`, `env` values, `url`, `headers` values) support shell-style variable expansion before the server is launched, so a token can live in the environment rather than in `settings.json`.
 
 **Supported syntax:**
 

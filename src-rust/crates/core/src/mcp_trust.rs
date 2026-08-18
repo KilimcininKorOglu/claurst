@@ -221,6 +221,7 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             url: None,
+            headers: HashMap::new(),
             server_type: "stdio".to_string(),
             origin: McpServerOrigin::User,
         }
@@ -233,6 +234,7 @@ mod tests {
             args: vec!["--flag".to_string()],
             env: HashMap::new(),
             url: None,
+            headers: HashMap::new(),
             server_type: "stdio".to_string(),
             origin: McpServerOrigin::Project,
         }

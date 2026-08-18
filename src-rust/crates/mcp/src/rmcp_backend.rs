@@ -122,6 +122,36 @@ impl RmcpClientBackend {
         Self::connect_with_transport(config, transport, client_info, "stdio").await
     }
 
+    /// The configured headers, as the transport wants them.
+    ///
+    /// A header the HTTP layer would reject is reported by name rather than
+    /// dropped, because a request missing the credential it was given fails
+    /// much later and says nothing about the header. The value never reaches
+    /// the error: it is usually a token.
+    fn headers_of(
+        config: &claurst_core::config::McpServerConfig,
+    ) -> anyhow::Result<HashMap<reqwest::header::HeaderName, reqwest::header::HeaderValue>> {
+        let mut headers = HashMap::with_capacity(config.headers.len());
+        for (name, value) in &config.headers {
+            let parsed_name: reqwest::header::HeaderName = name.parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "MCP server '{}': '{}' is not a valid header name",
+                    config.name,
+                    name
+                )
+            })?;
+            let parsed_value = reqwest::header::HeaderValue::from_str(value).map_err(|_| {
+                anyhow::anyhow!(
+                    "MCP server '{}': the value of header '{}' is not valid",
+                    config.name,
+                    name
+                )
+            })?;
+            headers.insert(parsed_name, parsed_value);
+        }
+        Ok(headers)
+    }
+
     pub async fn connect_http(
         config: &claurst_core::config::McpServerConfig,
         auth_token: Option<String>,
@@ -135,6 +165,10 @@ impl RmcpClientBackend {
         let mut transport_config = StreamableHttpClientTransportConfig::with_uri(endpoint);
         if let Some(token) = auth_token {
             transport_config = transport_config.auth_header(token);
+        }
+        let custom = Self::headers_of(config)?;
+        if !custom.is_empty() {
+            transport_config = transport_config.custom_headers(custom);
         }
 
         let transport = StreamableHttpClientTransport::from_config(transport_config);
@@ -226,7 +260,22 @@ impl LegacySseRmcpTransport {
             .url
             .clone()
             .ok_or_else(|| anyhow::anyhow!("MCP server '{}' has no URL configured", config.name))?;
-        let client = reqwest::Client::new();
+        // The configured headers ride on the client rather than on each
+        // request, so the SSE stream and the POSTs cannot disagree about them.
+        let mut defaults = reqwest::header::HeaderMap::new();
+        for (name, value) in RmcpClientBackend::headers_of(config)? {
+            defaults.insert(name, value);
+        }
+        let client = reqwest::Client::builder()
+            .default_headers(defaults)
+            .build()
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "MCP server '{}': could not build its HTTP client: {}",
+                    config.name,
+                    e
+                )
+            })?;
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
         let transport = Self {
             server_name: config.name.clone(),
@@ -838,6 +887,68 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{timeout, Duration};
 
+    fn http_config_with(headers: &[(&str, &str)]) -> McpServerConfig {
+        McpServerConfig {
+            name: "api".to_string(),
+            command: None,
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: Some("https://example.com/mcp".to_string()),
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            server_type: "http".to_string(),
+            origin: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_configured_header_reaches_the_transport() {
+        let parsed =
+            RmcpClientBackend::headers_of(&http_config_with(&[("Authorization", "Bearer secret")]))
+                .expect("a valid header converts");
+
+        assert_eq!(
+            parsed
+                .get(&reqwest::header::HeaderName::from_static("authorization"))
+                .map(|v| v.to_str().unwrap_or_default()),
+            Some("Bearer secret")
+        );
+    }
+
+    #[test]
+    fn a_server_with_no_headers_sends_none() {
+        assert!(RmcpClientBackend::headers_of(&http_config_with(&[]))
+            .expect("converts")
+            .is_empty());
+    }
+
+    #[test]
+    fn a_header_the_http_layer_would_reject_is_reported_by_name() {
+        let Err(e) = RmcpClientBackend::headers_of(&http_config_with(&[("bad header", "x")]))
+        else {
+            panic!("an invalid header name must not be sent");
+        };
+        let message = e.to_string();
+        assert!(message.contains("bad header"), "{message}");
+        assert!(message.contains("api"), "{message}");
+    }
+
+    #[test]
+    fn a_rejected_header_value_never_appears_in_the_error() {
+        // Header values are usually tokens; naming one in an error would put
+        // it in the log the user pastes into an issue.
+        let Err(e) =
+            RmcpClientBackend::headers_of(&http_config_with(&[("Authorization", "Bearer \n bad")]))
+        else {
+            panic!("an invalid header value must not be sent");
+        };
+        let message = e.to_string();
+        assert!(!message.contains("Bearer"), "{message}");
+        assert!(message.contains("Authorization"), "{message}");
+    }
+
     #[test]
     fn a_panicking_task_leaves_the_transport_state_usable() {
         // A background task that panics while holding one of these locks used
@@ -868,6 +979,7 @@ mod tests {
             args: vec![],
             env: HashMap::new(),
             url: Some(url),
+            headers: Default::default(),
             server_type: "sse".to_string(),
             origin: Default::default(),
         }

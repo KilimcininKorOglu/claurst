@@ -1508,6 +1508,10 @@ pub mod config {
         #[serde(default)]
         pub env: HashMap<String, String>,
         pub url: Option<String>,
+        /// Extra HTTP headers sent with every request to an `http` or `sse`
+        /// server. Ignored for `stdio`, which speaks over pipes.
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        pub headers: HashMap<String, String>,
         #[serde(rename = "type", default = "default_mcp_type")]
         pub server_type: String,
         /// Origin of this definition. Never read from JSON (always `User` on
@@ -5920,6 +5924,7 @@ mod tests {
             args: vec!["-y".to_string(), "@scope/server-github".to_string()],
             env: Default::default(),
             url: None,
+            headers: Default::default(),
             server_type: "stdio".to_string(),
             origin: Default::default(),
         };
@@ -5998,6 +6003,7 @@ mod tests {
             args: vec!["-c".to_string(), "id".to_string()],
             env: std::collections::HashMap::new(),
             url: None,
+            headers: Default::default(),
             server_type: "stdio".to_string(),
             origin: McpServerOrigin::User,
         });

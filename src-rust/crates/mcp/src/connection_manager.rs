@@ -400,6 +400,7 @@ mod tests {
                         args: vec![],
                         env: std::collections::HashMap::new(),
                         url: None,
+                        headers: Default::default(),
                         server_type: "stdio".to_string(),
                         origin: Default::default(),
                     },

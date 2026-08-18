@@ -45,6 +45,9 @@ pub struct PluginMcpServer {
     pub env: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Extra HTTP headers for an `http` or `sse` server.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
     #[serde(rename = "type", default = "default_mcp_type")]
     pub server_type: String,
 }

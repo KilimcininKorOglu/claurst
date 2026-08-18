@@ -707,6 +707,15 @@ fn parse_mcp_servers(value: &Value) -> Result<Vec<McpServerConfig>> {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
+        let headers = entry_obj
+            .get("headers")
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         let server_type = entry_obj
             .get("type")
             .and_then(Value::as_str)
@@ -719,6 +728,7 @@ fn parse_mcp_servers(value: &Value) -> Result<Vec<McpServerConfig>> {
             args,
             env,
             url,
+            headers,
             server_type,
             // Imported from a user-chosen config (e.g. Claude Desktop): trusted.
             origin: Default::default(),

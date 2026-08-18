@@ -102,6 +102,11 @@ pub fn expand_server_config(config: &McpServerConfig) -> McpServerConfig {
             .map(|(k, v)| (k.clone(), expand_env_vars(v)))
             .collect(),
         url: config.url.as_deref().map(expand_env_vars),
+        headers: config
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), expand_env_vars(v)))
+            .collect(),
         server_type: config.server_type.clone(),
         // Preserve origin: expansion must not launder a project server into
         // a trusted one.
@@ -1473,6 +1478,7 @@ mod tests {
                 m
             },
             url: None,
+            headers: Default::default(),
             server_type: "stdio".to_string(),
             origin: Default::default(),
         };
@@ -1641,6 +1647,7 @@ mod tests {
                 args: vec![],
                 env: HashMap::new(),
                 url: Some("https://example.com/mcp".to_string()),
+                headers: Default::default(),
                 server_type: "http".to_string(),
                 origin: Default::default(),
             },

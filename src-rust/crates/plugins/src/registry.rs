@@ -237,6 +237,7 @@ impl PluginRegistry {
                     args: mcp.args.clone(),
                     env: mcp.env.clone(),
                     url: mcp.url.clone(),
+                    headers: mcp.headers.clone(),
                     server_type: mcp.server_type.clone(),
                     origin: mcp_origin_for(&plugin.source),
                 });
@@ -349,6 +350,7 @@ mod tests {
             args: Vec::new(),
             env: std::collections::HashMap::new(),
             url: None,
+            headers: std::collections::HashMap::new(),
             server_type: "stdio".to_string(),
         }
     }

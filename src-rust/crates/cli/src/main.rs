@@ -6421,6 +6421,7 @@ mod bare_mode_tests {
                 args: Vec::new(),
                 env: std::collections::HashMap::new(),
                 url: None,
+                headers: std::collections::HashMap::new(),
                 server_type: "stdio".to_string(),
                 origin: claurst_core::config::McpServerOrigin::User,
             });

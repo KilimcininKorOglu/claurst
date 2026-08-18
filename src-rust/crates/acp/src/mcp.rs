@@ -73,11 +73,6 @@ pub async fn connect(
 }
 
 /// Read one protocol server definition as the internal one.
-///
-/// An http or sse server carrying headers is refused rather than connected
-/// without them: the internal config has nowhere to put a header, and an
-/// Authorization header dropped on the way would surface as an unexplained
-/// authentication failure much later.
 fn to_config(server: &acp::McpServer) -> Result<McpServerConfig, String> {
     match server {
         acp::McpServer::Stdio(stdio) => Ok(McpServerConfig {
@@ -90,45 +85,30 @@ fn to_config(server: &acp::McpServer) -> Result<McpServerConfig, String> {
                 .map(|var| (var.name.clone(), var.value.clone()))
                 .collect(),
             url: None,
+            headers: std::collections::HashMap::new(),
             server_type: "stdio".to_string(),
             origin: McpServerOrigin::User,
         }),
-        acp::McpServer::Http(http) => {
-            if !http.headers.is_empty() {
-                return Err(format!(
-                    "MCP server '{}': headers are not supported; configure the server's \
-                     credentials in the agent instead",
-                    http.name
-                ));
-            }
-            Ok(McpServerConfig {
-                name: http.name.clone(),
-                command: None,
-                args: Vec::new(),
-                env: std::collections::HashMap::new(),
-                url: Some(http.url.clone()),
-                server_type: "http".to_string(),
-                origin: McpServerOrigin::User,
-            })
-        }
-        acp::McpServer::Sse(sse) => {
-            if !sse.headers.is_empty() {
-                return Err(format!(
-                    "MCP server '{}': headers are not supported; configure the server's \
-                     credentials in the agent instead",
-                    sse.name
-                ));
-            }
-            Ok(McpServerConfig {
-                name: sse.name.clone(),
-                command: None,
-                args: Vec::new(),
-                url: Some(sse.url.clone()),
-                env: std::collections::HashMap::new(),
-                server_type: "sse".to_string(),
-                origin: McpServerOrigin::User,
-            })
-        }
+        acp::McpServer::Http(http) => Ok(McpServerConfig {
+            name: http.name.clone(),
+            command: None,
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+            url: Some(http.url.clone()),
+            headers: headers_of(&http.headers),
+            server_type: "http".to_string(),
+            origin: McpServerOrigin::User,
+        }),
+        acp::McpServer::Sse(sse) => Ok(McpServerConfig {
+            name: sse.name.clone(),
+            command: None,
+            args: Vec::new(),
+            env: std::collections::HashMap::new(),
+            url: Some(sse.url.clone()),
+            headers: headers_of(&sse.headers),
+            server_type: "sse".to_string(),
+            origin: McpServerOrigin::User,
+        }),
         other => Err(format!(
             "unsupported MCP transport: {}",
             serde_json::to_value(other)
@@ -137,6 +117,18 @@ fn to_config(server: &acp::McpServer) -> Result<McpServerConfig, String> {
                 .unwrap_or_else(|| "unknown".to_string())
         )),
     }
+}
+
+/// The headers a client supplied, as the internal config holds them.
+///
+/// A repeated name keeps the last value, matching what a `HeaderMap` insert
+/// does; the protocol carries a list, and the transport sends one value per
+/// name.
+fn headers_of(headers: &[acp::HttpHeader]) -> std::collections::HashMap<String, String> {
+    headers
+        .iter()
+        .map(|header| (header.name.clone(), header.value.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -183,19 +175,44 @@ mod tests {
     }
 
     #[test]
-    fn headers_are_refused_rather_than_quietly_dropped() {
-        // Connecting without the Authorization header the client supplied
-        // would fail later, somewhere that says nothing about the header.
+    fn a_header_the_client_supplied_is_carried_through() {
+        // Connecting without the Authorization header would fail later,
+        // somewhere that says nothing about the header.
         let server = acp::McpServer::Http(
             acp::McpServerHttp::new("api", "https://example.com/mcp")
                 .headers(vec![acp::HttpHeader::new("Authorization", "Bearer x")]),
         );
 
-        let Err(reason) = to_config(&server) else {
-            panic!("a header must not be dropped");
-        };
-        assert!(reason.contains("headers"), "{reason}");
-        assert!(reason.contains("api"), "{reason}");
+        let config = to_config(&server).expect("an http server converts");
+        assert_eq!(
+            config.headers.get("Authorization").map(String::as_str),
+            Some("Bearer x")
+        );
+    }
+
+    #[test]
+    fn an_sse_server_carries_its_headers_too() {
+        let server = acp::McpServer::Sse(
+            acp::McpServerSse::new("events", "https://example.com/sse")
+                .headers(vec![acp::HttpHeader::new("X-Api-Key", "k")]),
+        );
+
+        let config = to_config(&server).expect("an sse server converts");
+        assert_eq!(
+            config.headers.get("X-Api-Key").map(String::as_str),
+            Some("k")
+        );
+    }
+
+    #[test]
+    fn a_stdio_server_has_no_headers_to_carry() {
+        // It speaks over pipes; a header would have nowhere to go.
+        let server = acp::McpServer::Stdio(acp::McpServerStdio::new(
+            "docs",
+            std::path::PathBuf::from("/usr/bin/npx"),
+        ));
+
+        assert!(to_config(&server).expect("converts").headers.is_empty());
     }
 
     #[tokio::test]
@@ -207,11 +224,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bad_server_definition_is_reported_rather_than_skipped() {
-        let server = acp::McpServer::Http(
-            acp::McpServerHttp::new("api", "https://example.com/mcp")
-                .headers(vec![acp::HttpHeader::new("Authorization", "Bearer x")]),
-        );
+    async fn a_transport_this_does_not_speak_is_reported_rather_than_skipped() {
+        // A server silently left out would look connected and answer nothing.
+        let unsupported = serde_json::json!({ "type": "carrier-pigeon", "name": "birds" });
+        let Ok(server) = serde_json::from_value::<acp::McpServer>(unsupported) else {
+            // The schema refused it before this code could, which is the same
+            // outcome: nothing is skipped.
+            return;
+        };
 
         assert!(connect(std::slice::from_ref(&server), None).await.is_err());
     }
