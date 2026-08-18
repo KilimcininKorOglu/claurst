@@ -54,13 +54,31 @@ fn token_store_dir() -> PathBuf {
 }
 
 /// Path to the token store for a given MCP server.
-fn token_path(server_name: &str) -> PathBuf {
-    token_store_dir().join(format!("{}.json", server_name))
+///
+/// # Errors
+/// Returns `InvalidInput` when `server_name` carries path components (`/`,
+/// `\`, `..`) or is empty. A project's `.claurst/settings.json` names the MCP
+/// servers it defines, so the name is untrusted and a raw join would let a
+/// repository write an access token anywhere the user can write. Reducing the
+/// name to its last component instead would be worse than rejecting it: two
+/// servers named `gh` and `a/gh` would then share one token file.
+fn token_path(server_name: &str) -> std::io::Result<PathBuf> {
+    if server_name.is_empty()
+        || server_name.contains('/')
+        || server_name.contains('\\')
+        || server_name.contains("..")
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("MCP server name is not usable as a file name: {server_name:?}"),
+        ));
+    }
+    Ok(token_store_dir().join(format!("{}.json", server_name)))
 }
 
 /// Persist an MCP OAuth token to disk.
 pub fn store_mcp_token(token: &McpToken) -> std::io::Result<()> {
-    let path = token_path(&token.server_name);
+    let path = token_path(&token.server_name)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -70,14 +88,14 @@ pub fn store_mcp_token(token: &McpToken) -> std::io::Result<()> {
 
 /// Read a stored MCP OAuth token (None if not found or invalid).
 pub fn get_mcp_token(server_name: &str) -> Option<McpToken> {
-    let path = token_path(server_name);
+    let path = token_path(server_name).ok()?;
     let bytes = std::fs::read(&path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
 /// Delete the stored token for a server (effectively logs out).
 pub fn remove_mcp_token(server_name: &str) -> std::io::Result<()> {
-    let path = token_path(server_name);
+    let path = token_path(server_name)?;
     if path.exists() {
         std::fs::remove_file(&path)
     } else {
@@ -179,7 +197,8 @@ pub async fn begin_mcp_auth(server_name: &str, server_url: &str) -> anyhow::Resu
     let redirect_port = oauth_port_alloc()
         .map_err(|e| anyhow::anyhow!("Failed to allocate OAuth redirect port: {}", e))?;
     let redirect_uri = format!("http://127.0.0.1:{}/callback", redirect_port);
-    let verifier = pkce_verifier();
+    let verifier =
+        pkce_verifier().map_err(|e| anyhow::anyhow!("Failed to generate PKCE verifier: {}", e))?;
     let auth_url = build_mcp_auth_url(&metadata.authorization_endpoint, &redirect_uri, &verifier);
 
     Ok(McpAuthSession {
@@ -312,7 +331,7 @@ pub async fn run_mcp_auth_session(session: McpAuthSession) -> anyhow::Result<Mcp
         server_name: session.server_name,
         auth_url: session.auth_url,
         redirect_uri: session.redirect_uri,
-        token_path: token_path(&token.server_name),
+        token_path: token_path(&token.server_name)?,
     })
 }
 
@@ -360,12 +379,12 @@ pub async fn get_valid_mcp_access_token(
 // ---------------------------------------------------------------------------
 
 /// Generate a PKCE code verifier (43 URL-safe random chars per RFC 7636).
-pub fn pkce_verifier() -> String {
+pub fn pkce_verifier() -> std::io::Result<String> {
     use base64::Engine as _;
     let mut bytes = [0u8; 32];
-    getrandom::getrandom(&mut bytes).expect("getrandom failed");
+    getrandom::getrandom(&mut bytes).map_err(std::io::Error::other)?;
     // base64url-encode → 43 chars (256 bits of entropy, no padding)
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 /// Derive a PKCE code challenge from a verifier (S256 method).
@@ -408,7 +427,7 @@ pub struct XaaLoginState {
 /// Returns the login state needed to complete the exchange.
 pub fn initiate_xaa_login(server_name: &str, idp_url: &str) -> std::io::Result<XaaLoginState> {
     let port = oauth_port_alloc()?;
-    let verifier = pkce_verifier();
+    let verifier = pkce_verifier()?;
     let challenge = pkce_challenge(&verifier);
     let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
 
@@ -568,6 +587,42 @@ pub async fn refresh_mcp_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_server_name_carrying_a_path_gets_no_token_file() {
+        // A repository names the MCP servers it defines, so a raw join would
+        // let it write an access token anywhere the user can write.
+        for name in ["../../etc/passwd", "..", "a/b", "a\\b", "/etc/passwd", ""] {
+            let error = token_path(name).expect_err("{name:?} must be rejected");
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_server_name_lands_in_the_token_store() {
+        let path = token_path("my-server").expect("an ordinary name is usable");
+
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("my-server.json")
+        );
+        assert_eq!(path.parent(), Some(token_store_dir().as_path()));
+    }
+
+    #[test]
+    fn two_server_names_never_share_one_token_file() {
+        // Reducing a name to its last component would map both of these onto
+        // `gh.json`, so one server would read the other's access token.
+        let plain = token_path("gh").expect("an ordinary name is usable");
+        assert!(token_path("a/gh").is_err());
+        assert_eq!(plain.file_name().and_then(|n| n.to_str()), Some("gh.json"));
+    }
+
+    #[test]
+    fn a_pkce_verifier_carries_43_characters() {
+        let verifier = pkce_verifier().expect("the system RNG answers in tests");
+        assert_eq!(verifier.len(), 43);
+    }
 
     #[test]
     fn pkce_challenge_length() {
