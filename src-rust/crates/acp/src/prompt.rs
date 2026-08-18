@@ -30,6 +30,7 @@ pub async fn handle(
     connection: Arc<Connection>,
     session: Arc<SessionState>,
     turn: crate::sessions::TurnGuard,
+    editor: Option<Arc<dyn claurst_tools::EditorHost>>,
     params: acp::PromptRequest,
 ) -> Result<acp::PromptResponse, acp::Error> {
     // Convert prompt content blocks → the user turn in Claurst's internal
@@ -104,7 +105,7 @@ pub async fn handle(
         cancel_token: cancel.clone(),
         // Filled in per call by the tool dispatcher.
         current_call: None,
-        editor: None,
+        editor,
     };
 
     // Spawn the permission drainer for this turn.

@@ -596,6 +596,14 @@ impl AgentServer {
         req: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
         let session = self.session_or_error(&req.session_id)?;
+        // What the client offered to host for this session. Read per prompt
+        // rather than stored, so a client that reconnects with different
+        // capabilities is believed.
+        let editor = crate::editor::AcpEditorHost::for_session(
+            self.connection.clone(),
+            req.session_id.clone(),
+            &self.client_capabilities.read().clone(),
+        );
         // One turn at a time per session: the second would clone the same
         // transcript, run against it, and write its own copy back over the
         // first. A client with two prompts to make opens two sessions.
@@ -610,6 +618,7 @@ impl AgentServer {
             self.connection.clone(),
             session,
             turn,
+            editor,
             req,
         )
         .await
