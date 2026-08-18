@@ -1,5 +1,6 @@
 import * as cp from 'child_process';
 import * as readline from 'readline';
+import * as vscode from 'vscode';
 
 /** Minimal newline-delimited JSON-RPC 2.0 client for the Agent Client Protocol,
  * matching the wire format implemented in src-rust/crates/acp/src/connection.rs:
@@ -250,6 +251,37 @@ export class AcpClient {
       return;
     }
 
+    if (method === 'fs/read_text_file') {
+      try {
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          result: { content: await readTextFile(params?.path, params?.line, params?.limit) },
+        });
+      } catch (e) {
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32603, message: `cannot read ${params?.path}: ${e}` },
+        });
+      }
+      return;
+    }
+
+    if (method === 'fs/write_text_file') {
+      try {
+        await writeTextFile(params?.path, params?.content ?? '');
+        this.writeMessage({ jsonrpc: '2.0', id, result: {} });
+      } catch (e) {
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32603, message: `cannot write ${params?.path}: ${e}` },
+        });
+      }
+      return;
+    }
+
     // Unknown incoming request — respond with method-not-found so the agent
     // doesn't hang waiting for a reply.
     this.writeMessage({
@@ -327,7 +359,15 @@ export class AcpClient {
     if (!this.initialized) {
       this.initialized = this.request('initialize', {
         protocolVersion: 1,
-        clientCapabilities: {},
+        // We host the files: a read sees the buffer the user is looking at,
+        // including edits they have not saved, and a write goes through the
+        // workspace so it joins the undo stack instead of appearing beneath
+        // it. Terminals stay with the agent, which already runs commands in a
+        // PTY and reports their output.
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true },
+          terminal: false,
+        },
         clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
       }).then(() => undefined);
     }
@@ -411,6 +451,62 @@ export class AcpClient {
   dispose(): void {
     this.rl.close();
     this.child.kill();
+  }
+}
+
+/** The file as the editor has it, not as the disk has it.
+ *
+ * An open document is read from the editor's own copy, so unsaved edits are
+ * what the agent sees; anything else is read from the workspace filesystem,
+ * which also covers a remote workspace where the agent's own disk is not the
+ * one holding the file.
+ *
+ * `line` is 1-based and `limit` counts lines, matching the protocol. */
+async function readTextFile(path: string, line?: number, limit?: number): Promise<string> {
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new Error('no path was given');
+  }
+  const uri = vscode.Uri.file(path);
+  const open = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === uri.fsPath);
+  const text = open
+    ? open.getText()
+    : Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+
+  if (line === undefined && limit === undefined) {
+    return text;
+  }
+  const lines = text.split('\n');
+  const from = Math.max(0, (line ?? 1) - 1);
+  const to = limit === undefined ? lines.length : from + limit;
+  return lines.slice(from, to).join('\n');
+}
+
+/** Write through a workspace edit, so the change is undoable and shows up in
+ * the editor the user is looking at rather than underneath it.
+ *
+ * A file that does not exist yet is created first: a workspace edit cannot
+ * replace a range in a document there is none of. */
+async function writeTextFile(path: string, content: string): Promise<void> {
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new Error('no path was given');
+  }
+  const uri = vscode.Uri.file(path);
+  try {
+    await vscode.workspace.fs.stat(uri);
+  } catch {
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+    return;
+  }
+
+  const doc = await vscode.workspace.openTextDocument(uri);
+  const edit = new vscode.WorkspaceEdit();
+  const whole = new vscode.Range(
+    doc.lineAt(0).range.start,
+    doc.lineAt(doc.lineCount - 1).range.end,
+  );
+  edit.replace(uri, whole, content);
+  if (!(await vscode.workspace.applyEdit(edit))) {
+    throw new Error('the workspace refused the edit');
   }
 }
 
