@@ -223,16 +223,22 @@ function Install-FromBinary {
 
 function Install-Binary($source) {
     $target = Join-Path $InstallDir 'claurst.exe'
+    # Declared outside the block below so the cleanup after the copy can see it;
+    # scoped inside, the renamed binary was left behind by every upgrade.
+    $stale = "$target.old"
 
     # The currently running claurst.exe (if any) holds an exclusive file lock on
-    # Windows.  Try to swap by renaming the old one first.
+    # Windows.  Swap by renaming the old one aside, then drop it once the new
+    # binary is in place: the lock follows the open handle, not the name.
     if (Test-Path $target) {
-        $stale = "$target.old"
         if (Test-Path $stale) { Remove-Item -Force $stale -ErrorAction SilentlyContinue }
         try { Move-Item -Force $target $stale } catch { }
     }
 
     Copy-Item -Force $source $target
+    if (Test-Path $stale) {
+        Remove-Item -Force $stale -ErrorAction SilentlyContinue
+    }
     Write-Success "Installed: $target"
 }
 
