@@ -741,13 +741,24 @@ Maximum sleep duration is 60000 ms (60 seconds) per call.
 
 **Permission level:** Write
 
-Read or write Claurst configuration values programmatically. Used by commands and tools that need to persist settings.
+Read or write a Claurst setting. Omitting `value` reads the current one; supplying it writes to `settings.json`, where the next session picks it up.
 
-| Parameter | Type   | Required | Description                       |
-|-----------|--------|----------|-----------------------------------|
-| `action`  | string | yes      | `get`, `set`, or `reset`          |
-| `key`     | string | yes      | Configuration key                 |
-| `value`   | any    | no       | Value to set (required for `set`) |
+| Parameter | Type   | Required | Description                                              |
+|-----------|--------|----------|----------------------------------------------------------|
+| `setting` | string | yes      | Setting key, or `list` to see every key the tool accepts |
+| `value`   | any    | no       | Value to write. Omit to read instead.                    |
+
+Accepted keys:
+
+| Key               | Type    | Description                                                                              |
+|-------------------|---------|--------------------------------------------------------------------------------------------|
+| `model`           | string  | Model ID to use                                                                             |
+| `provider`        | string  | Account the turn is routed to                                                               |
+| `effort`          | string  | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`                  |
+| `max_tokens`      | integer | Maximum output tokens per response                                                          |
+| `verbose`         | boolean | Verbose logging                                                                             |
+| `permission_mode` | string  | `default`, `accept_edits`, `bypass_permissions`, or `plan`                                  |
+| `auto_compact`    | boolean | Auto-compact the conversation when the context fills                                        |
 
 ---
 
