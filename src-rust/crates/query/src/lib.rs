@@ -225,6 +225,7 @@ impl QueryConfig {
             output_style_prompt: cfg.resolve_output_style_prompt(),
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
+            effort_level: cfg.effective_effort_level(),
             ..Default::default()
         }
     }
@@ -243,6 +244,7 @@ impl QueryConfig {
             output_style_prompt: cfg.resolve_output_style_prompt(),
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
+            effort_level: cfg.effective_effort_level(),
             ..Default::default()
         }
     }
@@ -2111,6 +2113,26 @@ impl StreamHandler for ChannelStreamHandler {
 mod tests {
     use super::*;
     use claurst_api::SystemPrompt;
+
+    #[test]
+    fn a_configured_effort_reaches_the_turn() {
+        // Nothing else reads `config.effort`, so if this arm goes missing the
+        // setting is written, listed, and silently ignored on every request.
+        let cfg = claurst_core::config::Config {
+            effort: Some("xhigh".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            QueryConfig::from_config(&cfg).effort_level,
+            Some(claurst_core::effort::EffortLevel::XHigh)
+        );
+    }
+
+    #[test]
+    fn no_configured_effort_leaves_the_turn_on_its_default() {
+        let cfg = claurst_core::config::Config::default();
+        assert_eq!(QueryConfig::from_config(&cfg).effort_level, None);
+    }
 
     // The fallback switch fires on `is_retryable`. These pin that contract:
     // narrowing either classification for some other reason would kill

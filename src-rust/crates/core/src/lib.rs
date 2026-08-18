@@ -1239,6 +1239,10 @@ pub mod config {
         /// Active provider ID (default: "anthropic")
         #[serde(default)]
         pub provider: Option<String>,
+        /// Reasoning effort the session starts at, as an [`crate::effort::EffortLevel`]
+        /// name. Unset means the query loop's own default applies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub effort: Option<String>,
         /// Live copy of [`Settings::advisor_model`], merged in by
         /// [`Settings::effective_config`] so the running session sees an
         /// advisor change without a restart.
@@ -1941,6 +1945,17 @@ pub mod config {
                 .unwrap_or(crate::constants::DEFAULT_MAX_TOKENS)
         }
 
+        /// Reasoning effort the session starts at.
+        ///
+        /// An unreadable name resolves to `None` rather than an error: the
+        /// query loop has its own default, and refusing to start a session
+        /// over one misspelled settings value would be worse than ignoring it.
+        pub fn effective_effort_level(&self) -> Option<crate::effort::EffortLevel> {
+            self.effort
+                .as_deref()
+                .and_then(crate::effort::EffortLevel::from_str)
+        }
+
         /// How many file suggestions the `@` autocomplete may show.
         ///
         /// A stored 0 also falls back, because 0 shows nothing at all and was
@@ -2599,6 +2614,7 @@ pub mod config {
                 },
                 hooks: merge_map(base.config.hooks, over.config.hooks),
                 provider: over.config.provider.or(base.config.provider),
+                effort: over.config.effort.or(base.config.effort),
                 advisor_model: over.config.advisor_model.or(base.config.advisor_model),
                 companion: over.config.companion.or(base.config.companion),
                 provider_configs: merge_map(
@@ -6193,6 +6209,37 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(cfg.effective_model(), "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn an_unset_effort_leaves_the_choice_to_the_query_loop() {
+        assert_eq!(
+            crate::config::Config::default().effective_effort_level(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_stored_effort_name_resolves_to_its_level() {
+        let cfg = crate::config::Config {
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.effective_effort_level(),
+            Some(crate::effort::EffortLevel::High)
+        );
+    }
+
+    #[test]
+    fn a_misspelled_effort_does_not_stop_the_session() {
+        // The settings file is hand-edited, so one bad name must not be fatal;
+        // the query loop's own default takes over instead.
+        let cfg = crate::config::Config {
+            effort: Some("very high".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.effective_effort_level(), None);
     }
 
     #[test]
