@@ -180,13 +180,17 @@ Claurst will run in JSON-RPC 2.0 mode over stdio. It implements `initialize`, `s
 
 Every turn is written to the same session store the terminal reads, so an editor can list earlier conversations and reopen one. The slash commands are announced as available commands and run in the agent: a prompt naming one is answered by the command rather than sent to the model.
 
+The agent uses whatever the editor offered to host. With `fs.read_text_file` it reads the buffer the user is looking at rather than the older text on disk; with `fs.write_text_file` its edits go through the editor and stay undoable; with `terminal` its commands run in the editor's shell and are attached to the tool call that started them. Each is honoured on its own, and anything the editor does not host stays with the agent.
+
+A session can bring its own MCP servers over stdio, HTTP or SSE, connected for that session alone. A permission request carries what it is approving, not just the tool's name. Images in a prompt reach the model; audio does not, and `initialize` says so.
+
 Configure your provider / API key before launching — run `claurst auth login`, use `/connect` inside the TUI, or edit `settings.json` directly. The ACP agent uses the same credentials and providers as the interactive TUI.
 
 Enable verbose ACP logging (to stderr — never stdout, which would corrupt the protocol) by setting `CLAURST_ACP_LOG=debug`.
 
 ### VS Code
 
-VS Code has no ACP client of its own, so this repo ships one: [`editors/vscode/`](editors/vscode/). It spawns one `claurst acp` process for the window and gives each panel its own session inside it, renders the transcript, diffs and plan in a webview, completes slash commands and `@file` mentions, and can reopen an earlier conversation. Build it with `npm install && npm run compile` in that directory, then press F5 to open an Extension Development Host. Setup and scope are in [its README](editors/vscode/README.md).
+VS Code has no ACP client of its own, so this repo ships one: [`editors/vscode/`](editors/vscode/). It spawns one `claurst acp` process for the window and gives each panel its own session inside it, renders the transcript, diffs and plan in a webview, completes slash commands and `@file` mentions, hosts the files the agent reads and writes so unsaved edits are visible and its writes stay undoable, and can reopen or fork an earlier conversation. Build it with `npm install && npm run compile` in that directory, then press F5 to open an Extension Development Host. Setup and scope are in [its README](editors/vscode/README.md).
 
 ### Listing on the ACP Registry
 

@@ -542,7 +542,23 @@ A session with no name of its own is named after the first thing asked of it, an
 
 Slash commands work too: the agent announces the whole set the terminal offers, and a prompt naming one is answered by the command rather than sent to the model. Commands that open a picker on a terminal answer in text here, so `/rewind` numbers the messages, `/hooks` prints what is configured, and `/import-config` prints the preview that `/import-config apply` then carries out.
 
-Editing tools report each file they rewrote as a diff, and a stored todo list is published as the session's plan, so an editor draws both natively.
+Editing tools report each file they rewrote as a diff, and a stored todo list is published as the session's plan, so an editor draws both natively. Every tool call also names the files it is about, so an editor can follow the agent from file to file.
+
+A permission request carries what it is approving, not just the tool's name: a write arrives as a diff against the file on disk, an edit as the text it replaces and the text replacing it, a command as the command. Four answers are offered, including rejecting a tool permanently.
+
+The agent uses whatever the editor offered to host:
+
+| Capability | What changes |
+|--------------------------|--------------------------------------------------------------|
+| `fs.read_text_file`      | Reads see the buffer the user is looking at, unsaved edits included |
+| `fs.write_text_file`     | Writes go through the editor, so they are undoable            |
+| `terminal`               | Commands run in the editor's shell and are shown as they run  |
+
+Each is honoured on its own, and anything the editor does not host stays with the agent.
+
+A session can also bring its own MCP servers: whatever `session/new`, `session/load`, `session/resume` or `session/fork` names is connected for that session alone, over stdio, HTTP or SSE. A request that names none shares the agent's configured servers.
+
+Images in a prompt reach the model. Audio does not, and `initialize` says so.
 
 For VS Code, which has no ACP client of its own, the repository ships an extension under `editors/vscode/`.
 
