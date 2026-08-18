@@ -27,6 +27,7 @@ mod connection;
 mod permission;
 mod persist;
 mod prompt;
+mod replay;
 mod runtime;
 mod server;
 mod session_config;

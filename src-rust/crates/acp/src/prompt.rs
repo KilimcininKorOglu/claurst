@@ -464,7 +464,7 @@ pub(crate) fn classify_tool_kind(tool_name: &str) -> acp::ToolKind {
 
 /// Compose a short, human-readable title for a tool call. Falls back to the
 /// tool's bare name if no descriptive field is present.
-fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>) -> String {
+pub(crate) fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>) -> String {
     if let Some(input) = raw_input {
         // Prefer path-like fields for file tools.
         for key in &["file_path", "path", "filename", "url", "pattern", "command"] {

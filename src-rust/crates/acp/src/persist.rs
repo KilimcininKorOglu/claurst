@@ -32,6 +32,17 @@ pub async fn save(session: &Arc<SessionState>, model: &str) {
     }
 }
 
+/// Read a stored session, or `None` when nothing is filed under that id.
+pub async fn load(id: &str) -> Option<ConversationSession> {
+    match history::load_session(id).await {
+        Ok(stored) => Some(stored),
+        Err(e) => {
+            tracing::debug!(?e, session_id = id, "ACP: no stored session under that id");
+            None
+        }
+    }
+}
+
 /// The longest a derived title runs before it is cut short.
 const TITLE_CHARS: usize = 60;
 

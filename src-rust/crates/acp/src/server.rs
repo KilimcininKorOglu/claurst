@@ -77,9 +77,14 @@ impl AgentServer {
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
             "session/load" => {
-                // v1: not supported. Capability is advertised as false in
-                // initialize so a well-behaved client never calls this.
-                Err(acp::Error::method_not_found())
+                let req: acp::LoadSessionRequest = parse_params(params)?;
+                let result = self.on_load_session(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
+            "session/resume" => {
+                let req: acp::ResumeSessionRequest = parse_params(params)?;
+                let result = self.on_resume_session(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
             "session/prompt" => {
                 let req: acp::PromptRequest = parse_params(params)?;
@@ -151,7 +156,13 @@ impl AgentServer {
         let mut response = acp::InitializeResponse::new(acp::ProtocolVersion::V1)
             .agent_capabilities(
                 acp::AgentCapabilities::new()
-                    .load_session(false)
+                    // Every turn is filed, so a session outlives the process
+                    // and can be handed back in full or reopened silently.
+                    .load_session(true)
+                    .session_capabilities(
+                        acp::SessionCapabilities::new()
+                            .resume(Some(acp::SessionResumeCapabilities::new())),
+                    )
                     .prompt_capabilities(
                         // Embedded resources reach the model: `render_prompt_blocks`
                         // reads both a resource link and an inline resource. Images
@@ -193,6 +204,71 @@ impl AgentServer {
                 &self.runtime.config.permission_mode,
             )))
             .config_options(Some(self.config_options_for(&state))))
+    }
+
+    /// Reopen a stored session and hand the whole conversation back.
+    ///
+    /// The client draws a transcript it never saw being written, so the
+    /// history is replayed as `session/update` notifications before this
+    /// answers: the protocol requires the updates to arrive first.
+    async fn on_load_session(
+        self: &Arc<Self>,
+        req: acp::LoadSessionRequest,
+    ) -> Result<acp::LoadSessionResponse, acp::Error> {
+        let session = reopen(
+            &self.sessions,
+            &req.session_id,
+            &req.cwd,
+            req.mcp_servers.len(),
+        )
+        .await?;
+
+        let messages = session.messages.lock().clone();
+        for update in crate::replay::updates_for(&messages) {
+            let notification = acp::SessionNotification::new(req.session_id.clone(), update);
+            if let Err(e) = self
+                .connection
+                .send_notification("session/update", notification)
+                .await
+            {
+                warn!(?e, "ACP: failed to replay a stored session");
+                return Err(acp::Error::internal_error());
+            }
+        }
+        info!(
+            session_id = %req.session_id,
+            messages = messages.len(),
+            "ACP: session loaded and replayed"
+        );
+
+        Ok(acp::LoadSessionResponse::new()
+            .modes(Some(crate::session_config::mode_state(
+                &self.runtime.config.permission_mode,
+            )))
+            .config_options(Some(self.config_options_for(&session))))
+    }
+
+    /// Reopen a stored session and keep its context, without handing the
+    /// conversation back. A client that draws its own transcript asks for this
+    /// instead of `session/load`.
+    async fn on_resume_session(
+        self: &Arc<Self>,
+        req: acp::ResumeSessionRequest,
+    ) -> Result<acp::ResumeSessionResponse, acp::Error> {
+        let session = reopen(
+            &self.sessions,
+            &req.session_id,
+            &req.cwd,
+            req.mcp_servers.len(),
+        )
+        .await?;
+        info!(session_id = %req.session_id, "ACP: session resumed");
+
+        Ok(acp::ResumeSessionResponse::new()
+            .modes(Some(crate::session_config::mode_state(
+                &self.runtime.config.permission_mode,
+            )))
+            .config_options(Some(self.config_options_for(&session))))
     }
 
     /// The options a session currently offers, rebuilt from its overrides.
@@ -319,6 +395,46 @@ impl AgentServer {
     }
 }
 
+/// Put a session back in the registry: the live one if it is still there,
+/// otherwise the one on disk. An id nobody ever wrote is reported back.
+///
+/// A free function over the registry rather than a method, so the rule can be
+/// exercised without standing up a whole runtime.
+async fn reopen(
+    sessions: &SessionRegistry,
+    session_id: &acp::SessionId,
+    cwd: &std::path::Path,
+    mcp_server_count: usize,
+) -> Result<Arc<SessionState>, acp::Error> {
+    if !cwd.is_absolute() {
+        return Err(acp::Error::invalid_params().data(Some(
+            serde_json::json!({ "reason": "cwd must be absolute" }),
+        )));
+    }
+    if mcp_server_count > 0 {
+        warn!(
+            count = mcp_server_count,
+            "ACP: session-specific MCP servers are not yet routed — using global config"
+        );
+    }
+
+    if let Some(live) = sessions.get(session_id) {
+        return Ok(live);
+    }
+
+    let stored = crate::persist::load(session_id.0.as_ref())
+        .await
+        .ok_or_else(|| {
+            acp::Error::invalid_params().data(Some(serde_json::json!({
+                "reason": "unknown session",
+                "sessionId": session_id,
+            })))
+        })?;
+    let session = SessionState::restored(session_id.clone(), cwd.to_path_buf(), &stored);
+    sessions.insert(session.clone());
+    Ok(session)
+}
+
 fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T, acp::Error> {
     let value = params.ok_or_else(acp::Error::invalid_params)?;
     serde_json::from_value(value).map_err(|e| {
@@ -331,10 +447,131 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claurst_core::types::Message;
+    use std::path::{Path, PathBuf};
 
     #[derive(serde::Deserialize, Debug, PartialEq)]
     struct Params {
         name: String,
+    }
+
+    /// `CLAURST_HOME` is process-wide, so the tests that move it run one at a
+    /// time and put it back when they are done.
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn set() -> Self {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let previous = std::env::var_os("CLAURST_HOME");
+            unsafe { std::env::set_var("CLAURST_HOME", dir.path()) };
+            Self {
+                previous,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => unsafe { std::env::set_var("CLAURST_HOME", v) },
+                None => unsafe { std::env::remove_var("CLAURST_HOME") },
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_relative_directory_is_refused_rather_than_resolved() {
+        // Resolving it against the agent's own cwd would open the session
+        // somewhere the client never named.
+        let sessions = SessionRegistry::new();
+        let Err(error) = reopen(
+            &sessions,
+            &acp::SessionId::new("acp-1"),
+            Path::new("relative/path"),
+            0,
+        )
+        .await
+        else {
+            panic!("a relative cwd must be refused");
+        };
+
+        assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn an_id_nobody_ever_wrote_is_reported_back() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::set();
+
+        let sessions = SessionRegistry::new();
+        let Err(error) = reopen(
+            &sessions,
+            &acp::SessionId::new("acp-missing"),
+            Path::new("/tmp"),
+            0,
+        )
+        .await
+        else {
+            panic!("an unknown session must be refused");
+        };
+
+        assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+        let data = error.data.expect("the error names the session");
+        assert_eq!(data["reason"], "unknown session");
+    }
+
+    #[tokio::test]
+    async fn a_session_still_running_is_reopened_as_itself() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::set();
+
+        let sessions = SessionRegistry::new();
+        let id = acp::SessionId::new("acp-live");
+        let live = SessionState::new(id.clone(), PathBuf::from("/tmp/live"));
+        sessions.insert(live.clone());
+
+        let reopened = reopen(&sessions, &id, Path::new("/tmp/elsewhere"), 0)
+            .await
+            .expect("a live session reopens");
+
+        // The same state, not a second copy: a turn in flight keeps its
+        // transcript and its cancel token.
+        assert!(Arc::ptr_eq(&reopened, &live));
+    }
+
+    #[tokio::test]
+    async fn a_stored_session_comes_back_with_its_transcript() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::set();
+
+        let stored = SessionState::new(
+            acp::SessionId::new("acp-stored"),
+            PathBuf::from("/tmp/stored"),
+        );
+        *stored.messages.lock() = vec![Message::user("hello"), Message::assistant("hi")];
+        *stored.title.lock() = Some("greeting".to_string());
+        crate::persist::save(&stored, "m").await;
+
+        let sessions = SessionRegistry::new();
+        let reopened = reopen(
+            &sessions,
+            &acp::SessionId::new("acp-stored"),
+            Path::new("/tmp/stored"),
+            0,
+        )
+        .await
+        .expect("a stored session reopens");
+
+        assert_eq!(reopened.messages.lock().len(), 2);
+        assert_eq!(reopened.title.lock().as_deref(), Some("greeting"));
+        // And it is registered, so the next prompt finds it without a reload.
+        assert!(sessions.get(&acp::SessionId::new("acp-stored")).is_some());
     }
 
     #[test]
