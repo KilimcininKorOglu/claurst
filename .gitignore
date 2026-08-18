@@ -18,3 +18,12 @@ refs/
 .vscode/
 .claurst/
 
+# The extension's own launch config is project files, not personal state:
+# without it F5 has no Extension Development Host to run.
+!editors/vscode/.vscode/
+
+# VS Code extension build output
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/*.vsix
+
