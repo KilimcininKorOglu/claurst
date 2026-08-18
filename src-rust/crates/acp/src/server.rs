@@ -111,6 +111,11 @@ impl AgentServer {
                 let result = self.on_set_mode(req).await?;
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
+            "session/set_model" => {
+                let req: acp::SetSessionModelRequest = parse_params(params)?;
+                let result = self.on_set_model(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
             "session/set_config_option" => {
                 let req: acp::SetSessionConfigOptionRequest = parse_params(params)?;
                 let result = self.on_set_config_option(req).await?;
@@ -219,6 +224,7 @@ impl AgentServer {
         self.sessions.insert(state.clone());
         Ok(acp::NewSessionResponse::new(session_id)
             .modes(Some(self.mode_state_for(&state)))
+            .models(Some(self.model_state_for(&state)))
             .config_options(Some(self.config_options_for(&state))))
     }
 
@@ -259,6 +265,7 @@ impl AgentServer {
 
         Ok(acp::LoadSessionResponse::new()
             .modes(Some(self.mode_state_for(&session)))
+            .models(Some(self.model_state_for(&session)))
             .config_options(Some(self.config_options_for(&session))))
     }
 
@@ -280,6 +287,7 @@ impl AgentServer {
 
         Ok(acp::ResumeSessionResponse::new()
             .modes(Some(self.mode_state_for(&session)))
+            .models(Some(self.model_state_for(&session)))
             .config_options(Some(self.config_options_for(&session))))
     }
 
@@ -314,6 +322,7 @@ impl AgentServer {
 
         Ok(acp::ForkSessionResponse::new(forked_id)
             .modes(Some(self.mode_state_for(&forked)))
+            .models(Some(self.model_state_for(&forked)))
             .config_options(Some(self.config_options_for(&forked))))
     }
 
@@ -392,6 +401,55 @@ impl AgentServer {
         crate::session_config::config_options(&config, &self.runtime.model_registry, &model, effort)
     }
 
+    /// The models a session can be switched to, with the one it uses marked.
+    fn model_state_for(&self, session: &Arc<SessionState>) -> acp::SessionModelState {
+        let overrides = session.settings.lock().clone();
+        let mut config = self.runtime.config.clone();
+        crate::session_config::apply_overrides(&mut config, &overrides);
+        let model = overrides
+            .model
+            .clone()
+            .unwrap_or_else(|| self.runtime.query_config.model.clone());
+        crate::session_config::model_state(&config, &self.runtime.model_registry, &model)
+    }
+
+    /// Pick the model this session sends to.
+    ///
+    /// The same override the `model` configuration option writes, so the two
+    /// selectors a client may show cannot drift apart, and both are announced
+    /// whichever one was used.
+    async fn on_set_model(
+        self: &Arc<Self>,
+        req: acp::SetSessionModelRequest,
+    ) -> Result<acp::SetSessionModelResponse, acp::Error> {
+        let session = self.session_or_error(&req.session_id)?;
+        let model_id = req.model_id.0.to_string();
+        session.settings.lock().model = Some(model_id.clone());
+        info!(session_id = %req.session_id, model = %model_id, "ACP: session model changed");
+
+        self.announce_options(&req.session_id, self.config_options_for(&session))
+            .await;
+        Ok(acp::SetSessionModelResponse::new())
+    }
+
+    /// Restate a session's options to the client, so a view that did not make
+    /// the change still shows what the session is set to now.
+    async fn announce_options(
+        self: &Arc<Self>,
+        session_id: &acp::SessionId,
+        options: Vec<acp::SessionConfigOption>,
+    ) {
+        let update = acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(options));
+        let notification = acp::SessionNotification::new(session_id.clone(), update);
+        if let Err(e) = self
+            .connection
+            .send_notification("session/update", notification)
+            .await
+        {
+            warn!(?e, "ACP: failed to announce the configuration change");
+        }
+    }
+
     /// Change the model, the account, or the reasoning effort for this session
     /// alone. Session-scoped: nothing is written to `settings.json`.
     async fn on_set_config_option(
@@ -430,16 +488,8 @@ impl AgentServer {
         // Changing one option restates the other two: the model list belongs
         // to the account, and the effort ladder belongs to the model.
         let options = self.config_options_for(&session);
-        let update =
-            acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(options.clone()));
-        let notification = acp::SessionNotification::new(req.session_id.clone(), update);
-        if let Err(e) = self
-            .connection
-            .send_notification("session/update", notification)
-            .await
-        {
-            warn!(?e, "ACP: failed to announce the configuration change");
-        }
+        self.announce_options(&req.session_id, options.clone())
+            .await;
 
         Ok(acp::SetSessionConfigOptionResponse::new(options))
     }

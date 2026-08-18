@@ -161,6 +161,47 @@ pub fn config_options(
     ]
 }
 
+/// The models a session can be switched to, with the one it is using marked.
+///
+/// The same set the `model` configuration option offers, in the shape the
+/// dedicated model methods use. Both are published: those methods are unstable
+/// in the schema, and a client that does not know them still needs a way to
+/// pick a model.
+pub fn model_state(
+    config: &claurst_core::config::Config,
+    registry: &claurst_api::ModelRegistry,
+    model: &str,
+) -> acp::SessionModelState {
+    let account = config.selected_provider_id().to_string();
+    let vendor = config.vendor_id_for_account(&account);
+    let current = wire_model(&account, model);
+
+    let mut models: Vec<acp::ModelInfo> = registry
+        .list_visible_by_provider(&vendor)
+        .into_iter()
+        .map(|entry| {
+            acp::ModelInfo::new(
+                acp::ModelId::new(entry.info.id.to_string()),
+                entry.info.name.clone(),
+            )
+        })
+        .collect();
+    // A model the catalog has never heard of is still the one answering, and
+    // a state whose current model is missing from its own list is a selector
+    // that shows one thing and offers another.
+    if !models
+        .iter()
+        .any(|info| info.model_id.0.as_ref() == current)
+    {
+        models.insert(
+            0,
+            acp::ModelInfo::new(acp::ModelId::new(current.clone()), current.clone()),
+        );
+    }
+
+    acp::SessionModelState::new(acp::ModelId::new(current), models)
+}
+
 /// Record a client's choice on the session's overrides.
 ///
 /// Returns the ids of the options that could not be honoured, so the caller
@@ -341,6 +382,56 @@ mod tests {
                 option.id.0
             );
         }
+    }
+
+    #[test]
+    fn the_model_state_marks_the_model_the_turn_would_send() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let state = model_state(
+            &anthropic_config(),
+            &claurst_api::ModelRegistry::new(),
+            "anthropic/claude-opus-5",
+        );
+
+        // The account prefix is not part of the id the catalog is keyed by.
+        assert_eq!(state.current_model_id.0.as_ref(), "claude-opus-5");
+        // An empty catalog is the hard case: the model in use must still be
+        // offered, or the selector shows one thing and offers another.
+        assert!(
+            state
+                .available_models
+                .iter()
+                .any(|m| m.model_id.0.as_ref() == "claude-opus-5"),
+            "the current model is missing from the list it belongs to"
+        );
+    }
+
+    #[test]
+    fn the_two_model_selectors_read_the_same_choice() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        // `session/set_model` and the `model` config option write the same
+        // override, so a client showing both cannot see them disagree.
+        let mut overrides = SessionSettings::default();
+        let config = anthropic_config();
+        let registry = claurst_api::ModelRegistry::new();
+        apply_config_option(&mut overrides, &config, &registry, OPTION_MODEL, "gpt-5")
+            .expect("a model can be chosen");
+
+        let chosen = overrides.model.clone().expect("a model override");
+        let state = model_state(&config, &registry, &chosen);
+        let options = config_options(&config, &registry, &chosen, None);
+        let option_current = select_of(option_named(&options, OPTION_MODEL))
+            .current_value
+            .0
+            .to_string();
+
+        assert_eq!(state.current_model_id.0.as_ref(), option_current);
     }
 
     #[test]
