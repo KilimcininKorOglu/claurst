@@ -645,6 +645,10 @@ Grants Claurst read access to an additional directory outside the working direct
 
 Multiple `--add-dir` flags can be combined.
 
+Each directory is named and shown to the model, so it can reach the directory without being handed an absolute path. The working directory is always `&main`; every other directory takes its name from its last path component, lowercased with anything outside `[a-z0-9._-]` folded to a dash, so `_ai-engine` becomes `&_ai-engine` and `My Project (API)` becomes `&my-project-api`. Two directories with the same name are told apart with a counter: `&lib` and `&lib-2`. The names are derived from the configuration, so the same flags always produce the same names and nothing is persisted.
+
+Path arguments then accept `&<root-name>/<relative-path>` for a file and `&<root-name>` for the directory itself. A relative path without `&` still resolves against the working directory, and a mistyped root name is rejected with the list of known roots rather than being joined onto the working directory. The same names come from `additional_dirs` and `workspace_paths` in `settings.json`.
+
 ### Environment variables in config
 
 Environment variables can be set in `.claude/settings.json` under an `env` key. These are injected into tool executions:

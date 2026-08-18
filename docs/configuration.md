@@ -348,7 +348,7 @@ items; see [Commands](commands.md).
 
 | Key               | Type             | Default | Description                                                                                                              |
 |-------------------|------------------|---------|--------------------------------------------------------------------------------------------------------------------------|
-| `additional_dirs` | array of strings | []      | Additional filesystem paths Claurst is allowed to read and write. Equivalent to passing `--add-dir` on the command line. |
+| `additional_dirs` | array of strings | []      | Additional filesystem paths Claurst is allowed to read and write. Equivalent to passing `--add-dir` on the command line. Each one becomes a named workspace root the model can address as `&root-name/path`; see [`--add-dir`](advanced.md#--add-dir). |
 
 ### MCP servers
 

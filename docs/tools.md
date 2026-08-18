@@ -39,6 +39,14 @@ Every tool in Claurst implements a common `Tool` interface. This interface defin
 
 Tools are loaded eagerly at session start. The model receives tool descriptions and schemas and selects tools to call. Each tool call goes through permission resolution before `call()` is invoked.
 
+### Workspace-root paths
+
+Every path-based tool accepts three forms: an absolute path, a path relative to the working directory, and a named workspace-root path.
+
+The working directory is always `&main`. Directories added with `--add-dir`, `additional_dirs` or `workspace_paths` take a name from their last path component (`&docs`, `&_ai-engine`, `&my-project-api`), with a counter appended when two of them share a name. Write `&<root-name>/<relative-path>` for a file under that root, or `&<root-name>` on its own for the root directory. A root name that does not exist is an error listing the known roots, not a path.
+
+`GlobTool` and `GrepTool` search the working directory when `path` is omitted; pass `path=&<root-name>` to search a different root. See [`--add-dir`](advanced.md#--add-dir) for how the names are derived.
+
 ### Tool Concurrency
 
 Tools marked `isConcurrencySafe` may run in parallel with other tool calls. Most write tools are not concurrency-safe. Read-only tools are generally safe to parallelize.
@@ -103,7 +111,7 @@ Read the contents of a file from the local filesystem. Returns file contents as 
 
 | Parameter   | Type    | Required | Description                     |
 |-------------|---------|----------|---------------------------------|
-| `file_path` | string  | yes      | Absolute path to the file       |
+| `file_path` | string  | yes      | Absolute, working-directory-relative, or `&root-name/relative` path|
 | `offset`    | integer | no       | First line to read (1-indexed)  |
 | `limit`     | integer | no       | Maximum number of lines to read |
 
@@ -121,7 +129,7 @@ Write content to a file. Creates the file and any missing parent directories. Ov
 
 | Parameter   | Type   | Required | Description            |
 |-------------|--------|----------|------------------------|
-| `file_path` | string | yes      | Absolute path to write |
+| `file_path` | string | yes      | Absolute, working-directory-relative, or `&root-name/relative` path |
 | `content`   | string | yes      | Full file content      |
 
 Requires the file to have been read first (or the file to not exist). The previous content is stored for `/undo` support.
@@ -136,7 +144,7 @@ Perform an exact string replacement within an existing file. Fails if `old_strin
 
 | Parameter     | Type    | Required | Description                              |
 |---------------|---------|----------|------------------------------------------|
-| `file_path`   | string  | yes      | Absolute path to the file                |
+| `file_path`   | string  | yes      | Absolute, working-directory-relative, or `&root-name/relative` path|
 | `old_string`  | string  | yes      | Exact text to replace                    |
 | `new_string`  | string  | yes      | Replacement text                         |
 | `replace_all` | boolean | no       | Replace all occurrences (default: false) |
@@ -274,7 +282,7 @@ Find files matching a glob pattern. Searches from a specified directory (default
 | Parameter | Type   | Required | Description                                   |
 |-----------|--------|----------|-----------------------------------------------|
 | `pattern` | string | yes      | Glob pattern (e.g., `**/*.rs`, `src/**/*.ts`) |
-| `path`    | string | no       | Directory to search from                      |
+| `path`    | string | no       | Directory to search from; `&root-name` targets another workspace root|
 
 ---
 
@@ -287,7 +295,7 @@ Search file contents using regular expressions, powered by ripgrep. Supports mul
 | Parameter     | Type    | Required | Description                                 |
 |---------------|---------|----------|---------------------------------------------|
 | `pattern`     | string  | yes      | Regular expression pattern                  |
-| `path`        | string  | no       | Directory or file to search                 |
+| `path`        | string  | no       | Directory or file to search; `&root-name` targets another workspace root|
 | `glob`        | string  | no       | File glob filter (e.g., `*.rs`)             |
 | `type`        | string  | no       | File type filter (e.g., `rust`, `py`, `js`) |
 | `output_mode` | string  | no       | `content`, `files_with_matches`, or `count` |
@@ -629,7 +637,7 @@ Edit a Jupyter notebook (`.ipynb`) by modifying, inserting, or deleting cells. O
 
 | Parameter       | Type    | Required | Description                   |
 |-----------------|---------|----------|-------------------------------|
-| `notebook_path` | string  | yes      | Absolute path to the notebook |
+| `notebook_path` | string  | yes      | Absolute, working-directory-relative, or `&root-name/relative` path |
 | `cell_index`    | integer | no       | Cell to edit (0-indexed)      |
 | `new_source`    | string  | no       | New cell source content       |
 | `cell_type`     | string  | no       | `code`, `markdown`, or `raw`  |
