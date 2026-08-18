@@ -7,6 +7,7 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use parking_lot::Mutex as SyncMutex;
 use rmcp::model as rmcp_model;
 use rmcp::service::RunningService;
 use rmcp::transport::{
@@ -16,7 +17,7 @@ use rmcp::transport::{
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -210,10 +211,10 @@ struct LegacySseRmcpTransport {
     sse_url: String,
     client: reqwest::Client,
     auth_token: Option<String>,
-    post_endpoint: Arc<StdMutex<Option<String>>>,
+    post_endpoint: Arc<SyncMutex<Option<String>>>,
     incoming_tx: mpsc::UnboundedSender<rmcp::service::RxJsonRpcMessage<RoleClient>>,
     incoming_rx: Arc<Mutex<mpsc::UnboundedReceiver<rmcp::service::RxJsonRpcMessage<RoleClient>>>>,
-    background_tasks: Arc<StdMutex<Vec<JoinHandle<()>>>>,
+    background_tasks: Arc<SyncMutex<Vec<JoinHandle<()>>>>,
 }
 
 impl LegacySseRmcpTransport {
@@ -232,10 +233,10 @@ impl LegacySseRmcpTransport {
             sse_url,
             client,
             auth_token,
-            post_endpoint: Arc::new(StdMutex::new(None)),
+            post_endpoint: Arc::new(SyncMutex::new(None)),
             incoming_tx,
             incoming_rx: Arc::new(Mutex::new(incoming_rx)),
-            background_tasks: Arc::new(StdMutex::new(Vec::new())),
+            background_tasks: Arc::new(SyncMutex::new(Vec::new())),
         };
         transport.start_sse_listener().await?;
         Ok(transport)
@@ -243,7 +244,7 @@ impl LegacySseRmcpTransport {
 
     async fn start_sse_listener(&self) -> anyhow::Result<()> {
         let (endpoint_tx, endpoint_rx) = oneshot::channel::<anyhow::Result<String>>();
-        let endpoint_tx = Arc::new(StdMutex::new(Some(endpoint_tx)));
+        let endpoint_tx = Arc::new(SyncMutex::new(Some(endpoint_tx)));
 
         let mut request = self
             .client
@@ -283,13 +284,8 @@ impl LegacySseRmcpTransport {
             let result = transport::process_sse_response(response, |event, data| {
                 if matches!(event, Some("endpoint")) {
                     let endpoint = transport::resolve_legacy_endpoint(&sse_url, data)?;
-                    *post_endpoint.lock().expect("endpoint mutex poisoned") =
-                        Some(endpoint.clone());
-                    if let Some(tx) = endpoint_tx_for_task
-                        .lock()
-                        .expect("endpoint sender mutex poisoned")
-                        .take()
-                    {
+                    *post_endpoint.lock() = Some(endpoint.clone());
+                    if let Some(tx) = endpoint_tx_for_task.lock().take() {
                         let _ = tx.send(Ok(endpoint));
                     }
                     return Ok(());
@@ -307,27 +303,16 @@ impl LegacySseRmcpTransport {
 
             if let Err(e) = result {
                 tracing::warn!(server = %server_name, error = %e, "Legacy SSE stream closed with error");
-                if let Some(tx) = endpoint_tx_for_task
-                    .lock()
-                    .expect("endpoint sender mutex poisoned")
-                    .take()
-                {
+                if let Some(tx) = endpoint_tx_for_task.lock().take() {
                     let _ = tx.send(Err(anyhow::anyhow!(e.to_string())));
                 }
-            } else if let Some(tx) = endpoint_tx_for_task
-                .lock()
-                .expect("endpoint sender mutex poisoned")
-                .take()
-            {
+            } else if let Some(tx) = endpoint_tx_for_task.lock().take() {
                 let _ = tx.send(Err(anyhow::anyhow!(
                     "legacy SSE stream closed before announcing endpoint"
                 )));
             }
         });
-        self.background_tasks
-            .lock()
-            .expect("task mutex poisoned")
-            .push(task);
+        self.background_tasks.lock().push(task);
 
         let endpoint = tokio::time::timeout(std::time::Duration::from_secs(10), endpoint_rx)
             .await
@@ -343,7 +328,7 @@ impl LegacySseRmcpTransport {
                     self.server_name
                 )
             })??;
-        *self.post_endpoint.lock().expect("endpoint mutex poisoned") = Some(endpoint);
+        *self.post_endpoint.lock() = Some(endpoint);
         Ok(())
     }
 }
@@ -353,7 +338,7 @@ impl Drop for LegacySseRmcpTransport {
         // Some upper-layer paths drop the backend instead of calling close()
         // explicitly. Abort the listener tasks again here so legacy SSE does
         // not outlive the connection teardown.
-        let mut tasks = self.background_tasks.lock().expect("task mutex poisoned");
+        let mut tasks = self.background_tasks.lock();
         for handle in tasks.drain(..) {
             handle.abort();
         }
@@ -367,11 +352,7 @@ impl rmcp::transport::Transport<RoleClient> for LegacySseRmcpTransport {
         &mut self,
         item: rmcp::service::TxJsonRpcMessage<RoleClient>,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send + 'static {
-        let endpoint = self
-            .post_endpoint
-            .lock()
-            .expect("endpoint mutex poisoned")
-            .clone();
+        let endpoint = self.post_endpoint.lock().clone();
         let client = self.client.clone();
         let auth_token = self.auth_token.clone();
         let server_name = self.server_name.clone();
@@ -424,7 +405,7 @@ impl rmcp::transport::Transport<RoleClient> for LegacySseRmcpTransport {
     fn close(&mut self) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
         let background_tasks = Arc::clone(&self.background_tasks);
         async move {
-            let mut tasks = background_tasks.lock().expect("task mutex poisoned");
+            let mut tasks = background_tasks.lock();
             for handle in tasks.drain(..) {
                 handle.abort();
             }
@@ -450,7 +431,7 @@ async fn handle_legacy_sse_http_response(
     server_name: String,
     response: reqwest::Response,
     incoming_tx: mpsc::UnboundedSender<rmcp::service::RxJsonRpcMessage<RoleClient>>,
-    background_tasks: Arc<StdMutex<Vec<JoinHandle<()>>>>,
+    background_tasks: Arc<SyncMutex<Vec<JoinHandle<()>>>>,
 ) -> anyhow::Result<()> {
     let status = response.status();
     if !status.is_success() && status != reqwest::StatusCode::ACCEPTED {
@@ -483,10 +464,7 @@ async fn handle_legacy_sse_http_response(
                 tracing::warn!(server = %server_name_for_task, error = %e, "legacy SSE POST stream closed with error");
             }
         });
-        background_tasks
-            .lock()
-            .expect("task mutex poisoned")
-            .push(task);
+        background_tasks.lock().push(task);
         return Ok(());
     }
 
@@ -860,6 +838,29 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{timeout, Duration};
 
+    #[test]
+    fn a_panicking_task_leaves_the_transport_state_usable() {
+        // A background task that panics while holding one of these locks used
+        // to poison it, and every later lock panicked in turn, so one failed
+        // task took the MCP client down for the rest of the session. This also
+        // fails to compile if the field goes back to `std::sync::Mutex`, whose
+        // `lock` returns a `Result`.
+        let state: Arc<SyncMutex<Vec<u32>>> = Arc::new(SyncMutex::new(vec![7]));
+
+        let held = Arc::clone(&state);
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let outcome = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("a background task failed");
+        })
+        .join();
+        std::panic::set_hook(previous_hook);
+
+        assert!(outcome.is_err(), "the thread was supposed to panic");
+        assert_eq!(*state.lock(), vec![7]);
+    }
+
     fn test_sse_config(url: String) -> McpServerConfig {
         McpServerConfig {
             name: "test-sse".to_string(),
@@ -938,11 +939,7 @@ mod tests {
             .await
             .expect("connect legacy sse transport");
 
-        let endpoint = transport
-            .post_endpoint
-            .lock()
-            .expect("endpoint mutex poisoned")
-            .clone();
+        let endpoint = transport.post_endpoint.lock().clone();
         let expected = format!("{url}/messages");
         assert_eq!(endpoint.as_deref(), Some(expected.as_str()));
     }
@@ -956,7 +953,7 @@ mod tests {
         )
         .await;
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let tasks = Arc::new(StdMutex::new(Vec::new()));
+        let tasks = Arc::new(SyncMutex::new(Vec::new()));
 
         handle_legacy_sse_http_response("test".to_string(), response, tx, Arc::clone(&tasks))
             .await
@@ -981,7 +978,7 @@ mod tests {
         )
         .await;
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let tasks = Arc::new(StdMutex::new(Vec::new()));
+        let tasks = Arc::new(SyncMutex::new(Vec::new()));
 
         handle_legacy_sse_http_response("test".to_string(), response, tx, Arc::clone(&tasks))
             .await
@@ -1010,19 +1007,16 @@ mod tests {
             sse_url: "http://localhost/sse".to_string(),
             client: reqwest::Client::new(),
             auth_token: None,
-            post_endpoint: Arc::new(StdMutex::new(None)),
+            post_endpoint: Arc::new(SyncMutex::new(None)),
             incoming_tx: mpsc::unbounded_channel().0,
             incoming_rx: Arc::new(Mutex::new(mpsc::unbounded_channel().1)),
-            background_tasks: Arc::new(StdMutex::new(vec![task])),
+            background_tasks: Arc::new(SyncMutex::new(vec![task])),
         };
 
         let background_tasks = Arc::clone(&transport.background_tasks);
         drop(transport);
 
-        let is_empty = background_tasks
-            .lock()
-            .expect("task mutex poisoned")
-            .is_empty();
+        let is_empty = background_tasks.lock().is_empty();
         assert!(is_empty);
     }
 }
