@@ -24,6 +24,42 @@ const MODE_PILL = 'mode';
  * named instead, so the agent reads the part it needs. */
 const EMBED_LIMIT_BYTES = 64 * 1024;
 
+/** How a panel's session comes to exist. */
+export type PanelOpening =
+  | { kind: 'new' }
+  /** Reopen a stored session and draw the whole conversation back. */
+  | { kind: 'load'; session: StoredSession }
+  /** Reopen it and keep going, without re-reading it. */
+  | { kind: 'resume'; session: StoredSession }
+  /** Continue another session's conversation under a new id. */
+  | { kind: 'fork'; sessionId: string; cwd: string; title?: string };
+
+/** The directory a panel opened this way works in. */
+function cwdOf(opening: PanelOpening | undefined): string | undefined {
+  switch (opening?.kind) {
+    case 'load':
+    case 'resume':
+      return opening.session.cwd;
+    case 'fork':
+      return opening.cwd;
+    default:
+      return undefined;
+  }
+}
+
+/** What to call a panel before the agent names its session. */
+function titleOf(opening: PanelOpening | undefined): string | undefined {
+  switch (opening?.kind) {
+    case 'load':
+    case 'resume':
+      return opening.session.title;
+    case 'fork':
+      return opening.title ? `${opening.title} (fork)` : undefined;
+    default:
+      return undefined;
+  }
+}
+
 /** Owns one webview panel and the session behind it.
  *
  * Panels are independent conversations sharing a single agent process, so
@@ -49,11 +85,11 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     pool: AgentPool,
     outputChannel: vscode.OutputChannel,
-    restore?: StoredSession,
+    opening: PanelOpening = { kind: 'new' },
   ): ChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'claurstChat',
-      restore?.title ?? 'Claurst',
+      titleOf(opening) ?? 'Claurst',
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
@@ -61,7 +97,7 @@ export class ChatPanel {
         localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
       },
     );
-    return new ChatPanel(panel, extensionUri, pool, outputChannel, restore);
+    return new ChatPanel(panel, extensionUri, pool, outputChannel, opening);
   }
 
   /** Reveal a panel if there is one, otherwise start one. */
@@ -89,10 +125,11 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     private readonly pool: AgentPool,
     private readonly outputChannel: vscode.OutputChannel,
-    private readonly restore?: StoredSession,
+    private readonly opening: PanelOpening = { kind: 'new' },
   ) {
     this.panel = panel;
-    this.cwd = restore?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    this.cwd =
+      cwdOf(opening) ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
     ChatPanel.panels.add(this);
     ChatPanel.active = this;
 
@@ -180,22 +217,41 @@ export class ChatPanel {
     };
 
     try {
-      const session = this.restore
-        ? await client.loadSession(this.restore.sessionId, this.cwd, events)
-        : await client.newSession(this.cwd, events);
+      const opening = this.opening;
+      let session;
+      let opened: string;
+      switch (opening.kind) {
+        case 'load':
+          session = await client.loadSession(opening.session.sessionId, this.cwd, events);
+          opened = `Reopened ${opening.session.title ?? opening.session.sessionId}`;
+          break;
+        case 'resume':
+          session = await client.resumeSession(opening.session.sessionId, this.cwd, events);
+          opened = `Continuing ${opening.session.title ?? opening.session.sessionId}`;
+          break;
+        case 'fork':
+          session = await client.forkSession(opening.sessionId, this.cwd, events);
+          opened = `Forked ${opening.title ?? opening.sessionId}`;
+          break;
+        default:
+          session = await client.newSession(this.cwd, events);
+          opened = `Session started in ${this.cwd}`;
+      }
       this.sessionId = session.sessionId;
       this.options = session.configOptions;
       this.modes = session.modes;
       this.pushHeader();
-      this.postToWebview({
-        type: 'status',
-        text: this.restore
-          ? `Reopened ${this.restore.title ?? this.restore.sessionId}`
-          : `Session started in ${this.cwd}`,
-      });
+      this.postToWebview({ type: 'status', text: opened });
     } catch (e) {
       this.reportError(e);
     }
+  }
+
+  /** What this panel is talking to, for a command that acts on it. */
+  get session(): { sessionId: string; cwd: string; title: string } | undefined {
+    return this.sessionId
+      ? { sessionId: this.sessionId, cwd: this.cwd, title: this.panel.title }
+      : undefined;
   }
 
   /** The pills, straight from what the agent said it offers. */

@@ -504,6 +504,39 @@ export class AcpClient {
     }
   }
 
+  /** Reopen a stored session without replaying it.
+   *
+   * For a client that already knows what was said, or a user who wants to keep
+   * going rather than re-read the conversation. */
+  async resumeSession(
+    sessionId: string,
+    cwd: string,
+    events: SessionEvents,
+  ): Promise<SessionStart> {
+    this.sessions.set(sessionId, events);
+    try {
+      const result = await this.request<any>('session/resume', { sessionId, cwd, mcpServers: [] });
+      return startOf(result, sessionId);
+    } catch (e) {
+      this.sessions.delete(sessionId);
+      throw e;
+    }
+  }
+
+  /** Split a conversation in two, leaving the original untouched.
+   *
+   * The fork carries the transcript so far and the choices the source made,
+   * under a new id the caller routes to its own panel. */
+  async forkSession(
+    sessionId: string,
+    cwd: string,
+    events: SessionEvents,
+  ): Promise<SessionStart> {
+    const result = await this.request<any>('session/fork', { sessionId, cwd, mcpServers: [] });
+    this.sessions.set(result.sessionId, events);
+    return startOf(result, result.sessionId);
+  }
+
   /** Every session on file, newest first. */
   async listSessions(cwd?: string): Promise<StoredSession[]> {
     const result = await this.request<any>('session/list', cwd ? { cwd } : {});

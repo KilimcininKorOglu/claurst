@@ -33,6 +33,24 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('claurst.forkSession', () => {
+      // Trying a second approach without losing the first: the fork carries
+      // the conversation so far, and the original is untouched.
+      const source = ChatPanel.active?.session;
+      if (!source) {
+        vscode.window.showInformationMessage('No Claurst conversation to fork.');
+        return;
+      }
+      ChatPanel.create(context.extensionUri, pool, outputChannel, {
+        kind: 'fork',
+        sessionId: source.sessionId,
+        cwd: source.cwd,
+        title: source.title,
+      });
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('claurst.resumeSession', async () => {
       try {
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
@@ -51,8 +69,25 @@ export function activate(context: vscode.ExtensionContext): void {
             })),
             { placeHolder: 'Which conversation should Claurst pick up?' },
           );
-          if (picked) {
-            ChatPanel.create(context.extensionUri, pool, outputChannel, picked.session);
+          if (!picked) {
+            return;
+          }
+          // Replaying a long conversation costs a message per block, so it is
+          // asked for rather than assumed.
+          // `kind` on a quick-pick item means a separator, so the choice
+          // travels under a name of its own.
+          const how = await vscode.window.showQuickPick(
+            [
+              { label: 'Show the conversation', opening: 'load' as const },
+              { label: 'Just carry on', opening: 'resume' as const },
+            ],
+            { placeHolder: 'Draw what was said before?' },
+          );
+          if (how) {
+            ChatPanel.create(context.extensionUri, pool, outputChannel, {
+              kind: how.opening,
+              session: picked.session,
+            });
           }
         } finally {
           // The listing borrowed the agent; only a panel keeps it running.

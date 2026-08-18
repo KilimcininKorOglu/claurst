@@ -36,6 +36,10 @@
       {
         "command": "claurst.resumeSession",
         "title": "Claurst: Resume Session"
+      },
+      {
+        "command": "claurst.forkSession",
+        "title": "Claurst: Fork Session"
       }
     ],
     "menus": {
@@ -51,6 +55,9 @@
         },
         {
           "command": "claurst.resumeSession"
+        },
+        {
+          "command": "claurst.forkSession"
         }
       ]
     },

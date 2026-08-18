@@ -16,7 +16,16 @@ A `claurst` binary on `PATH`, or a path set in `claurst.executablePath`.
 | `Claurst: Open Chat`            | Reveals a panel, or opens one                  |
 | `Claurst: New Session`          | Opens another panel with its own conversation  |
 | `Claurst: Resume Session`       | Lists earlier sessions and reopens one         |
+| `Claurst: Fork Session`         | Continues this conversation in a second panel  |
 | `Claurst: Stop Current Turn`    | Cancels the turn in the focused panel          |
+
+Resuming asks whether to draw the earlier conversation or just carry on:
+replaying a long one costs a message per block, so it is a choice rather than
+an assumption.
+
+Forking leaves the original untouched. The new panel carries the conversation
+so far and the choices the source made, which is how you try a second approach
+without losing the first.
 
 ## One process, many conversations
 
