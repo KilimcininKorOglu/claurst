@@ -57,8 +57,9 @@ pub async fn handle(
     };
     messages.push(Message::user(turn_text));
 
-    // Reset the session's cancellation token for this new turn.
-    let cancel = session.cancel_token.clone();
+    // A fresh token for this turn, so a `session/cancel` that ended an earlier
+    // one cannot end this one before it starts.
+    let cancel = session.begin_turn();
 
     // What the client has changed for this session sits on top of the
     // runtime's configuration, and only for the turns of this session.

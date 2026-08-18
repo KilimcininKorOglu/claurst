@@ -30,7 +30,11 @@ pub struct SessionState {
     /// worktree of the same project without being started again.
     pub cwd: parking_lot::Mutex<PathBuf>,
     pub messages: parking_lot::Mutex<Vec<Message>>,
-    pub cancel_token: CancellationToken,
+    /// The token the current turn is driven by. It is replaced at the start of
+    /// every turn, because a cancelled token stays cancelled: keeping one for
+    /// the session's lifetime would make a single `session/cancel` abort every
+    /// later prompt on that session.
+    cancel_token: parking_lot::Mutex<CancellationToken>,
     pub pending_permissions: Arc<parking_lot::Mutex<PendingPermissionStore>>,
     pub file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
     pub current_turn: Arc<std::sync::atomic::AtomicUsize>,
@@ -95,7 +99,7 @@ impl SessionState {
             session_id,
             cwd: parking_lot::Mutex::new(cwd),
             messages: parking_lot::Mutex::new(messages),
-            cancel_token: CancellationToken::new(),
+            cancel_token: parking_lot::Mutex::new(CancellationToken::new()),
             pending_permissions: Arc::new(parking_lot::Mutex::new(
                 PendingPermissionStore::default(),
             )),
@@ -108,6 +112,25 @@ impl SessionState {
             created_at,
             forked_from,
         })
+    }
+
+    /// Hand out a fresh token for a turn that is about to start, dropping the
+    /// one the previous turn used.
+    pub fn begin_turn(&self) -> CancellationToken {
+        let token = CancellationToken::new();
+        *self.cancel_token.lock() = token.clone();
+        token
+    }
+
+    /// Cancel whatever turn is running. A session with no turn in flight is
+    /// unaffected once `begin_turn` replaces the token.
+    pub fn cancel(&self) {
+        self.cancel_token.lock().cancel();
+    }
+
+    /// Whether the token the current turn holds has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token.lock().is_cancelled()
     }
 }
 
@@ -153,7 +176,7 @@ mod tests {
             0
         );
         // A fresh token, so a cancelled predecessor cannot abort this session.
-        assert!(!state.cancel_token.is_cancelled());
+        assert!(!state.is_cancelled());
     }
 
     #[test]
@@ -161,10 +184,36 @@ mod tests {
         let first = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
         let second = SessionState::new(acp::SessionId::new("b"), PathBuf::from("/tmp/b"));
 
-        first.cancel_token.cancel();
+        first.cancel();
 
-        assert!(first.cancel_token.is_cancelled());
-        assert!(!second.cancel_token.is_cancelled());
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+    }
+
+    #[test]
+    fn a_cancelled_session_runs_again_on_the_next_turn() {
+        let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+
+        let first_turn = state.begin_turn();
+        state.cancel();
+        assert!(first_turn.is_cancelled(), "the running turn was cancelled");
+
+        // The next prompt must not inherit that verdict.
+        let second_turn = state.begin_turn();
+        assert!(!second_turn.is_cancelled());
+        assert!(!state.is_cancelled());
+    }
+
+    #[test]
+    fn cancelling_only_reaches_the_turn_that_is_running() {
+        let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+
+        let stale = state.begin_turn();
+        let current = state.begin_turn();
+        state.cancel();
+
+        assert!(current.is_cancelled());
+        assert!(!stale.is_cancelled(), "the replaced token was left alone");
     }
 
     #[test]
