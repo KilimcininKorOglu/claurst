@@ -8,6 +8,7 @@ claurst-core = { workspace = true }
 claurst-api = { workspace = true }
 claurst-plugins = { workspace = true }
 claurst-tools = { workspace = true }
+claurst-mcp = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

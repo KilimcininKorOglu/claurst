@@ -110,13 +110,10 @@ impl AgentRuntime {
         // tracked in plan/migration-todo).
         let mcp_manager = build_mcp_manager(&config, &settings, &working_dir).await;
 
-        // Build tools: built-ins + AgentTool. MCP tool wrappers are NOT
-        // attached here — the wrapper type lives in the CLI crate today and
-        // adding it would create a circular dep. Built-in tools (Bash, Read,
-        // Edit, Glob, Grep, WebFetch, …) cover the common ACP-editor flows.
-        let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
-        tools.push(Box::new(claurst_query::AgentTool));
-        let tools = Arc::new(tools);
+        // The same roster a terminal session gets, MCP tools included: both
+        // read the same settings, so both must end up with the same tools.
+        let tools =
+            claurst_query::build_tool_roster(mcp_manager.clone(), config.advisor_model.as_deref());
 
         // Same catalog the CLI reads, so a session started from an editor
         // resolves the same model as one started from a terminal.

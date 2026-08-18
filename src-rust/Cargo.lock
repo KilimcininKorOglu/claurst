@@ -970,6 +970,7 @@ dependencies = [
  "chrono",
  "claurst-api",
  "claurst-core",
+ "claurst-mcp",
  "claurst-plugins",
  "claurst-tools",
  "dashmap",

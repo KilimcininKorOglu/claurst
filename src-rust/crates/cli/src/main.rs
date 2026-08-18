@@ -37,12 +37,10 @@ pub const FEEDBACK_CHANNEL: &str = env!("FEEDBACK_CHANNEL");
 pub const ISSUES_EXPLAINER: &str = env!("ISSUES_EXPLAINER");
 
 use anyhow::Context;
-use async_trait::async_trait;
 use clap::{ArgAction, Parser, ValueEnum};
 use claurst_api::model_cache::{
     load_cached_model_registry, models_cache_path, models_dev_cache_path, models_source_url,
 };
-use claurst_core::types::ToolDefinition;
 use claurst_core::{
     config::{Config, PermissionMode, Settings},
     constants::APP_VERSION,
@@ -50,70 +48,11 @@ use claurst_core::{
     cost::CostTracker,
     permissions::{AutoPermissionHandler, InteractivePermissionHandler, PermissionManager},
 };
-use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
+use claurst_tools::ToolContext;
 use parking_lot::Mutex as ParkingMutex;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
-
-// ---------------------------------------------------------------------------
-// MCP tool wrapper: makes MCP server tools look like native cc-tools.
-// ---------------------------------------------------------------------------
-
-struct McpToolWrapper {
-    tool_def: ToolDefinition,
-    server_name: String,
-    manager: Arc<claurst_mcp::McpManager>,
-}
-
-#[async_trait]
-impl Tool for McpToolWrapper {
-    fn name(&self) -> &str {
-        &self.tool_def.name
-    }
-
-    fn description(&self) -> &str {
-        &self.tool_def.description
-    }
-
-    fn permission_level(&self) -> PermissionLevel {
-        // MCP tools run external processes – treat as Execute.
-        PermissionLevel::Execute
-    }
-
-    fn input_schema(&self) -> serde_json::Value {
-        self.tool_def.input_schema.clone()
-    }
-
-    async fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
-        let desc = format!("Run MCP tool {}", self.tool_def.name);
-        if let Err(e) = ctx.check_permission(self.name(), &desc, false) {
-            return ToolResult::error(e.to_string());
-        }
-
-        // Strip the server-name prefix to get the bare tool name.
-        let prefix = format!("{}_", self.server_name);
-        let bare_name = self
-            .tool_def
-            .name
-            .strip_prefix(&prefix)
-            .unwrap_or(&self.tool_def.name);
-
-        let args = if input.is_null() { None } else { Some(input) };
-
-        match self.manager.call_tool(&self.tool_def.name, args).await {
-            Ok(result) => {
-                let text = claurst_mcp::mcp_result_to_string(&result);
-                if result.is_error {
-                    ToolResult::error(text)
-                } else {
-                    ToolResult::success(text)
-                }
-            }
-            Err(e) => ToolResult::error(format!("MCP tool '{}' failed: {}", bare_name, e)),
-        }
-    }
-}
 
 /// Name the directories the session can reach, for the system prompt.
 ///
@@ -730,7 +669,7 @@ async fn main() -> anyhow::Result<()> {
         dump_config.working_directory = Some(cwd.display().to_string());
         dump_config.workspace_roots = roots_for_prompt(&cwd, &config);
         dump_config.enabled_tools = Some(
-            build_tools_with_mcp(None, config.advisor_model.as_deref())
+            claurst_query::build_tool_roster(None, config.advisor_model.as_deref())
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),
@@ -1013,7 +952,8 @@ async fn main() -> anyhow::Result<()> {
     // Build the full tool list: built-ins from cc-tools plus AgentTool from cc-query
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
-    let tools = build_tools_with_mcp(mcp_manager_arc.clone(), config.advisor_model.as_deref());
+    let tools =
+        claurst_query::build_tool_roster(mcp_manager_arc.clone(), config.advisor_model.as_deref());
 
     // Build model registry for dynamic model/provider resolution.
     // The registry is pre-populated with a hardcoded snapshot and enriched
@@ -1269,34 +1209,6 @@ async fn connect_mcp_manager_arc(
     let mcp_manager = Arc::new(claurst_mcp::McpManager::connect_all(servers).await);
     mcp_manager.clone().spawn_notification_poll_loop();
     Some(mcp_manager)
-}
-
-fn build_tools_with_mcp(
-    mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
-    advisor_model: Option<&str>,
-) -> Arc<Vec<Box<dyn claurst_tools::Tool>>> {
-    let mut v: Vec<Box<dyn claurst_tools::Tool>> = claurst_tools::all_tools();
-    v.push(Box::new(claurst_query::AgentTool));
-
-    // Offer the advisor only when a model backs it, so a session without one
-    // pays neither the tool schema nor the system-prompt guideline for it.
-    if advisor_model.is_some_and(|model| !model.trim().is_empty()) {
-        v.push(Box::new(claurst_tools::AdvisorTool));
-    }
-
-    if let Some(ref manager_arc) = mcp_manager {
-        for (server_name, tool_def) in manager_arc.all_tool_definitions() {
-            let wrapper = McpToolWrapper {
-                tool_def,
-                server_name,
-                manager: manager_arc.clone(),
-            };
-            v.push(Box::new(wrapper));
-        }
-        debug!(total_tools = v.len(), "MCP tools registered");
-    }
-
-    Arc::new(v)
 }
 
 /// Implementation of the `claurst models` subcommand.
@@ -5663,7 +5575,7 @@ async fn run_interactive(
             let new_mcp_manager = connect_mcp_manager_arc(&decision.allowed).await;
             tool_ctx.mcp_manager = new_mcp_manager.clone();
             app.mcp_manager = new_mcp_manager.clone();
-            tools_arc = build_tools_with_mcp(
+            tools_arc = claurst_query::build_tool_roster(
                 new_mcp_manager.clone(),
                 tool_ctx.config.advisor_model.as_deref(),
             );
@@ -6592,37 +6504,6 @@ mod bare_mode_tests {
 }
 
 #[cfg(test)]
-mod advisor_registration_tests {
-    //! The Advisor tool is offered only when an advisor model backs it, so a
-    //! session without one pays neither the tool schema nor its guideline.
-    use super::*;
-
-    fn tool_names(advisor_model: Option<&str>) -> Vec<String> {
-        build_tools_with_mcp(None, advisor_model)
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .collect()
-    }
-
-    #[test]
-    fn advisor_is_absent_without_a_configured_model() {
-        assert!(!tool_names(None).contains(&"Advisor".to_string()));
-    }
-
-    #[test]
-    fn advisor_is_offered_once_a_model_is_configured() {
-        assert!(tool_names(Some("claude-opus-4-6")).contains(&"Advisor".to_string()));
-    }
-
-    #[test]
-    fn a_blank_model_does_not_enable_the_advisor() {
-        // An empty or whitespace value is a cleared setting, not a model.
-        assert!(!tool_names(Some("")).contains(&"Advisor".to_string()));
-        assert!(!tool_names(Some("   ")).contains(&"Advisor".to_string()));
-    }
-}
-
-#[cfg(test)]
 mod dump_system_prompt_tests {
     //! `--dump-system-prompt` must print what a run actually sends. It used to
     //! print only the context attachments, so tool guidelines never appeared.
@@ -6637,7 +6518,7 @@ mod dump_system_prompt_tests {
         let mut dump_config =
             claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
         dump_config.enabled_tools = Some(
-            build_tools_with_mcp(None, config.advisor_model.as_deref())
+            claurst_query::build_tool_roster(None, config.advisor_model.as_deref())
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),

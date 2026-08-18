@@ -23,6 +23,7 @@ pub mod coordinator;
 pub mod cron_scheduler;
 pub mod goal_loop;
 pub mod managed_orchestrator;
+pub mod roster;
 pub mod sanitize;
 pub mod session_memory;
 pub mod skill_prefetch;
@@ -47,6 +48,7 @@ pub use goal_loop::{
     check_and_continue_goal, decide_goal_continuation, mark_goal_complete, GoalContinuation,
     StopReason,
 };
+pub use roster::build_tool_roster;
 pub use runner::*;
 pub use sanitize::sanitize_history;
 pub use session_memory::{
