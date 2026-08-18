@@ -21,6 +21,7 @@ pub struct AgentRuntime {
     pub settings: Settings,
     pub api_client: Arc<claurst_api::AnthropicClient>,
     pub provider_registry: Arc<claurst_api::ProviderRegistry>,
+    pub model_registry: Arc<claurst_api::ModelRegistry>,
     pub tools: Arc<Vec<Box<dyn Tool>>>,
     pub cost_tracker: Arc<CostTracker>,
     pub query_config: QueryConfig,
@@ -87,7 +88,12 @@ impl AgentRuntime {
         tools.push(Box::new(claurst_query::AgentTool));
         let tools = Arc::new(tools);
 
-        let mut query_config = QueryConfig::from_config(&config);
+        // Same catalog the CLI reads, so a session started from an editor
+        // resolves the same model as one started from a terminal.
+        let model_registry = claurst_api::model_cache::load_cached_model_registry(&config);
+
+        let mut query_config = QueryConfig::from_config_with_registry(&config, &model_registry);
+        query_config.model_registry = Some(model_registry.clone());
         query_config.working_directory = Some(working_dir.display().to_string());
         query_config.workspace_roots = claurst_core::workspace::generate_root_names(
             &working_dir,
@@ -104,6 +110,7 @@ impl AgentRuntime {
             settings,
             api_client,
             provider_registry,
+            model_registry,
             tools,
             cost_tracker,
             query_config,

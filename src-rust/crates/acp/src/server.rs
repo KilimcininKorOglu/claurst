@@ -91,6 +91,11 @@ impl AgentServer {
                 let result = self.on_set_mode(req).await?;
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
+            "session/set_config_option" => {
+                let req: acp::SetSessionConfigOptionRequest = parse_params(params)?;
+                let result = self.on_set_config_option(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
             other => {
                 warn!(method = other, "ACP: method not found");
                 Err(acp::Error::method_not_found())
@@ -175,12 +180,80 @@ impl AgentServer {
             );
         }
 
-        self.sessions.insert(state);
-        Ok(
-            acp::NewSessionResponse::new(session_id).modes(Some(
-                crate::session_config::mode_state(&self.runtime.config.permission_mode),
-            )),
-        )
+        self.sessions.insert(state.clone());
+        Ok(acp::NewSessionResponse::new(session_id)
+            .modes(Some(crate::session_config::mode_state(
+                &self.runtime.config.permission_mode,
+            )))
+            .config_options(Some(self.config_options_for(&state))))
+    }
+
+    /// The options a session currently offers, rebuilt from its overrides.
+    fn config_options_for(&self, session: &Arc<SessionState>) -> Vec<acp::SessionConfigOption> {
+        let overrides = session.settings.lock().clone();
+        let mut config = self.runtime.config.clone();
+        crate::session_config::apply_overrides(&mut config, &overrides);
+        let effort = overrides.effort.or(self.runtime.query_config.effort_level);
+        // The turn sends the runtime's resolved model unless the session says
+        // otherwise; `config.model` is often unset and would resolve to a
+        // fallback the session is not using.
+        let model = overrides
+            .model
+            .clone()
+            .unwrap_or_else(|| self.runtime.query_config.model.clone());
+        crate::session_config::config_options(&config, &self.runtime.model_registry, &model, effort)
+    }
+
+    /// Change the model, the account, or the reasoning effort for this session
+    /// alone. Session-scoped: nothing is written to `settings.json`.
+    async fn on_set_config_option(
+        self: &Arc<Self>,
+        req: acp::SetSessionConfigOptionRequest,
+    ) -> Result<acp::SetSessionConfigOptionResponse, acp::Error> {
+        let session = self.session_or_error(&req.session_id)?;
+        let option_id = req.config_id.0.to_string();
+        let value = req.value.0.to_string();
+
+        {
+            let mut overrides = session.settings.lock();
+            let mut config = self.runtime.config.clone();
+            crate::session_config::apply_overrides(&mut config, &overrides);
+            if let Err(reason) = crate::session_config::apply_config_option(
+                &mut overrides,
+                &config,
+                &self.runtime.model_registry,
+                &option_id,
+                &value,
+            ) {
+                return Err(acp::Error::invalid_params().data(Some(serde_json::json!({
+                    "reason": reason,
+                    "configId": option_id,
+                    "value": value,
+                }))));
+            }
+        }
+        info!(
+            session_id = %req.session_id,
+            option = %option_id,
+            value = %value,
+            "ACP: session configuration changed"
+        );
+
+        // Changing one option restates the other two: the model list belongs
+        // to the account, and the effort ladder belongs to the model.
+        let options = self.config_options_for(&session);
+        let update =
+            acp::SessionUpdate::ConfigOptionUpdate(acp::ConfigOptionUpdate::new(options.clone()));
+        let notification = acp::SessionNotification::new(req.session_id.clone(), update);
+        if let Err(e) = self
+            .connection
+            .send_notification("session/update", notification)
+            .await
+        {
+            warn!(?e, "ACP: failed to announce the configuration change");
+        }
+
+        Ok(acp::SetSessionConfigOptionResponse::new(options))
     }
 
     /// Switch how this session answers permission requests. Session-scoped:

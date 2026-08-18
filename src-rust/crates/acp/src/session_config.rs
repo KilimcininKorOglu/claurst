@@ -58,6 +58,148 @@ pub fn mode_state(mode: &PermissionMode) -> acp::SessionModeState {
     acp::SessionModeState::new(mode_id_for(mode), available_modes())
 }
 
+/// Configuration option ids. These reach the client, so they are part of the
+/// wire contract and not free to rename.
+pub const OPTION_MODEL: &str = "model";
+pub const OPTION_PROVIDER: &str = "provider";
+pub const OPTION_EFFORT: &str = "effort";
+
+/// A model id with its account prefix stripped.
+///
+/// A model may be written as `account/model`, and the catalog is keyed by the
+/// bare id, so matching the prefixed form against it finds nothing.
+pub fn wire_model(account: &str, model: &str) -> String {
+    model
+        .strip_prefix(&format!("{account}/"))
+        .unwrap_or(model)
+        .to_string()
+}
+
+/// The accounts this session can be routed to: everything with a credential,
+/// everything configured by hand, and whatever is active right now.
+fn available_accounts(config: &claurst_core::config::Config) -> Vec<String> {
+    let mut accounts: Vec<String> = claurst_core::auth_store::AuthStore::load()
+        .credentials
+        .keys()
+        .cloned()
+        .collect();
+    accounts.extend(config.provider_configs.keys().cloned());
+    accounts.push(config.selected_provider_id().to_string());
+    accounts.sort();
+    accounts.dedup();
+    accounts
+}
+
+/// Build a select option, keeping `current` in the list even when the source
+/// of the values does not know about it.
+///
+/// A current value the client cannot see is a selector that shows one thing
+/// and offers another.
+fn select(
+    id: &str,
+    name: &str,
+    current: &str,
+    values: Vec<(String, String)>,
+) -> acp::SessionConfigOption {
+    let mut values = values;
+    if !values.iter().any(|(value_id, _)| value_id == current) {
+        values.insert(0, (current.to_string(), current.to_string()));
+    }
+    let options: Vec<acp::SessionConfigSelectOption> = values
+        .into_iter()
+        .map(|(value_id, label)| acp::SessionConfigSelectOption::new(value_id, label))
+        .collect();
+    acp::SessionConfigOption::select(id.to_string(), name, current.to_string(), options)
+}
+
+/// Every option a client may set, with the values it may set them to.
+///
+/// Rebuilt from the session's current configuration on every call, because
+/// the model list belongs to the account and the effort ladder belongs to the
+/// model: change one and the other two are stale.
+///
+/// `model` is the id the next turn would send, which is not always
+/// `config.model`: with nothing configured the registry resolves one, and
+/// reporting the unresolved fallback would name a model the session is not
+/// using.
+pub fn config_options(
+    config: &claurst_core::config::Config,
+    registry: &claurst_api::ModelRegistry,
+    model: &str,
+    effort: Option<claurst_core::effort::EffortLevel>,
+) -> Vec<acp::SessionConfigOption> {
+    let account = config.selected_provider_id().to_string();
+    let vendor = config.vendor_id_for_account(&account);
+    let model = wire_model(&account, model);
+
+    let models: Vec<(String, String)> = registry
+        .list_visible_by_provider(&vendor)
+        .into_iter()
+        .map(|entry| (entry.info.id.to_string(), entry.info.name.clone()))
+        .collect();
+
+    let accounts: Vec<(String, String)> = available_accounts(config)
+        .into_iter()
+        .map(|id| (id.clone(), id))
+        .collect();
+
+    let current_effort = effort.map(|level| level.as_str()).unwrap_or("medium");
+    let efforts: Vec<(String, String)> =
+        claurst_api::effort_support::supported_efforts(&vendor, &model, Some(registry))
+            .into_iter()
+            .map(|level| (level.as_str().to_string(), level.label().to_string()))
+            .collect();
+
+    vec![
+        select(OPTION_MODEL, "Model", &model, models)
+            .category(Some(acp::SessionConfigOptionCategory::Model)),
+        // No category: the spec reserves every name that does not start with
+        // `_`, and a client handles a missing one by rendering a plain select.
+        select(OPTION_PROVIDER, "Account", &account, accounts),
+        select(OPTION_EFFORT, "Effort", current_effort, efforts)
+            .category(Some(acp::SessionConfigOptionCategory::ThoughtLevel)),
+    ]
+}
+
+/// Record a client's choice on the session's overrides.
+///
+/// Returns the ids of the options that could not be honoured, so the caller
+/// can refuse the request rather than answering with a list that contradicts
+/// what was asked.
+pub fn apply_config_option(
+    overrides: &mut SessionSettings,
+    config: &claurst_core::config::Config,
+    registry: &claurst_api::ModelRegistry,
+    option_id: &str,
+    value: &str,
+) -> Result<(), String> {
+    match option_id {
+        OPTION_MODEL => {
+            overrides.model = Some(value.to_string());
+            Ok(())
+        }
+        OPTION_PROVIDER => {
+            if !available_accounts(config).iter().any(|id| id == value) {
+                return Err(format!("no account named \"{value}\""));
+            }
+            overrides.provider = Some(value.to_string());
+            // The old model belongs to the old account. Carrying it over would
+            // send an id the new account has never heard of.
+            let vendor = config.vendor_id_for_account(value);
+            overrides.model = registry.best_model_for_provider(&vendor);
+            Ok(())
+        }
+        OPTION_EFFORT => match claurst_core::effort::EffortLevel::from_str(value) {
+            Some(level) => {
+                overrides.effort = Some(level);
+                Ok(())
+            }
+            None => Err(format!("no effort level named \"{value}\"")),
+        },
+        other => Err(format!("no configuration option named \"{other}\"")),
+    }
+}
+
 /// Lay a session's overrides over the runtime's configuration.
 ///
 /// The turn reads the account and the model from this `Config`, so an
@@ -77,6 +219,222 @@ pub fn apply_overrides(config: &mut claurst_core::config::Config, overrides: &Se
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// at a time and put it back afterwards. Without it the account list comes
+    /// from whatever the developer happens to be logged into.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn pointing_at(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    fn option_named<'a>(
+        options: &'a [acp::SessionConfigOption],
+        id: &str,
+    ) -> &'a acp::SessionConfigOption {
+        options
+            .iter()
+            .find(|option| option.id.0.as_ref() == id)
+            .unwrap_or_else(|| panic!("no option named {id}"))
+    }
+
+    fn select_of(option: &acp::SessionConfigOption) -> &acp::SessionConfigSelect {
+        match &option.kind {
+            acp::SessionConfigKind::Select(select) => select,
+            other => panic!("expected a select, got {other:?}"),
+        }
+    }
+
+    fn values_of(option: &acp::SessionConfigOption) -> Vec<String> {
+        match &select_of(option).options {
+            acp::SessionConfigSelectOptions::Ungrouped(values) => values
+                .iter()
+                .map(|value| value.value.0.to_string())
+                .collect(),
+            other => panic!("expected an ungrouped list, got {other:?}"),
+        }
+    }
+
+    fn anthropic_config() -> claurst_core::config::Config {
+        claurst_core::config::Config {
+            model: Some("claude-opus-5".to_string()),
+            provider: Some("anthropic".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_session_offers_a_model_an_account_and_an_effort() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let options = config_options(
+            &anthropic_config(),
+            &claurst_api::ModelRegistry::new(),
+            "claude-opus-5",
+            None,
+        );
+
+        let ids: Vec<&str> = options.iter().map(|o| o.id.0.as_ref()).collect();
+        assert_eq!(ids, vec![OPTION_MODEL, OPTION_PROVIDER, OPTION_EFFORT]);
+        assert_eq!(
+            option_named(&options, OPTION_MODEL).category,
+            Some(acp::SessionConfigOptionCategory::Model)
+        );
+        assert_eq!(
+            option_named(&options, OPTION_EFFORT).category,
+            Some(acp::SessionConfigOptionCategory::ThoughtLevel)
+        );
+    }
+
+    #[test]
+    fn the_current_value_is_always_one_of_the_offered_ones() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        // An empty catalog is the hard case: a model the registry has never
+        // heard of must still appear, or the selector shows one value and
+        // offers another.
+        let options = config_options(
+            &anthropic_config(),
+            &claurst_api::ModelRegistry::new(),
+            "claude-opus-5",
+            None,
+        );
+
+        for option in &options {
+            let current = select_of(option).current_value.0.to_string();
+            assert!(
+                values_of(option).contains(&current),
+                "{} offers no value for its current {current}",
+                option.id.0
+            );
+        }
+    }
+
+    #[test]
+    fn an_account_prefix_is_stripped_from_the_model_it_names() {
+        // The catalog is keyed by the bare id, so "anthropic/claude-opus-5"
+        // would match nothing in it.
+        assert_eq!(
+            wire_model("anthropic", "anthropic/claude-opus-5"),
+            "claude-opus-5"
+        );
+        assert_eq!(wire_model("anthropic", "claude-opus-5"), "claude-opus-5");
+        // Another account's prefix is not this account's to strip.
+        assert_eq!(
+            wire_model("openai", "anthropic/claude-opus-5"),
+            "anthropic/claude-opus-5"
+        );
+    }
+
+    #[test]
+    fn switching_account_moves_the_model_with_it() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let mut config = anthropic_config();
+        config
+            .provider_configs
+            .insert("openai".to_string(), Default::default());
+        let mut overrides = SessionSettings::default();
+
+        apply_config_option(
+            &mut overrides,
+            &config,
+            &claurst_api::ModelRegistry::new(),
+            OPTION_PROVIDER,
+            "openai",
+        )
+        .expect("a configured account can be selected");
+
+        assert_eq!(overrides.provider.as_deref(), Some("openai"));
+        // The old model belonged to the old account; carrying it over would
+        // send an id the new one has never heard of.
+        assert_ne!(overrides.model.as_deref(), Some("claude-opus-5"));
+    }
+
+    #[test]
+    fn an_account_with_no_credential_is_refused() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let mut overrides = SessionSettings::default();
+        let error = apply_config_option(
+            &mut overrides,
+            &anthropic_config(),
+            &claurst_api::ModelRegistry::new(),
+            OPTION_PROVIDER,
+            "openai",
+        )
+        .expect_err("an account nobody is logged into cannot serve a turn");
+
+        assert!(error.contains("openai"), "{error}");
+        assert_eq!(overrides.provider, None);
+    }
+
+    #[test]
+    fn an_effort_is_taken_by_name_and_refused_when_unknown() {
+        let mut overrides = SessionSettings::default();
+        let config = anthropic_config();
+        let registry = claurst_api::ModelRegistry::new();
+
+        apply_config_option(&mut overrides, &config, &registry, OPTION_EFFORT, "xhigh")
+            .expect("a known level is accepted");
+        assert_eq!(
+            overrides.effort,
+            Some(claurst_core::effort::EffortLevel::XHigh)
+        );
+
+        apply_config_option(
+            &mut overrides,
+            &config,
+            &registry,
+            OPTION_EFFORT,
+            "colossal",
+        )
+        .expect_err("an unknown level is refused");
+        assert_eq!(
+            overrides.effort,
+            Some(claurst_core::effort::EffortLevel::XHigh),
+            "a refused value must not disturb the one already set"
+        );
+    }
+
+    #[test]
+    fn an_option_the_agent_never_offered_is_refused() {
+        let mut overrides = SessionSettings::default();
+        apply_config_option(
+            &mut overrides,
+            &anthropic_config(),
+            &claurst_api::ModelRegistry::new(),
+            "temperature",
+            "0.7",
+        )
+        .expect_err("only the offered options can be set");
+    }
 
     #[test]
     fn every_offered_mode_can_be_set() {
