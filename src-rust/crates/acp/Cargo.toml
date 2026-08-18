@@ -25,7 +25,11 @@ dashmap = { workspace = true }
 parking_lot = { workspace = true }
 futures = { workspace = true }
 dirs = { workspace = true }
-agent-client-protocol-schema = { version = "0.13", default-features = false }
+# `session/fork` is still marked unstable in the schema, so the shape of the
+# request and its capability may change with the next release of the crate.
+agent-client-protocol-schema = { version = "0.13", default-features = false, features = [
+    "unstable_session_fork",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

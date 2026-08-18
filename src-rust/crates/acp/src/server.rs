@@ -91,6 +91,11 @@ impl AgentServer {
                 let result = self.on_list_sessions(req).await?;
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
+            "session/fork" => {
+                let req: acp::ForkSessionRequest = parse_params(params)?;
+                let result = self.on_fork_session(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
             "session/close" => {
                 let req: acp::CloseSessionRequest = parse_params(params)?;
                 let result = self.on_close_session(req).await?;
@@ -172,6 +177,7 @@ impl AgentServer {
                     .session_capabilities(
                         acp::SessionCapabilities::new()
                             .list(Some(acp::SessionListCapabilities::new()))
+                            .fork(Some(acp::SessionForkCapabilities::new()))
                             .resume(Some(acp::SessionResumeCapabilities::new()))
                             .close(Some(acp::SessionCloseCapabilities::new())),
                     )
@@ -212,9 +218,7 @@ impl AgentServer {
 
         self.sessions.insert(state.clone());
         Ok(acp::NewSessionResponse::new(session_id)
-            .modes(Some(crate::session_config::mode_state(
-                &self.runtime.config.permission_mode,
-            )))
+            .modes(Some(self.mode_state_for(&state)))
             .config_options(Some(self.config_options_for(&state))))
     }
 
@@ -254,9 +258,7 @@ impl AgentServer {
         );
 
         Ok(acp::LoadSessionResponse::new()
-            .modes(Some(crate::session_config::mode_state(
-                &self.runtime.config.permission_mode,
-            )))
+            .modes(Some(self.mode_state_for(&session)))
             .config_options(Some(self.config_options_for(&session))))
     }
 
@@ -277,10 +279,42 @@ impl AgentServer {
         info!(session_id = %req.session_id, "ACP: session resumed");
 
         Ok(acp::ResumeSessionResponse::new()
-            .modes(Some(crate::session_config::mode_state(
-                &self.runtime.config.permission_mode,
-            )))
+            .modes(Some(self.mode_state_for(&session)))
             .config_options(Some(self.config_options_for(&session))))
+    }
+
+    /// Split a session in two: a new one carrying the conversation so far,
+    /// leaving the original untouched.
+    ///
+    /// The fork keeps whatever the source session had chosen for itself (its
+    /// model, its account, its effort, its permission mode), because it
+    /// continues the same conversation.
+    async fn on_fork_session(
+        self: &Arc<Self>,
+        req: acp::ForkSessionRequest,
+    ) -> Result<acp::ForkSessionResponse, acp::Error> {
+        let source = reopen(
+            &self.sessions,
+            &req.session_id,
+            &req.cwd,
+            req.mcp_servers.len(),
+        )
+        .await?;
+
+        let model = self.runtime.query_config.model.clone();
+        let forked = fork_from(&self.sessions, &source, req.cwd.clone(), &model);
+        let forked_id = forked.session_id.clone();
+        crate::persist::save(&forked, &model).await;
+        info!(
+            session_id = %forked_id,
+            forked_from = %req.session_id,
+            messages = forked.messages.lock().len(),
+            "ACP: session forked"
+        );
+
+        Ok(acp::ForkSessionResponse::new(forked_id)
+            .modes(Some(self.mode_state_for(&forked)))
+            .config_options(Some(self.config_options_for(&forked))))
     }
 
     /// Every session on file, so a client can offer to reopen one.
@@ -325,6 +359,21 @@ impl AgentServer {
         self.sessions.remove(&req.session_id);
         info!(session_id = %req.session_id, "ACP: session closed");
         Ok(acp::CloseSessionResponse::new())
+    }
+
+    /// The modes a session offers, with the one it is actually in marked.
+    ///
+    /// A session that changed its own mode reports that mode, not the one the
+    /// runtime started in, so a reopened or forked session is not drawn as
+    /// something it is not.
+    fn mode_state_for(&self, session: &Arc<SessionState>) -> acp::SessionModeState {
+        let current = session
+            .settings
+            .lock()
+            .permission_mode
+            .clone()
+            .unwrap_or_else(|| self.runtime.config.permission_mode.clone());
+        crate::session_config::mode_state(&current)
     }
 
     /// The options a session currently offers, rebuilt from its overrides.
@@ -449,6 +498,22 @@ impl AgentServer {
         let session = self.session_or_error(&req.session_id)?;
         crate::prompt::handle(self.runtime.clone(), self.connection.clone(), session, req).await
     }
+}
+
+/// Register a copy of `source` under a new id, carrying its conversation and
+/// its choices, and remembering where the two parted.
+fn fork_from(
+    sessions: &SessionRegistry,
+    source: &Arc<SessionState>,
+    cwd: std::path::PathBuf,
+    model: &str,
+) -> Arc<SessionState> {
+    let snapshot = crate::persist::snapshot(source, model);
+    let forked_id = acp::SessionId::new(format!("acp-{}", uuid::Uuid::new_v4()));
+    let forked = SessionState::forked(forked_id, cwd, &snapshot);
+    *forked.settings.lock() = source.settings.lock().clone();
+    sessions.insert(forked.clone());
+    forked
 }
 
 /// Put a session back in the registry: the live one if it is still there,
@@ -599,6 +664,53 @@ mod tests {
         // The same state, not a second copy: a turn in flight keeps its
         // transcript and its cancel token.
         assert!(Arc::ptr_eq(&reopened, &live));
+    }
+
+    #[test]
+    fn a_fork_carries_the_conversation_and_the_choices_but_not_the_id() {
+        let sessions = SessionRegistry::new();
+        let source = SessionState::new(
+            acp::SessionId::new("acp-source"),
+            PathBuf::from("/tmp/source"),
+        );
+        *source.messages.lock() = vec![Message::user("one"), Message::assistant("two")];
+        source.settings.lock().model = Some("claude-opus-4".to_string());
+        source.settings.lock().permission_mode = Some(claurst_core::PermissionMode::AcceptEdits);
+
+        let forked = fork_from(&sessions, &source, PathBuf::from("/tmp/fork"), "m");
+
+        assert_ne!(forked.session_id, source.session_id);
+        assert_eq!(forked.messages.lock().len(), 2);
+        assert_eq!(
+            forked.settings.lock().model.as_deref(),
+            Some("claude-opus-4")
+        );
+        assert_eq!(
+            forked.settings.lock().permission_mode,
+            Some(claurst_core::PermissionMode::AcceptEdits)
+        );
+        assert_eq!(
+            forked.forked_from,
+            Some(("acp-source".to_string(), 2)),
+            "the fork records where it split"
+        );
+        assert!(sessions.get(&forked.session_id).is_some());
+    }
+
+    #[test]
+    fn a_fork_and_its_source_then_move_apart() {
+        let sessions = SessionRegistry::new();
+        let source = SessionState::new(
+            acp::SessionId::new("acp-source"),
+            PathBuf::from("/tmp/source"),
+        );
+        *source.messages.lock() = vec![Message::user("one")];
+
+        let forked = fork_from(&sessions, &source, PathBuf::from("/tmp/source"), "m");
+        forked.messages.lock().push(Message::user("only mine"));
+
+        assert_eq!(source.messages.lock().len(), 1);
+        assert_eq!(forked.messages.lock().len(), 2);
     }
 
     #[tokio::test]

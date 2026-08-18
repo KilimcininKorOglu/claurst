@@ -15,6 +15,14 @@ use crate::sessions::SessionState;
 /// Failures are logged and swallowed: a transcript that cannot be filed is
 /// worth a warning, not a refused turn the user has already paid for.
 pub async fn save(session: &Arc<SessionState>, model: &str) {
+    let stored = snapshot(session, model);
+    if let Err(e) = history::save_session(&stored).await {
+        tracing::warn!(?e, session_id = %stored.id, "ACP: could not save the session");
+    }
+}
+
+/// A session as a stored record: what `save` writes, and what a fork copies.
+pub fn snapshot(session: &Arc<SessionState>, model: &str) -> ConversationSession {
     let mut stored = ConversationSession::new(model.to_string());
     stored.id = session.session_id.0.to_string();
     stored.created_at = session.created_at;
@@ -26,10 +34,7 @@ pub async fn save(session: &Arc<SessionState>, model: &str) {
         stored.parent_session_id = Some(parent_id);
         stored.fork_point_message_index = Some(at_message);
     }
-
-    if let Err(e) = history::save_session(&stored).await {
-        tracing::warn!(?e, session_id = %stored.id, "ACP: could not save the session");
-    }
+    stored
 }
 
 /// Read a stored session, or `None` when nothing is filed under that id.
