@@ -44,6 +44,7 @@ pub mod status_notices;
 pub mod timeline;
 pub mod token_budget;
 pub mod truncate;
+pub mod workspace;
 pub use spinner::{
     sample_completion_verb, sample_spinner_verb, SPINNER_VERBS, TURN_COMPLETION_VERBS,
 };
