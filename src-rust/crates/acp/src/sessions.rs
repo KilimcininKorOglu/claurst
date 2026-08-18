@@ -33,14 +33,66 @@ pub struct SessionState {
     pub file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
     pub current_turn: Arc<std::sync::atomic::AtomicUsize>,
     pub settings: parking_lot::Mutex<SessionSettings>,
+    /// Human-readable name, shown by anything that lists sessions.
+    pub title: parking_lot::Mutex<Option<String>>,
+    /// When the session first existed. Kept across saves so a reloaded
+    /// session does not claim to have been created on the reload.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// The session this one was forked from, and the message it split at.
+    pub forked_from: Option<(String, usize)>,
 }
 
 impl SessionState {
     pub fn new(session_id: acp::SessionId, cwd: PathBuf) -> Arc<Self> {
+        Self::build(session_id, cwd, Vec::new(), None, chrono::Utc::now(), None)
+    }
+
+    /// Rebuild a session from what was stored, keeping its identity: the same
+    /// id, the same creation time, and the transcript it had.
+    pub fn restored(
+        session_id: acp::SessionId,
+        cwd: PathBuf,
+        stored: &claurst_core::history::ConversationSession,
+    ) -> Arc<Self> {
+        Self::build(
+            session_id,
+            cwd,
+            stored.messages.clone(),
+            stored.title.clone(),
+            stored.created_at,
+            None,
+        )
+    }
+
+    /// Start a new session carrying a copy of another one's transcript, and
+    /// remember where it split so both can be told apart later.
+    pub fn forked(
+        session_id: acp::SessionId,
+        cwd: PathBuf,
+        stored: &claurst_core::history::ConversationSession,
+    ) -> Arc<Self> {
+        Self::build(
+            session_id,
+            cwd,
+            stored.messages.clone(),
+            stored.title.clone(),
+            chrono::Utc::now(),
+            Some((stored.id.clone(), stored.messages.len())),
+        )
+    }
+
+    fn build(
+        session_id: acp::SessionId,
+        cwd: PathBuf,
+        messages: Vec<Message>,
+        title: Option<String>,
+        created_at: chrono::DateTime<chrono::Utc>,
+        forked_from: Option<(String, usize)>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             session_id,
             cwd,
-            messages: parking_lot::Mutex::new(Vec::new()),
+            messages: parking_lot::Mutex::new(messages),
             cancel_token: CancellationToken::new(),
             pending_permissions: Arc::new(parking_lot::Mutex::new(
                 PendingPermissionStore::default(),
@@ -50,6 +102,9 @@ impl SessionState {
             )),
             current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             settings: parking_lot::Mutex::new(SessionSettings::default()),
+            title: parking_lot::Mutex::new(title),
+            created_at,
+            forked_from,
         })
     }
 }

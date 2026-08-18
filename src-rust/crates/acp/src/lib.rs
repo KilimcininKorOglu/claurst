@@ -25,6 +25,7 @@
 
 mod connection;
 mod permission;
+mod persist;
 mod prompt;
 mod runtime;
 mod server;

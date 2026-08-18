@@ -142,6 +142,34 @@ pub async fn handle(
         let mut guard = session.messages.lock();
         *guard = messages;
     }
+    // A session nobody has named takes its name from what was asked of it, and
+    // the client is told so it can label the conversation it is showing.
+    let derived = crate::persist::derive_title(&session.messages.lock());
+    let named = {
+        let mut title = session.title.lock();
+        match (&*title, derived) {
+            (None, Some(derived)) => {
+                *title = Some(derived.clone());
+                Some(derived)
+            }
+            _ => None,
+        }
+    };
+    if let Some(title) = named {
+        send_session_update(
+            &connection,
+            &session.session_id,
+            acp::SessionUpdate::SessionInfoUpdate(
+                acp::SessionInfoUpdate::new()
+                    .title(title)
+                    .updated_at(chrono::Utc::now().to_rfc3339()),
+            ),
+        )
+        .await;
+    }
+
+    // And to disk, so the session outlives this connection.
+    crate::persist::save(&session, &query_config.model).await;
 
     let stop_reason = match outcome {
         QueryOutcome::EndTurn { .. } => acp::StopReason::EndTurn,
