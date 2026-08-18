@@ -36,9 +36,15 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "claurst.openChat" },
-        { "command": "claurst.newSession" },
-        { "command": "claurst.stopSession" }
+        {
+          "command": "claurst.openChat"
+        },
+        {
+          "command": "claurst.newSession"
+        },
+        {
+          "command": "claurst.stopSession"
+        }
       ]
     },
     "configuration": {

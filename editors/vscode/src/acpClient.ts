@@ -80,7 +80,12 @@ export class AcpClient {
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private sessionId: string | undefined;
 
-  constructor(executablePath: string, cwd: string, private events: AcpClientEvents) {
+  constructor(
+    executablePath: string,
+    cwd: string,
+    private clientVersion: string,
+    private events: AcpClientEvents,
+  ) {
     this.child = cp.spawn(executablePath, ['acp'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     this.rl = readline.createInterface({ input: this.child.stdout });
     this.rl.on('line', (line) => this.handleLine(line));
@@ -244,7 +249,7 @@ export class AcpClient {
     await this.request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: 'claurst-vscode', version: '0.1.7' },
+      clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
     });
   }
 

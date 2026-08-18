@@ -25,7 +25,11 @@ export class ChatPanel {
   private options: ConfigOption[] = [];
   private modes: SessionModes | undefined;
 
-  static createOrShow(extensionUri: vscode.Uri, outputChannel: vscode.OutputChannel): ChatPanel {
+  static createOrShow(
+    extensionUri: vscode.Uri,
+    version: string,
+    outputChannel: vscode.OutputChannel,
+  ): ChatPanel {
     if (ChatPanel.current) {
       ChatPanel.current.panel.reveal();
       return ChatPanel.current;
@@ -40,13 +44,14 @@ export class ChatPanel {
         localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
       },
     );
-    ChatPanel.current = new ChatPanel(panel, extensionUri, outputChannel);
+    ChatPanel.current = new ChatPanel(panel, extensionUri, version, outputChannel);
     return ChatPanel.current;
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
+    private readonly version: string,
     outputChannel: vscode.OutputChannel,
   ) {
     this.panel = panel;
@@ -96,7 +101,7 @@ export class ChatPanel {
       .getConfiguration('claurst')
       .get<string>('executablePath', 'claurst');
 
-    this.client = new AcpClient(executablePath, cwd, {
+    this.client = new AcpClient(executablePath, cwd, this.version, {
       onTextChunk: (text, isThought) => this.postToWebview({ type: 'textChunk', text, isThought }),
       onToolCall: (update) => this.postToWebview({ type: 'toolCall', ...toolCallPayload(update) }),
       onToolCallUpdate: (update) =>
