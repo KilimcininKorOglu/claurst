@@ -90,26 +90,29 @@ impl AgentServer {
             "session/new" => {
                 let req: acp::NewSessionRequest = parse_params(params)?;
                 let result = self.on_new_session(req).await?;
-                let commands = acp::SessionNotification::new(
-                    result.session_id.clone(),
-                    acp::SessionUpdate::AvailableCommandsUpdate(acp::AvailableCommandsUpdate::new(
-                        crate::commands::available_commands(),
-                    )),
-                );
+                let id = result.session_id.clone();
                 Ok(Answer {
-                    after: vec![commands],
+                    after: vec![announce_commands(id)],
                     ..answer(result)?
                 })
             }
             "session/load" => {
                 let req: acp::LoadSessionRequest = parse_params(params)?;
+                let id = req.session_id.clone();
                 let result = self.on_load_session(req).await?;
-                answer(result)
+                Ok(Answer {
+                    after: vec![announce_commands(id)],
+                    ..answer(result)?
+                })
             }
             "session/resume" => {
                 let req: acp::ResumeSessionRequest = parse_params(params)?;
+                let id = req.session_id.clone();
                 let result = self.on_resume_session(req).await?;
-                answer(result)
+                Ok(Answer {
+                    after: vec![announce_commands(id)],
+                    ..answer(result)?
+                })
             }
             "session/list" => {
                 let req: acp::ListSessionsRequest = parse_params(params)?;
@@ -119,7 +122,11 @@ impl AgentServer {
             "session/fork" => {
                 let req: acp::ForkSessionRequest = parse_params(params)?;
                 let result = self.on_fork_session(req).await?;
-                answer(result)
+                let id = result.session_id.clone();
+                Ok(Answer {
+                    after: vec![announce_commands(id)],
+                    ..answer(result)?
+                })
             }
             "session/close" => {
                 let req: acp::CloseSessionRequest = parse_params(params)?;
@@ -646,6 +653,21 @@ async fn reopen(
 struct Answer {
     value: Value,
     after: Vec<acp::SessionNotification>,
+}
+
+/// Tell a session which slash commands it can run.
+///
+/// Sent after the response rather than before it, because the client only
+/// learns the session id from that response. Every way of opening a session
+/// says this, not just `session/new`: a client that loaded, resumed or forked
+/// one is just as able to run `/help`.
+fn announce_commands(session_id: acp::SessionId) -> acp::SessionNotification {
+    acp::SessionNotification::new(
+        session_id,
+        acp::SessionUpdate::AvailableCommandsUpdate(acp::AvailableCommandsUpdate::new(
+            crate::commands::available_commands(),
+        )),
+    )
 }
 
 /// The plain case: a result and nothing to follow it.
