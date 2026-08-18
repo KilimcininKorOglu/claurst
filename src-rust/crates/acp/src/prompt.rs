@@ -38,12 +38,24 @@ pub async fn handle(
         return Err(acp::Error::invalid_params());
     }
 
+    // A prompt naming a slash command is the command layer's to answer, and
+    // only what it hands back becomes a turn.
+    let turn_text = match crate::commands::split_command(&user_text) {
+        Some((name, arguments)) => {
+            match run_command(&runtime, &connection, &session, &name, &arguments).await {
+                CommandTurn::Prompt(text) => text,
+                CommandTurn::Answered(stop) => return Ok(acp::PromptResponse::new(stop)),
+            }
+        }
+        None => user_text,
+    };
+
     // Append the user turn to the session transcript.
     let mut messages: Vec<Message> = {
         let guard = session.messages.lock();
         guard.clone()
     };
-    messages.push(Message::user(user_text));
+    messages.push(Message::user(turn_text));
 
     // Reset the session's cancellation token for this new turn.
     let cancel = session.cancel_token.clone();
@@ -58,7 +70,7 @@ pub async fn handle(
     let permission_handler: Arc<dyn claurst_core::PermissionHandler> =
         Arc::new(AcpPermissionHandler);
     let tool_ctx = ToolContext {
-        working_dir: session.cwd.clone(),
+        working_dir: session.cwd.lock().clone(),
         permission_mode: config.permission_mode.clone(),
         permission_handler,
         cost_tracker: runtime.cost_tracker.clone(),
@@ -107,9 +119,10 @@ pub async fn handle(
     if let Some(effort) = overrides.effort {
         query_config.effort_level = Some(effort);
     }
-    query_config.working_directory = Some(session.cwd.display().to_string());
+    let session_cwd = session.cwd.lock().clone();
+    query_config.working_directory = Some(session_cwd.display().to_string());
     query_config.workspace_roots = claurst_core::workspace::generate_root_names(
-        &session.cwd,
+        &session_cwd,
         &config.additional_dirs,
         &config.workspace_paths,
     )
@@ -183,6 +196,64 @@ pub async fn handle(
     };
 
     Ok(acp::PromptResponse::new(stop_reason))
+}
+
+/// What a slash command left for the turn to do.
+enum CommandTurn {
+    /// The command answered by itself; the turn is over.
+    Answered(acp::StopReason),
+    /// The command asked for this text to go to the model instead.
+    Prompt(String),
+}
+
+/// Run a slash command and tell the client what it did.
+///
+/// Anything the command reports while it is still working reaches the client
+/// as it happens, because a browser URL that arrives with the final answer is
+/// too late to open.
+async fn run_command(
+    runtime: &Arc<AgentRuntime>,
+    connection: &Arc<Connection>,
+    session: &Arc<SessionState>,
+    name: &str,
+    arguments: &str,
+) -> CommandTurn {
+    let (notes_tx, mut notes_rx) = mpsc::unbounded_channel::<String>();
+    let relay = tokio::spawn({
+        let connection = connection.clone();
+        let session_id = session.session_id.clone();
+        async move {
+            while let Some(note) = notes_rx.recv().await {
+                send_text_chunk(&connection, &session_id, &note, false).await;
+            }
+        }
+    });
+
+    let outcome = crate::commands::run(runtime, session, &notes_tx, name, arguments).await;
+    drop(notes_tx);
+    // The relay outlives this call whenever a command left work running in the
+    // background; it ends when that work drops its own sender.
+    if outcome.prompt.is_none() {
+        // Nothing more will be said by this turn, so waiting costs nothing and
+        // keeps the notes ahead of the answer.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(50), relay).await;
+    }
+
+    for update in outcome.updates {
+        send_session_update(connection, &session.session_id, update).await;
+    }
+    if let Some(reply) = &outcome.reply {
+        send_text_chunk(connection, &session.session_id, reply, false).await;
+    }
+    // A command can change the transcript, the name, or the directory, and
+    // none of that survives the process without this.
+    crate::persist::save(session, &runtime.query_config.model).await;
+
+    match outcome.prompt {
+        Some(text) => CommandTurn::Prompt(text),
+        None if outcome.failed => CommandTurn::Answered(acp::StopReason::Refusal),
+        None => CommandTurn::Answered(acp::StopReason::EndTurn),
+    }
 }
 
 /// Concatenate text from prompt content blocks.

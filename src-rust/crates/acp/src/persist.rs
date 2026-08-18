@@ -29,7 +29,7 @@ pub fn snapshot(session: &Arc<SessionState>, model: &str) -> ConversationSession
     stored.updated_at = chrono::Utc::now();
     stored.messages = session.messages.lock().clone();
     stored.title = session.title.lock().clone();
-    stored.working_dir = Some(session.cwd.display().to_string());
+    stored.working_dir = Some(session.cwd.lock().display().to_string());
     if let Some((parent_id, at_message)) = session.forked_from.clone() {
         stored.parent_session_id = Some(parent_id);
         stored.fork_point_message_index = Some(at_message);

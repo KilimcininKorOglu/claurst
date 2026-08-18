@@ -13,6 +13,34 @@ use claurst_core::CostTracker;
 use claurst_query::QueryConfig;
 use claurst_tools::Tool;
 
+/// An account to log in to.
+#[derive(Debug, Clone)]
+pub struct LoginRequest {
+    /// The provider id the credential belongs to.
+    pub provider: String,
+    /// Anthropic only: whether to log in through Claude.ai rather than the
+    /// Console.
+    pub login_with_claude_ai: bool,
+    /// A human-friendly name for the resulting account profile.
+    pub label: Option<String>,
+}
+
+/// Carries out a login and reports what happened, or why it did not.
+///
+/// The flows open a browser and wait on a loopback redirect, and they live in
+/// the binary that owns them, so the runtime is handed one rather than
+/// reaching for it. The sender receives the URL as soon as it exists, so a
+/// client can show it while the flow is still waiting.
+pub type LoginRunner = Arc<
+    dyn Fn(
+            LoginRequest,
+            tokio::sync::mpsc::UnboundedSender<String>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = anyhow::Result<String>> + Send + 'static>,
+        > + Send
+        + Sync,
+>;
+
 /// Snapshot of the global agent runtime — built at server startup, cloned
 /// (cheaply, via Arc) into each session.
 #[derive(Clone)]
@@ -28,6 +56,9 @@ pub struct AgentRuntime {
     pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
     pub permission_manager: Arc<std::sync::Mutex<PermissionManager>>,
     pub working_dir: PathBuf,
+    /// How `/login` and `/connect` are carried out, when the caller supplied
+    /// a way. Without one those commands say so rather than pretending.
+    pub login_runner: Option<LoginRunner>,
 }
 
 impl AgentRuntime {
@@ -35,7 +66,10 @@ impl AgentRuntime {
     /// directory. Mirrors the headless startup path but with ACP-specific
     /// defaults (non-interactive, permission decisions routed back to the
     /// connected client).
-    pub async fn build(working_dir: PathBuf) -> anyhow::Result<Self> {
+    pub async fn build(
+        working_dir: PathBuf,
+        login_runner: Option<LoginRunner>,
+    ) -> anyhow::Result<Self> {
         let settings = Settings::load_sync().unwrap_or_default();
         let mut config = settings.effective_config();
         // Plan mode requires interactive UI — fall back to Default so the
@@ -117,6 +151,7 @@ impl AgentRuntime {
             mcp_manager,
             permission_manager,
             working_dir,
+            login_runner,
         })
     }
 }

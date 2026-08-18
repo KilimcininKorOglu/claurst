@@ -500,7 +500,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Fast-path: `claude acp` — start the Agent Client Protocol stdio server.
     if raw_args.get(1).map(|s| s.as_str()) == Some("acp") {
-        return claurst_acp::run_acp_server().await;
+        return claurst_acp::run_acp_server(Some(acp_login_runner())).await;
     }
 
     // Fast-path: `claurst models [provider] [--refresh] [--verbose] [--json]`
@@ -1591,6 +1591,56 @@ async fn refresh_models_cache_once() {
     let _ = std::fs::write(&cache_path, &text);
     let _ = std::fs::write(&legacy_cache_path, &text);
     tracing::info!(path = %cache_path.display(), "Models cache refreshed from {}", url);
+}
+
+/// How `/login` and `/connect` are carried out for an editor over ACP.
+///
+/// The flows live here because they open a browser and listen on loopback,
+/// which is the binary's business, not the protocol layer's. The variants that
+/// report through a channel are the ones used: the printing ones would put
+/// their text on stdout, where every byte is parsed as JSON-RPC.
+fn acp_login_runner() -> claurst_acp::LoginRunner {
+    Arc::new(|request: claurst_acp::LoginRequest, notes| {
+        Box::pin(async move {
+            let (event_tx, mut event_rx) =
+                tokio::sync::mpsc::channel::<claurst_tui::DeviceAuthEvent>(8);
+            let relay = tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    if let claurst_tui::DeviceAuthEvent::GotBrowserUrl { url } = event {
+                        let _ = notes.send(format!(
+                            "Opening a browser to sign in. If it did not open, visit:\n{url}"
+                        ));
+                    }
+                }
+            });
+
+            let who = if request.provider == claurst_core::ProviderId::CODEX {
+                codex_oauth_flow::run_oauth_flow_with_label(event_tx, request.label.as_deref())
+                    .await
+                    .map(|tokens| {
+                        tokens
+                            .account_id
+                            .unwrap_or_else(|| "the account".to_string())
+                    })
+            } else {
+                oauth_flow::run_oauth_login_flow_tui(
+                    event_tx,
+                    request.login_with_claude_ai,
+                    request.label.as_deref(),
+                )
+                .await
+                .map(|result| {
+                    result
+                        .tokens
+                        .email
+                        .or(result.tokens.account_uuid)
+                        .unwrap_or_else(|| "the account".to_string())
+                })
+            };
+            relay.abort();
+            who
+        })
+    })
 }
 
 struct RefreshedProviderRuntime {

@@ -26,7 +26,9 @@ pub struct SessionSettings {
 /// MCP server roster, and cancellation token.
 pub struct SessionState {
     pub session_id: acp::SessionId,
-    pub cwd: PathBuf,
+    /// Where this session works. A session can be re-homed to another
+    /// worktree of the same project without being started again.
+    pub cwd: parking_lot::Mutex<PathBuf>,
     pub messages: parking_lot::Mutex<Vec<Message>>,
     pub cancel_token: CancellationToken,
     pub pending_permissions: Arc<parking_lot::Mutex<PendingPermissionStore>>,
@@ -91,7 +93,7 @@ impl SessionState {
     ) -> Arc<Self> {
         Arc::new(Self {
             session_id,
-            cwd,
+            cwd: parking_lot::Mutex::new(cwd),
             messages: parking_lot::Mutex::new(messages),
             cancel_token: CancellationToken::new(),
             pending_permissions: Arc::new(parking_lot::Mutex::new(
@@ -144,7 +146,7 @@ mod tests {
         let state = SessionState::new(id.clone(), cwd.clone());
 
         assert_eq!(state.session_id, id);
-        assert_eq!(state.cwd, cwd);
+        assert_eq!(*state.cwd.lock(), cwd);
         assert!(state.messages.lock().is_empty());
         assert_eq!(
             state.current_turn.load(std::sync::atomic::Ordering::SeqCst),

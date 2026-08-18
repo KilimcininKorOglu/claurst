@@ -41,12 +41,12 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 pub use connection::Connection;
-pub use runtime::AgentRuntime;
+pub use runtime::{AgentRuntime, LoginRequest, LoginRunner};
 pub use server::AgentServer;
 
 /// Run the ACP server on the current process' stdin / stdout. Returns when
 /// stdin reaches EOF or when the runtime fails to initialize.
-pub async fn run_acp_server() -> anyhow::Result<()> {
+pub async fn run_acp_server(login_runner: Option<LoginRunner>) -> anyhow::Result<()> {
     // We must NEVER write to stdout outside the protocol — every byte on
     // stdout is parsed by the client as JSON-RPC. Force logs to stderr.
     install_stderr_tracing();
@@ -54,7 +54,7 @@ pub async fn run_acp_server() -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
     info!(cwd = %working_dir.display(), version = env!("CARGO_PKG_VERSION"), "ACP: starting server");
 
-    let runtime = AgentRuntime::build(working_dir).await?;
+    let runtime = AgentRuntime::build(working_dir, login_runner).await?;
     let runtime = Arc::new(runtime);
     let connection = Connection::new(tokio::io::stdout());
     let server = AgentServer::new(connection.clone(), runtime);

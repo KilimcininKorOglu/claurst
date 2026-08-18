@@ -85,7 +85,14 @@ fn initialize_returns_spec_compliant_response() {
     let caps = &result["agentCapabilities"];
     assert!(caps["promptCapabilities"].is_object());
     assert!(caps["mcpCapabilities"].is_object());
-    assert!(caps["loadSession"].is_boolean());
+    assert_eq!(caps["loadSession"], true, "a session outlives the process");
+    // Every lifecycle method the agent answers is advertised, or a client has
+    // no way to know it can ask.
+    let sessions = &caps["sessionCapabilities"];
+    assert!(sessions["list"].is_object(), "session/list unannounced");
+    assert!(sessions["resume"].is_object(), "session/resume unannounced");
+    assert!(sessions["close"].is_object(), "session/close unannounced");
+    assert!(sessions["fork"].is_object(), "session/fork unannounced");
 }
 
 #[test]
@@ -110,15 +117,47 @@ fn session_new_returns_session_id() {
 }
 
 #[test]
-fn session_load_returns_method_not_found() {
-    // We do not advertise loadSession, so well-behaved clients should never
-    // call session/load — but the agent must answer correctly if they do.
+fn loading_a_session_that_was_never_written_names_the_id() {
+    // The agent advertises loadSession, so a client may ask for any id; one
+    // nobody ever saved has to be reported rather than quietly answered.
     let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"smoke","version":"0.0.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"x","cwd":"/","mcpServers":[]}}
 "#;
     let (stdout, _stderr) = run_with_input(request, Duration::from_secs(20));
     let resp = find_response(&stdout, 2);
-    assert_eq!(resp["error"]["code"], -32601, "should be MethodNotFound");
+    assert_eq!(resp["error"]["code"], -32602, "should be InvalidParams");
+    assert_eq!(resp["error"]["data"]["reason"], "unknown session");
+}
+
+#[test]
+fn a_new_session_is_told_which_commands_it_can_run() {
+    // The list arrives after the response, because a notification about a
+    // session the client has not been given the id of has nowhere to land.
+    let cwd = std::env::current_dir().expect("cwd");
+    let cwd_str = cwd.to_string_lossy().replace('\\', "/");
+    let request = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":1,"clientCapabilities":{{}},"clientInfo":{{"name":"smoke","version":"0.0.0"}}}}}}
+{{"jsonrpc":"2.0","id":2,"method":"session/new","params":{{"cwd":"{cwd_str}","mcpServers":[]}}}}
+"#
+    );
+    let (stdout, _stderr) = run_with_input(&request, Duration::from_secs(20));
+
+    let update = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+        .find(|v| v["method"] == "session/update")
+        .expect("the session was told nothing at all");
+    assert_eq!(
+        update["params"]["update"]["sessionUpdate"],
+        "available_commands_update"
+    );
+    let commands = update["params"]["update"]["availableCommands"]
+        .as_array()
+        .expect("a list of commands");
+    assert!(
+        commands.iter().any(|c| c["name"] == "help"),
+        "no /help in {commands:?}"
+    );
 }
 
 #[test]
