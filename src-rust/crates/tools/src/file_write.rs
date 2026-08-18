@@ -102,7 +102,7 @@ impl Tool for FileWriteTool {
         let is_new = !existed;
 
         // Write the file
-        if let Err(e) = crate::write_atomic(&path, params.content.as_bytes()).await {
+        if let Err(e) = ctx.write_text(&path, params.content.as_bytes()).await {
             return ToolResult::error(format!("Failed to write file {}: {}", path.display(), e));
         }
 

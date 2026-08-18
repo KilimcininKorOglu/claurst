@@ -104,6 +104,7 @@ pub async fn handle(
         cancel_token: cancel.clone(),
         // Filled in per call by the tool dispatcher.
         current_call: None,
+        editor: None,
     };
 
     // Spawn the permission drainer for this turn.

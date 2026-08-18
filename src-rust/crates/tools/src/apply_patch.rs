@@ -328,7 +328,7 @@ impl Tool for ApplyPatchTool {
 
             // Read current content (or empty string for new files).
             let original_content = if path.exists() {
-                match tokio::fs::read_to_string(&path).await {
+                match ctx.read_text(&path).await {
                     Ok(c) => c,
                     Err(e) => {
                         return ToolResult::error(format!("Cannot read {}: {}", path.display(), e))
@@ -420,7 +420,7 @@ impl Tool for ApplyPatchTool {
         // ----------------------------------------------------------------
 
         for (path, original_bytes, new_content) in &to_write {
-            if let Err(e) = crate::write_atomic(path, new_content.as_bytes()).await {
+            if let Err(e) = ctx.write_text(path, new_content.as_bytes()).await {
                 return ToolResult::error(format!("Failed to write {}: {}", path.display(), e));
             }
             ctx.record_file_change(

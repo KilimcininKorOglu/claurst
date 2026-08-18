@@ -28,6 +28,7 @@ pub mod bundled_skills;
 pub mod computer_use;
 pub mod config_tool;
 pub mod cron;
+pub mod editor_host;
 pub mod enter_plan_mode;
 pub mod exit_plan_mode;
 pub mod file_edit;
@@ -71,6 +72,9 @@ pub use brief::BriefTool;
 pub use computer_use::ComputerUseTool;
 pub use config_tool::ConfigTool;
 pub use cron::{CronCreateTool, CronDeleteTool, CronListTool};
+pub use editor_host::{
+    EditorCapabilities, EditorHost, TerminalId, TerminalOutput, TerminalRequest,
+};
 pub use enter_plan_mode::EnterPlanModeTool;
 pub use exit_plan_mode::ExitPlanModeTool;
 pub use file_edit::FileEditTool;
@@ -365,6 +369,9 @@ pub struct ToolContext {
     /// `None` on the per-turn context that every call is cloned from, and on
     /// any context built outside the dispatcher.
     pub current_call: Option<Arc<ActiveToolCall>>,
+    /// The client hosting this session's files and shell, when one does.
+    /// `None` in a terminal, where the agent owns both.
+    pub editor: Option<Arc<dyn editor_host::EditorHost>>,
 }
 
 impl ToolContext {
@@ -418,6 +425,39 @@ impl ToolContext {
             RootRef::Unknown(name) => Err(unknown(name)),
             RootRef::Plain => Ok(self.working_dir.join(path)),
         }
+    }
+
+    /// Read a file the user is working on.
+    ///
+    /// Through the client when one is hosting the files, so an unsaved buffer
+    /// is what the tool sees rather than the older text on disk. Otherwise
+    /// straight from disk.
+    pub async fn read_text(&self, path: &std::path::Path) -> std::io::Result<String> {
+        match &self.editor {
+            Some(editor) if editor.capabilities().read_text_file => {
+                editor.read_text_file(path).await
+            }
+            _ => tokio::fs::read_to_string(path).await,
+        }
+    }
+
+    /// Write a file the user is working on.
+    ///
+    /// Through the client when one is hosting the files, so the change lands
+    /// in the editor's undo stack instead of appearing underneath it.
+    /// Otherwise atomically to disk.
+    ///
+    /// Binary content is always written to disk: the client's write carries
+    /// text, and there is no lossless way to hand it bytes.
+    pub async fn write_text(&self, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+        if let Some(editor) = &self.editor {
+            if editor.capabilities().write_text_file {
+                if let Ok(text) = std::str::from_utf8(contents) {
+                    return editor.write_text_file(path, text).await;
+                }
+            }
+        }
+        write_atomic(path, contents).await
     }
 
     fn permission_allowed_roots(&self) -> Vec<PathBuf> {
@@ -775,6 +815,7 @@ mod tests {
             user_question_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
+            editor: None,
         }
     }
 

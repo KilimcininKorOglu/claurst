@@ -118,7 +118,7 @@ impl Tool for FileReadTool {
         }
 
         // Read text file
-        let content = match tokio::fs::read_to_string(&path).await {
+        let content = match ctx.read_text(&path).await {
             Ok(c) => c,
             Err(e) => {
                 // Might be binary

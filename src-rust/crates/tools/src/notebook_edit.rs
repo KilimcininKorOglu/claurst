@@ -116,7 +116,7 @@ impl Tool for NotebookEditTool {
         }
 
         // Read notebook
-        let content = match tokio::fs::read_to_string(&path).await {
+        let content = match ctx.read_text(&path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read notebook: {}", e)),
         };
@@ -185,7 +185,7 @@ impl Tool for NotebookEditTool {
                         return ToolResult::error(format!("Failed to serialize notebook: {}", e))
                     }
                 };
-                if let Err(e) = crate::write_atomic(&path, updated.as_bytes()).await {
+                if let Err(e) = ctx.write_text(&path, updated.as_bytes()).await {
                     return ToolResult::error(format!("Failed to write notebook: {}", e));
                 }
                 ctx.record_file_change(

@@ -97,7 +97,7 @@ impl Tool for FileEditTool {
         }
 
         // Read current content
-        let content = match tokio::fs::read_to_string(&path).await {
+        let content = match ctx.read_text(&path).await {
             Ok(c) => c,
             Err(e) => {
                 return ToolResult::error(format!("Failed to read file {}: {}", path.display(), e));
@@ -146,7 +146,7 @@ impl Tool for FileEditTool {
         );
 
         // Write back
-        if let Err(e) = crate::write_atomic(&path, new_content.as_bytes()).await {
+        if let Err(e) = ctx.write_text(&path, new_content.as_bytes()).await {
             return ToolResult::error(format!("Failed to write file {}: {}", path.display(), e));
         }
 

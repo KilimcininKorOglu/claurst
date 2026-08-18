@@ -128,7 +128,7 @@ impl Tool for BatchEditTool {
                 // use cached edited content if available
                 content.clone()
             } else {
-                match tokio::fs::read_to_string(&path).await {
+                match ctx.read_text(&path).await {
                     Ok(c) => c,
                     Err(e) => {
                         pre_check_errors.push(format!(
@@ -215,7 +215,7 @@ impl Tool for BatchEditTool {
 
         for (i, (path_str, original, new_content)) in unique_writings.iter().enumerate() {
             let path = std::path::Path::new(path_str);
-            match crate::write_atomic(path, new_content.as_bytes()).await {
+            match ctx.write_text(path, new_content.as_bytes()).await {
                 Ok(()) => {
                     ctx.record_file_change(
                         path.to_path_buf(),
@@ -231,11 +231,9 @@ impl Tool for BatchEditTool {
                     // rollback in reverse order to preserve original file state
                     for (rb_path, rb_original, rb_new_content) in unique_writings[0..i].iter().rev()
                     {
-                        if let Err(re) = crate::write_atomic(
-                            std::path::Path::new(rb_path),
-                            rb_original.as_bytes(),
-                        )
-                        .await
+                        if let Err(re) = ctx
+                            .write_text(std::path::Path::new(rb_path), rb_original.as_bytes())
+                            .await
                         {
                             rollback_errors.push(format!("  rollback {}: {}", rb_path, re));
                         } else {

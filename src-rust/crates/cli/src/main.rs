@@ -924,6 +924,7 @@ async fn main() -> anyhow::Result<()> {
         cancel_token: tokio_util::sync::CancellationToken::new(),
         // Filled in per call by the tool dispatcher.
         current_call: None,
+        editor: None,
     };
 
     // Hourly shadow-snapshot GC loop: only runs when snapshot is explicitly enabled.
