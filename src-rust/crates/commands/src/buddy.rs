@@ -532,6 +532,7 @@ mod tests {
             remote_session_url: None,
             mcp_manager: None,
             mcp_auth_runner: None,
+            interactive: true,
         }
     }
 
@@ -696,6 +697,7 @@ mod tests {
             remote_session_url: None,
             mcp_manager: None,
             mcp_auth_runner: None,
+            interactive: true,
         };
         let companion = Companion::new("test-identity", None);
 

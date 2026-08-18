@@ -532,6 +532,9 @@ async fn main() -> anyhow::Result<()> {
                     remote_session_url: None,
                     mcp_manager: None,
                     mcp_auth_runner: None,
+                    // A named subcommand prints and exits; there is no view
+                    // for a command to open.
+                    interactive: false,
                 };
                 // Collect remaining args after the command name
                 let rest: Vec<&str> = raw_args[2..].iter().map(|s| s.as_str()).collect();
@@ -2977,6 +2980,9 @@ async fn run_interactive(
         remote_session_url: session.remote_session_url.clone(),
         mcp_manager: tool_ctx.mcp_manager.clone(),
         mcp_auth_runner: None,
+        // Set per command below: a prompt that arrived from a remote client
+        // has nobody at this terminal to read a view.
+        interactive: true,
     };
 
     // tools is already Arc<Vec<...>> — share it across spawned tasks without copying.
@@ -3302,6 +3308,9 @@ async fn run_interactive(
                             // Always runs — some commands need BOTH (e.g. /clear clears
                             // app state via TUI AND the messages vec via CLI).
                             cmd_ctx.messages = messages.clone();
+                            // Whoever sent this is not at the keyboard, so a
+                            // command that would open a view answers in text.
+                            cmd_ctx.interactive = !from_remote;
                             // The app owns the level; a picker can have moved
                             // it since the last command ran.
                             cmd_ctx.effort_level = app.effort_explicit.then_some(app.effort_level);
@@ -3417,20 +3426,11 @@ async fn run_interactive(
                                     ));
                                     transcript_replaced = true;
                                 }
-                                Some(CommandResult::OpenRewindOverlay) if from_remote => {
-                                    app.status_message = Some(terminal_only_notice(&cmd_name));
-                                }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());
                                     app.open_rewind_flow();
                                     app.status_message =
                                         Some("Select a message to rewind to.".to_string());
-                                }
-                                Some(CommandResult::OpenHooksOverlay)
-                                | Some(CommandResult::OpenImportConfigOverlay)
-                                    if from_remote =>
-                                {
-                                    app.status_message = Some(terminal_only_notice(&cmd_name));
                                 }
                                 Some(CommandResult::ReloadPlugins) => {
                                     let previous = claurst_plugins::global_plugin_registry();

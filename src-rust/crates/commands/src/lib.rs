@@ -5,7 +5,7 @@
 // Each command is a struct implementing the `SlashCommand` trait.
 
 use async_trait::async_trait;
-use claurst_core::config::{Config, Settings, Theme};
+use claurst_core::config::{Config, HookEntry, HookEvent, Settings, Theme};
 use claurst_core::cost::CostTracker;
 use claurst_core::types::{ContentBlock, Message};
 use std::collections::BTreeMap;
@@ -37,6 +37,13 @@ pub struct CommandContext {
     pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
     /// Optional callback for starting an MCP OAuth flow in the background.
     pub mcp_auth_runner: Option<Arc<dyn Fn(claurst_mcp::oauth::McpAuthSession) + Send + Sync>>,
+    /// Whether whoever ran the command can see a view on this terminal.
+    ///
+    /// False for an editor over ACP, a remote client, and the headless path.
+    /// A command that would open a picker answers those callers in text
+    /// instead, because a view they cannot see helps nobody and takes the
+    /// place of the answer they could have read.
+    pub interactive: bool,
 }
 
 /// Result of running a slash command.
@@ -1088,16 +1095,114 @@ impl SlashCommand for ImportConfigCommand {
         "Import CLAUDE.md and settings.json from ~/.claude"
     }
     fn help(&self) -> &str {
-        "Usage: /import-config\n\
+        "Usage: /import-config [apply]\n\
          Import user-level Claude Code configuration from ~/.claude:\n\
            - ~/.claude/CLAUDE.md\n\
            - ~/.claude/settings.json\n\n\
-         This command opens an interactive import dialog with preview and confirmation."
+         On a terminal this opens an import dialog with preview and confirmation.\n\
+         Elsewhere it prints the same preview, and /import-config apply performs it."
     }
 
-    async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        CommandResult::OpenImportConfigOverlay
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
+        use claurst_core::import_config::{build_import_preview, execute_import, ImportSelection};
+
+        let args = args.trim();
+        if args.eq_ignore_ascii_case("apply") {
+            return match execute_import(ImportSelection::Both) {
+                Ok(result) => CommandResult::Message(import_outcome(&result)),
+                Err(e) => CommandResult::Error(format!("Import failed: {e}")),
+            };
+        }
+        if !args.is_empty() {
+            return CommandResult::Error(format!(
+                "/import-config takes no argument, or \"apply\". Got \"{args}\"."
+            ));
+        }
+
+        if ctx.interactive {
+            return CommandResult::OpenImportConfigOverlay;
+        }
+        match build_import_preview(ImportSelection::Both) {
+            Ok(preview) => CommandResult::Message(import_preview_text(&preview)),
+            Err(e) => CommandResult::Error(format!("Could not read the configuration: {e}")),
+        }
     }
+}
+
+/// What an import would do, for a caller with no dialog to confirm it in.
+fn import_preview_text(preview: &claurst_core::import_config::ImportPreview) -> String {
+    let mut out = String::from("Run /import-config apply to carry this out.\n");
+
+    match &preview.claude_md {
+        Some(md) => out.push_str(&format!(
+            "\nCLAUDE.md  {} → {}\n  {} lines, {} characters{}\n",
+            md.plan.source_path.display(),
+            md.plan.target_path.display(),
+            md.line_count,
+            md.char_count,
+            if md.plan.target_exists {
+                " (replaces the file already there)"
+            } else {
+                ""
+            }
+        )),
+        None => out.push_str("\nCLAUDE.md  nothing to import\n"),
+    }
+
+    match &preview.settings {
+        Some(settings) => {
+            out.push_str(&format!(
+                "\nsettings.json  {} → {}\n",
+                settings.plan.source_path.display(),
+                settings.plan.target_path.display()
+            ));
+            for field in &settings.fields {
+                let reason = field
+                    .reason
+                    .as_deref()
+                    .map(|r| format!(" — {r}"))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  {:<8} {}{reason}\n",
+                    field.action.label(),
+                    field.name
+                ));
+            }
+        }
+        None => out.push_str("\nsettings.json  nothing to import\n"),
+    }
+
+    out.trim_end().to_string()
+}
+
+/// What an import did.
+fn import_outcome(result: &claurst_core::import_config::ImportExecutionResult) -> String {
+    let mut out = String::new();
+    if result.wrote_claude_md {
+        out.push_str("Wrote CLAUDE.md.\n");
+    }
+    if result.wrote_settings {
+        out.push_str(&format!(
+            "Wrote settings.json: {} field{} imported.\n",
+            result.imported_fields.len(),
+            if result.imported_fields.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ));
+    }
+    if !result.skipped_fields.is_empty() {
+        out.push_str(&format!(
+            "Left alone: {}.\n",
+            result.skipped_fields.join(", ")
+        ));
+    }
+    if out.is_empty() {
+        // Saying nothing at all would read as success with no explanation.
+        return "Nothing was imported: there was nothing to take.".to_string();
+    }
+    out.trim_end().to_string()
 }
 
 // ---- /hooks --------------------------------------------------------------
@@ -1137,11 +1242,38 @@ impl SlashCommand for HooksCommand {
             );
         }
 
+        if !ctx.interactive {
+            return CommandResult::Message(hooks_listing(&ctx.config.hooks));
+        }
+
         // Return the overlay-open signal; the CLI driver will call
         // app.hooks_config_menu.open() or fall back to text output if running
         // without a TUI.
         CommandResult::OpenHooksOverlay
     }
+}
+
+/// The configured hooks as text, grouped by the event that fires them.
+fn hooks_listing(hooks: &std::collections::HashMap<HookEvent, Vec<HookEntry>>) -> String {
+    let mut events: Vec<(&HookEvent, &Vec<HookEntry>)> = hooks.iter().collect();
+    // A map has no order of its own, and a listing that reshuffles itself
+    // between runs is hard to read.
+    events.sort_by_key(|(event, _)| format!("{event:?}"));
+
+    let mut out = String::new();
+    for (event, entries) in events {
+        out.push_str(&format!("{event:?}\n"));
+        for entry in entries {
+            let filter = entry
+                .tool_filter
+                .as_deref()
+                .map(|f| format!(" [{f}]"))
+                .unwrap_or_default();
+            let blocking = if entry.blocking { " (blocking)" } else { "" };
+            out.push_str(&format!("  {}{filter}{blocking}\n", entry.command));
+        }
+    }
+    out.trim_end().to_string()
 }
 
 // ---- /thinking -----------------------------------------------------------
@@ -1617,7 +1749,146 @@ mod tests {
             remote_session_url: None,
             mcp_manager: None,
             mcp_auth_runner: None,
+            interactive: true,
         }
+    }
+
+    // ---- Commands that would open a view ------------------------------------
+
+    #[tokio::test]
+    async fn rewind_lists_the_messages_for_a_caller_with_no_overlay() {
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+        ctx.messages = vec![
+            Message::user("fix the parser"),
+            Message::assistant("which one"),
+        ];
+
+        let result = crate::session_tools::RewindCommand
+            .execute("", &mut ctx)
+            .await;
+
+        let CommandResult::Message(text) = result else {
+            panic!("expected a listing, got {result:?}");
+        };
+        assert!(text.contains("fix the parser"), "{text}");
+        assert!(text.contains("which one"), "{text}");
+        // The listing has to say how to act on it, or it is a dead end.
+        assert!(text.contains("/rewind <n>"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn rewind_with_a_count_keeps_that_many_messages() {
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+        ctx.messages = vec![
+            Message::user("one"),
+            Message::assistant("two"),
+            Message::user("three"),
+        ];
+
+        let result = crate::session_tools::RewindCommand
+            .execute("2", &mut ctx)
+            .await;
+
+        let CommandResult::SetMessages(kept) = result else {
+            panic!("expected a rewind, got {result:?}");
+        };
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn rewind_past_the_end_is_refused_rather_than_clamped() {
+        // Clamping would answer a request nobody made, and the caller would
+        // never learn the number was wrong.
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+        ctx.messages = vec![Message::user("one")];
+
+        let result = crate::session_tools::RewindCommand
+            .execute("9", &mut ctx)
+            .await;
+
+        assert!(
+            matches!(result, CommandResult::Error(_)),
+            "expected a refusal, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rewind_still_opens_the_overlay_on_a_terminal() {
+        let mut ctx = make_ctx();
+        ctx.messages = vec![Message::user("one")];
+
+        let result = crate::session_tools::RewindCommand
+            .execute("", &mut ctx)
+            .await;
+
+        assert!(matches!(result, CommandResult::OpenRewindOverlay));
+    }
+
+    #[tokio::test]
+    async fn hooks_are_printed_for_a_caller_with_no_overlay() {
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+        ctx.config.hooks.insert(
+            HookEvent::PreToolUse,
+            vec![HookEntry {
+                command: "echo before".to_string(),
+                tool_filter: Some("Bash".to_string()),
+                blocking: true,
+            }],
+        );
+
+        let result = HooksCommand.execute("", &mut ctx).await;
+
+        let CommandResult::Message(text) = result else {
+            panic!("expected a listing, got {result:?}");
+        };
+        assert!(text.contains("PreToolUse"), "{text}");
+        assert!(text.contains("echo before"), "{text}");
+        assert!(text.contains("Bash"), "{text}");
+        assert!(text.contains("blocking"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn hooks_still_opens_the_overlay_on_a_terminal() {
+        let mut ctx = make_ctx();
+        ctx.config.hooks.insert(
+            HookEvent::Stop,
+            vec![HookEntry {
+                command: "echo done".to_string(),
+                ..Default::default()
+            }],
+        );
+
+        let result = HooksCommand.execute("", &mut ctx).await;
+
+        assert!(matches!(result, CommandResult::OpenHooksOverlay));
+    }
+
+    #[tokio::test]
+    async fn import_config_refuses_an_argument_it_does_not_know() {
+        // Anything but "apply" would otherwise be taken as a request to
+        // preview, which is not what was asked.
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+
+        let result = ImportConfigCommand.execute("everything", &mut ctx).await;
+
+        assert!(
+            matches!(result, CommandResult::Error(_)),
+            "expected a refusal, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn import_config_still_opens_the_dialog_on_a_terminal() {
+        let mut ctx = make_ctx();
+
+        let result = ImportConfigCommand.execute("", &mut ctx).await;
+
+        assert!(matches!(result, CommandResult::OpenImportConfigOverlay));
     }
 
     // ---- Command registry tests ---------------------------------------------

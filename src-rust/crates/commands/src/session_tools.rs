@@ -133,19 +133,83 @@ impl SlashCommand for RewindCommand {
         "Interactively select a message to rewind to"
     }
     fn help(&self) -> &str {
-        "Usage: /rewind\n\
-         Opens an interactive overlay to select the message to rewind to.\n\
-         Use ↑↓ to navigate, Enter to select, y/n to confirm."
+        "Usage: /rewind [n]\n\
+         With no argument on a terminal, opens an overlay to select the message\n\
+         to rewind to: ↑↓ to navigate, Enter to select, y/n to confirm.\n\
+         Elsewhere it lists the messages, and /rewind <n> keeps the first n."
     }
 
-    async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         if ctx.messages.is_empty() {
             return CommandResult::Message(
                 "Nothing to rewind — conversation is empty.".to_string(),
             );
         }
-        CommandResult::OpenRewindOverlay
+
+        let args = args.trim();
+        if !args.is_empty() {
+            return match args.parse::<usize>() {
+                Ok(keep) if keep <= ctx.messages.len() => {
+                    CommandResult::SetMessages(ctx.messages[..keep].to_vec())
+                }
+                Ok(keep) => CommandResult::Error(format!(
+                    "The conversation has {} messages, so {keep} cannot be kept.",
+                    ctx.messages.len()
+                )),
+                Err(_) => CommandResult::Error(format!(
+                    "\"{args}\" is not a message count. Run /rewind to see them numbered."
+                )),
+            };
+        }
+
+        if ctx.interactive {
+            return CommandResult::OpenRewindOverlay;
+        }
+        CommandResult::Message(rewind_listing(&ctx.messages))
     }
+}
+
+/// The messages numbered, so a caller with no overlay can name one.
+///
+/// The number is how many messages would be kept, which is what `/rewind <n>`
+/// takes: rewinding to a message means keeping everything before it.
+fn rewind_listing(messages: &[claurst_core::types::Message]) -> String {
+    let mut out = String::from("Run /rewind <n> to keep the first n messages.\n");
+    for (index, message) in messages.iter().enumerate() {
+        let who = match message.role {
+            claurst_core::types::Role::User => "user",
+            claurst_core::types::Role::Assistant => "agent",
+        };
+        out.push_str(&format!(
+            "\n{:>3}  {who:<6} {}",
+            index,
+            message_preview(message)
+        ));
+    }
+    out
+}
+
+/// How long a message preview runs before it is cut short.
+const PREVIEW_CHARS: usize = 70;
+
+/// The first line of a message, short enough to sit in a list.
+fn message_preview(message: &claurst_core::types::Message) -> String {
+    let text = message.get_all_text();
+    let Some(line) = text.lines().find(|l| !l.trim().is_empty()) else {
+        // A turn made only of tool calls has no text to show.
+        let calls = message.get_tool_use_blocks().len();
+        return match calls {
+            0 => "(no text)".to_string(),
+            1 => "(1 tool call)".to_string(),
+            n => format!("({n} tool calls)"),
+        };
+    };
+    let line = line.trim();
+    let mut preview: String = line.chars().take(PREVIEW_CHARS).collect();
+    if line.chars().count() > PREVIEW_CHARS {
+        preview.push('…');
+    }
+    preview
 }
 
 // ---- /stats --------------------------------------------------------------
