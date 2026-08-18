@@ -348,13 +348,55 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    /// Resolve a potentially relative path against the working directory.
-    pub fn resolve_path(&self, path: &str) -> PathBuf {
-        let p = PathBuf::from(path);
-        if p.is_absolute() {
-            p
-        } else {
-            self.working_dir.join(p)
+    /// Every directory this session can reach, by name.
+    ///
+    /// Derived from the working directory and the configured extra directories
+    /// rather than stored, so it cannot drift from either.
+    pub fn workspace_roots(&self) -> std::collections::BTreeMap<String, PathBuf> {
+        claurst_core::workspace::generate_root_names(
+            &self.working_dir,
+            &self.config.additional_dirs,
+            &self.config.workspace_paths,
+        )
+    }
+
+    /// Resolve a tool path argument.
+    ///
+    /// An absolute path is taken as-is, `&name` and `&name/relative` resolve
+    /// against the named workspace root, and anything else resolves against
+    /// the working directory.
+    ///
+    /// # Errors
+    /// Returns a message naming the known roots when the path asks for a root
+    /// that does not exist, so a mistyped root does not silently turn into a
+    /// file the session was never pointed at.
+    pub fn resolve_path(&self, path: &str) -> Result<PathBuf, String> {
+        use claurst_core::workspace::RootRef;
+
+        if PathBuf::from(path).is_absolute() {
+            return Ok(PathBuf::from(path));
+        }
+
+        let roots = self.workspace_roots();
+        let unknown = |name: &str| {
+            format!(
+                "unknown workspace root \"&{name}\"; known roots: {}",
+                roots
+                    .keys()
+                    .map(|known| format!("&{known}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+
+        match claurst_core::workspace::parse_root_ref(path, &roots) {
+            RootRef::Root { name, relative } => match roots.get(name) {
+                Some(root) if relative.is_empty() => Ok(root.clone()),
+                Some(root) => Ok(root.join(relative)),
+                None => Err(unknown(name)),
+            },
+            RootRef::Unknown(name) => Err(unknown(name)),
+            RootRef::Plain => Ok(self.working_dir.join(path)),
         }
     }
 
@@ -845,7 +887,7 @@ mod tests {
 
         // Absolute paths pass through unchanged
         let resolved = ctx.resolve_path("/absolute/path/file.rs");
-        assert_eq!(resolved, PathBuf::from("/absolute/path/file.rs"));
+        assert_eq!(resolved, Ok(PathBuf::from("/absolute/path/file.rs")));
     }
 
     #[test]
@@ -859,7 +901,73 @@ mod tests {
 
         // Relative paths get joined with working_dir
         let resolved = ctx.resolve_path("src/main.rs");
-        assert_eq!(resolved, PathBuf::from("/workspace/src/main.rs"));
+        assert_eq!(resolved, Ok(PathBuf::from("/workspace/src/main.rs")));
+    }
+
+    fn context_with_extra_dir() -> ToolContext {
+        use claurst_core::permissions::AutoPermissionHandler;
+
+        let handler = Arc::new(AutoPermissionHandler {
+            mode: claurst_core::config::PermissionMode::Default,
+        });
+        let mut ctx = test_tool_context(handler);
+        ctx.config.additional_dirs = vec![PathBuf::from("/elsewhere/docs")];
+        ctx
+    }
+
+    #[test]
+    fn an_extra_directory_becomes_a_named_root() {
+        let ctx = context_with_extra_dir();
+        let roots = ctx.workspace_roots();
+
+        assert_eq!(roots.get("main"), Some(&PathBuf::from("/workspace")));
+        assert_eq!(roots.get("docs"), Some(&PathBuf::from("/elsewhere/docs")));
+    }
+
+    #[test]
+    fn a_root_path_resolves_against_its_root() {
+        let ctx = context_with_extra_dir();
+
+        assert_eq!(
+            ctx.resolve_path("&docs/spec.md"),
+            Ok(PathBuf::from("/elsewhere/docs/spec.md"))
+        );
+        assert_eq!(
+            ctx.resolve_path("&docs"),
+            Ok(PathBuf::from("/elsewhere/docs"))
+        );
+        assert_eq!(
+            ctx.resolve_path("&main/src/main.rs"),
+            Ok(PathBuf::from("/workspace/src/main.rs"))
+        );
+    }
+
+    #[test]
+    fn a_mistyped_root_is_rejected_rather_than_joined() {
+        let ctx = context_with_extra_dir();
+
+        let error = ctx
+            .resolve_path("&doc/spec.md")
+            .expect_err("an unknown root must not resolve");
+        assert!(error.contains("&doc"), "{error}");
+        assert!(error.contains("&main"), "{error}");
+        assert!(error.contains("&docs"), "{error}");
+    }
+
+    #[test]
+    fn without_extra_directories_only_main_exists() {
+        use claurst_core::permissions::AutoPermissionHandler;
+
+        let handler = Arc::new(AutoPermissionHandler {
+            mode: claurst_core::config::PermissionMode::Default,
+        });
+        let ctx = test_tool_context(handler);
+
+        assert_eq!(ctx.workspace_roots().len(), 1);
+        assert_eq!(
+            ctx.resolve_path("src/main.rs"),
+            Ok(PathBuf::from("/workspace/src/main.rs"))
+        );
     }
 
     #[test]

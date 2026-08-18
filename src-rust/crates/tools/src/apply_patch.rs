@@ -320,7 +320,10 @@ impl Tool for ApplyPatchTool {
         let mut to_write: Vec<(std::path::PathBuf, Vec<u8>, String)> = Vec::new();
 
         for fp in &file_patches {
-            let path = ctx.resolve_path(&fp.path);
+            let path = match ctx.resolve_path(&fp.path) {
+                Ok(path) => path,
+                Err(message) => return ToolResult::error(message),
+            };
             debug!(path = %path.display(), "ApplyPatch processing file");
 
             // Read current content (or empty string for new files).

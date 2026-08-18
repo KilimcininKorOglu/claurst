@@ -92,7 +92,13 @@ impl Tool for BriefTool {
         let mut errors: Vec<String> = Vec::new();
 
         for raw_path in &params.attachments {
-            let path = ctx.resolve_path(raw_path);
+            let path = match ctx.resolve_path(raw_path) {
+                Ok(path) => path,
+                Err(message) => {
+                    errors.push(format!("{}: {}", raw_path, message));
+                    continue;
+                }
+            };
             match resolve_attachment(&path).await {
                 Ok(meta) => resolved.push(meta),
                 Err(e) => errors.push(format!("{}: {}", raw_path, e)),

@@ -65,7 +65,7 @@ impl Tool for NotebookEditTool {
             "properties": {
                 "notebook_path": {
                     "type": "string",
-                    "description": "Absolute path to the .ipynb notebook file"
+                    "description": "Path to the .ipynb notebook: absolute, relative to the working directory, or &<root-name>/<relative-path> for another workspace root"
                 },
                 "cell_id": {
                     "type": "string",
@@ -96,7 +96,10 @@ impl Tool for NotebookEditTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        let path = ctx.resolve_path(&params.notebook_path);
+        let path = match ctx.resolve_path(&params.notebook_path) {
+            Ok(path) => path,
+            Err(message) => return ToolResult::error(message),
+        };
 
         // Validate extension
         if path.extension().and_then(|e| e.to_str()) != Some("ipynb") {

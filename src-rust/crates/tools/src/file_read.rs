@@ -45,7 +45,7 @@ impl Tool for FileReadTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "The absolute path to the file to read"
+                    "description": "Path to the file to read: absolute, relative to the working directory, or &<root-name>/<relative-path> for another workspace root"
                 },
                 "offset": {
                     "type": "number",
@@ -66,7 +66,10 @@ impl Tool for FileReadTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        let path = ctx.resolve_path(&params.file_path);
+        let path = match ctx.resolve_path(&params.file_path) {
+            Ok(path) => path,
+            Err(message) => return ToolResult::error(message),
+        };
         debug!(path = %path.display(), "Reading file");
 
         // Permission check
@@ -169,5 +172,76 @@ impl Tool for FileReadTool {
         }
 
         ToolResult::success(output)
+    }
+}
+
+#[cfg(test)]
+mod workspace_root_tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    /// A session rooted at one temp directory with a second one added.
+    fn two_directory_context() -> (tempfile::TempDir, tempfile::TempDir, ToolContext) {
+        let main = tempfile::tempdir().expect("main dir");
+        let docs = tempfile::tempdir().expect("docs dir");
+        std::fs::write(docs.path().join("spec.md"), "spec content").expect("write spec");
+
+        let mut ctx = allow_all_context(main.path().to_path_buf());
+        ctx.config.additional_dirs = vec![docs.path().to_path_buf()];
+        (main, docs, ctx)
+    }
+
+    #[tokio::test]
+    async fn a_file_in_another_root_is_read_by_root_name() {
+        let (_main, docs, ctx) = two_directory_context();
+        let root_name = docs
+            .path()
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .expect("root name");
+
+        let result = FileReadTool
+            .execute(
+                serde_json::json!({ "file_path": format!("&{root_name}/spec.md") }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!result.is_error, "{}", result.content);
+        assert!(
+            result.content.contains("spec content"),
+            "{}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mistyped_root_name_is_reported_to_the_caller() {
+        let (_main, _docs, ctx) = two_directory_context();
+
+        let result = FileReadTool
+            .execute(serde_json::json!({ "file_path": "&nope/spec.md" }), &ctx)
+            .await;
+
+        assert!(result.is_error, "{}", result.content);
+        assert!(result.content.contains("&nope"), "{}", result.content);
+        assert!(result.content.contains("&main"), "{}", result.content);
+    }
+
+    #[tokio::test]
+    async fn a_plain_relative_path_still_resolves_against_the_working_directory() {
+        let (main, _docs, ctx) = two_directory_context();
+        std::fs::write(main.path().join("here.txt"), "local content").expect("write local");
+
+        let result = FileReadTool
+            .execute(serde_json::json!({ "file_path": "here.txt" }), &ctx)
+            .await;
+
+        assert!(!result.is_error, "{}", result.content);
+        assert!(
+            result.content.contains("local content"),
+            "{}",
+            result.content
+        );
     }
 }

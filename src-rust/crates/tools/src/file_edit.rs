@@ -46,7 +46,7 @@ impl Tool for FileEditTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "The absolute path to the file to modify"
+                    "description": "Path to the file to modify: absolute, relative to the working directory, or &<root-name>/<relative-path> for another workspace root"
                 },
                 "old_string": {
                     "type": "string",
@@ -80,7 +80,10 @@ impl Tool for FileEditTool {
             return ToolResult::error("old_string must not be empty".to_string());
         }
 
-        let path = ctx.resolve_path(&params.file_path);
+        let path = match ctx.resolve_path(&params.file_path) {
+            Ok(path) => path,
+            Err(message) => return ToolResult::error(message),
+        };
         debug!(path = %path.display(), "Editing file");
 
         // Permission check

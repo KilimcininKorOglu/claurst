@@ -62,7 +62,7 @@ impl Tool for BatchEditTool {
                         "properties": {
                             "file_path": {
                                 "type": "string",
-                                "description": "Absolute path to the file to modify"
+                                "description": "Path to the file to modify: absolute, relative to the working directory, or &<root-name>/<relative-path> for another workspace root"
                             },
                             "old_string": {
                                 "type": "string",
@@ -113,7 +113,10 @@ impl Tool for BatchEditTool {
         let mut path_content: HashMap<String, String> = HashMap::new();
 
         for (i, edit) in params.edits.iter().enumerate() {
-            let path = ctx.resolve_path(&edit.file_path);
+            let path = match ctx.resolve_path(&edit.file_path) {
+                Ok(path) => path,
+                Err(message) => return ToolResult::error(message),
+            };
             debug!(path = %path.display(), index = i, "BatchEdit pre-check");
 
             if edit.old_string.is_empty() {

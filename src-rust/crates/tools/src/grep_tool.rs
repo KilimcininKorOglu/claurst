@@ -98,7 +98,7 @@ impl Tool for GrepTool {
                 },
                 "path": {
                     "type": "string",
-                    "description": "File or directory to search in. Defaults to working directory."
+                    "description": "File or directory to search in. Accepts &<root-name> to search another workspace root. Defaults to the working directory."
                 },
                 "type": {
                     "type": "string",
@@ -144,11 +144,13 @@ impl Tool for GrepTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        let search_path = params
-            .path
-            .as_ref()
-            .map(|p| ctx.resolve_path(p))
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let search_path = match params.path.as_deref() {
+            Some(path) => match ctx.resolve_path(path) {
+                Ok(path) => path,
+                Err(message) => return ToolResult::error(message),
+            },
+            None => ctx.working_dir.clone(),
+        };
 
         if let Err(e) = ctx.check_permission_for_path(
             self.name(),

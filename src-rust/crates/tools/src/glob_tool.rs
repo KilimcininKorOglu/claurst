@@ -49,7 +49,7 @@ impl Tool for GlobTool {
                 },
                 "path": {
                     "type": "string",
-                    "description": "The directory to search in. Defaults to working directory."
+                    "description": "The directory to search in. Accepts &<root-name> to search another workspace root. Defaults to the working directory."
                 }
             },
             "required": ["pattern"]
@@ -62,11 +62,13 @@ impl Tool for GlobTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        let base_dir = params
-            .path
-            .as_ref()
-            .map(|p| ctx.resolve_path(p))
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let base_dir = match params.path.as_deref() {
+            Some(path) => match ctx.resolve_path(path) {
+                Ok(path) => path,
+                Err(message) => return ToolResult::error(message),
+            },
+            None => ctx.working_dir.clone(),
+        };
 
         if let Err(e) = ctx.check_permission_for_path(
             self.name(),

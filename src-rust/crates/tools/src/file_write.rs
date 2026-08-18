@@ -41,7 +41,7 @@ impl Tool for FileWriteTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "The absolute path to the file to write"
+                    "description": "Path to the file to write: absolute, relative to the working directory, or &<root-name>/<relative-path> for another workspace root"
                 },
                 "content": {
                     "type": "string",
@@ -58,7 +58,10 @@ impl Tool for FileWriteTool {
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
 
-        let path = ctx.resolve_path(&params.file_path);
+        let path = match ctx.resolve_path(&params.file_path) {
+            Ok(path) => path,
+            Err(message) => return ToolResult::error(message),
+        };
         debug!(path = %path.display(), "Writing file");
 
         // Permission check
