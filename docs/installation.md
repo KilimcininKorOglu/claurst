@@ -2,8 +2,9 @@
 
 Claurst is a Rust reimplementation of the Claude Code CLI. The fastest way
 to install it is via the one-liner installers below. They drop the binary
-into `~/.claurst/bin` (or `%USERPROFILE%\.claurst\bin` on Windows) and add
-that directory to your `PATH` automatically.
+into `~/.local/bin` (or `%LOCALAPPDATA%\Programs\claurst` on Windows; Git Bash
+uses that same Windows location) and add that directory to your `PATH`
+automatically.
 
 ---
 
@@ -40,13 +41,30 @@ curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download
 irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
 ```
 
+### Windows (Git Bash / MSYS / Cygwin)
+
+`install.sh` also runs under Git Bash. It downloads the Windows archive
+(`claurst-windows-x86_64.zip`), installs `claurst.exe` into the **same**
+directory `install.ps1` uses (`%LOCALAPPDATA%\Programs\claurst`), and updates
+the Windows user `PATH` rather than a shell config file, so the binary is on
+`PATH` in PowerShell and cmd too:
+
+```bash
+curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+```
+
+Extraction uses `unzip` when it is installed and falls back to `tar`, which
+Git for Windows ships and which reads a zip.
+
 Both installers:
 
 1. Detect your platform and architecture.
 2. Download the matching archive from the latest GitHub release.
-3. Extract `claurst` into `~/.claurst/bin/` (Windows: `%USERPROFILE%\.claurst\bin\`).
+3. Extract `claurst` into `~/.local/bin/` on Linux and macOS, or
+   `%LOCALAPPDATA%\Programs\claurst` on Windows (`install.sh` under Git Bash
+   uses that same Windows location).
 4. Append that directory to your shell config (`.bashrc`, `.zshrc`,
-   `.config/fish/config.fish`) or to your Windows user `PATH`.
+   `.config/fish/config.fish`) on Unix, or to your Windows user `PATH`.
 5. On macOS, strip the quarantine attribute so Gatekeeper does not block the
    unsigned binary.
 
@@ -62,10 +80,48 @@ Both scripts accept the same flags:
 | `--version 0.1.0`      | `-Version 0.1.0`     | Install a specific version                |
 | `--binary <path>`      | `-Binary <path>`     | Install from a local file (skip download) |
 | `--install-dir <path>` | `-InstallDir <path>` | Override the install directory            |
+| `--token <token>`      | `-Token <token>`     | GitHub token for the API and downloads    |
 | `--no-modify-path`     | `-NoModifyPath`      | Don't touch shell config / user PATH      |
 | `--help`               | `-Help`              | Show usage                                |
 
 Example: `curl -fsSL https://.../install.sh | bash -s -- --version 0.1.0`
+
+### GitHub authentication
+
+GitHub rate-limits unauthenticated API requests per IP address, which is easy
+to hit behind a shared network or in CI. Pass a token to lift the limit, and to
+install from a private fork. Both installers also read `GITHUB_TOKEN` and
+`GH_TOKEN` (the GitHub CLI's variable):
+
+```bash
+# Linux / macOS / Git Bash
+export GITHUB_TOKEN=ghp_...
+curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+
+# Or, running the script locally:
+./install.sh --token ghp_...
+```
+
+```powershell
+# Windows
+$env:GITHUB_TOKEN = 'ghp_...'
+irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
+
+# Or:
+.\install.ps1 -Token ghp_...
+```
+
+A classic or fine-grained token with `contents: read` is enough; for a public
+repository no scope at all is needed, since the token only lifts the rate
+limit.
+
+The token is sent as `Authorization: Bearer …` to `github.com` and
+`api.github.com` only. A release download redirects to a separate storage host,
+and neither installer sends the token there: `install.sh` relies on curl, which
+drops the header across hosts, and `install.ps1` follows the redirect itself
+and rebuilds the headers per hop. `install.sh` also hands the header to curl on
+stdin rather than as an argument, so the token does not appear in the process
+list.
 
 ---
 
@@ -333,12 +389,14 @@ the [Upgrading](#upgrading) section above.
 
 ## Uninstalling
 
-If you used the install script, remove the install directory:
+If you used the install script, remove the binary it installed:
 
 ```bash
-rm -rf ~/.claurst/bin                    # Linux / macOS
+rm -f ~/.local/bin/claurst               # Linux / macOS
 # Windows (PowerShell):
-Remove-Item -Recurse -Force "$env:USERPROFILE\.claurst\bin"
+Remove-Item -Force "$env:LOCALAPPDATA\Programs\claurst\claurst.exe"
+# and the directory, once it is empty:
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\claurst" -ErrorAction SilentlyContinue
 ```
 
 For manual installs:
@@ -355,4 +413,5 @@ rm -rf ~/.claurst
 ```
 
 You may also want to remove the `# claurst` PATH line that the installer
-appended to your shell config (`.bashrc`, `.zshrc`, etc.).
+appended to your shell config (`.bashrc`, `.zshrc`, etc.), or the Windows user
+`PATH` entry for `%LOCALAPPDATA%\Programs\claurst`.

@@ -57,7 +57,7 @@ curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download
 irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
 ```
 
-This drops `claurst` into `~/.claurst/bin` (or `%USERPROFILE%\.claurst\bin` on Windows) and adds it to your `PATH` automatically. Open a new terminal and run `claurst`.
+This drops `claurst` into `~/.local/bin` (or `%LOCALAPPDATA%\Programs\claurst` on Windows; Git Bash uses that same Windows location) and adds it to your `PATH` automatically. Open a new terminal and run `claurst`.
 
 ## Via npm / bun
 

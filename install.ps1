@@ -12,6 +12,7 @@ param(
     [string]$Version = "",
     [string]$Binary = "",
     [string]$InstallDir = "",
+    [string]$Token = "",
     [switch]$NoModifyPath,
     [switch]$Help
 )
@@ -38,16 +39,103 @@ Options:
     -Version <version>      Install a specific version (e.g., 0.1.0)
     -Binary <path>          Install from a local binary instead of downloading
     -InstallDir <path>      Override install location (default: %LOCALAPPDATA%\Programs\claurst)
+    -Token <token>          GitHub token for API and downloads
+                            (or set GITHUB_TOKEN / GH_TOKEN)
     -NoModifyPath           Don't add the install dir to user PATH
 
 Examples:
     irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
     .\install.ps1 -Version 0.1.0
     .\install.ps1 -Binary C:\path\to\claurst.exe
+    `$env:GITHUB_TOKEN = 'ghp_...'; .\install.ps1
 "@
 }
 
 if ($Help) { Show-Usage; exit 0 }
+
+# ----- GitHub requests -----
+# -Token wins; otherwise GITHUB_TOKEN, then GH_TOKEN (the gh CLI's variable).
+if ([string]::IsNullOrEmpty($Token)) {
+    if (-not [string]::IsNullOrEmpty($env:GITHUB_TOKEN)) {
+        $Token = $env:GITHUB_TOKEN
+    } elseif (-not [string]::IsNullOrEmpty($env:GH_TOKEN)) {
+        $Token = $env:GH_TOKEN
+    }
+}
+
+# Hosts the token may be sent to. A release download redirects to a storage
+# host, and Windows PowerShell carries custom headers across a redirect, so the
+# token would land somewhere it does not belong unless the header is decided
+# per hop.
+$script:GitHubHosts = @('github.com', 'api.github.com', 'www.github.com')
+
+function Get-GitHubHeaders($uri) {
+    $headers = @{
+        'User-Agent' = 'claurst-installer'
+        'Accept'     = 'application/vnd.github+json'
+    }
+    if ([string]::IsNullOrEmpty($script:Token)) { return $headers }
+    try {
+        $host_name = ([Uri]$uri).Host
+    } catch {
+        return $headers
+    }
+    if ($script:GitHubHosts -contains $host_name.ToLower()) {
+        $headers['Authorization'] = "Bearer $($script:Token)"
+    }
+    return $headers
+}
+
+# Download $Uri to $OutFile, following redirects by hand so each hop gets the
+# headers its own host is allowed to see.
+function Invoke-GitHubDownload($Uri, $OutFile) {
+    $target = $Uri
+    for ($hop = 0; $hop -lt 5; $hop++) {
+        $headers = Get-GitHubHeaders $target
+        $redirect = $null
+        try {
+            $oldPref = $ProgressPreference
+            $ProgressPreference = 'SilentlyContinue'
+            try {
+                $resp = Invoke-WebRequest -UseBasicParsing -Uri $target -Headers $headers `
+                    -MaximumRedirection 0 -OutFile $OutFile -ErrorAction Stop
+            } finally {
+                $ProgressPreference = $oldPref
+            }
+            # PowerShell 7 hands back a 3xx here instead of throwing.
+            if ($null -ne $resp -and [int]$resp.StatusCode -ge 300 -and [int]$resp.StatusCode -lt 400) {
+                $redirect = Get-RedirectLocation $resp
+            } else {
+                return
+            }
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response) { throw }
+            $status = [int]$response.StatusCode
+            if ($status -lt 300 -or $status -ge 400) { throw }
+            $redirect = Get-RedirectLocation $response
+            if ([string]::IsNullOrEmpty($redirect)) { throw }
+        }
+
+        if ([string]::IsNullOrEmpty($redirect)) { return }
+        $target = $redirect
+    }
+    throw "Too many redirects while downloading $Uri"
+}
+
+# The Location header is a string on Windows PowerShell and a Uri collection on
+# PowerShell 7, so both shapes are read.
+function Get-RedirectLocation($response) {
+    try {
+        $value = $response.Headers.Location
+        if ($value) { return [string]$value }
+    } catch { }
+    try {
+        $value = $response.Headers['Location']
+        if ($value) { return [string]$value }
+    } catch { }
+    return $null
+}
 
 # ----- Detect architecture -----
 function Get-Arch {
@@ -87,13 +175,22 @@ function Resolve-Version {
     if (-not [string]::IsNullOrEmpty($script:Version)) {
         return ($script:Version -replace '^v', '')
     }
+    $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
     try {
-        $resp = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ 'User-Agent' = 'claurst-installer' }
+        $resp = Invoke-RestMethod -UseBasicParsing -Uri $apiUrl -Headers (Get-GitHubHeaders $apiUrl)
         $tag = $resp.tag_name
         if ([string]::IsNullOrEmpty($tag)) { throw "no tag_name in response" }
         return ($tag -replace '^v', '')
     } catch {
-        Write-Err "Failed to fetch latest version from GitHub API: $_"
+        Write-Err "Failed to fetch the latest version from the GitHub API: $_"
+        Write-Info "Check that $Repo has a published release:"
+        Write-Info "  https://github.com/$Repo/releases"
+        if ([string]::IsNullOrEmpty($script:Token)) {
+            Write-Info "Unauthenticated requests are rate limited. Set GITHUB_TOKEN, GH_TOKEN, or pass -Token."
+        } else {
+            Write-Info "If the token was refused, check that it is valid and can read this repository."
+        }
+        Write-Info "You can also install a known version directly: -Version 0.1.0"
         exit 1
     }
 }
@@ -129,16 +226,18 @@ function Download-And-Install($desiredVersion, $arch) {
 
     Write-Info "Installing claurst v$desiredVersion (windows-$arch)"
     Write-Muted "Downloading $url"
+    if (-not [string]::IsNullOrEmpty($script:Token)) {
+        Write-Muted "Using GitHub authentication."
+    }
     try {
-        # Disable progress UI for a faster, less noisy download.
-        $oldPref = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zipPath
-        $ProgressPreference = $oldPref
+        Invoke-GitHubDownload $url $zipPath
     } catch {
         Write-Err "Download failed: $_"
         Write-Info ("Check that release v$desiredVersion exists for windows-" + $arch + ":")
         Write-Info "  https://github.com/$Repo/releases/tag/v$desiredVersion"
+        if ([string]::IsNullOrEmpty($script:Token)) {
+            Write-Info "A private release needs GITHUB_TOKEN, GH_TOKEN, or -Token."
+        }
         Remove-Item -Recurse -Force $tmpRoot -ErrorAction SilentlyContinue
         exit 1
     }
@@ -152,10 +251,7 @@ function Download-And-Install($desiredVersion, $arch) {
     $sumsPath = Join-Path $tmpRoot 'SHA256SUMS'
     $haveSums = $false
     try {
-        $oldPref2 = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -UseBasicParsing -Uri $sumsUrl -OutFile $sumsPath
-        $ProgressPreference = $oldPref2
+        Invoke-GitHubDownload $sumsUrl $sumsPath
         $haveSums = $true
     } catch {
         Write-Warn "Could not fetch SHA256SUMS for v$desiredVersion - skipping checksum verification."
