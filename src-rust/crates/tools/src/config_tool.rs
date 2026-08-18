@@ -1,7 +1,8 @@
 // ConfigTool: get or set Claurst configuration settings at runtime.
 //
-// Reads from and persists to ~/.claurst/settings.json.
-// Supported settings: model, max_tokens, verbose, permission_mode.
+// Reads from and persists to `settings.json` under the resolved config root.
+// Supported settings: model, provider, effort, max_tokens, verbose,
+// permission_mode, auto_compact.
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
@@ -18,6 +19,14 @@ struct ConfigInput {
 
 static SUPPORTED_SETTINGS: &[(&str, &str)] = &[
     ("model", "LLM model to use (e.g. 'claude-opus-4-6')"),
+    (
+        "provider",
+        "Account the turn is routed to (e.g. 'anthropic', 'openai')",
+    ),
+    (
+        "effort",
+        "Reasoning effort: none | minimal | low | medium | high | xhigh | max | ultracode",
+    ),
     ("max_tokens", "Maximum output tokens per response"),
     ("verbose", "Enable verbose logging (true/false)"),
     (
@@ -38,8 +47,8 @@ impl Tool for ConfigTool {
 
     fn description(&self) -> &str {
         "Get or set Claurst configuration settings. Omit 'value' to read the current value. \
-         Supported settings: model, max_tokens, verbose, permission_mode, auto_compact. \
-         Changes persist to ~/.claurst/settings.json."
+         Supported settings: model, provider, effort, max_tokens, verbose, permission_mode, \
+         auto_compact. Changes persist to settings.json and apply to the next session."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -52,7 +61,7 @@ impl Tool for ConfigTool {
             "properties": {
                 "setting": {
                     "type": "string",
-                    "description": "Setting key (e.g. 'model', 'verbose', 'max_tokens', 'permission_mode')"
+                    "description": "Setting key (e.g. 'model', 'provider', 'effort', 'verbose', 'max_tokens', 'permission_mode')"
                 },
                 "value": {
                     "description": "New value to set. Omit to read the current value."
@@ -98,6 +107,42 @@ impl Tool for ConfigTool {
                         return ToolResult::error(format!("Failed to save settings: {}", e));
                     }
                     ToolResult::success(format!("model = \"{}\"", s))
+                }
+                "provider" => {
+                    let s = match new_value.as_str() {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return ToolResult::error("'provider' must be a string".to_string())
+                        }
+                    };
+                    settings.config.provider = Some(s.clone());
+                    if let Err(e) = settings.save().await {
+                        return ToolResult::error(format!("Failed to save settings: {}", e));
+                    }
+                    ToolResult::success(format!("provider = \"{}\"", s))
+                }
+                "effort" => {
+                    use claurst_core::effort::EffortLevel;
+                    let s = match new_value.as_str() {
+                        Some(s) => s,
+                        None => return ToolResult::error("'effort' must be a string".to_string()),
+                    };
+                    // Reject rather than store: an unparseable name would be
+                    // written to disk and then silently ignored on every turn.
+                    let Some(level) = EffortLevel::from_str(s) else {
+                        let valid: Vec<&str> =
+                            EffortLevel::ALL.iter().map(EffortLevel::as_str).collect();
+                        return ToolResult::error(format!(
+                            "Unknown effort '{}'. Use: {}",
+                            s,
+                            valid.join(" | ")
+                        ));
+                    };
+                    settings.config.effort = Some(level.as_str().to_string());
+                    if let Err(e) = settings.save().await {
+                        return ToolResult::error(format!("Failed to save settings: {}", e));
+                    }
+                    ToolResult::success(format!("effort = \"{}\"", level.as_str()))
                 }
                 "max_tokens" => {
                     let n = match new_value.as_u64() {
@@ -184,6 +229,16 @@ impl Tool for ConfigTool {
                     "model = \"{}\"",
                     settings.config.effective_model()
                 )),
+                "provider" => ToolResult::success(format!(
+                    "provider = \"{}\"",
+                    settings.config.selected_provider_id()
+                )),
+                "effort" => match settings.config.effective_effort_level() {
+                    Some(level) => ToolResult::success(format!("effort = \"{}\"", level.as_str())),
+                    // Not the same as a level named "none": nothing is set, so
+                    // the query loop decides.
+                    None => ToolResult::success("effort = unset".to_string()),
+                },
                 "max_tokens" => ToolResult::success(format!(
                     "max_tokens = {}",
                     settings.config.effective_max_tokens()
@@ -212,5 +267,107 @@ fn permission_mode_str(mode: &claurst_core::config::PermissionMode) -> &'static 
         PermissionMode::AcceptEdits => "accept_edits",
         PermissionMode::BypassPermissions => "bypass_permissions",
         PermissionMode::Plan => "plan",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// at a time and put it back afterwards.
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn pointing_at(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    async fn run(setting: &str, value: Option<Value>) -> ToolResult {
+        let input = match value {
+            Some(v) => json!({ "setting": setting, "value": v }),
+            None => json!({ "setting": setting }),
+        };
+        let ctx = allow_all_context(std::env::temp_dir());
+        ConfigTool.execute(input, &ctx).await
+    }
+
+    #[tokio::test]
+    async fn an_effort_survives_the_round_trip_to_disk() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let set = run("effort", Some(json!("high"))).await;
+        assert!(!set.is_error, "{}", set.content);
+        assert!(set.content.contains("high"), "{}", set.content);
+
+        let read = run("effort", None).await;
+        assert!(read.content.contains("high"), "{}", read.content);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_effort_is_refused_and_names_the_valid_ones() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        // Storing it would write a name to disk that every turn then ignores.
+        let result = run("effort", Some(json!("very high"))).await;
+        assert!(result.is_error, "{}", result.content);
+        assert!(result.content.contains("ultracode"), "{}", result.content);
+
+        let read = run("effort", None).await;
+        assert!(read.content.contains("unset"), "{}", read.content);
+    }
+
+    #[tokio::test]
+    async fn a_provider_survives_the_round_trip_to_disk() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let set = run("provider", Some(json!("openai"))).await;
+        assert!(!set.is_error, "{}", set.content);
+
+        let read = run("provider", None).await;
+        assert!(read.content.contains("openai"), "{}", read.content);
+    }
+
+    #[tokio::test]
+    async fn an_unset_provider_reads_as_the_default_account() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let read = run("provider", None).await;
+        assert!(read.content.contains("anthropic"), "{}", read.content);
+    }
+
+    #[tokio::test]
+    async fn the_listing_names_the_settings_the_tool_accepts() {
+        // A setting missing from the list is unreachable: the model reads this
+        // to learn what it may write.
+        let listed = run("list", None).await;
+        for (key, _) in SUPPORTED_SETTINGS {
+            assert!(listed.content.contains(key), "{key} missing from the list");
+        }
     }
 }

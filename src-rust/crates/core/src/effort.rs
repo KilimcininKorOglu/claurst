@@ -63,6 +63,19 @@ pub enum EffortLevel {
 }
 
 impl EffortLevel {
+    /// Every level in canonical ascending order — the one list to iterate when
+    /// something has to name them all, so a new rung reaches every surface.
+    pub const ALL: [EffortLevel; 8] = [
+        EffortLevel::None,
+        EffortLevel::Minimal,
+        EffortLevel::Low,
+        EffortLevel::Medium,
+        EffortLevel::High,
+        EffortLevel::XHigh,
+        EffortLevel::Max,
+        EffortLevel::Ultracode,
+    ];
+
     /// Parse an effort level from its string representation (case-insensitive).
     ///
     /// Accepts: `"none"`, `"minimal"`, `"low"`, `"medium"` (or `"normal"`),
@@ -420,18 +433,7 @@ pub fn ultracode_system_prompt_addendum() -> String {
 mod tests {
     use super::*;
 
-    /// Every effort level in canonical ascending order — the single list the
-    /// tests iterate so a new rung is covered everywhere at once.
-    const ALL_LEVELS: [EffortLevel; 8] = [
-        EffortLevel::None,
-        EffortLevel::Minimal,
-        EffortLevel::Low,
-        EffortLevel::Medium,
-        EffortLevel::High,
-        EffortLevel::XHigh,
-        EffortLevel::Max,
-        EffortLevel::Ultracode,
-    ];
+    const ALL_LEVELS: [EffortLevel; 8] = EffortLevel::ALL;
 
     #[test]
     fn from_str_roundtrips() {
