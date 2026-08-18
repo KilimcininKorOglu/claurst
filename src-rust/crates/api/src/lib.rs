@@ -49,6 +49,9 @@ pub mod providers;
 // Model Registry (Phase 3).
 pub mod model_registry;
 
+// On-disk models catalog cache, shared by every surface that lists models.
+pub mod model_cache;
+
 // Model-adaptive effort ladders (#267).
 pub mod effort_support;
 

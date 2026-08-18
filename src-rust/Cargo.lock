@@ -727,7 +727,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -768,6 +767,7 @@ dependencies = [
  "bytes",
  "chrono",
  "claurst-core",
+ "dirs",
  "futures",
  "hex",
  "hmac",
@@ -788,6 +788,7 @@ dependencies = [
  "uuid",
  "wreq",
  "wreq-util",
+ "xxhash-rust",
 ]
 
 [[package]]

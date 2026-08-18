@@ -39,6 +39,9 @@ pub const ISSUES_EXPLAINER: &str = env!("ISSUES_EXPLAINER");
 use anyhow::Context;
 use async_trait::async_trait;
 use clap::{ArgAction, Parser, ValueEnum};
+use claurst_api::model_cache::{
+    load_cached_model_registry, models_cache_path, models_dev_cache_path, models_source_url,
+};
 use claurst_core::types::ToolDefinition;
 use claurst_core::{
     config::{Config, PermissionMode, Settings},
@@ -1291,40 +1294,6 @@ fn build_tools_with_mcp(
     Arc::new(v)
 }
 
-fn model_cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("claurst")
-}
-
-/// Resolve the models.dev source URL, honoring env-var overrides.
-fn models_source_url() -> String {
-    std::env::var("CLAURST_MODELS_URL")
-        .or_else(|_| std::env::var("MODELS_DEV_URL"))
-        .unwrap_or_else(|_| "https://models.dev/api.json".to_string())
-}
-
-/// Default cache filename — derived from the source URL so a custom
-/// `CLAURST_MODELS_URL` doesn't stomp the canonical models.dev cache.
-fn models_cache_path() -> PathBuf {
-    let url = models_source_url();
-    let filename = if url == "https://models.dev/api.json" {
-        "models.json".to_string()
-    } else {
-        // Hash the source URL into the filename so two different mirrors
-        // each get their own cache file.
-        let h = xxhash_rust::xxh64::xxh64(url.as_bytes(), 0);
-        format!("models-{:016x}.json", h)
-    };
-    model_cache_dir().join(filename)
-}
-
-/// Legacy cache file location — kept so old installs don't lose their
-/// previously-fetched data on first run with the new layout.
-fn models_dev_cache_path() -> PathBuf {
-    model_cache_dir().join("models_dev.json")
-}
-
 /// Implementation of the `claurst models` subcommand.
 ///
 /// Flags:
@@ -1517,26 +1486,6 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn load_cached_model_registry(config: &Config) -> Arc<claurst_api::ModelRegistry> {
-    let mut reg = claurst_api::ModelRegistry::new();
-    // CLAURST_MODELS_PATH wins outright — useful for offline dev where you
-    // pin a known-good api.json on disk.
-    if let Ok(custom) = std::env::var("CLAURST_MODELS_PATH") {
-        reg.load_cache(&PathBuf::from(custom));
-    } else {
-        reg.load_cache(&models_cache_path());
-        // Migration nicety: if the new cache file is missing but the old
-        // one exists, ingest it once.
-        if !models_cache_path().exists() {
-            reg.load_cache(&models_dev_cache_path());
-        }
-    }
-    // Layer user metadata overrides on top of the catalog (issue #309). Stored
-    // in the registry, so any later cache reload re-asserts them automatically.
-    reg.apply_model_overrides(&config.model_overrides);
-    Arc::new(reg)
 }
 
 /// Whether the cache file is fresh enough to skip refreshing.

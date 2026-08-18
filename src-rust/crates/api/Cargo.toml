@@ -31,6 +31,8 @@ urlencoding = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 hmac = "0.12"
+dirs = { workspace = true }
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
