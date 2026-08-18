@@ -310,7 +310,10 @@ async fn send_session_update(
     }
 }
 
-fn classify_tool_kind(tool_name: &str) -> acp::ToolKind {
+/// Classify a Claurst tool name into the ACP `ToolKind` the client uses to
+/// pick an icon and a verb. The permission path classifies the same names, so
+/// this is the single table both sides read.
+pub(crate) fn classify_tool_kind(tool_name: &str) -> acp::ToolKind {
     match tool_name {
         "Read" | "FileRead" => acp::ToolKind::Read,
         "Edit" | "FileEdit" | "Write" | "FileWrite" | "BatchEdit" | "ApplyPatch" => {

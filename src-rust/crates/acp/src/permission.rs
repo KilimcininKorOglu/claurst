@@ -127,23 +127,14 @@ pub async fn forward_pending(
     let _ = decision_tx.send(decision);
 }
 
-/// Classify a Claurst tool name into an ACP `ToolKind` for client UI hints.
+/// Classify a permission request into an ACP `ToolKind` for client UI hints.
+/// A caller that marks the call read-only outranks the name, so a tool used
+/// in a read-only mode is not announced as an edit.
 fn infer_tool_kind(request: &PermissionRequest) -> acp::ToolKind {
     if request.is_read_only {
         return acp::ToolKind::Read;
     }
-    match request.tool_name.as_str() {
-        "Edit" | "FileEdit" | "Write" | "FileWrite" | "BatchEdit" | "ApplyPatch" => {
-            acp::ToolKind::Edit
-        }
-        "Bash" | "Shell" | "Execute" => acp::ToolKind::Execute,
-        "WebFetch" | "WebSearch" => acp::ToolKind::Fetch,
-        "Glob" | "Grep" | "GlobTool" => acp::ToolKind::Search,
-        "Delete" | "Rm" => acp::ToolKind::Delete,
-        "Move" | "Rename" => acp::ToolKind::Move,
-        "Think" | "Sequential" => acp::ToolKind::Think,
-        _ => acp::ToolKind::Other,
-    }
+    crate::prompt::classify_tool_kind(&request.tool_name)
 }
 
 /// Spawn a task that watches the shared `PendingPermissionStore` and
@@ -230,6 +221,21 @@ mod tests {
         assert_eq!(
             infer_tool_kind(&request("Bash", false)),
             acp::ToolKind::Execute
+        );
+    }
+
+    #[test]
+    fn a_reading_tool_reads_as_read_even_when_the_flag_is_unset() {
+        // `is_read_only` is set by the tool that raised the request, and a
+        // reading tool that leaves it false still reads a file. The session
+        // update path already classifies it as Read; both must agree.
+        assert_eq!(
+            infer_tool_kind(&request("Read", false)),
+            acp::ToolKind::Read
+        );
+        assert_eq!(
+            infer_tool_kind(&request("FileRead", false)),
+            acp::ToolKind::Read
         );
     }
 
