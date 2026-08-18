@@ -64,6 +64,13 @@ pub(crate) async fn execute_tool(
                     id: tool_id.to_string(),
                     input: input.clone(),
                 })),
+                // A hosting client is told which call anything it shows the
+                // user belongs to.
+                editor: ctx
+                    .editor
+                    .as_ref()
+                    .and_then(|editor| editor.for_tool_call(tool_id))
+                    .or_else(|| ctx.editor.clone()),
                 ..ctx.clone()
             };
             // Central permission backstop (issue #210): if a tool does not gate

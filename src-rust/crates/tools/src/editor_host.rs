@@ -57,6 +57,15 @@ pub trait EditorHost: Send + Sync {
     /// not ask for something the client never offered.
     fn capabilities(&self) -> EditorCapabilities;
 
+    /// The same host, bound to one tool call.
+    ///
+    /// A client that shows a running command needs to know which call started
+    /// it, and only the dispatcher knows that. `None` means the host does not
+    /// distinguish calls and the session's own is used unchanged.
+    fn for_tool_call(&self, _tool_call_id: &str) -> Option<std::sync::Arc<dyn EditorHost>> {
+        None
+    }
+
     /// The file as the client has it, unsaved edits included.
     async fn read_text_file(&self, path: &Path) -> std::io::Result<String>;
 

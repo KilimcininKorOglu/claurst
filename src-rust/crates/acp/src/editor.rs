@@ -23,6 +23,9 @@ pub struct AcpEditorHost {
     connection: Arc<Connection>,
     session_id: acp::SessionId,
     capabilities: EditorCapabilities,
+    /// The tool call whose terminals these are, so a client can draw the live
+    /// output under the call that started it rather than on its own.
+    tool_call: Option<acp::ToolCallId>,
 }
 
 impl AcpEditorHost {
@@ -42,7 +45,50 @@ impl AcpEditorHost {
             connection,
             session_id,
             capabilities,
+            tool_call: None,
         }))
+    }
+
+    /// The same host, for one tool call.
+    ///
+    /// A tool is handed this copy so the terminal it starts is announced under
+    /// its own call; the session's copy announces nothing, because a terminal
+    /// belonging to no call has nowhere to be drawn.
+    fn for_call(&self, tool_call: acp::ToolCallId) -> Self {
+        Self {
+            connection: self.connection.clone(),
+            session_id: self.session_id.clone(),
+            capabilities: self.capabilities,
+            tool_call: Some(tool_call),
+        }
+    }
+
+    /// Tell the client which call this terminal belongs to.
+    ///
+    /// Sent while the terminal is still alive: the protocol requires the
+    /// update to precede `terminal/release`, or the client is left holding an
+    /// id it can no longer read.
+    async fn announce_terminal(&self, terminal: &acp::TerminalId) {
+        let Some(tool_call) = &self.tool_call else {
+            return;
+        };
+        let update = acp::ToolCallUpdate::new(
+            tool_call.clone(),
+            acp::ToolCallUpdateFields::new().content(Some(vec![acp::ToolCallContent::Terminal(
+                acp::Terminal::new(terminal.clone()),
+            )])),
+        );
+        let notification = acp::SessionNotification::new(
+            self.session_id.clone(),
+            acp::SessionUpdate::ToolCallUpdate(update),
+        );
+        if let Err(e) = self
+            .connection
+            .send_notification("session/update", notification)
+            .await
+        {
+            tracing::warn!(?e, "ACP: could not attach a terminal to its tool call");
+        }
     }
 
     /// One client call, with both failure kinds reported as io errors so a
@@ -78,6 +124,10 @@ fn capabilities_of(client: &acp::ClientCapabilities) -> EditorCapabilities {
 impl EditorHost for AcpEditorHost {
     fn capabilities(&self) -> EditorCapabilities {
         self.capabilities
+    }
+
+    fn for_tool_call(&self, tool_call_id: &str) -> Option<Arc<dyn EditorHost>> {
+        Some(Arc::new(self.for_call(acp::ToolCallId::new(tool_call_id))))
     }
 
     async fn read_text_file(&self, path: &Path) -> std::io::Result<String> {
@@ -123,6 +173,7 @@ impl EditorHost for AcpEditorHost {
         }
 
         let response: acp::CreateTerminalResponse = self.call("terminal/create", params).await?;
+        self.announce_terminal(&response.terminal_id).await;
         Ok(TerminalId(response.terminal_id.0.to_string()))
     }
 
@@ -250,6 +301,47 @@ mod tests {
                 terminal: true,
             }
         );
+    }
+
+    #[test]
+    fn a_hosts_own_copy_belongs_to_no_call() {
+        // It is the dispatcher that knows which call is running; a terminal
+        // announced by the session's copy would have nowhere to be drawn.
+        let host = AcpEditorHost {
+            connection: connection(),
+            session_id: acp::SessionId::new("acp-1"),
+            capabilities: EditorCapabilities {
+                read_text_file: false,
+                write_text_file: false,
+                terminal: true,
+            },
+            tool_call: None,
+        };
+
+        assert!(host.tool_call.is_none());
+        assert_eq!(
+            host.for_call(acp::ToolCallId::new("toolu_9")).tool_call,
+            Some(acp::ToolCallId::new("toolu_9"))
+        );
+    }
+
+    #[test]
+    fn a_per_call_copy_keeps_what_the_client_can_do() {
+        let host = AcpEditorHost {
+            connection: connection(),
+            session_id: acp::SessionId::new("acp-1"),
+            capabilities: EditorCapabilities {
+                read_text_file: true,
+                write_text_file: false,
+                terminal: true,
+            },
+            tool_call: None,
+        };
+
+        let per_call = host
+            .for_tool_call("toolu_9")
+            .expect("this host distinguishes calls");
+        assert_eq!(per_call.capabilities(), host.capabilities);
     }
 
     #[test]
