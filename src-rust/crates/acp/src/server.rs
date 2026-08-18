@@ -86,6 +86,16 @@ impl AgentServer {
                 let result = self.on_resume_session(req).await?;
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
+            "session/list" => {
+                let req: acp::ListSessionsRequest = parse_params(params)?;
+                let result = self.on_list_sessions(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
+            "session/close" => {
+                let req: acp::CloseSessionRequest = parse_params(params)?;
+                let result = self.on_close_session(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
             "session/prompt" => {
                 let req: acp::PromptRequest = parse_params(params)?;
                 let result = self.on_prompt(req).await?;
@@ -161,7 +171,9 @@ impl AgentServer {
                     .load_session(true)
                     .session_capabilities(
                         acp::SessionCapabilities::new()
-                            .resume(Some(acp::SessionResumeCapabilities::new())),
+                            .list(Some(acp::SessionListCapabilities::new()))
+                            .resume(Some(acp::SessionResumeCapabilities::new()))
+                            .close(Some(acp::SessionCloseCapabilities::new())),
                     )
                     .prompt_capabilities(
                         // Embedded resources reach the model: `render_prompt_blocks`
@@ -269,6 +281,50 @@ impl AgentServer {
                 &self.runtime.config.permission_mode,
             )))
             .config_options(Some(self.config_options_for(&session))))
+    }
+
+    /// Every session on file, so a client can offer to reopen one.
+    async fn on_list_sessions(
+        self: &Arc<Self>,
+        req: acp::ListSessionsRequest,
+    ) -> Result<acp::ListSessionsResponse, acp::Error> {
+        if let Some(cwd) = &req.cwd {
+            if !cwd.is_absolute() {
+                return Err(acp::Error::invalid_params().data(Some(
+                    serde_json::json!({ "reason": "cwd must be absolute" }),
+                )));
+            }
+        }
+
+        let stored = claurst_core::history::list_sessions().await;
+        let page = crate::listing::page(&stored, req.cwd.as_deref(), req.cursor.as_deref())
+            .map_err(|reason| {
+                acp::Error::invalid_params().data(Some(serde_json::json!({
+                    "reason": reason,
+                    "cursor": req.cursor,
+                })))
+            })?;
+        debug!(
+            listed = page.sessions.len(),
+            stored = stored.len(),
+            "ACP: sessions listed"
+        );
+
+        Ok(acp::ListSessionsResponse::new(page.sessions).next_cursor(page.next_cursor))
+    }
+
+    /// Let go of a session: stop whatever it is doing, write it out, and drop
+    /// it from the registry. What is on disk stays, so it can be loaded again.
+    async fn on_close_session(
+        self: &Arc<Self>,
+        req: acp::CloseSessionRequest,
+    ) -> Result<acp::CloseSessionResponse, acp::Error> {
+        let session = self.session_or_error(&req.session_id)?;
+        session.cancel_token.cancel();
+        crate::persist::save(&session, &self.runtime.query_config.model).await;
+        self.sessions.remove(&req.session_id);
+        info!(session_id = %req.session_id, "ACP: session closed");
+        Ok(acp::CloseSessionResponse::new())
     }
 
     /// The options a session currently offers, rebuilt from its overrides.

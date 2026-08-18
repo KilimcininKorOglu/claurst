@@ -24,6 +24,7 @@
 //! (see `src-rust/plan/migration-todo.md`).
 
 mod connection;
+mod listing;
 mod permission;
 mod persist;
 mod prompt;
