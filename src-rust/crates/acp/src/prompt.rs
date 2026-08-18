@@ -156,9 +156,12 @@ pub async fn handle(
     Ok(acp::PromptResponse::new(stop_reason))
 }
 
-/// Concatenate text from prompt content blocks. Image / Audio / embedded
-/// resources are dropped here (they require additional prompt capabilities
-/// which v1 does not advertise) but are tracked for telemetry.
+/// Concatenate text from prompt content blocks.
+///
+/// A resource the client embedded (an `@file` mention in an editor) arrives
+/// with its own uri, which is named alongside the contents: the model cannot
+/// answer about a file whose path it was never told. Image and audio blocks
+/// are dropped, and `initialize` says so.
 fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> String {
     let mut parts: Vec<String> = Vec::new();
     for block in blocks {
@@ -168,14 +171,20 @@ fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> String {
                 parts.push(format!("[resource link: {}]", link.uri));
             }
             acp::ContentBlock::Resource(res) => {
-                // Best-effort: emit any embedded text.
                 let json = serde_json::to_value(res).unwrap_or_default();
-                if let Some(text) = json
-                    .get("resource")
+                let resource = json.get("resource");
+                let text = resource
                     .and_then(|r| r.get("text"))
-                    .and_then(|t| t.as_str())
-                {
-                    parts.push(text.to_string());
+                    .and_then(|t| t.as_str());
+                let uri = resource.and_then(|r| r.get("uri")).and_then(|u| u.as_str());
+                match (uri, text) {
+                    (Some(uri), Some(text)) => parts.push(format!("[{uri}]\n{text}")),
+                    (None, Some(text)) => parts.push(text.to_string()),
+                    // A resource with no text is a binary blob or a reference
+                    // the client expected us to fetch; naming it is better
+                    // than dropping it silently.
+                    (Some(uri), None) => parts.push(format!("[resource: {uri}]")),
+                    (None, None) => warn!("ACP: ignoring a resource block with no uri or text"),
                 }
             }
             acp::ContentBlock::Image(_) | acp::ContentBlock::Audio(_) => {
@@ -391,6 +400,25 @@ mod tests {
             acp::ContentBlock::Image(acp::ImageContent::new("base64data", "image/png")),
         ];
         assert_eq!(render_prompt_blocks(&blocks), "caption");
+    }
+
+    #[test]
+    fn an_embedded_file_reaches_the_model_with_its_path() {
+        // This is what an `@file` mention arrives as. Without the uri the model
+        // is handed a wall of code and no way to say which file it edits.
+        let resource =
+            acp::EmbeddedResource::new(acp::EmbeddedResourceResource::TextResourceContents(
+                acp::TextResourceContents::new("fn main() {}", "file:///repo/src/main.rs"),
+            ));
+        let blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent::new("explain this")),
+            acp::ContentBlock::Resource(resource),
+        ];
+
+        let rendered = render_prompt_blocks(&blocks);
+        assert!(rendered.contains("file:///repo/src/main.rs"), "{rendered}");
+        assert!(rendered.contains("fn main() {}"), "{rendered}");
+        assert!(rendered.starts_with("explain this"), "{rendered}");
     }
 
     #[test]

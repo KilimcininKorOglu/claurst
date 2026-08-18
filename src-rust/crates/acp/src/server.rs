@@ -152,7 +152,14 @@ impl AgentServer {
             .agent_capabilities(
                 acp::AgentCapabilities::new()
                     .load_session(false)
-                    .prompt_capabilities(acp::PromptCapabilities::new())
+                    .prompt_capabilities(
+                        // Embedded resources reach the model: `render_prompt_blocks`
+                        // reads both a resource link and an inline resource. Images
+                        // and audio stay unadvertised because that same function
+                        // drops them, and claiming otherwise would lose a file the
+                        // user attached.
+                        acp::PromptCapabilities::new().embedded_context(true),
+                    )
                     .mcp_capabilities(acp::McpCapabilities::new()),
             );
         response = response.agent_info(Some(agent_info));
