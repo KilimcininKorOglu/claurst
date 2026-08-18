@@ -242,6 +242,10 @@ async fn forward_events(
                         // Where the file recorder stood before this tool ran.
                         // Everything appended past this point belongs to it.
                         history_len: file_history.lock().entries().len(),
+                        // The todo list the model is about to store. Held until
+                        // the call succeeds, so a rejected write does not leave
+                        // a plan on screen that nothing is following.
+                        plan: raw_input.as_ref().and_then(plan_from_todos),
                     },
                 );
                 let mut tool_call =
@@ -295,6 +299,16 @@ async fn forward_events(
                     acp::SessionUpdate::ToolCallUpdate(update),
                 )
                 .await;
+                // A stored todo list is the agent's plan, and the protocol has
+                // a place for it that a client renders as a checklist.
+                if let Some(plan) = active_tools
+                    .get_mut(&tool_id)
+                    .and_then(|meta| meta.plan.take())
+                    .filter(|_| !is_error)
+                {
+                    send_session_update(&connection, &session_id, acp::SessionUpdate::Plan(plan))
+                        .await;
+                }
                 active_tools.remove(&tool_id);
             }
             QueryEvent::Error(msg) => {
@@ -318,6 +332,36 @@ struct ToolMeta {
     kind: acp::ToolKind,
     /// Length of the file recorder when this tool started.
     history_len: usize,
+    /// The plan this call would publish once it succeeds.
+    plan: Option<acp::Plan>,
+}
+
+/// Read a `TodoWrite` input as the protocol's plan.
+///
+/// Returns `None` for any other tool: the shape is the contract, so a tool
+/// that happens to carry a `todos` array of the same shape is a plan too.
+fn plan_from_todos(input: &serde_json::Value) -> Option<acp::Plan> {
+    let todos = input.get("todos")?.as_array()?;
+    let entries: Vec<acp::PlanEntry> = todos
+        .iter()
+        .filter_map(|todo| {
+            let content = todo.get("content")?.as_str()?;
+            let status = match todo.get("status").and_then(|s| s.as_str()) {
+                Some("in_progress") => acp::PlanEntryStatus::InProgress,
+                Some("completed") => acp::PlanEntryStatus::Completed,
+                // The tool rejects any other name, so anything reaching here
+                // is a todo yet to be started.
+                _ => acp::PlanEntryStatus::Pending,
+            };
+            let priority = match todo.get("priority").and_then(|p| p.as_str()) {
+                Some("high") => acp::PlanEntryPriority::High,
+                Some("low") => acp::PlanEntryPriority::Low,
+                _ => acp::PlanEntryPriority::Medium,
+            };
+            Some(acp::PlanEntry::new(content, priority, status))
+        })
+        .collect();
+    Some(acp::Plan::new(entries))
 }
 
 /// Every file change recorded after `from`, as protocol diffs.
@@ -491,6 +535,32 @@ mod tests {
             diff_of(&diffs[0]).path,
             std::path::PathBuf::from("/repo/new.rs")
         );
+    }
+
+    #[test]
+    fn a_todo_list_becomes_a_plan_with_its_statuses_intact() {
+        let input = serde_json::json!({
+            "todos": [
+                { "id": "1", "content": "read the code", "status": "completed", "priority": "high" },
+                { "id": "2", "content": "write the test", "status": "in_progress" },
+                { "id": "3", "content": "run it", "status": "pending", "priority": "low" },
+            ]
+        });
+
+        let plan = plan_from_todos(&input).expect("a todos array is a plan");
+        assert_eq!(plan.entries.len(), 3);
+        assert_eq!(plan.entries[0].status, acp::PlanEntryStatus::Completed);
+        assert_eq!(plan.entries[0].priority, acp::PlanEntryPriority::High);
+        assert_eq!(plan.entries[1].status, acp::PlanEntryStatus::InProgress);
+        // No priority given: the middle rung, not a guess at either end.
+        assert_eq!(plan.entries[1].priority, acp::PlanEntryPriority::Medium);
+        assert_eq!(plan.entries[2].content, "run it");
+    }
+
+    #[test]
+    fn a_tool_input_without_todos_is_not_a_plan() {
+        let input = serde_json::json!({ "file_path": "/repo/a.rs" });
+        assert!(plan_from_todos(&input).is_none());
     }
 
     #[test]
