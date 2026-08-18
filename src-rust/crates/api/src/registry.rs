@@ -44,14 +44,24 @@ fn canonical_local_provider_id(provider_id: &str) -> &str {
     }
 }
 
+/// The base URL for `provider_id`, shaped for the implementation that will
+/// receive it.
+///
+/// The shaping follows the account's protocol, not its name. An account the
+/// user named matches no vendor id, so keying on the name skipped the step
+/// entirely: an `ollama` account called `ev-ollama` reached the provider
+/// without the `/v1` its OpenAI-compatible endpoint lives under, and an
+/// `openai` one kept a `/v1` that `OpenAiProvider` appends again.
 pub fn resolve_provider_api_base(
     config: &claurst_core::config::Config,
     provider_id: &str,
 ) -> Option<String> {
     let base = config.resolve_provider_api_base(provider_id)?;
-    if provider_id == "openai" {
+    let vendor = config.vendor_id_for_account(provider_id);
+    let protocol = normalize_protocol(&vendor);
+    if protocol == ProviderId::OPENAI {
         Some(normalize_openai_base(&base))
-    } else if crate::providers::openai_compat_providers::provider_for_id(provider_id).is_some() {
+    } else if crate::providers::openai_compat_providers::provider_for_id(protocol).is_some() {
         Some(normalize_openai_compat_base(&base))
     } else {
         Some(base)
@@ -1096,6 +1106,83 @@ mod tests {
         registry.set_default(ProviderId::new("lmstudio"));
 
         assert_eq!(&**registry.default_provider_id(), ProviderId::LM_STUDIO);
+    }
+
+    /// A config carrying one account, as `settings.json` would define it.
+    fn config_with_account(
+        account: &str,
+        protocol: Option<&str>,
+        api_base: &str,
+    ) -> claurst_core::config::Config {
+        let mut config = claurst_core::config::Config::default();
+        config.provider_configs.insert(
+            account.to_string(),
+            claurst_core::config::ProviderConfig {
+                api_base: Some(api_base.to_string()),
+                protocol: protocol.map(str::to_string),
+                ..Default::default()
+            },
+        );
+        config
+    }
+
+    #[test]
+    fn a_vendor_named_openai_compat_account_gets_the_v1_suffix() {
+        let config = config_with_account("ollama", None, "http://192.0.2.10:11434");
+        assert_eq!(
+            resolve_provider_api_base(&config, "ollama").as_deref(),
+            Some("http://192.0.2.10:11434/v1")
+        );
+    }
+
+    #[test]
+    fn a_user_named_account_is_shaped_by_its_protocol() {
+        // The account matches no vendor id, so only its `protocol` says the
+        // endpoint lives under /v1.
+        let config = config_with_account("ev-ollama", Some("ollama"), "http://192.0.2.10:11434");
+        assert_eq!(
+            resolve_provider_api_base(&config, "ev-ollama").as_deref(),
+            Some("http://192.0.2.10:11434/v1")
+        );
+    }
+
+    #[test]
+    fn a_base_that_already_ends_in_v1_is_left_alone() {
+        let config =
+            config_with_account("ev-ollama", Some("ollama"), "http://192.0.2.10:11434/v1/");
+        assert_eq!(
+            resolve_provider_api_base(&config, "ev-ollama").as_deref(),
+            Some("http://192.0.2.10:11434/v1")
+        );
+    }
+
+    #[test]
+    fn a_user_named_openai_account_loses_the_v1_the_provider_appends() {
+        // OpenAiProvider builds "{base}/v1/chat/completions" itself, so a base
+        // that keeps its own /v1 would send the segment twice.
+        let config = config_with_account("gw", Some("openai"), "https://gw.example/v1");
+        assert_eq!(
+            resolve_provider_api_base(&config, "gw").as_deref(),
+            Some("https://gw.example")
+        );
+    }
+
+    #[test]
+    fn an_account_speaking_a_wire_format_alias_is_shaped_like_openai() {
+        let config = config_with_account("gw", Some("chat-completions"), "https://gw.example/v1");
+        assert_eq!(
+            resolve_provider_api_base(&config, "gw").as_deref(),
+            Some("https://gw.example")
+        );
+    }
+
+    #[test]
+    fn an_anthropic_account_keeps_its_base_url_untouched() {
+        let config = config_with_account("gw", Some("anthropic"), "https://gw.example/anthropic");
+        assert_eq!(
+            resolve_provider_api_base(&config, "gw").as_deref(),
+            Some("https://gw.example/anthropic")
+        );
     }
 }
 

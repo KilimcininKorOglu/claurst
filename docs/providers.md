@@ -359,11 +359,13 @@ Neither slot has models.dev catalog entries. The picker shows whatever the endpo
 
 Connects to a locally running Ollama instance. No API key required.
 
-**Base URL:** Reads `OLLAMA_HOST` (defaults to `http://localhost:11434`). Claurst appends `/v1` to construct the OpenAI-compatible endpoint.
+**Base URL:** Reads `OLLAMA_HOST` (defaults to `http://localhost:11434`). Claurst appends `/v1` to construct the OpenAI-compatible endpoint. For a remote Ollama server, set `providers.ollama.api_base` to that host: both `http://192.168.1.50:11434` and `http://192.168.1.50:11434/v1` work, because the `/v1` suffix is added when it is missing.
 
 **Default model:** `llama3.2`
 
-**Model list:** When using `/connect` or `/model`, the picker queries your local Ollama server via `/api/tags` and shows only the models you have installed (`ollama list`). Cloud models (e.g., `kimi-k2.6:cloud`) appear after you run `ollama pull <model>:cloud`.
+**Model list:** When using `/connect` or `/model`, the picker queries your Ollama server via `/api/tags` and shows only the models you have installed (`ollama list`). Cloud models (e.g., `kimi-k2.6:cloud`) appear after you run `ollama pull <model>:cloud`.
+
+`/api/tags` and the health check use the native Ollama API rather than the OpenAI-compatible one, and they follow `api_base` to the same host. A remote `api_base` therefore lists the remote server's models, not whatever happens to run on localhost.
 
 **Configuration:**
 
@@ -390,9 +392,11 @@ claurst --provider ollama --model llama3.2 "explain this code"
 
 Connects to a locally running LM Studio server. No API key required.
 
-**Base URL:** Reads `LM_STUDIO_HOST` (defaults to `http://localhost:1234`). Claurst appends `/v1`.
+**Base URL:** Reads `LM_STUDIO_HOST` (defaults to `http://localhost:1234`). Claurst appends `/v1`. A remote server is configured the same way as Ollama's, through `providers.lmstudio.api_base`, with or without the `/v1` suffix.
 
 **Default model:** `default` (whichever model is loaded in LM Studio)
+
+**Model list:** The picker reads LM Studio's native API, which follows `api_base` to the same host, and lists the models currently loaded there.
 
 **Configuration:**
 
@@ -764,10 +768,26 @@ The `providers` map in `~/.claurst/settings.json` accepts per-provider `Provider
 |--------------------|------------------|--------------------------------------------------|
 | `api_key`          | string           | Override the environment variable API key        |
 | `api_base`         | string           | Override the default base URL                    |
+| `protocol`         | string           | Wire format this account speaks                  |
 | `enabled`          | bool             | Enable or disable the provider (default: `true`) |
 | `models_whitelist` | array of strings | If non-empty, only listed model IDs are allowed  |
 | `models_blacklist` | array of strings | Listed model IDs are refused                     |
 | `options`          | object           | Provider-specific pass-through options           |
+
+An entry named after its vendor (`"ollama"`, `"openai"`) needs no `protocol`; the name is the wire format. Name an entry anything else to run a second account of the same vendor, and give it `protocol` so it is still built by the right implementation:
+
+```json
+{
+  "providers": {
+    "home-ollama": {
+      "protocol": "ollama",
+      "api_base": "http://192.168.1.50:11434"
+    }
+  }
+}
+```
+
+`api_base` is shaped for that protocol, not for the entry's name: an OpenAI-compatible endpoint gains the `/v1` suffix when it is missing, and an `openai` one has it removed because that implementation appends `/v1` itself.
 
 ## Model Whitelist and Blacklist
 
