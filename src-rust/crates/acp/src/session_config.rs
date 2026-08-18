@@ -186,7 +186,18 @@ pub fn apply_config_option(
             // The old model belongs to the old account. Carrying it over would
             // send an id the new account has never heard of.
             let vendor = config.vendor_id_for_account(value);
-            overrides.model = registry.best_model_for_provider(&vendor);
+            overrides.model = Some(registry.best_model_for_provider(&vendor).unwrap_or_else(
+                || {
+                    // An account the catalog does not cover still needs a model,
+                    // and leaving the override unset would silently keep the old
+                    // account's one.
+                    let probe = claurst_core::config::Config {
+                        provider: Some(vendor.clone()),
+                        ..Default::default()
+                    };
+                    probe.effective_model().to_string()
+                },
+            ));
             Ok(())
         }
         OPTION_EFFORT => match claurst_core::effort::EffortLevel::from_str(value) {
@@ -371,8 +382,17 @@ mod tests {
 
         assert_eq!(overrides.provider.as_deref(), Some("openai"));
         // The old model belonged to the old account; carrying it over would
-        // send an id the new one has never heard of.
-        assert_ne!(overrides.model.as_deref(), Some("claude-opus-5"));
+        // send an id the new one has never heard of. An empty catalog is the
+        // hard case: leaving the override unset would keep the old model.
+        let model = overrides
+            .model
+            .as_deref()
+            .expect("the new account needs a model");
+        assert_ne!(model, "claude-opus-5");
+        assert!(
+            model.starts_with("gpt"),
+            "expected an openai model, got {model}"
+        );
     }
 
     #[test]
