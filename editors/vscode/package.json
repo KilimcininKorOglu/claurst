@@ -32,6 +32,10 @@
       {
         "command": "claurst.stopSession",
         "title": "Claurst: Stop Current Turn"
+      },
+      {
+        "command": "claurst.resumeSession",
+        "title": "Claurst: Resume Session"
       }
     ],
     "menus": {
@@ -44,6 +48,9 @@
         },
         {
           "command": "claurst.stopSession"
+        },
+        {
+          "command": "claurst.resumeSession"
         }
       ]
     },

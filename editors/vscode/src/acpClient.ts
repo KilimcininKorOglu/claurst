@@ -11,11 +11,29 @@ export type PermissionOption = {
   kind: string;
 };
 
+/** A file a tool rewrote, as the agent reported it. */
+export type ToolDiff = {
+  path: string;
+  oldText?: string;
+  newText: string;
+};
+
 export type ToolCallUpdate = {
   toolCallId?: string;
   title?: string;
   status?: string;
   kind?: string;
+  /** The text the tool returned, when it returned any. */
+  output?: string;
+  /** Every file this tool rewrote. */
+  diffs: ToolDiff[];
+};
+
+/** One step of the agent's plan. */
+export type PlanEntry = {
+  content: string;
+  status: string;
+  priority?: string;
 };
 
 /** One value a select-style configuration option can be set to. */
@@ -44,18 +62,44 @@ export type SessionModes = {
   availableModes: SessionMode[];
 };
 
-/** What `session/new` told us about the session it just created. */
+/** A slash command the agent offers. */
+export type AvailableCommand = {
+  name: string;
+  description: string;
+  hint?: string;
+};
+
+/** What `session/new`, `session/load` or `session/resume` told us. */
 export type SessionStart = {
   sessionId: string;
   modes?: SessionModes;
   configOptions: ConfigOption[];
 };
 
+/** One session on file, as `session/list` describes it. */
+export type StoredSession = {
+  sessionId: string;
+  cwd: string;
+  title?: string;
+  updatedAt?: string;
+};
+
+/** A block of a prompt: plain text, a named file, or a file's contents. */
+export type PromptBlock =
+  | { type: 'text'; text: string }
+  | { type: 'resource_link'; uri: string; name: string }
+  | { type: 'resource'; resource: { uri: string; text: string; mimeType?: string } };
+
 /** How the user answered a permission request, or that they answered nothing. */
 export type PermissionAnswer = { optionId: string } | { cancelled: true };
 
-export interface AcpClientEvents {
-  onTextChunk?: (text: string, isThought: boolean) => void;
+/** Who a streamed chunk came from. A replayed transcript carries the user's
+ * own turns, which are not the agent talking. */
+export type ChunkKind = 'agent' | 'thought' | 'user';
+
+/** What one session's panel wants to hear about. */
+export interface SessionEvents {
+  onTextChunk?: (text: string, kind: ChunkKind) => void;
   onToolCall?: (update: ToolCallUpdate) => void;
   onToolCallUpdate?: (update: ToolCallUpdate) => void;
   /** Resolves to a chosen option id, or to `{cancelled: true}` when the user
@@ -68,17 +112,32 @@ export interface AcpClientEvents {
   onConfigOptions?: (options: ConfigOption[]) => void;
   /** The session's mode changed, for whatever reason. */
   onModeChanged?: (modeId: string) => void;
+  /** The commands this session can run. */
+  onCommands?: (commands: AvailableCommand[]) => void;
+  /** The agent's plan, restated in full each time it moves. */
+  onPlan?: (entries: PlanEntry[]) => void;
+  /** The session was named, or renamed. */
+  onSessionInfo?: (title?: string) => void;
+}
+
+export interface AcpClientEvents {
   onStderr?: (line: string) => void;
   onExit?: (code: number | null) => void;
 }
 
-/** Speaks ACP to a `claurst acp` child process over stdio. */
+/** Speaks ACP to a `claurst acp` child process over stdio.
+ *
+ * One process serves every panel: sessions are independent inside it, and
+ * they share the MCP connections and the model catalog the agent built once
+ * at startup. Each update carries the session it belongs to, which is how it
+ * reaches the right panel. */
 export class AcpClient {
   private child: cp.ChildProcessWithoutNullStreams;
   private rl: readline.Interface;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-  private sessionId: string | undefined;
+  private sessions = new Map<string, SessionEvents>();
+  private initialized: Promise<void> | undefined;
 
   constructor(
     executablePath: string,
@@ -164,11 +223,13 @@ export class AcpClient {
 
   private async handleIncomingRequest(id: number, method: string, params: any): Promise<void> {
     if (method === 'session/request_permission') {
+      const handler = this.sessions.get(params?.sessionId);
       const toolCall: ToolCallUpdate = {
         toolCallId: params?.toolCall?.toolCallId,
         title: params?.toolCall?.title,
         status: params?.toolCall?.status,
         kind: params?.toolCall?.kind,
+        diffs: [],
       };
       const options: PermissionOption[] = (params?.options ?? []).map((o: any) => ({
         optionId: o.optionId,
@@ -176,7 +237,8 @@ export class AcpClient {
         kind: o.kind,
       }));
       const answer =
-        (await this.events.onRequestPermission?.(toolCall, options)) ?? ({ cancelled: true } as const);
+        (await handler?.onRequestPermission?.(toolCall, options)) ??
+        ({ cancelled: true } as const);
       // Dismissing the prompt means the user chose nothing. Falling back to
       // the first offered option would run the tool they walked away from,
       // because the first option is "allow once".
@@ -202,27 +264,42 @@ export class AcpClient {
       return;
     }
     const update = params?.update;
-    if (!update) {
+    const handler = this.sessions.get(params?.sessionId);
+    if (!update || !handler) {
       return;
     }
     switch (update.sessionUpdate) {
+      case 'user_message_chunk':
+        // Only a replayed transcript carries these, and drawing them as the
+        // agent would put the user's own words in its mouth.
+        handler.onTextChunk?.(extractText(update.content), 'user');
+        break;
       case 'agent_message_chunk':
-        this.events.onTextChunk?.(extractText(update.content), false);
+        handler.onTextChunk?.(extractText(update.content), 'agent');
         break;
       case 'agent_thought_chunk':
-        this.events.onTextChunk?.(extractText(update.content), true);
+        handler.onTextChunk?.(extractText(update.content), 'thought');
         break;
       case 'tool_call':
-        this.events.onToolCall?.(toolCallOf(update));
+        handler.onToolCall?.(toolCallOf(update));
         break;
       case 'tool_call_update':
-        this.events.onToolCallUpdate?.(toolCallOf(update));
+        handler.onToolCallUpdate?.(toolCallOf(update));
         break;
       case 'config_option_update':
-        this.events.onConfigOptions?.(parseConfigOptions(update.configOptions));
+        handler.onConfigOptions?.(parseConfigOptions(update.configOptions));
         break;
       case 'current_mode_update':
-        this.events.onModeChanged?.(update.currentModeId);
+        handler.onModeChanged?.(update.currentModeId);
+        break;
+      case 'available_commands_update':
+        handler.onCommands?.(parseCommands(update.availableCommands));
+        break;
+      case 'plan':
+        handler.onPlan?.(parsePlan(update.entries));
+        break;
+      case 'session_info_update':
+        handler.onSessionInfo?.(update.title ?? undefined);
         break;
       default:
         break;
@@ -245,71 +322,127 @@ export class AcpClient {
     this.writeMessage({ jsonrpc: '2.0', method, params });
   }
 
-  async initialize(): Promise<void> {
-    await this.request('initialize', {
-      protocolVersion: 1,
-      clientCapabilities: {},
-      clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
-    });
+  /** Negotiate capabilities once, however many panels ask for it. */
+  initialize(): Promise<void> {
+    if (!this.initialized) {
+      this.initialized = this.request('initialize', {
+        protocolVersion: 1,
+        clientCapabilities: {},
+        clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
+      }).then(() => undefined);
+    }
+    return this.initialized;
   }
 
-  async newSession(cwd: string): Promise<SessionStart> {
+  /** Start a session and route its updates to `events`. */
+  async newSession(cwd: string, events: SessionEvents): Promise<SessionStart> {
     const result = await this.request<any>('session/new', { cwd, mcpServers: [] });
-    this.sessionId = result.sessionId;
-    return {
-      sessionId: result.sessionId,
-      modes: result.modes,
-      configOptions: parseConfigOptions(result.configOptions),
-    };
+    this.sessions.set(result.sessionId, events);
+    return startOf(result, result.sessionId);
   }
 
-  async prompt(text: string): Promise<void> {
-    await this.request('session/prompt', {
-      sessionId: this.requireSession(),
-      prompt: [{ type: 'text', text }],
-    });
+  /** Reopen a stored session. The agent replays the whole transcript as
+   * updates before it answers, so the handler is registered first. */
+  async loadSession(sessionId: string, cwd: string, events: SessionEvents): Promise<SessionStart> {
+    this.sessions.set(sessionId, events);
+    try {
+      const result = await this.request<any>('session/load', { sessionId, cwd, mcpServers: [] });
+      return startOf(result, sessionId);
+    } catch (e) {
+      this.sessions.delete(sessionId);
+      throw e;
+    }
+  }
+
+  /** Every session on file, newest first. */
+  async listSessions(cwd?: string): Promise<StoredSession[]> {
+    const result = await this.request<any>('session/list', cwd ? { cwd } : {});
+    const sessions: any[] = Array.isArray(result?.sessions) ? result.sessions : [];
+    return sessions.map((s) => ({
+      sessionId: s.sessionId,
+      cwd: s.cwd,
+      title: s.title ?? undefined,
+      updatedAt: s.updatedAt ?? undefined,
+    }));
+  }
+
+  async prompt(sessionId: string, blocks: PromptBlock[]): Promise<void> {
+    await this.request('session/prompt', { sessionId, prompt: blocks });
   }
 
   /** Change the model, the account, or the reasoning effort. Returns the whole
    * option set, since changing one of them can change the others' values. */
-  async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
+  async setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string,
+  ): Promise<ConfigOption[]> {
     const result = await this.request<any>('session/set_config_option', {
-      sessionId: this.requireSession(),
+      sessionId,
       configId,
       value,
     });
     return parseConfigOptions(result?.configOptions);
   }
 
-  async setMode(modeId: string): Promise<void> {
-    await this.request('session/set_mode', { sessionId: this.requireSession(), modeId });
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    await this.request('session/set_mode', { sessionId, modeId });
   }
 
-  cancel(): void {
-    if (this.sessionId) {
-      this.notify('session/cancel', { sessionId: this.sessionId });
+  cancel(sessionId: string): void {
+    this.notify('session/cancel', { sessionId });
+  }
+
+  /** Let the agent go of a session, and stop routing its updates. */
+  async closeSession(sessionId: string): Promise<void> {
+    this.sessions.delete(sessionId);
+    try {
+      await this.request('session/close', { sessionId });
+    } catch {
+      // A session the agent has already dropped needs no closing, and the
+      // panel is going away either way.
     }
+  }
+
+  get sessionCount(): number {
+    return this.sessions.size;
   }
 
   dispose(): void {
     this.rl.close();
     this.child.kill();
   }
+}
 
-  private requireSession(): string {
-    if (!this.sessionId) {
-      throw new Error('no active session; call newSession() first');
-    }
-    return this.sessionId;
-  }
+function startOf(result: any, sessionId: string): SessionStart {
+  return {
+    sessionId,
+    modes: result?.modes,
+    configOptions: parseConfigOptions(result?.configOptions),
+  };
 }
 
 function toolCallOf(update: any): ToolCallUpdate {
+  const content: any[] = Array.isArray(update.content) ? update.content : [];
+  const diffs: ToolDiff[] = content
+    .filter((block) => block?.type === 'diff')
+    .map((block) => ({
+      path: block.path,
+      oldText: block.oldText ?? undefined,
+      newText: block.newText ?? '',
+    }));
+  const output = content
+    .filter((block) => block?.type === 'content')
+    .map((block) => extractText(block.content))
+    .filter((text) => text.length > 0)
+    .join('\n');
   return {
     toolCallId: update.toolCallId,
     title: update.title,
     status: update.status,
     kind: update.kind,
+    output: output.length > 0 ? output : undefined,
+    diffs,
   };
 }
 
@@ -318,6 +451,30 @@ function extractText(content: any): string {
     return content.text ?? '';
   }
   return '';
+}
+
+function parseCommands(raw: any): AvailableCommand[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .filter((command) => typeof command?.name === 'string')
+    .map((command) => ({
+      name: command.name,
+      description: command.description ?? '',
+      hint: command.input?.hint ?? undefined,
+    }));
+}
+
+function parsePlan(raw: any): PlanEntry[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((entry) => ({
+    content: entry?.content ?? '',
+    status: entry?.status ?? 'pending',
+    priority: entry?.priority ?? undefined,
+  }));
 }
 
 /** Flatten the protocol's select options into what the panel renders.

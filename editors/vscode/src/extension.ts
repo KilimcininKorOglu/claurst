@@ -1,4 +1,6 @@
+import * as os from 'os';
 import * as vscode from 'vscode';
+import { AgentPool } from './agentPool';
 import { ChatPanel } from './chatPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -7,27 +9,63 @@ export function activate(context: vscode.ExtensionContext): void {
   // The agent is told which client it is talking to; the manifest is the one
   // place that version lives, so nothing else has to be kept in step with it.
   const version: string = context.extension.packageJSON.version;
+  const pool = new AgentPool(version, outputChannel);
+  context.subscriptions.push({ dispose: () => pool.dispose() });
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.openChat', () => {
-      ChatPanel.createOrShow(context.extensionUri, version, outputChannel);
+      ChatPanel.show(context.extensionUri, pool, outputChannel);
     }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.newSession', () => {
-      ChatPanel.current?.dispose();
-      ChatPanel.createOrShow(context.extensionUri, version, outputChannel);
+      // A second panel, not a replacement: two conversations can run side by
+      // side inside the one agent process.
+      ChatPanel.create(context.extensionUri, pool, outputChannel);
     }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.stopSession', () => {
-      ChatPanel.current?.cancelCurrentTurn();
+      ChatPanel.active?.cancelCurrentTurn();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claurst.resumeSession', async () => {
+      try {
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+        const client = await pool.acquire(cwd);
+        try {
+          const sessions = await client.listSessions(cwd);
+          if (sessions.length === 0) {
+            vscode.window.showInformationMessage('No earlier sessions in this folder.');
+            return;
+          }
+          const picked = await vscode.window.showQuickPick(
+            sessions.map((session) => ({
+              label: session.title ?? session.sessionId,
+              description: session.updatedAt,
+              session,
+            })),
+            { placeHolder: 'Which conversation should Claurst pick up?' },
+          );
+          if (picked) {
+            ChatPanel.create(context.extensionUri, pool, outputChannel, picked.session);
+          }
+        } finally {
+          // The listing borrowed the agent; only a panel keeps it running.
+          pool.release();
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`Claurst: ${message}`);
+      }
     }),
   );
 }
 
 export function deactivate(): void {
-  ChatPanel.current?.dispose();
+  ChatPanel.disposeAll();
 }

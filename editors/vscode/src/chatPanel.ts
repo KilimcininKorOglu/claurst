@@ -1,42 +1,59 @@
 import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   AcpClient,
+  AvailableCommand,
+  ChunkKind,
   ConfigOption,
   PermissionAnswer,
   PermissionOption,
+  PlanEntry,
+  PromptBlock,
   SessionModes,
+  StoredSession,
   ToolCallUpdate,
 } from './acpClient';
+import { AgentPool } from './agentPool';
 
 /** The key the mode pill uses. Config option ids come from the agent, so this
  * one only has to avoid colliding with them. */
 const MODE_PILL = 'mode';
 
-/** Owns one webview panel and its backing AcpClient/session. */
+/** The largest file whose contents travel with the prompt. Anything bigger is
+ * named instead, so the agent reads the part it needs. */
+const EMBED_LIMIT_BYTES = 64 * 1024;
+
+/** Owns one webview panel and the session behind it.
+ *
+ * Panels are independent conversations sharing a single agent process, so
+ * opening a second one costs a session rather than a process. */
 export class ChatPanel {
-  public static current: ChatPanel | undefined;
+  private static readonly panels = new Set<ChatPanel>();
+  /** The panel the user is looking at, which the palette commands act on. */
+  static active: ChatPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
   private client: AcpClient | undefined;
-  private readonly outputChannel: vscode.OutputChannel;
+  private sessionId: string | undefined;
   private disposables: vscode.Disposable[] = [];
 
   private options: ConfigOption[] = [];
   private modes: SessionModes | undefined;
+  private cwd: string;
+  /** Whether this panel is holding the shared agent. Releasing one it never
+   * took would shut the process down under another panel. */
+  private holdsAgent = false;
 
-  static createOrShow(
+  static create(
     extensionUri: vscode.Uri,
-    version: string,
+    pool: AgentPool,
     outputChannel: vscode.OutputChannel,
+    restore?: StoredSession,
   ): ChatPanel {
-    if (ChatPanel.current) {
-      ChatPanel.current.panel.reveal();
-      return ChatPanel.current;
-    }
     const panel = vscode.window.createWebviewPanel(
       'claurstChat',
-      'Claurst',
+      restore?.title ?? 'Claurst',
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
@@ -44,20 +61,52 @@ export class ChatPanel {
         localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
       },
     );
-    ChatPanel.current = new ChatPanel(panel, extensionUri, version, outputChannel);
-    return ChatPanel.current;
+    return new ChatPanel(panel, extensionUri, pool, outputChannel, restore);
+  }
+
+  /** Reveal a panel if there is one, otherwise start one. */
+  static show(
+    extensionUri: vscode.Uri,
+    pool: AgentPool,
+    outputChannel: vscode.OutputChannel,
+  ): ChatPanel {
+    const existing = ChatPanel.active ?? ChatPanel.panels.values().next().value;
+    if (existing) {
+      existing.panel.reveal();
+      return existing;
+    }
+    return ChatPanel.create(extensionUri, pool, outputChannel);
+  }
+
+  static disposeAll(): void {
+    for (const panel of [...ChatPanel.panels]) {
+      panel.dispose();
+    }
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
-    private readonly version: string,
-    outputChannel: vscode.OutputChannel,
+    private readonly pool: AgentPool,
+    private readonly outputChannel: vscode.OutputChannel,
+    private readonly restore?: StoredSession,
   ) {
     this.panel = panel;
-    this.outputChannel = outputChannel;
+    this.cwd = restore?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    ChatPanel.panels.add(this);
+    ChatPanel.active = this;
+
     this.panel.webview.html = this.renderHtml(extensionUri);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    this.panel.onDidChangeViewState(
+      () => {
+        if (this.panel.active) {
+          ChatPanel.active = this;
+        }
+      },
+      null,
+      this.disposables,
+    );
     this.panel.webview.onDidReceiveMessage(
       (msg) => this.handleWebviewMessage(msg),
       null,
@@ -81,9 +130,11 @@ export class ChatPanel {
 </head>
 <body>
   <div id="header"></div>
+  <div id="plan" class="hidden"></div>
   <div id="messages"></div>
+  <div id="completions" class="hidden"></div>
   <div id="input-row">
-    <textarea id="input-box" rows="1" placeholder="Ask claurst..."></textarea>
+    <textarea id="input-box" rows="1" placeholder="Ask claurst... (/ for commands, @ for files)"></textarea>
     <button id="send-btn" title="Send (Enter)">Send</button>
     <button id="stop-btn" title="Cancel the current turn">Stop</button>
   </div>
@@ -93,46 +144,53 @@ export class ChatPanel {
   }
 
   private async startSession(): Promise<void> {
-    // Prefer the first workspace folder, but don't block chat on one being
-    // open — fall back to the user's home directory so the panel is always
-    // usable, matching how a plain terminal session would behave.
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-    const executablePath = vscode.workspace
-      .getConfiguration('claurst')
-      .get<string>('executablePath', 'claurst');
+    const client = await this.pool.acquire(this.cwd);
+    this.holdsAgent = true;
+    this.client = client;
 
-    this.client = new AcpClient(executablePath, cwd, this.version, {
-      onTextChunk: (text, isThought) => this.postToWebview({ type: 'textChunk', text, isThought }),
-      onToolCall: (update) => this.postToWebview({ type: 'toolCall', ...toolCallPayload(update) }),
-      onToolCallUpdate: (update) =>
+    const events = {
+      onTextChunk: (text: string, kind: ChunkKind) =>
+        this.postToWebview({ type: 'textChunk', text, kind }),
+      onToolCall: (update: ToolCallUpdate) =>
+        this.postToWebview({ type: 'toolCall', ...toolCallPayload(update) }),
+      onToolCallUpdate: (update: ToolCallUpdate) =>
         this.postToWebview({ type: 'toolCallUpdate', ...toolCallPayload(update) }),
-      onRequestPermission: (toolCall, options) => this.promptForPermission(toolCall, options),
-      onConfigOptions: (options) => {
+      onRequestPermission: (toolCall: ToolCallUpdate, options: PermissionOption[]) =>
+        this.promptForPermission(toolCall, options),
+      onConfigOptions: (options: ConfigOption[]) => {
         this.options = options;
         this.pushHeader();
       },
-      onModeChanged: (modeId) => {
+      onModeChanged: (modeId: string) => {
         if (this.modes) {
           this.modes = { ...this.modes, currentModeId: modeId };
           this.pushHeader();
         }
       },
-      onStderr: (line) => this.outputChannel.appendLine(line),
-      onExit: (code) => {
-        this.postToWebview({
-          type: 'status',
-          text: `claurst process exited (code ${code ?? 'unknown'}).`,
-        });
+      onCommands: (commands: AvailableCommand[]) =>
+        this.postToWebview({ type: 'commands', commands }),
+      onPlan: (entries: PlanEntry[]) => this.postToWebview({ type: 'plan', entries }),
+      onSessionInfo: (title?: string) => {
+        if (title) {
+          this.panel.title = title;
+        }
       },
-    });
+    };
 
     try {
-      await this.client.initialize();
-      const session = await this.client.newSession(cwd);
+      const session = this.restore
+        ? await client.loadSession(this.restore.sessionId, this.cwd, events)
+        : await client.newSession(this.cwd, events);
+      this.sessionId = session.sessionId;
       this.options = session.configOptions;
       this.modes = session.modes;
       this.pushHeader();
-      this.postToWebview({ type: 'status', text: `Session started in ${cwd}` });
+      this.postToWebview({
+        type: 'status',
+        text: this.restore
+          ? `Reopened ${this.restore.title ?? this.restore.sessionId}`
+          : `Session started in ${this.cwd}`,
+      });
     } catch (e) {
       this.reportError(e);
     }
@@ -183,14 +241,35 @@ export class ChatPanel {
           this.pick(msg.key).catch((e) => this.reportError(e));
         }
         break;
+      case 'pickFile':
+        this.pickFile().catch((e) => this.reportError(e));
+        break;
       default:
         break;
     }
   }
 
+  /** Let the user choose a file to mention, and put it in the input box. */
+  private async pickFile(): Promise<void> {
+    const files = await vscode.workspace.findFiles('**/*', '**/{node_modules,.git,target}/**', 500);
+    const items = files.map((uri) => ({
+      label: vscode.workspace.asRelativePath(uri),
+      uri,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Which file should Claurst look at?',
+      matchOnDescription: true,
+    });
+    if (picked) {
+      this.postToWebview({ type: 'mention', text: picked.label });
+    }
+  }
+
   /** Open a picker for one pill and send the choice to the agent. */
   private async pick(key: string): Promise<void> {
-    if (!this.client) {
+    const client = this.client;
+    const sessionId = this.sessionId;
+    if (!client || !sessionId) {
       return;
     }
     if (key === MODE_PILL) {
@@ -205,7 +284,7 @@ export class ChatPanel {
       if (!picked) {
         return;
       }
-      await this.client.setMode(picked.id);
+      await client.setMode(sessionId, picked.id);
       this.modes = { ...modes, currentModeId: picked.id };
       this.pushHeader();
       return;
@@ -228,7 +307,7 @@ export class ChatPanel {
     }
     // Setting one option restates all of them: the model list belongs to the
     // account, and the effort ladder belongs to the model.
-    this.options = await this.client.setConfigOption(option.id, picked.value);
+    this.options = await client.setConfigOption(sessionId, option.id, picked.value);
     this.pushHeader();
   }
 
@@ -236,7 +315,9 @@ export class ChatPanel {
    * webview can re-enable input. */
   private async runPrompt(text: string): Promise<void> {
     try {
-      await this.client?.prompt(text);
+      if (this.client && this.sessionId) {
+        await this.client.prompt(this.sessionId, await this.buildPrompt(text));
+      }
     } catch (e) {
       this.reportError(e);
     } finally {
@@ -244,8 +325,67 @@ export class ChatPanel {
     }
   }
 
+  /** Turn what was typed into prompt blocks, resolving any `@file` mention.
+   *
+   * A small file travels with the prompt so the agent does not have to spend a
+   * turn reading it; a large one is named, and the agent reads the part it
+   * needs. */
+  private async buildPrompt(text: string): Promise<PromptBlock[]> {
+    const blocks: PromptBlock[] = [{ type: 'text', text }];
+    const roots = vscode.workspace.workspaceFolders ?? [];
+    for (const mention of mentionsIn(text)) {
+      const uri = await this.resolveMention(mention, roots);
+      if (!uri) {
+        continue;
+      }
+      let stat: vscode.FileStat;
+      try {
+        stat = await vscode.workspace.fs.stat(uri);
+      } catch {
+        // A mention that names nothing is just text; the model sees it either
+        // way, and inventing a file would be worse.
+        continue;
+      }
+      if (stat.size > EMBED_LIMIT_BYTES) {
+        blocks.push({ type: 'resource_link', uri: uri.toString(), name: mention });
+        continue;
+      }
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        blocks.push({
+          type: 'resource',
+          resource: { uri: uri.toString(), text: Buffer.from(bytes).toString('utf8') },
+        });
+      } catch {
+        blocks.push({ type: 'resource_link', uri: uri.toString(), name: mention });
+      }
+    }
+    return blocks;
+  }
+
+  private async resolveMention(
+    mention: string,
+    roots: readonly vscode.WorkspaceFolder[],
+  ): Promise<vscode.Uri | undefined> {
+    if (path.isAbsolute(mention)) {
+      return vscode.Uri.file(mention);
+    }
+    for (const root of roots) {
+      const candidate = vscode.Uri.joinPath(root.uri, mention);
+      try {
+        await vscode.workspace.fs.stat(candidate);
+        return candidate;
+      } catch {
+        // Try the next root; a mention need not belong to the first one.
+      }
+    }
+    return undefined;
+  }
+
   cancelCurrentTurn(): void {
-    this.client?.cancel();
+    if (this.client && this.sessionId) {
+      this.client.cancel(this.sessionId);
+    }
   }
 
   private postToWebview(msg: unknown): void {
@@ -259,8 +399,25 @@ export class ChatPanel {
   }
 
   dispose(): void {
-    ChatPanel.current = undefined;
-    this.client?.dispose();
+    if (!ChatPanel.panels.delete(this)) {
+      // Already disposed: the panel's own onDidDispose and an explicit call
+      // both land here.
+      return;
+    }
+    if (ChatPanel.active === this) {
+      ChatPanel.active = ChatPanel.panels.values().next().value;
+    }
+    if (this.client && this.sessionId) {
+      const client = this.client;
+      const sessionId = this.sessionId;
+      // The session is written out by the agent as it closes, so a panel
+      // closed by accident can be reopened from the session list.
+      client.closeSession(sessionId).catch(() => undefined);
+    }
+    if (this.holdsAgent) {
+      this.holdsAgent = false;
+      this.pool.release();
+    }
     this.panel.dispose();
     for (const d of this.disposables) {
       d.dispose();
@@ -269,11 +426,24 @@ export class ChatPanel {
   }
 }
 
+/** Every `@path` mention in what the user typed. */
+function mentionsIn(text: string): string[] {
+  const found = new Set<string>();
+  const pattern = /(^|\s)@([^\s]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    found.add(match[2]);
+  }
+  return [...found];
+}
+
 function toolCallPayload(update: ToolCallUpdate) {
   return {
     toolCallId: update.toolCallId,
     title: update.title,
     status: update.status,
     kind: update.kind,
+    output: update.output,
+    diffs: update.diffs,
   };
 }
