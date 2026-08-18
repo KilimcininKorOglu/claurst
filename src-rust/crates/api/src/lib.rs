@@ -48,6 +48,7 @@ pub mod providers;
 
 // Model Registry (Phase 3).
 pub mod model_registry;
+pub mod model_sync;
 
 // On-disk models catalog cache, shared by every surface that lists models.
 pub mod model_cache;
