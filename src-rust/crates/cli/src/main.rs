@@ -14,6 +14,7 @@
 
 mod codex_oauth_flow;
 mod oauth_flow;
+mod status_line;
 mod upgrade;
 
 // ---------------------------------------------------------------------------
@@ -2885,36 +2886,17 @@ async fn run_interactive(
         }
     }
 
-    // CLAUDE_STATUS_COMMAND: optional external command whose stdout replaces the
-    // left-side status bar text. Polled every 500ms (debounced) in the main loop.
-    // The command is run in a background task; results flow through a channel.
-    let status_cmd_str = std::env::var("CLAUDE_STATUS_COMMAND").ok();
-    let (status_cmd_tx, mut status_cmd_rx) = mpsc::channel::<String>(4);
-    if let Some(ref cmd_str) = status_cmd_str {
-        let cmd_str = cmd_str.clone();
-        let tx = status_cmd_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                // Run via shell so pipes/redirects in the command string work.
-                let output = if cfg!(target_os = "windows") {
-                    tokio::process::Command::new("cmd")
-                        .args(["/C", &cmd_str])
-                        .output()
-                        .await
-                } else {
-                    tokio::process::Command::new("sh")
-                        .args(["-c", &cmd_str])
-                        .output()
-                        .await
-                };
-                if let Ok(out) = output {
-                    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    let _ = tx.try_send(text);
-                }
-            }
-        });
-    }
+    // External status line: a shell command from the user's settings whose
+    // stdout is rendered above the footer. It runs when the session state
+    // changes, so an idle session spawns nothing.
+    let (status_line_tx, mut status_line_rx) = mpsc::channel::<String>(4);
+    let status_line = live_config
+        .status_line
+        .as_ref()
+        .and_then(|config| status_line::StatusLine::spawn(config, status_line_tx));
+    let status_line_project_dir = tool_ctx.working_dir.display().to_string();
+    let mut status_line_trigger: Option<status_line::TriggerKey> = None;
+    let mut status_line_last_run = std::time::Instant::now();
 
     // Bridge runtime channels — Some when bridge is configured and started.
     //
@@ -5037,9 +5019,32 @@ async fn run_interactive(
             }
         }
 
-        // Drain CLAUDE_STATUS_COMMAND results (most recent wins)
-        if status_cmd_str.is_some() {
-            while let Ok(text) = status_cmd_rx.try_recv() {
+        // External status line: publish the session state whenever it changed,
+        // then take whatever the command last printed. `refreshInterval` adds a
+        // timer on top; without it an idle session never runs the command.
+        if let Some(ref status_line) = status_line {
+            let snapshot = status_line::snapshot(
+                &app,
+                &tool_ctx.session_id,
+                claurst_core::session_storage::transcript_path(
+                    &tool_ctx.working_dir,
+                    &tool_ctx.session_id,
+                )
+                .ok()
+                .map(|path| path.display().to_string()),
+                &status_line_project_dir,
+                messages.len(),
+            );
+            let due = status_line
+                .refresh_interval()
+                .is_some_and(|interval| status_line_last_run.elapsed() >= interval);
+            if due || status_line_trigger.as_ref() != Some(&snapshot.trigger) {
+                status_line_trigger = Some(snapshot.trigger.clone());
+                status_line_last_run = std::time::Instant::now();
+                let size = terminal.size().unwrap_or_default();
+                status_line.request(snapshot.payload(), size.width, size.height);
+            }
+            while let Ok(text) = status_line_rx.try_recv() {
                 app.status_line_override = if text.is_empty() { None } else { Some(text) };
             }
         }
@@ -5860,6 +5865,9 @@ async fn run_interactive(
 
     if let Some(runtime) = bridge_runtime.take() {
         runtime.cancel.cancel();
+    }
+    if let Some(status_line) = status_line {
+        status_line.shutdown();
     }
 
     claurst_plugins::run_global_hook(

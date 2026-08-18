@@ -618,6 +618,16 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         input_height(&app.prompt_input, prompt_text_width) + 1 + bubble
     };
 
+    // The external status line takes its own rows directly above the footer.
+    // It yields while the suggestion popup or a permission prompt is up, so a
+    // multi-line script cannot squeeze out what the user is answering.
+    let status_line_rows = if suggestions_height > 0 || app.permission_request.is_some() {
+        Vec::new()
+    } else {
+        status_line_lines(app, size)
+    };
+    let status_line_height = status_line_rows.len() as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -626,6 +636,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
             Constraint::Length(status_height),
             Constraint::Length(prompt_height),
             Constraint::Length(suggestions_height),
+            Constraint::Length(status_line_height),
             Constraint::Length(1),
         ])
         .split(size);
@@ -659,7 +670,10 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     if suggestions_height > 0 {
         render_prompt_suggestions(frame, app, chunks[4]);
     }
-    render_footer(frame, app, chunks[5]);
+    if status_line_height > 0 {
+        frame.render_widget(Paragraph::new(status_line_rows), chunks[5]);
+    }
+    render_footer(frame, app, chunks[6]);
 
     // Overlays (rendered on top in Z-order)
 
@@ -3182,7 +3196,14 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
 
         // Vim mode indicator — shown for all modes using neovim "-- MODE --" convention.
         // INSERT is dim (common, low-noise); other modes use bright colour.
-        if app.prompt_input.vim_enabled {
+        // A status line that renders `vim.mode` itself can suppress this so the
+        // mode is not shown twice.
+        let vim_indicator_hidden = app
+            .config
+            .status_line
+            .as_ref()
+            .is_some_and(|status_line| status_line.hide_vim_mode_indicator);
+        if app.prompt_input.vim_enabled && !vim_indicator_hidden {
             if !spans.is_empty() {
                 spans.push(Span::raw("  "));
             }
@@ -3501,19 +3522,6 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             ));
         }
 
-        // External status line override
-        if let Some(ref override_text) = app.status_line_override {
-            if !parts.is_empty() {
-                parts.push(Span::raw("  "));
-            }
-            // Strip any ANSI escapes for terminal rendering (plain text)
-            let clean: String = override_text
-                .chars()
-                .filter(|c| c.is_ascii_graphic() || *c == ' ')
-                .collect();
-            parts.push(Span::styled(clean, Style::default().fg(Color::DarkGray)));
-        }
-
         // 8. Bridge badge
         if let Some(badge) = app.bridge_state.status_badge(app.frame_count) {
             if !parts.is_empty() {
@@ -3556,6 +3564,74 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         height: footer_area.height,
     };
     frame.render_widget(Paragraph::new(vec![Line::from(spans)]), padded_area);
+}
+
+/// Lay out the external status line command's output for the rows above the
+/// footer: styled from its own ANSI, padded, and clipped to the terminal.
+///
+/// Returns no rows when nothing has been printed yet, which collapses the row
+/// group so the transcript keeps the space.
+fn status_line_lines(app: &App, size: Rect) -> Vec<Line<'static>> {
+    let Some(text) = app.status_line_override.as_deref() else {
+        return Vec::new();
+    };
+    if text.is_empty() || size.width == 0 {
+        return Vec::new();
+    }
+
+    let requested = app
+        .config
+        .status_line
+        .as_ref()
+        .and_then(|status_line| status_line.padding)
+        .unwrap_or(0);
+    // Leave at least one column of content, however wide the padding asks to be.
+    let padding = requested.min(size.width.saturating_sub(1) / 2) as usize;
+    let content_width = size.width as usize - padding * 2;
+    // A script that prints a hundred lines must not push the transcript away.
+    let max_rows = (size.height / 2).max(1) as usize;
+
+    crate::ansi::ansi_to_lines(text)
+        .into_iter()
+        .take(max_rows)
+        .map(|line| pad_and_clip(line, padding, content_width))
+        .collect()
+}
+
+/// Indent a line by `padding` columns and cut it off at `max_width`, measuring
+/// in display columns so wide glyphs do not overrun the row.
+fn pad_and_clip(line: Line<'static>, padding: usize, max_width: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if padding > 0 {
+        spans.push(Span::raw(" ".repeat(padding)));
+    }
+
+    let mut width = 0usize;
+    for span in line.spans {
+        let span_width = UnicodeWidthStr::width(span.content.as_ref());
+        if width + span_width <= max_width {
+            width += span_width;
+            spans.push(span);
+            continue;
+        }
+        // Clip inside this span, keeping a column for the ellipsis.
+        let style = span.style;
+        let mut kept = String::new();
+        for ch in span.content.chars() {
+            let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+            if width + ch_width + 1 > max_width {
+                break;
+            }
+            kept.push(ch);
+            width += ch_width;
+        }
+        if !kept.is_empty() {
+            spans.push(Span::styled(kept, style));
+        }
+        spans.push(Span::styled("\u{2026}", style));
+        break;
+    }
+    Line::from(spans)
 }
 
 fn render_prompt_suggestions(frame: &mut Frame, app: &App, area: Rect) {
@@ -5529,5 +5605,153 @@ mod tab_expansion_tests {
 
         let line = flatten(&timeline_row_line(&row, false, false, 60, 0));
         assert!(!line.contains('\t'), "a tab survived in {line:?}");
+    }
+}
+
+#[cfg(test)]
+mod external_status_line_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::{Config, StatusLineConfig};
+    use claurst_core::cost::CostTracker;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    const WIDTH: u16 = 40;
+    const HEIGHT: u16 = 12;
+
+    fn app_with_output(output: &str, padding: Option<u16>) -> App {
+        let config = Config {
+            status_line: Some(StatusLineConfig {
+                kind: "command".to_string(),
+                command: "irrelevant".to_string(),
+                padding,
+                refresh_interval: None,
+                hide_vim_mode_indicator: false,
+            }),
+            ..Config::default()
+        };
+        let mut app = App::new(config, CostTracker::new());
+        app.status_line_override = Some(output.to_string());
+        app
+    }
+
+    fn draw(app: &App) -> ratatui::buffer::Buffer {
+        let mut terminal = match Terminal::new(TestBackend::new(WIDTH, HEIGHT)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_app(frame, app)) {
+            panic!("draw: {err}");
+        }
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    /// The status line sits directly above the footer, which is the last row.
+    fn status_row(buffer: &ratatui::buffer::Buffer) -> String {
+        row_text(buffer, HEIGHT - 2)
+    }
+
+    #[test]
+    fn the_output_lands_above_the_footer() {
+        let buffer = draw(&app_with_output("ctx 42%", None));
+        assert_eq!(status_row(&buffer), "ctx 42%");
+    }
+
+    #[test]
+    fn non_ascii_output_is_not_stripped() {
+        // The footer used to filter on `is_ascii_graphic`, printing "alyor".
+        let buffer = draw(&app_with_output("çalışıyor", None));
+        assert_eq!(status_row(&buffer), "çalışıyor");
+    }
+
+    #[test]
+    fn a_colour_reaches_the_cells() {
+        let buffer = draw(&app_with_output("\u{1b}[32mok\u{1b}[0m!", None));
+        assert_eq!(status_row(&buffer), "ok!");
+        assert_eq!(buffer[(0, HEIGHT - 2)].fg, Color::Green);
+        // The reset returns the cell to the frame's own foreground.
+        assert_eq!(buffer[(2, HEIGHT - 2)].fg, Color::White);
+    }
+
+    #[test]
+    fn every_printed_line_gets_its_own_row() {
+        let buffer = draw(&app_with_output("first\nsecond", None));
+        assert_eq!(row_text(&buffer, HEIGHT - 3), "first");
+        assert_eq!(row_text(&buffer, HEIGHT - 2), "second");
+    }
+
+    #[test]
+    fn padding_indents_the_output() {
+        let buffer = draw(&app_with_output("ctx", Some(3)));
+        assert_eq!(row_text(&buffer, HEIGHT - 2), "   ctx");
+    }
+
+    #[test]
+    fn a_line_wider_than_the_terminal_is_clipped() {
+        let long = "x".repeat(usize::from(WIDTH) + 20);
+        let buffer = draw(&app_with_output(&long, None));
+        let row = status_row(&buffer);
+
+        assert_eq!(row.chars().count(), usize::from(WIDTH));
+        assert!(
+            row.ends_with('\u{2026}'),
+            "expected an ellipsis, got {row:?}"
+        );
+    }
+
+    #[test]
+    fn a_flood_of_lines_cannot_take_the_screen() {
+        let flood = (0..40)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let buffer = draw(&app_with_output(&flood, None));
+
+        // Half the screen at most, so the transcript keeps the rest. Only the
+        // status line prints bare numbers, so counting those counts its rows.
+        let rows = (0..HEIGHT)
+            .filter(|y| row_text(&buffer, *y).trim().parse::<u32>().is_ok())
+            .count();
+        assert_eq!(
+            rows,
+            usize::from(HEIGHT) / 2,
+            "status line took {rows} rows"
+        );
+    }
+
+    #[test]
+    fn the_row_yields_to_the_suggestion_popup() {
+        let mut app = app_with_output("ctx 42%", None);
+        app.prompt_input.suggestions = vec![crate::prompt_input::TypeaheadSuggestion {
+            text: "/help".to_string(),
+            description: String::new(),
+            source: crate::prompt_input::TypeaheadSource::SlashCommand,
+        }];
+        let buffer = draw(&app);
+
+        for y in 0..HEIGHT {
+            assert!(
+                !row_text(&buffer, y).contains("ctx 42%"),
+                "the status line stayed up while suggestions were open"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_reserved_before_the_first_run() {
+        let mut app = app_with_output("", None);
+        app.status_line_override = None;
+        let buffer = draw(&app);
+
+        assert_eq!(status_row(&buffer), "");
     }
 }

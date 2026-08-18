@@ -4,6 +4,7 @@
 
 use super::*;
 use async_trait::async_trait;
+use claurst_core::config::StatusLineConfig;
 
 pub struct StatuslineCommand;
 pub struct SecurityReviewCommand;
@@ -31,7 +32,7 @@ impl SlashCommand for StatuslineCommand {
            /statusline hide all      — hide everything"
     }
 
-    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let args = args.trim();
         let current = load_ui_settings();
 
@@ -43,11 +44,13 @@ impl SlashCommand for StatuslineCommand {
                  Show tokens: {tokens}\n\
                  Show model:  {model}\n\
                  Show time:   {time}\n\n\
+                 {external}\n\n\
                  Use /statusline [show|hide] [cost|tokens|model|time|all] to change.",
                 cost = fmt_bool(current.statusline_show_cost.unwrap_or(true)),
                 tokens = fmt_bool(current.statusline_show_tokens.unwrap_or(true)),
                 model = fmt_bool(current.statusline_show_model.unwrap_or(true)),
                 time = fmt_bool(current.statusline_show_time.unwrap_or(true)),
+                external = describe_external_status_line(ctx.config.status_line.as_ref()),
             ));
         }
 
@@ -112,6 +115,26 @@ fn fmt_bool(v: bool) -> &'static str {
     } else {
         "off"
     }
+}
+
+/// Report the external status line command, which is configured in
+/// `settings.json` rather than through this command.
+fn describe_external_status_line(config: Option<&StatusLineConfig>) -> String {
+    let Some(config) = config.filter(|config| config.is_command()) else {
+        return "External command: none. Add \"statusLine\": {\"type\": \"command\", \
+                \"command\": \"…\"} to ~/.claurst/settings.json to run one."
+            .to_string();
+    };
+
+    let mut description = format!("External command: {}", config.command);
+    match config.refresh_interval {
+        Some(seconds) => description.push_str(&format!("\nRefresh:          every {seconds}s")),
+        None => description.push_str("\nRefresh:          on session changes"),
+    }
+    if let Some(padding) = config.padding {
+        description.push_str(&format!("\nPadding:          {padding}"));
+    }
+    description
 }
 
 // ---- /security-review ----------------------------------------------------
@@ -272,5 +295,53 @@ impl SlashCommand for TerminalSetupCommand {
                 "[!] Nerd Font not detected — box-drawing may appear broken"
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(command: &str) -> StatusLineConfig {
+        StatusLineConfig {
+            kind: "command".to_string(),
+            command: command.to_string(),
+            padding: None,
+            refresh_interval: None,
+            hide_vim_mode_indicator: false,
+        }
+    }
+
+    #[test]
+    fn an_unconfigured_status_line_says_how_to_set_one_up() {
+        let text = describe_external_status_line(None);
+        assert!(text.contains("none"));
+        assert!(text.contains("settings.json"));
+    }
+
+    #[test]
+    fn a_configured_command_is_named_with_its_cadence() {
+        let mut cfg = config("~/.claurst/statusline.sh");
+        cfg.refresh_interval = Some(5);
+        cfg.padding = Some(2);
+
+        let text = describe_external_status_line(Some(&cfg));
+        assert!(text.contains("~/.claurst/statusline.sh"));
+        assert!(text.contains("every 5s"));
+        assert!(text.contains("Padding:          2"));
+    }
+
+    #[test]
+    fn without_a_refresh_interval_the_cadence_is_the_session() {
+        let text = describe_external_status_line(Some(&config("date")));
+        assert!(text.contains("on session changes"));
+    }
+
+    #[test]
+    fn a_type_that_is_not_a_command_reads_as_unconfigured() {
+        let mut cfg = config("date");
+        cfg.kind = "webhook".to_string();
+
+        assert!(describe_external_status_line(Some(&cfg)).contains("none"));
     }
 }

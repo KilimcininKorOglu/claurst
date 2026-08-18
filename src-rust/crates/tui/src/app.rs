@@ -1525,7 +1525,8 @@ pub struct App {
     pub background_task_count: usize,
     /// Background task status text shown in footer pill.
     pub background_task_status: Option<String>,
-    /// External status line command output (from CLAUDE_STATUS_COMMAND).
+    /// Last stdout of the external status line command (settings `statusLine`),
+    /// rendered with its own ANSI styling in the rows above the footer.
     pub status_line_override: Option<String>,
     /// Whether auto-compact is enabled (from settings).
     pub auto_compact_enabled: bool,

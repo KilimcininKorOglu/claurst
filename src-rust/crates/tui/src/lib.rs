@@ -65,6 +65,9 @@ static MOUSE_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(true);
 
 /// Agent definitions list and coordinator progress view.
 pub mod agents_view;
+
+/// ANSI escape parsing for externally produced text.
+pub mod ansi;
 /// Application state and main event loop.
 pub mod app;
 /// Model-initiated question dialog (AskUserQuestion tool).
