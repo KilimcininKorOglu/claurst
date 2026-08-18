@@ -441,6 +441,9 @@ impl ToolContext {
             working_dir: Some(self.working_dir.clone()),
             allowed_roots: self.permission_allowed_roots(),
             context_description: None,
+            // Whatever the running call was given, so a prompt can show what
+            // it is approving rather than only which tool asked.
+            input: self.current_call.as_ref().map(|call| call.input.clone()),
         }
     }
 

@@ -69,10 +69,18 @@ pub async fn forward_pending(
         reason.clone()
     };
 
-    let fields = acp::ToolCallUpdateFields::new()
+    let mut fields = acp::ToolCallUpdateFields::new()
         .kind(Some(infer_tool_kind(&request)))
         .status(Some(acp::ToolCallStatus::Pending))
-        .title(Some(title));
+        .title(Some(title))
+        .content(Some(preview(&request).await));
+    let locations = locations_of(&request);
+    if !locations.is_empty() {
+        fields = fields.locations(Some(locations));
+    }
+    if let Some(input) = &request.input {
+        fields = fields.raw_input(Some(input.clone()));
+    }
     let tool_call = acp::ToolCallUpdate::new(acp::ToolCallId::new(tool_use_id.as_str()), fields);
 
     let options = vec![
@@ -91,6 +99,11 @@ pub async fn forward_pending(
             "Reject",
             acp::PermissionOptionKind::RejectOnce,
         ),
+        acp::PermissionOption::new(
+            acp::PermissionOptionId::new("reject_always"),
+            "Reject always",
+            acp::PermissionOptionKind::RejectAlways,
+        ),
     ];
 
     let request_params = acp::RequestPermissionRequest::new(session_id, tool_call, options);
@@ -105,12 +118,7 @@ pub async fn forward_pending(
 
     let decision = match result {
         Ok(Ok(response)) => match response.outcome {
-            acp::RequestPermissionOutcome::Selected(sel) => match sel.option_id.0.as_ref() {
-                "allow_once" => PermissionDecision::Allow,
-                "allow_always" => PermissionDecision::AllowPermanently,
-                "reject_always" => PermissionDecision::DenyPermanently,
-                _ => PermissionDecision::Deny,
-            },
+            acp::RequestPermissionOutcome::Selected(sel) => decision_for(sel.option_id.0.as_ref()),
             acp::RequestPermissionOutcome::Cancelled => PermissionDecision::Deny,
             _ => PermissionDecision::Deny,
         },
@@ -125,6 +133,126 @@ pub async fn forward_pending(
     };
 
     let _ = decision_tx.send(decision);
+}
+
+/// What the option the user picked means here.
+///
+/// An id this does not know denies: an approval must be something the client
+/// was actually offered, never a default.
+fn decision_for(option_id: &str) -> PermissionDecision {
+    match option_id {
+        "allow_once" => PermissionDecision::Allow,
+        "allow_always" => PermissionDecision::AllowPermanently,
+        "reject_always" => PermissionDecision::DenyPermanently,
+        _ => PermissionDecision::Deny,
+    }
+}
+
+/// The file this request is about, when it names one.
+///
+/// A client draws its "jump to file" affordance from this, so a request that
+/// names no path gets an empty list rather than an invented one.
+fn locations_of(request: &PermissionRequest) -> Vec<acp::ToolCallLocation> {
+    match &request.path {
+        Some(path) => vec![acp::ToolCallLocation::new(std::path::PathBuf::from(path))],
+        None => Vec::new(),
+    }
+}
+
+/// What the client should show alongside "approve this?".
+///
+/// A prompt naming only the tool asks the user to approve something they
+/// cannot see. A `Write` is shown as a real diff, because both sides of it are
+/// known: the file on disk and the text about to replace it. Everything else
+/// is described in words built from the call's own arguments — an `Edit`'s new
+/// file contents do not exist yet, and computing them here would be a second
+/// implementation of the edit that could disagree with the tool's own.
+async fn preview(request: &PermissionRequest) -> Vec<acp::ToolCallContent> {
+    if let Some(diff) = write_diff(request).await {
+        return vec![acp::ToolCallContent::Diff(diff)];
+    }
+    let described = describe(request);
+    if described.is_empty() {
+        return Vec::new();
+    }
+    vec![acp::ToolCallContent::Content(acp::Content::new(
+        acp::ContentBlock::Text(acp::TextContent::new(described)),
+    ))]
+}
+
+/// A whole-file diff for a call that replaces a file outright.
+///
+/// `None` for every other tool, and for a write whose target cannot be read as
+/// text: the protocol's diff carries text, and there is nothing truthful to
+/// put in it otherwise. A file that does not exist yet diffs against nothing,
+/// which is what creating it is.
+async fn write_diff(request: &PermissionRequest) -> Option<acp::Diff> {
+    if !matches!(request.tool_name.as_str(), "Write" | "FileWrite") {
+        return None;
+    }
+    let input = request.input.as_ref()?;
+    let new_text = input.get("content")?.as_str()?.to_string();
+    let path = request.path.clone()?;
+    let old_text = match tokio::fs::read_to_string(&path).await {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        // Unreadable is not the same as absent, and claiming the file was
+        // empty would show the user a diff that adds a file it replaces.
+        Err(_) => return None,
+    };
+    let mut diff = acp::Diff::new(std::path::PathBuf::from(path), new_text);
+    if let Some(old) = old_text {
+        diff = diff.old_text(Some(old));
+    }
+    Some(diff)
+}
+
+/// Say in words what the call would do, from its own arguments.
+///
+/// Falls back to whatever the tool already explained (`context_description`,
+/// then `details`) when the arguments are not in a shape this knows.
+fn describe(request: &PermissionRequest) -> String {
+    let by_input = request
+        .input
+        .as_ref()
+        .and_then(|input| match request.tool_name.as_str() {
+            "Edit" | "FileEdit" => {
+                let old = input.get("old_string")?.as_str()?;
+                let new = input.get("new_string")?.as_str()?;
+                let all = input
+                    .get("replace_all")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let scope = if all { "every occurrence of" } else { "" };
+                Some(format!(
+                    "Replace {scope}\n\n```\n{}\n```\n\nwith\n\n```\n{}\n```",
+                    truncate(old),
+                    truncate(new)
+                ))
+            }
+            "Bash" | "PtyBash" => Some(format!(
+                "Run\n\n```\n{}\n```",
+                truncate(input.get("command")?.as_str()?)
+            )),
+            "WebFetch" => Some(format!("Fetch {}", input.get("url")?.as_str()?)),
+            _ => None,
+        });
+
+    by_input
+        .or_else(|| request.context_description.clone())
+        .or_else(|| request.details.clone())
+        .unwrap_or_default()
+}
+
+/// Keep a preview readable. A permission prompt is a dialog, not a file
+/// viewer, and a client that wants the whole thing has `raw_input`.
+fn truncate(text: &str) -> String {
+    const LIMIT: usize = 2000;
+    if text.chars().count() <= LIMIT {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(LIMIT).collect();
+    format!("{kept}\n… (truncated)")
 }
 
 /// Classify a permission request into an ACP `ToolKind` for client UI hints.
@@ -183,6 +311,7 @@ mod tests {
             working_dir: None,
             allowed_roots: Vec::new(),
             context_description: None,
+            input: None,
         }
     }
 
@@ -267,6 +396,154 @@ mod tests {
             }
             other => panic!("expected Ask, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn every_offered_option_maps_to_a_decision_of_its_own() {
+        assert!(matches!(
+            decision_for("allow_once"),
+            PermissionDecision::Allow
+        ));
+        assert!(matches!(
+            decision_for("allow_always"),
+            PermissionDecision::AllowPermanently
+        ));
+        assert!(matches!(
+            decision_for("reject_once"),
+            PermissionDecision::Deny
+        ));
+        assert!(matches!(
+            decision_for("reject_always"),
+            PermissionDecision::DenyPermanently
+        ));
+    }
+
+    #[test]
+    fn an_option_that_was_never_offered_denies() {
+        assert!(matches!(
+            decision_for("allow_everything_forever"),
+            PermissionDecision::Deny
+        ));
+    }
+
+    #[test]
+    fn a_request_naming_a_file_says_which_one() {
+        let mut req = request("Edit", false);
+        req.path = Some("/src/main.rs".to_string());
+
+        let locations = locations_of(&req);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, std::path::PathBuf::from("/src/main.rs"));
+    }
+
+    #[test]
+    fn a_request_naming_no_file_invents_none() {
+        assert!(locations_of(&request("Bash", false)).is_empty());
+    }
+
+    #[test]
+    fn an_edit_shows_both_sides_of_the_change() {
+        let mut req = request("Edit", false);
+        req.input = Some(serde_json::json!({
+            "file_path": "/src/main.rs",
+            "old_string": "fn old()",
+            "new_string": "fn new()",
+        }));
+
+        let described = describe(&req);
+        assert!(described.contains("fn old()"), "{described}");
+        assert!(described.contains("fn new()"), "{described}");
+    }
+
+    #[test]
+    fn replacing_everywhere_is_said_out_loud() {
+        let mut req = request("Edit", false);
+        req.input = Some(serde_json::json!({
+            "old_string": "a",
+            "new_string": "b",
+            "replace_all": true,
+        }));
+
+        assert!(
+            describe(&req).contains("every occurrence"),
+            "{}",
+            describe(&req)
+        );
+    }
+
+    #[test]
+    fn a_command_is_shown_before_it_runs() {
+        let mut req = request("Bash", false);
+        req.input = Some(serde_json::json!({ "command": "rm -rf /tmp/x" }));
+
+        assert!(describe(&req).contains("rm -rf /tmp/x"));
+    }
+
+    #[test]
+    fn a_tool_this_knows_nothing_about_falls_back_to_what_it_explained() {
+        let mut req = request("SomeMcpTool", false);
+        req.input = Some(serde_json::json!({ "anything": 1 }));
+        req.context_description = Some("call the deploy endpoint".to_string());
+
+        assert_eq!(describe(&req), "call the deploy endpoint");
+    }
+
+    #[test]
+    fn a_request_that_explains_nothing_shows_nothing() {
+        assert!(describe(&request("SomeMcpTool", false)).is_empty());
+    }
+
+    #[test]
+    fn a_long_preview_is_cut_rather_than_sent_whole() {
+        let long = "x".repeat(5000);
+        let cut = truncate(&long);
+
+        assert!(cut.chars().count() < long.chars().count());
+        assert!(cut.ends_with("… (truncated)"), "{}", &cut[cut.len() - 40..]);
+    }
+
+    #[tokio::test]
+    async fn a_write_is_shown_as_a_diff_against_what_is_on_disk() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("notes.txt");
+        tokio::fs::write(&path, "before\n").await.expect("seed");
+
+        let mut req = request("Write", false);
+        req.path = Some(path.display().to_string());
+        req.input = Some(serde_json::json!({ "content": "after\n" }));
+
+        let diff = write_diff(&req).await.expect("a write diffs");
+        assert_eq!(diff.new_text, "after\n");
+        assert_eq!(diff.old_text.as_deref(), Some("before\n"));
+    }
+
+    #[tokio::test]
+    async fn creating_a_file_diffs_against_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut req = request("Write", false);
+        req.path = Some(dir.path().join("new.txt").display().to_string());
+        req.input = Some(serde_json::json!({ "content": "hello\n" }));
+
+        let diff = write_diff(&req).await.expect("a write diffs");
+        assert_eq!(diff.old_text, None, "a new file had no previous contents");
+    }
+
+    #[tokio::test]
+    async fn an_edit_is_not_passed_off_as_a_whole_file_diff() {
+        // The new contents do not exist yet, and a Diff carrying only the
+        // changed fragment would render as though it were the whole file.
+        let mut req = request("Edit", false);
+        req.path = Some("/src/main.rs".to_string());
+        req.input = Some(serde_json::json!({
+            "old_string": "a",
+            "new_string": "b",
+        }));
+
+        assert!(write_diff(&req).await.is_none());
+        assert!(matches!(
+            preview(&req).await.as_slice(),
+            [acp::ToolCallContent::Content(_)]
+        ));
     }
 
     #[test]

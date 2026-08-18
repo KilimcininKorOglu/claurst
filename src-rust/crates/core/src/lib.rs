@@ -4142,6 +4142,11 @@ pub mod permissions {
         /// Context-aware description showing user WHY the tool needs permission.
         /// E.g. "bash: execute `ls -la /home`", "write file: /path/to/.bashrc", "fetch: https://example.com"
         pub context_description: Option<String>,
+        /// The arguments of the call being approved, when the request was
+        /// raised from inside a tool call. A prompt that only names the tool
+        /// cannot show what it would do; this is what a UI renders a preview
+        /// from. `None` for a check raised outside any call.
+        pub input: Option<serde_json::Value>,
     }
 
     // -----------------------------------------------------------------------
@@ -6531,6 +6536,7 @@ mod tests {
             working_dir: None,
             allowed_roots: Vec::new(),
             context_description: None,
+            input: None,
         }
     }
 

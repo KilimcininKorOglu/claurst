@@ -7345,6 +7345,7 @@ mod remote_permission_tests {
             working_dir: None,
             allowed_roots: Vec::new(),
             context_description: None,
+            input: None,
         };
         (
             claurst_tools::PendingPermissionRequest {
