@@ -32,23 +32,28 @@ pub async fn handle(
     turn: crate::sessions::TurnGuard,
     params: acp::PromptRequest,
 ) -> Result<acp::PromptResponse, acp::Error> {
-    // Convert prompt content blocks → a single user message in Claurst's
-    // internal format.
-    let user_text = render_prompt_blocks(&params.prompt);
-    if user_text.trim().is_empty() {
+    // Convert prompt content blocks → the user turn in Claurst's internal
+    // format.
+    let rendered = render_prompt_blocks(&params.prompt);
+    let user_text = text_of(&rendered);
+    if rendered.is_empty() || (user_text.trim().is_empty() && rendered.len() == 1) {
         return Err(acp::Error::invalid_params());
     }
 
     // A prompt naming a slash command is the command layer's to answer, and
-    // only what it hands back becomes a turn.
-    let turn_text = match crate::commands::split_command(&user_text) {
+    // only what it hands back becomes a turn. What a command hands back is
+    // text, so an image alongside one is not carried into that turn.
+    let user_turn = match crate::commands::split_command(&user_text) {
         Some((name, arguments)) => {
             match run_command(&runtime, &connection, &session, &name, &arguments).await {
-                CommandTurn::Prompt(text) => text,
+                CommandTurn::Prompt(text) => Message::user(text),
                 CommandTurn::Answered(stop) => return Ok(acp::PromptResponse::new(stop)),
             }
         }
-        None => user_text,
+        // A prompt that is only words keeps the shape it always had, so a
+        // transcript written before images were carried still reads the same.
+        None if rendered.len() == 1 => Message::user(user_text),
+        None => Message::user_blocks(rendered),
     };
 
     // Append the user turn to the session transcript.
@@ -56,7 +61,7 @@ pub async fn handle(
         let guard = session.messages.lock();
         guard.clone()
     };
-    messages.push(Message::user(turn_text));
+    messages.push(user_turn);
 
     // The token this turn was claimed with. It is fresh, so a `session/cancel`
     // that ended an earlier turn cannot end this one before it starts.
@@ -260,14 +265,33 @@ async fn run_command(
     }
 }
 
-/// Concatenate text from prompt content blocks.
+/// Turn the client's prompt blocks into the ones the model is sent.
 ///
 /// A resource the client embedded (an `@file` mention in an editor) arrives
 /// with its own uri, which is named alongside the contents: the model cannot
-/// answer about a file whose path it was never told. Image and audio blocks
-/// are dropped, and `initialize` says so.
-fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> String {
+/// answer about a file whose path it was never told. Text runs are joined into
+/// a single block so the common all-text prompt keeps the shape it always had.
+/// An image is carried through as an image.
+///
+/// Audio is still dropped, and `initialize` says so: the internal message type
+/// has no audio block, so there is nothing to carry it in.
+fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> Vec<claurst_core::types::ContentBlock> {
+    use claurst_core::types::{ContentBlock, ImageSource};
+
+    let mut rendered: Vec<ContentBlock> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
+
+    // Text accumulates until an image interrupts it, so the model sees the
+    // caption next to the picture it describes rather than after all of them.
+    fn flush(parts: &mut Vec<String>, rendered: &mut Vec<ContentBlock>) {
+        if parts.is_empty() {
+            return;
+        }
+        rendered.push(ContentBlock::Text {
+            text: std::mem::take(parts).join("\n\n"),
+        });
+    }
+
     for block in blocks {
         match block {
             acp::ContentBlock::Text(t) => parts.push(t.text.clone()),
@@ -291,15 +315,40 @@ fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> String {
                     (None, None) => warn!("ACP: ignoring a resource block with no uri or text"),
                 }
             }
-            acp::ContentBlock::Image(_) | acp::ContentBlock::Audio(_) => {
-                warn!("ACP: ignoring multimedia content block (capability not advertised)");
+            acp::ContentBlock::Image(image) => {
+                flush(&mut parts, &mut rendered);
+                rendered.push(ContentBlock::Image {
+                    source: ImageSource {
+                        source_type: "base64".to_string(),
+                        media_type: Some(image.mime_type.clone()),
+                        data: Some(image.data.clone()),
+                        url: None,
+                    },
+                });
+            }
+            acp::ContentBlock::Audio(_) => {
+                warn!("ACP: ignoring audio content block (capability not advertised)");
             }
             _ => {
                 warn!("ACP: ignoring unknown content block variant");
             }
         }
     }
-    parts.join("\n\n")
+    flush(&mut parts, &mut rendered);
+    rendered
+}
+
+/// Everything the prompt said in words, for the checks that read words: is
+/// this a slash command, and did the client send anything at all.
+fn text_of(blocks: &[claurst_core::types::ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            claurst_core::types::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Pump QueryEvents → `session/update` SessionNotifications.
@@ -726,7 +775,9 @@ mod tests {
             acp::ContentBlock::Text(acp::TextContent::new("first")),
             acp::ContentBlock::Text(acp::TextContent::new("second")),
         ];
-        assert_eq!(render_prompt_blocks(&blocks), "first\n\nsecond");
+        let rendered = render_prompt_blocks(&blocks);
+        assert_eq!(rendered.len(), 1, "an all-text prompt stays one block");
+        assert_eq!(text_of(&rendered), "first\n\nsecond");
     }
 
     #[test]
@@ -738,20 +789,64 @@ mod tests {
             "file:///tmp/notes.md",
         ))];
         assert_eq!(
-            render_prompt_blocks(&blocks),
+            text_of(&render_prompt_blocks(&blocks)),
             "[resource link: file:///tmp/notes.md]"
         );
     }
 
     #[test]
-    fn an_image_is_dropped_and_the_text_around_it_survives() {
-        // The server does not advertise the image capability, so an editor that
-        // sends one anyway must not cost the user the rest of the prompt.
+    fn an_image_reaches_the_model_as_an_image() {
         let blocks = vec![
             acp::ContentBlock::Text(acp::TextContent::new("caption")),
             acp::ContentBlock::Image(acp::ImageContent::new("base64data", "image/png")),
         ];
-        assert_eq!(render_prompt_blocks(&blocks), "caption");
+
+        let rendered = render_prompt_blocks(&blocks);
+        assert_eq!(text_of(&rendered), "caption");
+        match &rendered[1] {
+            claurst_core::types::ContentBlock::Image { source } => {
+                assert_eq!(source.source_type, "base64");
+                assert_eq!(source.media_type.as_deref(), Some("image/png"));
+                assert_eq!(source.data.as_deref(), Some("base64data"));
+            }
+            other => panic!("expected an image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_caption_stays_next_to_the_image_it_describes() {
+        // Joining all the text first would put the second caption under the
+        // first picture.
+        let blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent::new("before")),
+            acp::ContentBlock::Image(acp::ImageContent::new("one", "image/png")),
+            acp::ContentBlock::Text(acp::TextContent::new("after")),
+        ];
+
+        let rendered = render_prompt_blocks(&blocks);
+        assert_eq!(rendered.len(), 3);
+        assert!(matches!(
+            &rendered[0],
+            claurst_core::types::ContentBlock::Text { text } if text == "before"
+        ));
+        assert!(matches!(
+            &rendered[2],
+            claurst_core::types::ContentBlock::Text { text } if text == "after"
+        ));
+    }
+
+    #[test]
+    fn audio_is_still_dropped_and_the_text_around_it_survives() {
+        // There is no audio block in the internal message type, so an editor
+        // that sends one anyway must not cost the user the rest of the prompt.
+        let blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent::new("listen to this")),
+            acp::ContentBlock::Audio(acp::AudioContent::new("base64data", "audio/wav")),
+        ];
+
+        let rendered = render_prompt_blocks(&blocks);
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(text_of(&rendered), "listen to this");
     }
 
     fn history_with(changes: &[(&str, &[u8], &[u8])]) -> parking_lot::Mutex<FileHistory> {
@@ -849,15 +944,15 @@ mod tests {
             acp::ContentBlock::Resource(resource),
         ];
 
-        let rendered = render_prompt_blocks(&blocks);
+        let rendered = text_of(&render_prompt_blocks(&blocks));
         assert!(rendered.contains("file:///repo/src/main.rs"), "{rendered}");
         assert!(rendered.contains("fn main() {}"), "{rendered}");
         assert!(rendered.starts_with("explain this"), "{rendered}");
     }
 
     #[test]
-    fn no_blocks_render_as_no_text() {
-        assert_eq!(render_prompt_blocks(&[]), "");
+    fn no_blocks_render_as_nothing() {
+        assert!(render_prompt_blocks(&[]).is_empty());
     }
 
     #[test]

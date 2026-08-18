@@ -80,17 +80,34 @@ fn update_for(role: &Role, block: &ContentBlock) -> Vec<acp::SessionUpdate> {
                 ),
             )]
         }
-        // An image, a document or a local shell block has no place in the
-        // replay: the protocol carries them per prompt, not per transcript.
+        // A picture the user attached is part of what was said, so a replayed
+        // conversation shows it rather than only its caption. Only base64 data
+        // can be replayed: the protocol's image block carries the bytes, and a
+        // url the agent fetched is not something to hand back as one.
+        ContentBlock::Image { source } => match (&source.data, &source.media_type) {
+            (Some(data), Some(media_type)) => vec![chunk_for(
+                role,
+                acp::ContentBlock::Image(acp::ImageContent::new(data.clone(), media_type.clone())),
+            )],
+            _ => Vec::new(),
+        },
+        // A document or a local shell block has no place in the replay: the
+        // protocol carries them per prompt, not per transcript.
         _ => Vec::new(),
     }
 }
 
 /// A message chunk attributed to whoever said it.
 fn text_chunk(role: &Role, text: &str) -> acp::SessionUpdate {
-    let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
-        text.to_string(),
-    )));
+    chunk_for(
+        role,
+        acp::ContentBlock::Text(acp::TextContent::new(text.to_string())),
+    )
+}
+
+/// The same, for a block that is not text.
+fn chunk_for(role: &Role, block: acp::ContentBlock) -> acp::SessionUpdate {
+    let chunk = acp::ContentChunk::new(block);
     match role {
         Role::User => acp::SessionUpdate::UserMessageChunk(chunk),
         _ => acp::SessionUpdate::AgentMessageChunk(chunk),
@@ -170,6 +187,53 @@ mod tests {
             snapshot_patch: None,
             timestamp: None,
         }
+    }
+
+    #[test]
+    fn a_picture_the_user_attached_is_replayed_as_one() {
+        let messages = vec![user_blocks(vec![
+            ContentBlock::Text {
+                text: "what is this".to_string(),
+            },
+            ContentBlock::Image {
+                source: claurst_core::types::ImageSource {
+                    source_type: "base64".to_string(),
+                    media_type: Some("image/png".to_string()),
+                    data: Some("base64data".to_string()),
+                    url: None,
+                },
+            },
+        ])];
+
+        let updates = updates_for(&messages);
+
+        assert_eq!(updates.len(), 2);
+        match &updates[1] {
+            acp::SessionUpdate::UserMessageChunk(chunk) => match &chunk.content {
+                acp::ContentBlock::Image(image) => {
+                    assert_eq!(image.data, "base64data");
+                    assert_eq!(image.mime_type, "image/png");
+                }
+                other => panic!("expected an image, got {other:?}"),
+            },
+            other => panic!("expected a user chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_image_with_no_bytes_is_left_out_rather_than_faked() {
+        // A url the agent was given is not something to hand back as image
+        // data, and an empty image block would render as a broken picture.
+        let messages = vec![user_blocks(vec![ContentBlock::Image {
+            source: claurst_core::types::ImageSource {
+                source_type: "url".to_string(),
+                media_type: None,
+                data: None,
+                url: Some("https://example.com/a.png".to_string()),
+            },
+        }])];
+
+        assert!(updates_for(&messages).is_empty());
     }
 
     #[test]

@@ -213,12 +213,15 @@ impl AgentServer {
                             .close(Some(acp::SessionCloseCapabilities::new())),
                     )
                     .prompt_capabilities(
-                        // Embedded resources reach the model: `render_prompt_blocks`
-                        // reads both a resource link and an inline resource. Images
-                        // and audio stay unadvertised because that same function
-                        // drops them, and claiming otherwise would lose a file the
-                        // user attached.
-                        acp::PromptCapabilities::new().embedded_context(true),
+                        // Embedded resources and images reach the model:
+                        // `render_prompt_blocks` reads a resource link, an
+                        // inline resource, and an image. Audio stays
+                        // unadvertised because the internal message type has
+                        // no audio block to carry it in, and claiming
+                        // otherwise would lose what the user attached.
+                        acp::PromptCapabilities::new()
+                            .embedded_context(true)
+                            .image(true),
                     )
                     .mcp_capabilities(acp::McpCapabilities::new()),
             );
