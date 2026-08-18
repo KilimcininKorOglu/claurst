@@ -35,21 +35,27 @@ export class AgentPool {
   }
 
   private async start(cwd: string): Promise<AcpClient> {
-    const executablePath = vscode.workspace
-      .getConfiguration('claurst')
-      .get<string>('executablePath', 'claurst');
-    const client = new AcpClient(executablePath, cwd, this.version, {
-      onStderr: (line) => this.outputChannel.appendLine(line),
-      onExit: (code) => {
-        this.outputChannel.appendLine(
-          `[claurst-vscode] agent process exited (code ${code ?? 'unknown'})`,
-        );
-        // A process that died takes every session with it; the next panel
-        // starts a fresh one rather than talking to a corpse.
-        this.client = undefined;
-        this.starting = undefined;
+    const config = vscode.workspace.getConfiguration('claurst');
+    const executablePath = config.get<string>('executablePath', 'claurst');
+    const hostTerminals = config.get<boolean>('hostTerminals', false);
+    const client = new AcpClient(
+      executablePath,
+      cwd,
+      this.version,
+      {
+        onStderr: (line) => this.outputChannel.appendLine(line),
+        onExit: (code) => {
+          this.outputChannel.appendLine(
+            `[claurst-vscode] agent process exited (code ${code ?? 'unknown'})`,
+          );
+          // A process that died takes every session with it; the next panel
+          // starts a fresh one rather than talking to a corpse.
+          this.client = undefined;
+          this.starting = undefined;
+        },
       },
-    });
+      hostTerminals,
+    );
     await client.initialize();
     this.client = client;
     return client;

@@ -12,6 +12,9 @@
 
   let currentAgentBubble = null;
   const toolCallEls = new Map();
+  /** What each hosted terminal has said, and where it is being drawn. */
+  const terminalText = new Map();
+  const terminalEls = new Map();
   let commands = [];
   let completionIndex = 0;
   let completionMatches = [];
@@ -109,7 +112,26 @@
     for (const diff of msg.diffs || []) {
       el.appendChild(renderDiff(diff));
     }
+    // A tool call is redrawn from scratch on every update, so the terminal's
+    // element is rebuilt too and refilled from what it has said so far.
+    if (msg.terminalId) {
+      const pre = document.createElement('pre');
+      pre.className = 'terminal-output';
+      pre.textContent = terminalText.get(msg.terminalId) || '';
+      terminalEls.set(msg.terminalId, pre);
+      el.appendChild(pre);
+    }
     messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function appendTerminalOutput(terminalId, chunk) {
+    const text = (terminalText.get(terminalId) || '') + chunk;
+    terminalText.set(terminalId, text);
+    const pre = terminalEls.get(terminalId);
+    if (pre) {
+      pre.textContent = text;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
   }
 
   // The pills are whatever the agent said it offers, so they are rebuilt from
@@ -276,6 +298,10 @@
       case 'toolCallUpdate': {
         currentAgentBubble = null;
         upsertToolCall(msg);
+        break;
+      }
+      case 'terminalOutput': {
+        appendTerminalOutput(msg.terminalId, msg.chunk);
         break;
       }
       case 'status': {

@@ -59,9 +59,29 @@ moves.
 
 ## Permissions
 
-A tool that needs approval opens a quick pick. Dismissing it without choosing
-cancels the turn: walking away from the question is not consent, and the tool
-does not run.
+A tool that needs approval opens a quick pick showing what it is about to do:
+a write appears as a diff against the file on disk, an edit as the text it
+replaces and the text replacing it, a command as the command. Dismissing the
+pick without choosing cancels the turn: walking away from the question is not
+consent, and the tool does not run.
+
+## Files the agent reads and writes
+
+The extension hosts the files. A read comes from the buffer you are looking at,
+so edits you have not saved are what the agent sees, and a write goes through a
+workspace edit, so it is undoable and shows up in the editor rather than
+underneath it. A file no editor has open is read and written through the
+workspace filesystem, which also covers a remote workspace.
+
+## Running commands here instead
+
+`claurst.hostTerminals` moves the agent's shell commands into this extension,
+so their output appears live in the panel under the call that started them.
+
+It is off by default, and the reason is not cosmetic: the agent runs a command
+in a real PTY, and this runs it on a pipe. Anything that checks whether it is
+attached to a terminal (npm, cargo, git, pytest) prints differently, and some
+tools disable colour or progress entirely.
 
 ## Developing
 
@@ -74,5 +94,5 @@ Then press F5 to open an Extension Development Host running this extension.
 
 ## Scope
 
-No image or audio input: the agent drops both, and its `initialize` says so.
-Terminals stay with the agent rather than being hosted by the editor.
+No audio input: the agent has no way to carry it to the model, and its
+`initialize` says so.

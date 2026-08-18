@@ -175,6 +175,8 @@ export class ChatPanel {
           this.panel.title = title;
         }
       },
+      onTerminalOutput: (terminalId: string, chunk: string) =>
+        this.postToWebview({ type: 'terminalOutput', terminalId, chunk }),
     };
 
     try {
@@ -445,5 +447,6 @@ function toolCallPayload(update: ToolCallUpdate) {
     kind: update.kind,
     output: update.output,
     diffs: update.diffs,
+    terminalId: update.terminalId,
   };
 }

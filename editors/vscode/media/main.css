@@ -124,6 +124,20 @@ body {
   white-space: pre;
 }
 
+.terminal-output {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 16em;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  background: var(--vscode-terminal-background, var(--vscode-editor-background));
+  color: var(--vscode-terminal-foreground, var(--vscode-editor-foreground));
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+}
+
 .diff-line.added {
   background: var(--vscode-diffEditor-insertedTextBackground, rgba(76, 175, 80, 0.2));
 }

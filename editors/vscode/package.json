@@ -61,6 +61,11 @@
           "type": "string",
           "default": "claurst",
           "description": "Path to the claurst executable. Defaults to resolving 'claurst' from PATH."
+        },
+        "claurst.hostTerminals": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the agent's shell commands in this extension instead of in the agent, so their output appears live in the chat panel. Off by default: the agent runs commands in a real PTY, and this runs them on a pipe, so anything that checks whether it is attached to a terminal (npm, cargo, git, pytest) behaves differently."
         }
       }
     }

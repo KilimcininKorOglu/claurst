@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as readline from 'readline';
 import * as vscode from 'vscode';
+import { TerminalHost } from './terminalHost';
 
 /** Minimal newline-delimited JSON-RPC 2.0 client for the Agent Client Protocol,
  * matching the wire format implemented in src-rust/crates/acp/src/connection.rs:
@@ -28,6 +29,8 @@ export type ToolCallUpdate = {
   output?: string;
   /** Every file this tool rewrote. */
   diffs: ToolDiff[];
+  /** The terminal this call is running in, when we are hosting it. */
+  terminalId?: string;
 };
 
 /** One step of the agent's plan. */
@@ -119,6 +122,8 @@ export interface SessionEvents {
   onPlan?: (entries: PlanEntry[]) => void;
   /** The session was named, or renamed. */
   onSessionInfo?: (title?: string) => void;
+  /** More output from a terminal this extension is hosting. */
+  onTerminalOutput?: (terminalId: string, chunk: string) => void;
 }
 
 export interface AcpClientEvents {
@@ -139,13 +144,25 @@ export class AcpClient {
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private sessions = new Map<string, SessionEvents>();
   private initialized: Promise<void> | undefined;
+  private readonly terminals: TerminalHost;
+  /** Which session started each terminal, so its output reaches that panel. */
+  private terminalOwners = new Map<string, string>();
 
   constructor(
     executablePath: string,
     cwd: string,
     private clientVersion: string,
     private events: AcpClientEvents,
+    /** Whether to run the agent's commands here rather than in the agent. Off
+     * by default: the agent runs them in a real PTY, and a child process here
+     * is on a pipe, so anything that checks `isatty` behaves differently. */
+    private readonly hostTerminals = false,
   ) {
+    this.terminals = new TerminalHost((terminalId, chunk) => {
+      const sessionId = this.terminalOwners.get(terminalId);
+      const handler = sessionId ? this.sessions.get(sessionId) : undefined;
+      handler?.onTerminalOutput?.(terminalId, chunk);
+    });
     this.child = cp.spawn(executablePath, ['acp'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     this.rl = readline.createInterface({ input: this.child.stdout });
     this.rl.on('line', (line) => this.handleLine(line));
@@ -282,6 +299,11 @@ export class AcpClient {
       return;
     }
 
+    if (method.startsWith('terminal/')) {
+      await this.handleTerminalRequest(id, method, params);
+      return;
+    }
+
     // Unknown incoming request — respond with method-not-found so the agent
     // doesn't hang waiting for a reply.
     this.writeMessage({
@@ -289,6 +311,95 @@ export class AcpClient {
       id,
       error: { code: -32601, message: `client does not implement '${method}'` },
     });
+  }
+
+  /** Run and report on the commands the agent handed us.
+   *
+   * A terminal id the host does not know is an error rather than an empty
+   * answer: the agent would otherwise wait for output that will never come. */
+  private async handleTerminalRequest(id: number, method: string, params: any): Promise<void> {
+    const fail = (message: string) =>
+      this.writeMessage({ jsonrpc: '2.0', id, error: { code: -32602, message } });
+    const terminalId: string | undefined = params?.terminalId;
+
+    switch (method) {
+      case 'terminal/create': {
+        try {
+          const created = this.terminals.create({
+            command: params?.command ?? '',
+            args: Array.isArray(params?.args) ? params.args : [],
+            env: Object.fromEntries(
+              (Array.isArray(params?.env) ? params.env : []).map((v: any) => [v?.name, v?.value]),
+            ),
+            cwd: params?.cwd ?? undefined,
+            outputByteLimit: params?.outputByteLimit ?? undefined,
+          });
+          if (params?.sessionId) {
+            this.terminalOwners.set(created, params.sessionId);
+          }
+          this.writeMessage({ jsonrpc: '2.0', id, result: { terminalId: created } });
+        } catch (e) {
+          fail(`could not start ${params?.command}: ${e}`);
+        }
+        return;
+      }
+      case 'terminal/output': {
+        const snapshot = terminalId ? this.terminals.snapshot(terminalId) : undefined;
+        if (!snapshot) {
+          fail(`unknown terminal ${terminalId}`);
+          return;
+        }
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            output: snapshot.output,
+            truncated: snapshot.truncated,
+            exitStatus: snapshot.exit
+              ? { exitCode: snapshot.exit.exitCode, signal: snapshot.exit.signal }
+              : null,
+          },
+        });
+        return;
+      }
+      case 'terminal/wait_for_exit': {
+        const exit = terminalId ? await this.terminals.waitForExit(terminalId) : undefined;
+        if (!exit) {
+          fail(`unknown terminal ${terminalId}`);
+          return;
+        }
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          result: { exitStatus: { exitCode: exit.exitCode, signal: exit.signal } },
+        });
+        return;
+      }
+      case 'terminal/kill': {
+        if (!terminalId || !this.terminals.kill(terminalId)) {
+          fail(`unknown terminal ${terminalId}`);
+          return;
+        }
+        this.writeMessage({ jsonrpc: '2.0', id, result: {} });
+        return;
+      }
+      case 'terminal/release': {
+        if (terminalId) {
+          this.terminals.release(terminalId);
+          this.terminalOwners.delete(terminalId);
+        }
+        // Releasing one that is already gone is not a failure: it is the
+        // state the caller wanted.
+        this.writeMessage({ jsonrpc: '2.0', id, result: {} });
+        return;
+      }
+      default:
+        this.writeMessage({
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32601, message: `client does not implement '${method}'` },
+        });
+    }
   }
 
   private handleNotification(method: string, params: any): void {
@@ -362,11 +473,10 @@ export class AcpClient {
         // We host the files: a read sees the buffer the user is looking at,
         // including edits they have not saved, and a write goes through the
         // workspace so it joins the undo stack instead of appearing beneath
-        // it. Terminals stay with the agent, which already runs commands in a
-        // PTY and reports their output.
+        // it. Terminals only when the user asked for it — see `hostTerminals`.
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: true },
-          terminal: false,
+          terminal: this.hostTerminals,
         },
         clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
       }).then(() => undefined);
@@ -449,6 +559,7 @@ export class AcpClient {
   }
 
   dispose(): void {
+    this.terminals.disposeAll();
     this.rl.close();
     this.child.kill();
   }
@@ -532,6 +643,7 @@ function toolCallOf(update: any): ToolCallUpdate {
     .map((block) => extractText(block.content))
     .filter((text) => text.length > 0)
     .join('\n');
+  const terminal = content.find((block) => block?.type === 'terminal');
   return {
     toolCallId: update.toolCallId,
     title: update.title,
@@ -539,6 +651,7 @@ function toolCallOf(update: any): ToolCallUpdate {
     kind: update.kind,
     output: output.length > 0 ? output : undefined,
     diffs,
+    terminalId: terminal?.terminalId ?? undefined,
   };
 }
 
