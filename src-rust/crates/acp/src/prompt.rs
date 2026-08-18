@@ -355,6 +355,10 @@ async fn forward_events(
                     acp::ToolCall::new(acp::ToolCallId::new(tool_id.as_str()), title)
                         .kind(kind)
                         .status(acp::ToolCallStatus::InProgress);
+                let locations = tool_locations(raw_input.as_ref());
+                if !locations.is_empty() {
+                    tool_call = tool_call.locations(locations);
+                }
                 if let Some(input) = raw_input {
                     tool_call = tool_call.raw_input(Some(input));
                 }
@@ -551,10 +555,122 @@ pub(crate) fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>)
     tool_name.to_string()
 }
 
+/// Which files a call is about, so a client can follow the agent from file to
+/// file rather than only reading about it.
+///
+/// Read from the arguments by field name rather than by tool name, so a tool
+/// that names its path the same way needs nothing added here. A `BatchEdit`
+/// touches several files and reports all of them.
+pub(crate) fn tool_locations(raw_input: Option<&serde_json::Value>) -> Vec<acp::ToolCallLocation> {
+    let Some(input) = raw_input else {
+        return Vec::new();
+    };
+
+    // One edit per file, in the order the call listed them.
+    if let Some(edits) = input.get("edits").and_then(|e| e.as_array()) {
+        return edits
+            .iter()
+            .filter_map(|edit| location_at(edit.get("file_path")?.as_str()?, edit))
+            .collect();
+    }
+
+    for key in ["file_path", "notebook_path", "path"] {
+        if let Some(path) = input.get(key).and_then(|v| v.as_str()) {
+            return location_at(path, input).into_iter().collect();
+        }
+    }
+    Vec::new()
+}
+
+/// One location, carrying the line the call starts at when it names one.
+///
+/// A relative path is left as it is: the client resolves it against the
+/// session's directory, which it already knows, and guessing here would be
+/// wrong for any call made against another root.
+fn location_at(path: &str, input: &serde_json::Value) -> Option<acp::ToolCallLocation> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut location = acp::ToolCallLocation::new(std::path::PathBuf::from(path));
+    // `Read` counts from the first line; the protocol's line is the same
+    // number, so a client can scroll to where the agent is looking.
+    if let Some(offset) = input.get("offset").and_then(|v| v.as_u64()) {
+        location = location.line(Some(offset as u32));
+    }
+    Some(location)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use claurst_core::file_history::FileHistory;
+
+    #[test]
+    fn an_edit_reports_the_file_it_touches() {
+        let input = serde_json::json!({
+            "file_path": "src/main.rs",
+            "old_string": "a",
+            "new_string": "b",
+        });
+
+        let locations = tool_locations(Some(&input));
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, std::path::PathBuf::from("src/main.rs"));
+        assert_eq!(locations[0].line, None);
+    }
+
+    #[test]
+    fn a_read_reports_the_line_it_starts_at() {
+        let input = serde_json::json!({ "file_path": "src/lib.rs", "offset": 120 });
+
+        let locations = tool_locations(Some(&input));
+        assert_eq!(locations[0].line, Some(120));
+    }
+
+    #[test]
+    fn a_batch_edit_reports_every_file_it_touches() {
+        let input = serde_json::json!({
+            "edits": [
+                { "file_path": "a.rs", "old_string": "x", "new_string": "y" },
+                { "file_path": "b.rs", "old_string": "x", "new_string": "y" },
+            ]
+        });
+
+        let paths: Vec<_> = tool_locations(Some(&input))
+            .into_iter()
+            .map(|l| l.path)
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                std::path::PathBuf::from("a.rs"),
+                std::path::PathBuf::from("b.rs")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_notebook_is_found_under_its_own_field_name() {
+        let input = serde_json::json!({ "notebook_path": "run.ipynb" });
+        assert_eq!(
+            tool_locations(Some(&input))[0].path,
+            std::path::PathBuf::from("run.ipynb")
+        );
+    }
+
+    #[test]
+    fn a_call_about_no_file_reports_none() {
+        // A command is not a path, and a client offered one would open it.
+        let input = serde_json::json!({ "command": "ls -la" });
+        assert!(tool_locations(Some(&input)).is_empty());
+        assert!(tool_locations(None).is_empty());
+    }
+
+    #[test]
+    fn an_empty_path_is_not_reported_as_a_location() {
+        let input = serde_json::json!({ "file_path": "" });
+        assert!(tool_locations(Some(&input)).is_empty());
+    }
 
     #[test]
     fn two_text_blocks_are_separated_by_a_blank_line() {
