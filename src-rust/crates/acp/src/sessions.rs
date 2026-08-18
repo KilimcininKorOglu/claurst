@@ -55,6 +55,10 @@ pub struct SessionState {
     /// the transcript, run against it, and write their own copy back, so the
     /// second one to finish would erase the first.
     turn_in_flight: AtomicBool,
+    /// The MCP servers this session was opened with, and the tools they added.
+    /// `None` when the client named none, in which case the session runs with
+    /// the agent's own roster.
+    pub mcp: parking_lot::Mutex<Option<crate::mcp::SessionMcp>>,
 }
 
 /// Proof that this turn owns the session, and the token it is driven by.
@@ -144,6 +148,7 @@ impl SessionState {
             forked_from,
             cost_tracker: claurst_core::CostTracker::new(),
             turn_in_flight: AtomicBool::new(false),
+            mcp: parking_lot::Mutex::new(None),
         })
     }
 

@@ -123,7 +123,14 @@ pub async fn run(
         session_title: session.title.lock().clone(),
         effort_level: overrides.effort.or(runtime.query_config.effort_level),
         remote_session_url: None,
-        mcp_manager: runtime.mcp_manager.clone(),
+        // A command that lists or authenticates MCP servers must talk about
+        // the ones this session is actually running.
+        mcp_manager: session
+            .mcp
+            .lock()
+            .as_ref()
+            .map(|mcp| mcp.manager.clone())
+            .or_else(|| runtime.mcp_manager.clone()),
         mcp_auth_runner: Some(mcp_auth_runner(notes.clone())),
         // Nobody is at this terminal: the client is an editor somewhere else.
         interactive: false,

@@ -223,7 +223,11 @@ impl AgentServer {
                             .embedded_context(true)
                             .image(true),
                     )
-                    .mcp_capabilities(acp::McpCapabilities::new()),
+                    // Stdio is implied by the protocol; http and sse are said
+                    // out loud because a session can now be opened against
+                    // either. A header on one is refused rather than dropped,
+                    // which the request answers with.
+                    .mcp_capabilities(acp::McpCapabilities::new().http(true).sse(true)),
             );
         response = response.agent_info(Some(agent_info));
         Ok(response)
@@ -242,13 +246,7 @@ impl AgentServer {
         let state = SessionState::new(session_id.clone(), req.cwd.clone());
         info!(session_id = %session_id, cwd = %req.cwd.display(), "ACP: new session");
 
-        // v1: ignore req.mcp_servers — agent uses settings.json MCP roster.
-        if !req.mcp_servers.is_empty() {
-            warn!(
-                count = req.mcp_servers.len(),
-                "ACP: session-specific MCP servers are not yet routed (v1) — using global config"
-            );
-        }
+        *state.mcp.lock() = self.session_mcp(&req.mcp_servers).await?;
 
         self.sessions.insert(state.clone());
         Ok(acp::NewSessionResponse::new(session_id)
@@ -266,13 +264,9 @@ impl AgentServer {
         self: &Arc<Self>,
         req: acp::LoadSessionRequest,
     ) -> Result<acp::LoadSessionResponse, acp::Error> {
-        let session = reopen(
-            &self.sessions,
-            &req.session_id,
-            &req.cwd,
-            req.mcp_servers.len(),
-        )
-        .await?;
+        let session = self
+            .reopen_with_mcp(&req.session_id, &req.cwd, &req.mcp_servers)
+            .await?;
 
         let messages = session.messages.lock().clone();
         for update in crate::replay::updates_for(&messages) {
@@ -305,13 +299,9 @@ impl AgentServer {
         self: &Arc<Self>,
         req: acp::ResumeSessionRequest,
     ) -> Result<acp::ResumeSessionResponse, acp::Error> {
-        let session = reopen(
-            &self.sessions,
-            &req.session_id,
-            &req.cwd,
-            req.mcp_servers.len(),
-        )
-        .await?;
+        let session = self
+            .reopen_with_mcp(&req.session_id, &req.cwd, &req.mcp_servers)
+            .await?;
         info!(session_id = %req.session_id, "ACP: session resumed");
 
         Ok(acp::ResumeSessionResponse::new()
@@ -330,16 +320,16 @@ impl AgentServer {
         self: &Arc<Self>,
         req: acp::ForkSessionRequest,
     ) -> Result<acp::ForkSessionResponse, acp::Error> {
-        let source = reopen(
-            &self.sessions,
-            &req.session_id,
-            &req.cwd,
-            req.mcp_servers.len(),
-        )
-        .await?;
+        let source = reopen(&self.sessions, &req.session_id, &req.cwd).await?;
 
         let model = self.runtime.query_config.model.clone();
         let forked = fork_from(&self.sessions, &source, req.cwd.clone(), &model);
+        // Servers the fork named are its own; otherwise it continues the same
+        // conversation, so it continues against the same servers.
+        *forked.mcp.lock() = match self.session_mcp(&req.mcp_servers).await? {
+            Some(own) => Some(own),
+            None => source.mcp.lock().clone(),
+        };
         let forked_id = forked.session_id.clone();
         crate::persist::save(&forked, &model).await;
         info!(
@@ -570,6 +560,37 @@ impl AgentServer {
         })
     }
 
+    /// Reopen a session, giving it the MCP servers the request named.
+    ///
+    /// A session that is already live keeps the servers it was opened with
+    /// unless this request named its own: reconnecting under a client that
+    /// asked for nothing in particular would drop the tools a turn may be
+    /// using right now.
+    async fn reopen_with_mcp(
+        self: &Arc<Self>,
+        session_id: &acp::SessionId,
+        cwd: &std::path::Path,
+        servers: &[acp::McpServer],
+    ) -> Result<Arc<SessionState>, acp::Error> {
+        let session = reopen(&self.sessions, session_id, cwd).await?;
+        if let Some(own) = self.session_mcp(servers).await? {
+            *session.mcp.lock() = Some(own);
+        }
+        Ok(session)
+    }
+
+    /// Connect the MCP servers a request named, for that session alone.
+    ///
+    /// A request that named none answers `None`, and that session runs with
+    /// the agent's own roster: a client relying on the agent's configuration
+    /// must not be handed an empty one.
+    async fn session_mcp(
+        self: &Arc<Self>,
+        servers: &[acp::McpServer],
+    ) -> Result<Option<crate::mcp::SessionMcp>, acp::Error> {
+        crate::mcp::connect(servers, self.runtime.config.advisor_model.as_deref()).await
+    }
+
     async fn on_prompt(
         self: &Arc<Self>,
         req: acp::PromptRequest,
@@ -620,18 +641,11 @@ async fn reopen(
     sessions: &SessionRegistry,
     session_id: &acp::SessionId,
     cwd: &std::path::Path,
-    mcp_server_count: usize,
 ) -> Result<Arc<SessionState>, acp::Error> {
     if !cwd.is_absolute() {
         return Err(acp::Error::invalid_params().data(Some(
             serde_json::json!({ "reason": "cwd must be absolute" }),
         )));
-    }
-    if mcp_server_count > 0 {
-        warn!(
-            count = mcp_server_count,
-            "ACP: session-specific MCP servers are not yet routed — using global config"
-        );
     }
 
     if let Some(live) = sessions.get(session_id) {
@@ -740,7 +754,6 @@ mod tests {
             &sessions,
             &acp::SessionId::new("acp-1"),
             Path::new("relative/path"),
-            0,
         )
         .await
         else {
@@ -760,7 +773,6 @@ mod tests {
             &sessions,
             &acp::SessionId::new("acp-missing"),
             Path::new("/tmp"),
-            0,
         )
         .await
         else {
@@ -782,13 +794,32 @@ mod tests {
         let live = SessionState::new(id.clone(), PathBuf::from("/tmp/live"));
         sessions.insert(live.clone());
 
-        let reopened = reopen(&sessions, &id, Path::new("/tmp/elsewhere"), 0)
+        let reopened = reopen(&sessions, &id, Path::new("/tmp/elsewhere"))
             .await
             .expect("a live session reopens");
 
         // The same state, not a second copy: a turn in flight keeps its
         // transcript and its cancel token.
         assert!(Arc::ptr_eq(&reopened, &live));
+    }
+
+    #[tokio::test]
+    async fn a_session_that_named_no_servers_is_left_on_the_agents_roster() {
+        let _lock = HOME_LOCK.lock().await;
+        let _home = HomeGuard::set();
+
+        let sessions = SessionRegistry::new();
+        let id = acp::SessionId::new("acp-live");
+        sessions.insert(SessionState::new(id.clone(), PathBuf::from("/tmp/live")));
+
+        let reopened = reopen(&sessions, &id, Path::new("/tmp/live"))
+            .await
+            .expect("a live session reopens");
+
+        assert!(
+            reopened.mcp.lock().is_none(),
+            "a session with no servers of its own shares the agent's roster"
+        );
     }
 
     #[test]
@@ -856,7 +887,6 @@ mod tests {
             &sessions,
             &acp::SessionId::new("acp-stored"),
             Path::new("/tmp/stored"),
-            0,
         )
         .await
         .expect("a stored session reopens");

@@ -63,6 +63,9 @@ pub async fn handle(
     };
     messages.push(user_turn);
 
+    // The servers this session was opened with, if it named any of its own.
+    let session_mcp = session.mcp.lock().clone();
+
     // The token this turn was claimed with. It is fresh, so a `session/cancel`
     // that ended an earlier turn cannot end this one before it starts.
     let cancel = turn.token().clone();
@@ -85,7 +88,10 @@ pub async fn handle(
         file_history: session.file_history.clone(),
         current_turn: session.current_turn.clone(),
         non_interactive: false, // ACP routes permissions via the bridge
-        mcp_manager: runtime.mcp_manager.clone(),
+        mcp_manager: session_mcp
+            .as_ref()
+            .map(|mcp| mcp.manager.clone())
+            .or_else(|| runtime.mcp_manager.clone()),
         managed_agent_config: config.managed_agents.clone(),
         config: config.clone(),
         completion_notifier: None,
@@ -143,7 +149,10 @@ pub async fn handle(
     let outcome = claurst_query::run_query_loop(
         runtime.api_client.as_ref(),
         &mut messages,
-        runtime.tools.as_slice(),
+        session_mcp
+            .as_ref()
+            .map(|mcp| mcp.tools.as_slice())
+            .unwrap_or_else(|| runtime.tools.as_slice()),
         &tool_ctx,
         &query_config,
         session.cost_tracker.clone(),

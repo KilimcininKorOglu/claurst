@@ -26,6 +26,7 @@
 mod commands;
 mod connection;
 mod listing;
+mod mcp;
 mod permission;
 mod persist;
 mod prompt;
