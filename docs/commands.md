@@ -439,13 +439,16 @@ Open the interactive theme picker. Preview and select a color theme for the Clau
 
 ### /statusline
 
-Configure the status line displayed at the bottom of the TUI. Toggle individual elements such as model name, token count, session name, and git branch.
+Choose which built-in items the TUI status bar shows: cost, token count, model name and elapsed time. With no arguments it reports the current setting, and names the external status line command if one is configured.
 
 ```
 /statusline
-/statusline toggle model
-/statusline toggle tokens
+/statusline show cost
+/statusline hide tokens
+/statusline show all
 ```
+
+The external status line is a separate feature and is configured in `settings.json` rather than here. It runs a command of your own and shows its output in its own rows above the footer; see [Configuration](configuration.md#status-line).
 
 ---
 

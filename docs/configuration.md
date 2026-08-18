@@ -253,6 +253,97 @@ instead. `Shift+Insert` works either way.
 Copying out needs nothing installed. When no clipboard tool answers, Claurst
 hands the text to the terminal emulator with OSC 52, which works over SSH.
 
+### Status line
+
+`statusLine` runs a shell command and shows its output in its own rows directly
+above the footer, so you can keep context usage, cost or git state permanently
+in view.
+
+```json
+{
+  "config": {
+    "statusLine": {
+      "type": "command",
+      "command": "~/.claurst/statusline.sh",
+      "padding": 2,
+      "refreshInterval": 5
+    }
+  }
+}
+```
+
+| Key                    | Type    | Default | Description                                                                                                     |
+|------------------------|---------|---------|-------------------------------------------------------------------------------------------------------------------|
+| `type`                 | string  | command | Only `"command"` runs anything. Any other value leaves the status line off.                                       |
+| `command`              | string  | —       | Runs in a shell, so a script path and an inline pipeline both work.                                              |
+| `padding`              | number  | 0       | Extra columns of indentation on each side of the output.                                                          |
+| `refreshInterval`      | number  | —       | Re-run every N seconds on top of the state-driven updates. Minimum 1. Leave it out to run only when state changes. |
+| `hideVimModeIndicator` | boolean | false   | Suppress the built-in `-- INSERT --` line, for a status line that prints `vim.mode` itself.                        |
+
+**Only your own global settings file can set this.** A project's
+`.claurst/settings.json` is ignored for `statusLine`, in whole: it can neither
+replace the command nor introduce one. Without that rule, cloning a repository
+would run whatever shell command the repository asked for.
+
+The command runs when the session changes: at startup, when a reply arrives,
+when the model, directory, permission mode, vim mode, output style, effort
+level, context usage or cost move. Bursts collapse into a single run, a run
+still going when the next change lands is killed, and an idle session with no
+`refreshInterval` runs nothing at all. Output is capped at 4 KB and a command
+that has neither finished nor printed within 10 seconds is abandoned.
+
+Output may span several lines, and each is shown on its own row, up to half the
+terminal height. ANSI colour is rendered rather than printed; OSC 8 hyperlinks
+show their label as plain text. `COLUMNS` and `LINES` carry the terminal size,
+which a script cannot measure for itself because its output is captured.
+
+The session arrives as JSON on stdin:
+
+```json
+{
+  "session_id": "…",
+  "transcript_path": "~/.claurst/projects/…/….jsonl",
+  "version": "0.1.7",
+  "cwd": "/work/project",
+  "workspace": { "current_dir": "/work/project", "project_dir": "/work" },
+  "model": { "id": "claude-opus-5", "display_name": "claude-opus-5" },
+  "permission_mode": "Default",
+  "output_style": { "name": "auto" },
+  "effort": { "level": "high" },
+  "vim": { "mode": "NORMAL" },
+  "cost": { "total_cost_usd": 1.25, "total_duration_ms": 61000 },
+  "context_window": {
+    "total_input_tokens": 1500,
+    "total_output_tokens": 500,
+    "context_window_size": 200000,
+    "used_percentage": 20.0,
+    "remaining_percentage": 80.0,
+    "current_usage": {
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "cache_creation_input_tokens": 200,
+      "cache_read_input_tokens": 300
+    }
+  },
+  "exceeds_200k_tokens": false
+}
+```
+
+`vim` is absent unless vim mode is on, and `transcript_path` is absent when the
+session has no file yet. A script that reads the JSON with `jq` looks like this:
+
+```bash
+#!/bin/bash
+input=$(cat)
+model=$(printf '%s' "$input" | jq -r '.model.display_name')
+dir=$(printf '%s' "$input" | jq -r '.workspace.current_dir')
+pct=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+printf '\033[32m[%s]\033[0m %s | %s%% context\n' "$model" "${dir##*/}" "$pct"
+```
+
+`/statusline` reports the configured command alongside the built-in status bar
+items; see [Commands](commands.md).
+
 ### Directory access
 
 | Key               | Type             | Default | Description                                                                                                              |
