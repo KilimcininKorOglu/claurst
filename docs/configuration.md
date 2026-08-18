@@ -163,12 +163,13 @@ The `config` object holds runtime behaviour options.
 
 ### Model and token settings
 
-| Key          | Type            | Default          | Description                                                                                                                 |
-|--------------|-----------------|------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `api_key`    | string \| null  | null             | Anthropic API key. Overrides `ANTHROPIC_API_KEY` env var. Prefer the env var in shared environments.                        |
-| `model`      | string \| null  | provider default | Model ID to use. When absent, the provider's default is used (e.g. `claude-sonnet-4-6` for Anthropic, `gpt-4o` for OpenAI). |
-| `max_tokens` | integer \| null | 8192             | Maximum tokens per model response.                                                                                          |
-| `provider`   | string \| null  | `"anthropic"`    | Active provider. See the [Providers](#providers) section.                                                                   |
+| Key          | Type            | Default          | Description                                                                                                                          |
+|--------------|-----------------|------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `api_key`    | string \| null  | null             | Anthropic API key. Overrides `ANTHROPIC_API_KEY` env var. Prefer the env var in shared environments.                                 |
+| `model`      | string \| null  | provider default | Model ID to use. When absent, the provider's default is used (e.g. `claude-sonnet-4-6` for Anthropic, `gpt-4o` for OpenAI).          |
+| `max_tokens` | integer \| null | 8192             | Maximum tokens per model response.                                                                                                    |
+| `provider`   | string \| null  | `"anthropic"`    | Active provider. See the [Providers](#providers) section.                                                                             |
+| `effort`     | string \| null  | unset            | Reasoning effort a session starts at: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`. Unset leaves it to the turn. |
 
 ### Permission mode
 

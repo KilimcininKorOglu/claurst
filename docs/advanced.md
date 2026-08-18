@@ -512,6 +512,25 @@ SSH sessions work similarly: `claurst --ssh` enables a remote-accessible session
 
 ---
 
+## Editor sessions
+
+`claurst acp` runs the agent as an [Agent Client Protocol](https://agentclientprotocol.com) server over stdio, which is how Zed and other ACP-aware editors drive it. Point the editor's agent configuration at the `claurst` binary with the `acp` argument.
+
+A session started this way reports what it can be reconfigured with, so the editor renders native pickers:
+
+| Selector | Values |
+|----------|--------------------------------------------------------|
+| Model    | The models the active account serves                    |
+| Account  | Every account with a credential                         |
+| Effort   | The reasoning ladder the current model supports         |
+| Mode     | Ask, accept edits, or bypass permissions                |
+
+Those choices last for that session. Nothing is written to `settings.json`, so a session started from a terminal keeps its own model and effort. To change the starting values instead, set `config.model`, `config.provider` and `config.effort` in [Configuration](configuration).
+
+For VS Code, which has no ACP client of its own, the repository ships an extension under `editors/vscode/`.
+
+---
+
 ## AGENTS.md hierarchical memory
 
 Claurst reads instruction files from the filesystem before every session and whenever a relevant file changes. The lookup order is:
