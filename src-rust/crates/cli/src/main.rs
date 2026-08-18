@@ -1593,14 +1593,6 @@ async fn refresh_models_cache_once() {
     tracing::info!(path = %cache_path.display(), "Models cache refreshed from {}", url);
 }
 
-async fn remove_file_if_exists(path: &std::path::Path) -> anyhow::Result<()> {
-    match tokio::fs::remove_file(path).await {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
-    }
-}
-
 struct RefreshedProviderRuntime {
     config: Config,
     client: Arc<claurst_api::AnthropicClient>,
@@ -1612,30 +1604,7 @@ struct RefreshedProviderRuntime {
 async fn refresh_provider_runtime_state(
     current_config: &Config,
 ) -> anyhow::Result<RefreshedProviderRuntime> {
-    remove_file_if_exists(&claurst_core::AuthStore::path())
-        .await
-        .context("Failed to clear auth store")?;
-    remove_file_if_exists(&claurst_core::oauth::OAuthTokens::token_file_path())
-        .await
-        .context("Failed to clear OAuth token cache")?;
-    remove_file_if_exists(&models_cache_path())
-        .await
-        .context("Failed to clear model cache")?;
-    remove_file_if_exists(&models_dev_cache_path())
-        .await
-        .context("Failed to clear legacy model cache")?;
-
-    let mut settings = Settings::load()
-        .await
-        .context("Failed to load settings for /refresh")?;
-    settings.provider = None;
-    settings.config.provider = None;
-    settings.config.model = None;
-    settings.config.api_key = None;
-    settings
-        .save()
-        .await
-        .context("Failed to save refreshed settings")?;
+    claurst_api::provider_state::clear_saved_provider_state().await?;
 
     let mut config = current_config.clone();
     config.api_key = None;
