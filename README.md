@@ -174,9 +174,11 @@ args:    ["acp"]
 }
 ```
 
-Claurst will run in JSON-RPC 2.0 mode over stdio. It implements `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_mode` and `session/set_config_option`, streams `session/update` notifications (text deltas, agent thinking, tool calls with their progress + results), and routes every tool permission through `session/request_permission` so the editor can show a native approval dialog.
+Claurst will run in JSON-RPC 2.0 mode over stdio. It implements `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_mode`, `session/set_config_option` and `session/set_model`, plus the session lifecycle: `session/list`, `session/load`, `session/resume`, `session/fork` and `session/close`. It streams `session/update` notifications (text deltas, agent thinking, tool calls with their progress, results and per-file diffs, the agent's plan, the session's name) and routes every tool permission through `session/request_permission` so the editor can show a native approval dialog.
 
 `session/new` reports the model, the account and the reasoning effort as configuration options, plus the modes the session can run in, so an editor renders native pickers for all four. Those choices apply to that session only and are never written to `settings.json`.
+
+Every turn is written to the same session store the terminal reads, so an editor can list earlier conversations and reopen one. The slash commands are announced as available commands and run in the agent: a prompt naming one is answered by the command rather than sent to the model.
 
 Configure your provider / API key before launching — run `claurst auth login`, use `/connect` inside the TUI, or edit `settings.json` directly. The ACP agent uses the same credentials and providers as the interactive TUI.
 
@@ -184,7 +186,7 @@ Enable verbose ACP logging (to stderr — never stdout, which would corrupt the 
 
 ### VS Code
 
-VS Code has no ACP client of its own, so this repo ships one: [`editors/vscode/`](editors/vscode/). It spawns `claurst acp`, renders the session in a webview panel, and drives the same protocol described above. Build it with `npm install && npm run compile` in that directory, then press F5 to open an Extension Development Host. Setup and scope are in [its README](editors/vscode/README.md).
+VS Code has no ACP client of its own, so this repo ships one: [`editors/vscode/`](editors/vscode/). It spawns one `claurst acp` process for the window and gives each panel its own session inside it, renders the transcript, diffs and plan in a webview, completes slash commands and `@file` mentions, and can reopen an earlier conversation. Build it with `npm install && npm run compile` in that directory, then press F5 to open an Extension Development Host. Setup and scope are in [its README](editors/vscode/README.md).
 
 ### Listing on the ACP Registry
 

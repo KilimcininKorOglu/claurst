@@ -527,6 +527,23 @@ A session started this way reports what it can be reconfigured with, so the edit
 
 Those choices last for that session. Nothing is written to `settings.json`, so a session started from a terminal keeps its own model and effort. To change the starting values instead, set `config.model`, `config.provider` and `config.effort` in [Configuration](configuration).
 
+Every turn is written to the same session store the terminal reads, so a conversation started in an editor outlives the editor:
+
+| Method | What it does |
+|---------------------|-------------------------------------------------------------|
+| `session/list`       | The sessions on file, filtered by directory, a page at a time |
+| `session/load`       | Reopens one and replays the whole transcript                  |
+| `session/resume`     | Reopens one without the replay                                |
+| `session/fork`       | Copies the conversation into a second session                 |
+| `session/close`      | Writes the session out and lets go of it                      |
+| `session/set_model`  | Picks the model, alongside the model selector above           |
+
+A session with no name of its own is named after the first thing asked of it, and the name is reported as it is set.
+
+Slash commands work too: the agent announces the whole set the terminal offers, and a prompt naming one is answered by the command rather than sent to the model. Commands that open a picker on a terminal answer in text here, so `/rewind` numbers the messages, `/hooks` prints what is configured, and `/import-config` prints the preview that `/import-config apply` then carries out.
+
+Editing tools report each file they rewrote as a diff, and a stored todo list is published as the session's plan, so an editor draws both natively.
+
 For VS Code, which has no ACP client of its own, the repository ships an extension under `editors/vscode/`.
 
 ---
