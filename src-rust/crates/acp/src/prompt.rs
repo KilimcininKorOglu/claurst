@@ -427,6 +427,19 @@ async fn forward_events(
                 )
                 .await;
             }
+            // What the loop is doing, and how close the conversation is to
+            // filling the context window. Neither has a place of its own in
+            // the protocol, so both are said the way an error already is:
+            // the alternative is a client that watches an agent compact its
+            // history without being told anything happened.
+            QueryEvent::Status(msg) => {
+                send_text_chunk(&connection, &session_id, &format!("\n[{}]", msg), false).await;
+            }
+            QueryEvent::TokenWarning { state, pct_used } => {
+                if let Some(note) = token_warning_note(state, pct_used) {
+                    send_text_chunk(&connection, &session_id, &note, false).await;
+                }
+            }
             _ => {}
         }
     }
@@ -555,6 +568,23 @@ pub(crate) fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>)
     tool_name.to_string()
 }
 
+/// How a context-window warning reads to the user.
+///
+/// `Ok` says nothing: the loop emits it when usage falls back under the
+/// threshold, and an editor does not need a line for "still fine".
+fn token_warning_note(state: claurst_query::TokenWarningState, pct_used: f64) -> Option<String> {
+    let severity = match state {
+        claurst_query::TokenWarningState::Ok => return None,
+        claurst_query::TokenWarningState::Warning => "context is filling up",
+        claurst_query::TokenWarningState::Critical => "context is nearly full",
+    };
+    Some(format!(
+        "\n[{}: {:.0}% of the context window used]",
+        severity,
+        pct_used * 100.0
+    ))
+}
+
 /// Which files a call is about, so a client can follow the agent from file to
 /// file rather than only reading about it.
 ///
@@ -604,6 +634,24 @@ fn location_at(path: &str, input: &serde_json::Value) -> Option<acp::ToolCallLoc
 mod tests {
     use super::*;
     use claurst_core::file_history::FileHistory;
+
+    #[test]
+    fn a_context_warning_says_how_full_it_is() {
+        let note = token_warning_note(claurst_query::TokenWarningState::Warning, 0.83)
+            .expect("a warning is said out loud");
+        assert!(note.contains("83%"), "{note}");
+        assert!(note.contains("filling up"), "{note}");
+
+        let critical = token_warning_note(claurst_query::TokenWarningState::Critical, 0.96)
+            .expect("a critical warning is said out loud");
+        assert!(critical.contains("96%"), "{critical}");
+        assert!(critical.contains("nearly full"), "{critical}");
+    }
+
+    #[test]
+    fn nothing_is_said_while_the_context_is_fine() {
+        assert!(token_warning_note(claurst_query::TokenWarningState::Ok, 0.2).is_none());
+    }
 
     #[test]
     fn an_edit_reports_the_file_it_touches() {
