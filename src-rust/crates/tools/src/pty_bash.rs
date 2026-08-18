@@ -790,55 +790,29 @@ impl Tool for PtyBashTool {
                 (script, restored_env, wd)
             };
 
+            // A client that hosts the terminal runs the same script, so the
+            // user watches the command in their own editor and `cd`/`export`
+            // still outlive the call.
+            if let Some(editor) = ctx.editor.clone().filter(|e| e.capabilities().terminal) {
+                return run_in_client_terminal(
+                    editor,
+                    ctx,
+                    &script,
+                    &restored_env,
+                    &params.command,
+                    &shell_state_arc,
+                    timeout_dur,
+                )
+                .await;
+            }
+
             // run_in_pty owns the timeout so it can KILL the child when it fires
             // (a bare outer timeout would just drop the future and orphan it) (#220).
             let outcome = run_in_pty(&script, &working_dir_str, &restored_env, timeout_dur).await;
 
             match outcome {
                 PtyOutcome::Completed(raw_output, exit_code) => {
-                    // Strip ANSI escape codes from PTY output
-                    let cleaned = strip_ansi(&raw_output);
-
-                    // Split into user-visible lines and state block
-                    let all_lines: Vec<String> = cleaned.lines().map(|l| l.to_string()).collect();
-
-                    let sentinel_pos = all_lines
-                        .iter()
-                        .rposition(|l| l.trim() == SHELL_STATE_SENTINEL);
-
-                    let (user_lines, state_lines) = match sentinel_pos {
-                        Some(pos) => (&all_lines[..pos], &all_lines[pos + 1..]),
-                        None => (all_lines.as_slice(), &[][..]),
-                    };
-
-                    // Update persistent shell state
-                    if !state_lines.is_empty() {
-                        if let Some((new_cwd, env_delta)) = parse_shell_state_block(state_lines) {
-                            let mut state = shell_state_arc.lock();
-                            state.cwd = Some(new_cwd);
-                            for (k, v) in env_delta {
-                                state.env_vars.insert(k, v);
-                            }
-                        }
-                    }
-
-                    // Fast-path export capture
-                    {
-                        let exports = extract_exports_from_command(&params.command);
-                        if !exports.is_empty() {
-                            let mut state = shell_state_arc.lock();
-                            for (k, v) in exports {
-                                state.env_vars.insert(k, v);
-                            }
-                        }
-                    }
-
-                    let mut output = user_lines.join("\n");
-                    if output.is_empty() {
-                        output = "(no output)".to_string();
-                    }
-
-                    truncate_output(output, exit_code)
+                    finish_run(&raw_output, exit_code, &params.command, &shell_state_arc)
                 }
                 PtyOutcome::Failed(e) => ToolResult::error(format!("PTY execution failed: {}", e)),
                 PtyOutcome::TimedOut => {
@@ -849,6 +823,130 @@ impl Tool for PtyBashTool {
     }
 }
 
+/// Run the wrapper script in a terminal the client owns.
+///
+/// The client shows the command running and the agent reads the same output it
+/// would have read from its own PTY, so the shell state parsing, the timeout
+/// and the result are unchanged. The terminal is always released, including
+/// when the command timed out or the turn was cancelled: a terminal nobody
+/// let go of stays on the user's screen forever.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+async fn run_in_client_terminal(
+    editor: std::sync::Arc<dyn crate::EditorHost>,
+    ctx: &ToolContext,
+    script: &str,
+    restored_env: &HashMap<String, String>,
+    command: &str,
+    shell_state: &std::sync::Arc<parking_lot::Mutex<ShellState>>,
+    timeout: Duration,
+) -> ToolResult {
+    // SECURITY (#211): the script carries no restored values; they travel in
+    // the environment, exactly as they do on the local path.
+    let request = crate::TerminalRequest {
+        command: "bash".to_string(),
+        // `-c`, exactly as the local PTY path spawns it: `-l` would source the
+        // login profiles and the two ways of running would stop agreeing on
+        // the environment a command sees.
+        args: vec!["-c".to_string(), script.to_string()],
+        env: restored_env.clone(),
+        cwd: Some(ctx.working_dir.clone()),
+        output_byte_limit: Some(MAX_CLIENT_TERMINAL_BYTES),
+    };
+
+    let terminal = match editor.create_terminal(request).await {
+        Ok(id) => id,
+        Err(e) => return ToolResult::error(format!("The editor could not start a terminal: {e}")),
+    };
+
+    let finished = tokio::select! {
+        result = editor.wait_for_terminal_exit(&terminal) => Some(result),
+        _ = tokio::time::sleep(timeout) => None,
+        _ = ctx.cancel_token.cancelled() => None,
+    };
+
+    let result = match finished {
+        Some(Ok(output)) => finish_run(
+            &output.output,
+            output
+                .exit_code
+                .unwrap_or(if output.signal.is_some() { 137 } else { 0 }),
+            command,
+            shell_state,
+        ),
+        Some(Err(e)) => ToolResult::error(format!("The editor's terminal failed: {e}")),
+        None => {
+            // Whatever it is doing, it is no longer this turn's business.
+            if let Err(e) = editor.kill_terminal(&terminal).await {
+                debug!(error = %e, "could not kill the editor's terminal");
+            }
+            ToolResult::error(format!("Command timed out after {}ms", timeout.as_millis()))
+        }
+    };
+
+    if let Err(e) = editor.release_terminal(&terminal).await {
+        debug!(error = %e, "could not release the editor's terminal");
+    }
+    result
+}
+
+/// How much of a hosted command's output to keep. Matches the ceiling the
+/// local path truncates to, so neither way of running says more than the
+/// other.
+#[cfg(unix)]
+const MAX_CLIENT_TERMINAL_BYTES: u64 = 100_000;
+
+/// Read what the wrapper script produced: the command's own output, and the
+/// shell state it reported after the sentinel.
+///
+/// Shared by every way of running that script, because the shell state is what
+/// makes `cd` and `export` outlive the call, and a second reader of the same
+/// format would drift from this one.
+#[cfg(unix)]
+fn finish_run(
+    raw_output: &str,
+    exit_code: i32,
+    command: &str,
+    shell_state: &std::sync::Arc<parking_lot::Mutex<ShellState>>,
+) -> ToolResult {
+    let cleaned = strip_ansi(raw_output);
+    let all_lines: Vec<String> = cleaned.lines().map(|l| l.to_string()).collect();
+
+    let sentinel_pos = all_lines
+        .iter()
+        .rposition(|l| l.trim() == SHELL_STATE_SENTINEL);
+    let (user_lines, state_lines) = match sentinel_pos {
+        Some(pos) => (&all_lines[..pos], &all_lines[pos + 1..]),
+        None => (all_lines.as_slice(), &[][..]),
+    };
+
+    if !state_lines.is_empty() {
+        if let Some((new_cwd, env_delta)) = parse_shell_state_block(state_lines) {
+            let mut state = shell_state.lock();
+            state.cwd = Some(new_cwd);
+            for (k, v) in env_delta {
+                state.env_vars.insert(k, v);
+            }
+        }
+    }
+
+    // Fast-path export capture: an `export` in the command itself is honoured
+    // even when the state block did not arrive.
+    let exports = extract_exports_from_command(command);
+    if !exports.is_empty() {
+        let mut state = shell_state.lock();
+        for (k, v) in exports {
+            state.env_vars.insert(k, v);
+        }
+    }
+
+    let mut output = user_lines.join("\n");
+    if output.is_empty() {
+        output = "(no output)".to_string();
+    }
+    truncate_output(output, exit_code)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -857,6 +955,240 @@ impl Tool for PtyBashTool {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+
+    /// A client that runs the script itself, records how it was asked to, and
+    /// answers with output of the shape a real shell would produce.
+    struct FakeTerminalHost {
+        requests: parking_lot::Mutex<Vec<crate::TerminalRequest>>,
+        released: parking_lot::Mutex<Vec<crate::TerminalId>>,
+        output: String,
+        exit_code: i32,
+    }
+
+    #[async_trait]
+    impl crate::EditorHost for FakeTerminalHost {
+        fn capabilities(&self) -> crate::EditorCapabilities {
+            crate::EditorCapabilities {
+                read_text_file: false,
+                write_text_file: false,
+                terminal: true,
+            }
+        }
+
+        async fn read_text_file(&self, _path: &std::path::Path) -> std::io::Result<String> {
+            unimplemented!("not exercised here")
+        }
+
+        async fn write_text_file(
+            &self,
+            _path: &std::path::Path,
+            _contents: &str,
+        ) -> std::io::Result<()> {
+            unimplemented!("not exercised here")
+        }
+
+        async fn create_terminal(
+            &self,
+            request: crate::TerminalRequest,
+        ) -> std::io::Result<crate::TerminalId> {
+            self.requests.lock().push(request);
+            Ok(crate::TerminalId("term-1".to_string()))
+        }
+
+        async fn wait_for_terminal_exit(
+            &self,
+            id: &crate::TerminalId,
+        ) -> std::io::Result<crate::TerminalOutput> {
+            self.terminal_output(id).await
+        }
+
+        async fn terminal_output(
+            &self,
+            _id: &crate::TerminalId,
+        ) -> std::io::Result<crate::TerminalOutput> {
+            Ok(crate::TerminalOutput {
+                output: self.output.clone(),
+                truncated: false,
+                exit_code: Some(self.exit_code),
+                signal: None,
+            })
+        }
+
+        async fn kill_terminal(&self, _id: &crate::TerminalId) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        async fn release_terminal(&self, id: &crate::TerminalId) -> std::io::Result<()> {
+            self.released.lock().push(id.clone());
+            Ok(())
+        }
+    }
+
+    fn fake_host(output: &str, exit_code: i32) -> std::sync::Arc<FakeTerminalHost> {
+        std::sync::Arc::new(FakeTerminalHost {
+            requests: parking_lot::Mutex::new(Vec::new()),
+            released: parking_lot::Mutex::new(Vec::new()),
+            output: output.to_string(),
+            exit_code,
+        })
+    }
+
+    #[tokio::test]
+    async fn a_hosted_command_is_run_the_way_the_local_one_is() {
+        let host = fake_host("hi\n", 0);
+        let ctx = crate::test_support::allow_all_context(PathBuf::from("/tmp"));
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(ShellState::new()));
+        let script = build_wrapper_script("echo hi", &state.lock(), &PathBuf::from("/tmp"));
+
+        let result = run_in_client_terminal(
+            host.clone(),
+            &ctx,
+            &script,
+            &HashMap::new(),
+            "echo hi",
+            &state,
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(!result.is_error, "{}", result.content);
+        let requests = host.requests.lock();
+        let request = requests.first().expect("a terminal was asked for");
+        assert_eq!(request.command, "bash");
+        assert_eq!(
+            request.args[0], "-c",
+            "a login shell would not see the same environment as the local path"
+        );
+        assert_eq!(request.args[1], script);
+    }
+
+    #[tokio::test]
+    async fn a_hosted_command_keeps_the_shell_state_it_reported() {
+        // This is what makes `cd` outlive the call, and it must work the same
+        // whether the shell was ours or the editor's.
+        let host = fake_host(
+            &format!("built\n{SHELL_STATE_SENTINEL}\n/repo/sub\nFOO=bar\n"),
+            0,
+        );
+        let ctx = crate::test_support::allow_all_context(PathBuf::from("/repo"));
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(ShellState::new()));
+
+        let result = run_in_client_terminal(
+            host,
+            &ctx,
+            "irrelevant",
+            &HashMap::new(),
+            "cd sub",
+            &state,
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(result.content.contains("built"), "{}", result.content);
+        assert!(
+            !result.content.contains(SHELL_STATE_SENTINEL),
+            "the state block reached the model"
+        );
+        assert_eq!(state.lock().cwd, Some(PathBuf::from("/repo/sub")));
+        assert_eq!(
+            state.lock().env_vars.get("FOO").map(String::as_str),
+            Some("bar")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hosted_terminal_is_always_let_go_of() {
+        let host = fake_host("done\n", 0);
+        let ctx = crate::test_support::allow_all_context(PathBuf::from("/tmp"));
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(ShellState::new()));
+
+        let _ = run_in_client_terminal(
+            host.clone(),
+            &ctx,
+            "irrelevant",
+            &HashMap::new(),
+            "true",
+            &state,
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(
+            host.released.lock().len(),
+            1,
+            "a terminal nobody released stays on the user's screen"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_turn_stops_waiting_and_lets_the_terminal_go() {
+        struct NeverExits;
+
+        #[async_trait]
+        impl crate::EditorHost for NeverExits {
+            fn capabilities(&self) -> crate::EditorCapabilities {
+                crate::EditorCapabilities {
+                    read_text_file: false,
+                    write_text_file: false,
+                    terminal: true,
+                }
+            }
+            async fn read_text_file(&self, _path: &std::path::Path) -> std::io::Result<String> {
+                unimplemented!("not exercised here")
+            }
+            async fn write_text_file(
+                &self,
+                _path: &std::path::Path,
+                _contents: &str,
+            ) -> std::io::Result<()> {
+                unimplemented!("not exercised here")
+            }
+            async fn create_terminal(
+                &self,
+                _request: crate::TerminalRequest,
+            ) -> std::io::Result<crate::TerminalId> {
+                Ok(crate::TerminalId("term-1".to_string()))
+            }
+            async fn wait_for_terminal_exit(
+                &self,
+                _id: &crate::TerminalId,
+            ) -> std::io::Result<crate::TerminalOutput> {
+                std::future::pending().await
+            }
+            async fn terminal_output(
+                &self,
+                _id: &crate::TerminalId,
+            ) -> std::io::Result<crate::TerminalOutput> {
+                std::future::pending().await
+            }
+            async fn kill_terminal(&self, _id: &crate::TerminalId) -> std::io::Result<()> {
+                Ok(())
+            }
+            async fn release_terminal(&self, _id: &crate::TerminalId) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let ctx = crate::test_support::allow_all_context(PathBuf::from("/tmp"));
+        ctx.cancel_token.cancel();
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(ShellState::new()));
+
+        let result = run_in_client_terminal(
+            std::sync::Arc::new(NeverExits),
+            &ctx,
+            "irrelevant",
+            &HashMap::new(),
+            "sleep 999",
+            &state,
+            Duration::from_secs(60),
+        )
+        .await;
+
+        assert!(
+            result.is_error,
+            "a cancelled command must not report success"
+        );
+    }
 
     /// #211: restored env values (secrets) must NOT be baked into the wrapper
     /// script, because that script becomes an argv element of `bash -c`, which is
