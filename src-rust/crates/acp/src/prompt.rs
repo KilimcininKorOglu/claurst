@@ -91,6 +91,8 @@ pub async fn handle(
         // sub-agents observe cancellation (issue #218). `run_query_loop` also
         // rebinds this to the token it is driven by.
         cancel_token: cancel.clone(),
+        // Filled in per call by the tool dispatcher.
+        current_call: None,
     };
 
     // Spawn the permission drainer for this turn.

@@ -983,6 +983,8 @@ async fn main() -> anyhow::Result<()> {
         // Placeholder token; `run_query_loop` rebinds it to the loop's actual
         // cancel token so the parallel tool executor honours Ctrl-C (issue #218).
         cancel_token: tokio_util::sync::CancellationToken::new(),
+        // Filled in per call by the tool dispatcher.
+        current_call: None,
     };
 
     // Hourly shadow-snapshot GC loop: only runs when snapshot is explicitly enabled.

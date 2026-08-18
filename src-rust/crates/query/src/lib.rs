@@ -1352,7 +1352,8 @@ async fn run_query_loop_inner(
                             {
                                 blocked
                             } else {
-                                execute_tool(&tool_name, &tool_input, tools, tool_ctx).await
+                                execute_tool(&tool_name, &tool_id, &tool_input, tools, tool_ctx)
+                                    .await
                             };
                             // A blocked tool still reports, matching the other
                             // dispatch arm; only an unparsed call stays silent,
@@ -1995,9 +1996,10 @@ async fn run_query_loop_inner(
                             futures::future::Either::Left(async move { r })
                         } else {
                             let name = p.name.clone();
+                            let id = p.id.clone();
                             let input = p.input.clone();
                             futures::future::Either::Right(async move {
-                                execute_tool(&name, &input, tools, tool_ctx).await
+                                execute_tool(&name, &id, &input, tools, tool_ctx).await
                             })
                         }
                     })
@@ -2700,6 +2702,7 @@ mod tests {
             permission_manager: None,
             user_question_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
         }
     }
 
@@ -2717,7 +2720,7 @@ mod tests {
         })];
         let ctx = deny_all_context();
 
-        let result = execute_tool("MockExec", &serde_json::json!({}), &tools, &ctx).await;
+        let result = execute_tool("MockExec", "call-1", &serde_json::json!({}), &tools, &ctx).await;
 
         assert!(result.is_error, "central backstop must block a denied tool");
         assert!(
@@ -2740,7 +2743,14 @@ mod tests {
         })];
         let ctx = deny_all_context();
 
-        let result = execute_tool("MockSelfGated", &serde_json::json!({}), &tools, &ctx).await;
+        let result = execute_tool(
+            "MockSelfGated",
+            "call-1",
+            &serde_json::json!({}),
+            &tools,
+            &ctx,
+        )
+        .await;
 
         assert!(
             !result.is_error,
@@ -2767,7 +2777,8 @@ mod tests {
             })];
             let ctx = deny_all_context();
 
-            let result = execute_tool("MockSafe", &serde_json::json!({}), &tools, &ctx).await;
+            let result =
+                execute_tool("MockSafe", "call-1", &serde_json::json!({}), &tools, &ctx).await;
 
             assert!(
                 !result.is_error,
@@ -2780,6 +2791,53 @@ mod tests {
                 level
             );
         }
+    }
+
+    /// Records the call the context described while it was executing.
+    struct CallRecordingTool {
+        seen: Arc<parking_lot::Mutex<Option<claurst_tools::ActiveToolCall>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for CallRecordingTool {
+        fn name(&self) -> &str {
+            "MockRecorder"
+        }
+        fn description(&self) -> &str {
+            "records what the context said about its own call"
+        }
+        fn permission_level(&self) -> PermissionLevel {
+            PermissionLevel::ReadOnly
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn execute(&self, _input: Value, ctx: &ToolContext) -> ToolResult {
+            *self.seen.lock() = ctx.current_call.as_deref().cloned();
+            ToolResult::success("recorded")
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tool_is_told_which_call_it_is_running() {
+        let seen = Arc::new(parking_lot::Mutex::new(None));
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(CallRecordingTool { seen: seen.clone() })];
+        let ctx = deny_all_context();
+        let input = serde_json::json!({"file_path": "/tmp/x"});
+
+        let result = execute_tool("MockRecorder", "toolu_42", &input, &tools, &ctx).await;
+        assert!(!result.is_error);
+
+        let call = seen.lock().clone().expect("the tool saw its call");
+        assert_eq!(call.id, "toolu_42");
+        assert_eq!(call.input, input);
+    }
+
+    #[tokio::test]
+    async fn the_turns_own_context_names_no_call() {
+        // Only the dispatcher's per-call copy carries one; the context the turn
+        // was built with must not claim to belong to some call.
+        assert!(deny_all_context().current_call.is_none());
     }
 
     #[test]

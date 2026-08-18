@@ -46,6 +46,7 @@ pub(crate) fn synthesize_permission_description(name: &str, input: &Value) -> St
 /// Execute a single tool invocation.
 pub(crate) async fn execute_tool(
     name: &str,
+    tool_id: &str,
     input: &Value,
     tools: &[Box<dyn Tool>],
     ctx: &ToolContext,
@@ -55,6 +56,16 @@ pub(crate) async fn execute_tool(
     match tool {
         Some(tool) => {
             debug!(tool = name, "Executing tool");
+            // A copy of the turn's context that knows which call it belongs to.
+            // Concurrent calls each get their own, so nothing is shared that
+            // one call could read as another's.
+            let ctx = &ToolContext {
+                current_call: Some(std::sync::Arc::new(claurst_tools::ActiveToolCall {
+                    id: tool_id.to_string(),
+                    input: input.clone(),
+                })),
+                ..ctx.clone()
+            };
             // Central permission backstop (issue #210): if a tool does not gate
             // itself (`self_gates() == false`) and requires a gated permission
             // level, prompt here BEFORE executing. On denial, return a blocked

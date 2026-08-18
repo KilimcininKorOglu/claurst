@@ -310,6 +310,20 @@ impl CompletionNotifier {
     }
 }
 
+/// The tool call a context was cloned for.
+///
+/// A tool is handed its own arguments, but not the id the model gave the call
+/// nor a value it can pass on to something that needs the arguments as data
+/// (a permission prompt that wants to show what it is approving, an editor
+/// that wants to attach a terminal to the right call).
+#[derive(Debug, Clone)]
+pub struct ActiveToolCall {
+    /// The `tool_use` id from the model's turn.
+    pub id: String,
+    /// The arguments the model supplied, as they arrived.
+    pub input: serde_json::Value,
+}
+
 /// Shared context passed to every tool invocation.
 #[derive(Clone)]
 pub struct ToolContext {
@@ -345,6 +359,10 @@ pub struct ToolContext {
     /// to a fresh disconnected token; `run_query_loop` rebinds it to the loop's
     /// actual token so cancellation propagates into tools and sub-agents.
     pub cancel_token: tokio_util::sync::CancellationToken,
+    /// The call this context was cloned for, set by the tool dispatcher.
+    /// `None` on the per-turn context that every call is cloned from, and on
+    /// any context built outside the dispatcher.
+    pub current_call: Option<Arc<ActiveToolCall>>,
 }
 
 impl ToolContext {
@@ -751,6 +769,7 @@ mod tests {
             permission_manager: None,
             user_question_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
         }
     }
 
