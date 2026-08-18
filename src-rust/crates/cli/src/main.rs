@@ -112,6 +112,24 @@ impl Tool for McpToolWrapper {
     }
 }
 
+/// Name the directories the session can reach, for the system prompt.
+///
+/// Takes the same inputs as [`claurst_tools::ToolContext::workspace_roots`], so
+/// the names the model is told about are the names path arguments resolve by.
+fn roots_for_prompt(
+    working_dir: &std::path::Path,
+    config: &claurst_core::config::Config,
+) -> std::collections::BTreeMap<String, String> {
+    claurst_core::workspace::generate_root_names(
+        working_dir,
+        &config.additional_dirs,
+        &config.workspace_paths,
+    )
+    .into_iter()
+    .map(|(name, path)| (name, path.display().to_string()))
+    .collect()
+}
+
 // ---------------------------------------------------------------------------
 // CLI argument definition (matches TypeScript main.tsx flags)
 // ---------------------------------------------------------------------------
@@ -704,6 +722,7 @@ async fn main() -> anyhow::Result<()> {
         dump_config.system_prompt = Some(system_prompt);
         dump_config.append_system_prompt = None;
         dump_config.working_directory = Some(cwd.display().to_string());
+        dump_config.workspace_roots = roots_for_prompt(&cwd, &config);
         dump_config.enabled_tools = Some(
             build_tools_with_mcp(None, config.advisor_model.as_deref())
                 .iter()
@@ -1001,6 +1020,7 @@ async fn main() -> anyhow::Result<()> {
     query_config.system_prompt = Some(system_prompt);
     query_config.append_system_prompt = None;
     query_config.working_directory = Some(cwd.display().to_string());
+    query_config.workspace_roots = roots_for_prompt(&cwd, &config);
     if let Some(tokens) = cli.thinking {
         query_config.thinking_budget = Some(tokens);
     }
@@ -4179,6 +4199,8 @@ async fn run_interactive(
                         qcfg.output_style = cmd_ctx.config.effective_output_style();
                         qcfg.output_style_prompt = cmd_ctx.config.resolve_output_style_prompt();
                         qcfg.working_directory = Some(tool_ctx.working_dir.display().to_string());
+                        qcfg.workspace_roots =
+                            roots_for_prompt(&tool_ctx.working_dir, &tool_ctx.config);
                         // Read per turn rather than once at startup: `/buddy`
                         // can turn the companion on, off, or hatch it mid-session.
                         qcfg.companion_addendum = app.companion_addendum();

@@ -103,6 +103,9 @@ pub struct QueryConfig {
     pub output_style: claurst_core::system_prompt::OutputStyle,
     pub output_style_prompt: Option<String>,
     pub working_directory: Option<String>,
+    /// Every directory the session can reach, by name. Forwarded to the
+    /// system prompt so the model can address them as `&name/path`.
+    pub workspace_roots: std::collections::BTreeMap<String, String>,
     pub thinking_budget: Option<u32>,
     pub temperature: Option<f32>,
     /// Maximum cumulative character count of all tool results in the message
@@ -192,6 +195,7 @@ impl Default for QueryConfig {
             output_style: claurst_core::system_prompt::OutputStyle::Default,
             output_style_prompt: None,
             working_directory: None,
+            workspace_roots: std::collections::BTreeMap::new(),
             thinking_budget: None,
             temperature: None,
             tool_result_budget: 50_000,
@@ -2214,6 +2218,7 @@ mod tests {
             output_style: claurst_core::system_prompt::OutputStyle::Default,
             output_style_prompt: None,
             working_directory: None,
+            workspace_roots: std::collections::BTreeMap::new(),
             thinking_budget: None,
             temperature: None,
             tool_result_budget: 50_000,

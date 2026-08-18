@@ -382,6 +382,16 @@ impl Tool for AgentTool {
             append_system_prompt: None,
             output_style: ctx.config.effective_output_style(),
             output_style_prompt: ctx.config.resolve_output_style_prompt(),
+            // A sub-agent may run in a worktree of its own, so its roots are
+            // named from its working directory rather than the parent's.
+            workspace_roots: claurst_core::workspace::generate_root_names(
+                std::path::Path::new(&working_dir_str),
+                &ctx.config.additional_dirs,
+                &ctx.config.workspace_paths,
+            )
+            .into_iter()
+            .map(|(name, path)| (name, path.display().to_string()))
+            .collect(),
             working_directory: Some(working_dir_str),
             thinking_budget: None,
             temperature: None,

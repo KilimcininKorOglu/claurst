@@ -209,6 +209,9 @@ pub struct SystemPromptOptions {
     pub custom_output_style_prompt: Option<String>,
     /// Absolute path to the working directory (injected as dynamic section).
     pub working_directory: Option<String>,
+    /// Every directory the session can reach, by name. `main` is the working
+    /// directory; the rest come from `--add-dir` and `workspace_paths`.
+    pub workspace_roots: std::collections::BTreeMap<String, String>,
     /// Pre-built memory content from memdir (injected as dynamic section).
     pub memory_content: String,
     /// Custom system prompt (--system-prompt flag or settings).
@@ -319,6 +322,13 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
     // repeated here in an XML tag as well; nothing read the tag, and the
     // repetition only spent tokens.
 
+    // 11b. Named workspace roots, only when the session can reach more than the
+    // working directory. With a single root the section says nothing the `<env>`
+    // section did not already say.
+    if opts.workspace_roots.len() > 1 {
+        parts.push(build_workspace_roots_section(&opts.workspace_roots));
+    }
+
     // 12. Memory injection (from memdir)
     if !opts.memory_content.is_empty() {
         parts.push(format!("\n<memory>\n{}\n</memory>", opts.memory_content));
@@ -344,6 +354,22 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
 
 /// Build the dynamic environment-info section injected after the boundary.
 /// Mirrors `computeEnvInfo()` + `getUnameSR()` from `src/constants/prompts.ts`.
+/// Name the directories the session can reach and how to address them.
+fn build_workspace_roots_section(roots: &std::collections::BTreeMap<String, String>) -> String {
+    let mut out = String::from("\n<workspace_roots>");
+    for (name, path) in roots {
+        out.push_str(&format!("\n<root name=\"{name}\">{path}</root>"));
+    }
+    out.push_str(
+        "\n</workspace_roots>\n\
+         Path arguments accept workspace root syntax: &<root-name>/<relative-path> for a file, \
+         and &<root-name> for the root directory itself. A relative path without & resolves \
+         against main. Glob and Grep search main when path is omitted; pass path=&<root-name> \
+         to search a different root.",
+    );
+    out
+}
+
 fn build_env_info_section(working_dir: Option<&str>) -> String {
     // Platform string
     let platform = if cfg!(target_os = "windows") {
@@ -682,6 +708,43 @@ mod tests {
             cwd_pos > boundary_pos,
             "Working directory must appear after the dynamic boundary"
         );
+    }
+
+    #[test]
+    fn extra_roots_are_named_in_the_dynamic_section() {
+        let opts = SystemPromptOptions {
+            working_directory: Some("/repo".to_string()),
+            workspace_roots: std::collections::BTreeMap::from([
+                ("main".to_string(), "/repo".to_string()),
+                ("docs".to_string(), "/other/docs".to_string()),
+            ]),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+
+        let boundary = prompt
+            .find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            .expect("boundary present");
+        let roots = prompt.find("<workspace_roots>").expect("section present");
+        assert!(roots > boundary, "the root list must stay uncacheable");
+        assert!(prompt.contains("<root name=\"main\">/repo</root>"));
+        assert!(prompt.contains("<root name=\"docs\">/other/docs</root>"));
+        assert!(prompt.contains("&<root-name>/<relative-path>"));
+    }
+
+    #[test]
+    fn a_lone_working_directory_gets_no_root_section() {
+        // With nothing but `main`, the section would repeat `<env>`.
+        let opts = SystemPromptOptions {
+            working_directory: Some("/repo".to_string()),
+            workspace_roots: std::collections::BTreeMap::from([(
+                "main".to_string(),
+                "/repo".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        assert!(!build_system_prompt(&opts).contains("<workspace_roots>"));
     }
 
     #[test]
