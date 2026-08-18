@@ -186,11 +186,11 @@ impl SettingsScreen {
             claurst_core::config::OutputFormat::StreamJson => "stream_json".to_string(),
         };
         self.disable_claude_mds = self.settings_snapshot.config.disable_claude_mds;
-        self.file_injection_enabled = self.settings_snapshot.config.file_injection_enabled;
+        self.file_injection_enabled = self.settings_snapshot.config.file_injection_is_enabled();
         self.file_autocomplete_limit = self
             .settings_snapshot
             .config
-            .file_autocomplete_limit
+            .effective_file_autocomplete_limit()
             .to_string();
         self.file_autocomplete_show_hidden_files = self
             .settings_snapshot
@@ -199,7 +199,7 @@ impl SettingsScreen {
         self.file_injection_max_size = self
             .settings_snapshot
             .config
-            .file_injection_max_size
+            .effective_file_injection_max_size()
             .to_string();
     }
 
@@ -345,15 +345,15 @@ impl SettingsScreen {
                 }
                 "fileAutocompleteLimit" => {
                     if let Ok(n) = value.parse::<usize>() {
-                        config.file_autocomplete_limit = n;
-                        saved.file_autocomplete_limit = n;
+                        config.file_autocomplete_limit = Some(n);
+                        saved.file_autocomplete_limit = Some(n);
                         self.file_autocomplete_limit = value.clone();
                     }
                 }
                 "fileInjectionMaxSize" => {
                     if let Ok(n) = value.parse::<usize>() {
-                        config.file_injection_max_size = n;
-                        saved.file_injection_max_size = n;
+                        config.file_injection_max_size = Some(n);
+                        saved.file_injection_max_size = Some(n);
                         self.file_injection_max_size = value.clone();
                     }
                 }
@@ -1225,8 +1225,8 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                     }
                     "fileInjectionEnabled" => {
                         screen.file_injection_enabled = new_value;
-                        screen.settings_snapshot.config.file_injection_enabled = new_value;
-                        config.file_injection_enabled = new_value;
+                        screen.settings_snapshot.config.file_injection_enabled = Some(new_value);
+                        config.file_injection_enabled = Some(new_value);
                     }
                     "fileAutocompleteShowHiddenFiles" => {
                         screen.file_autocomplete_show_hidden_files = new_value;
@@ -1527,7 +1527,9 @@ mod tests {
             }),
             ("Web search fallback", |config| config.web_search_fallback),
             ("Execution timeline", |config| config.timeline_enabled),
-            ("File injection (@)", |config| config.file_injection_enabled),
+            ("File injection (@)", |config| {
+                config.file_injection_enabled.is_some()
+            }),
         ];
 
         for (label, reads) in cases {

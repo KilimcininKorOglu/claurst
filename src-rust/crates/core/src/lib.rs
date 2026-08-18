@@ -1291,29 +1291,45 @@ pub mod config {
             skip_serializing_if = "is_false"
         )]
         pub cursor_blink_enabled: bool,
-        /// Maximum number of file suggestions shown in autocomplete. Defaults to 15.
+        /// Maximum number of file suggestions shown in autocomplete.
+        ///
+        /// `None` means unset; read it through
+        /// [`Config::effective_file_autocomplete_limit`], which supplies 15.
+        /// The field is an `Option` because `Config` derives `Default`, where a
+        /// plain `usize` starts at 0 and switches autocomplete off entirely.
         #[serde(
-            default = "default_file_autocomplete_limit",
-            rename = "fileAutocompleteLimit"
+            default,
+            rename = "fileAutocompleteLimit",
+            skip_serializing_if = "Option::is_none"
         )]
-        pub file_autocomplete_limit: usize,
+        pub file_autocomplete_limit: Option<usize>,
         /// Whether to show hidden files in file autocomplete. Defaults to false.
         #[serde(default, rename = "fileAutocompleteShowHiddenFiles")]
         pub file_autocomplete_show_hidden_files: bool,
-        /// Whether @ file references are automatically injected into message context. Defaults to true.
-        /// When true: @file auto-injects file contents into your message before sending.
-        /// When false: @ is just autocomplete and reference (no auto-injection).
+        /// Whether @ file references are automatically injected into message context.
+        ///
+        /// `None` means unset; read it through
+        /// [`Config::file_injection_is_enabled`], which supplies `true`.
+        /// When on: @file auto-injects file contents into your message before sending.
+        /// When off: @ is just autocomplete and reference (no auto-injection).
         /// Note: This only affects user messages. @include in CLAUDE.md/AGENTS.md always injects with no size limits.
-        #[serde(default = "default_true", rename = "fileInjectionEnabled")]
-        pub file_injection_enabled: bool,
-        /// Maximum file size to auto-inject (in KB). Defaults to 100. Set to 0 for no limit.
+        #[serde(
+            default,
+            rename = "fileInjectionEnabled",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub file_injection_enabled: Option<bool>,
+        /// Maximum file size to auto-inject (in KB). `None` means unset; read it
+        /// through [`Config::effective_file_injection_max_size`], which supplies
+        /// 100. `Some(0)` means no limit.
         /// When a file exceeds this limit, users get a warning and can choose to override or cancel.
         /// Note: @include in CLAUDE.md/AGENTS.md always injects regardless of this limit.
         #[serde(
-            default = "default_file_injection_max_size",
-            rename = "fileInjectionMaxSize"
+            default,
+            rename = "fileInjectionMaxSize",
+            skip_serializing_if = "Option::is_none"
         )]
-        pub file_injection_max_size: usize,
+        pub file_injection_max_size: Option<usize>,
         /// Whether the Glob and Grep tools search files that `.gitignore` and
         /// `.ignore` exclude. Defaults to false.
         ///
@@ -1675,29 +1691,33 @@ pub mod config {
         /// Whether to enable auto-compact. Defaults to true.
         #[serde(default = "default_true", rename = "autoCompact")]
         pub auto_compact: bool,
-        /// Maximum number of file suggestions shown in autocomplete. Defaults to 15.
+        /// Legacy top-level mirror of `config.fileAutocompleteLimit`. `None`
+        /// means unset, so the nested value stands.
         #[serde(
-            default = "default_file_autocomplete_limit",
-            rename = "fileAutocompleteLimit"
+            default,
+            rename = "fileAutocompleteLimit",
+            skip_serializing_if = "Option::is_none"
         )]
-        pub file_autocomplete_limit: usize,
+        pub file_autocomplete_limit: Option<usize>,
         /// Whether to show hidden files in file autocomplete. Defaults to false.
         #[serde(default, rename = "fileAutocompleteShowHiddenFiles")]
         pub file_autocomplete_show_hidden_files: bool,
-        /// Whether @ file references are automatically injected into message context. Defaults to true.
-        /// When true: @file auto-injects file contents into your message before sending.
-        /// When false: @ is just autocomplete and reference (no auto-injection).
-        /// Note: This only affects user messages. @include in CLAUDE.md/AGENTS.md always injects with no size limits.
-        #[serde(default = "default_true", rename = "fileInjectionEnabled")]
-        pub file_injection_enabled: bool,
-        /// Maximum file size to auto-inject (in KB). Defaults to 100. Set to 0 for no limit.
-        /// When a file exceeds this limit, users get a warning and can choose to override or cancel.
-        /// Note: @include in CLAUDE.md/AGENTS.md always injects regardless of this limit.
+        /// Legacy top-level mirror of `config.fileInjectionEnabled`. `None`
+        /// means unset, so the nested value stands.
         #[serde(
-            default = "default_file_injection_max_size",
-            rename = "fileInjectionMaxSize"
+            default,
+            rename = "fileInjectionEnabled",
+            skip_serializing_if = "Option::is_none"
         )]
-        pub file_injection_max_size: usize,
+        pub file_injection_enabled: Option<bool>,
+        /// Legacy top-level mirror of `config.fileInjectionMaxSize`. `None`
+        /// means unset, so the nested value stands.
+        #[serde(
+            default,
+            rename = "fileInjectionMaxSize",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub file_injection_max_size: Option<usize>,
     }
 
     /// A user-defined slash command template.
@@ -1919,6 +1939,27 @@ pub mod config {
         pub fn effective_max_tokens(&self) -> u32 {
             self.max_tokens
                 .unwrap_or(crate::constants::DEFAULT_MAX_TOKENS)
+        }
+
+        /// How many file suggestions the `@` autocomplete may show.
+        ///
+        /// A stored 0 also falls back, because 0 shows nothing at all and was
+        /// only ever written by serialising a `Config::default()`.
+        pub fn effective_file_autocomplete_limit(&self) -> usize {
+            self.file_autocomplete_limit
+                .filter(|limit| *limit > 0)
+                .unwrap_or_else(default_file_autocomplete_limit)
+        }
+
+        /// Whether an `@file` reference injects the file's contents.
+        pub fn file_injection_is_enabled(&self) -> bool {
+            self.file_injection_enabled.unwrap_or(true)
+        }
+
+        /// Largest file, in KB, that an `@file` reference injects. 0 is no limit.
+        pub fn effective_file_injection_max_size(&self) -> usize {
+            self.file_injection_max_size
+                .unwrap_or_else(default_file_injection_max_size)
         }
 
         /// Resolve the effective compact threshold (0.0 - 1.0).
@@ -2409,19 +2450,19 @@ pub mod config {
                 }
             }
             // Copy file autocomplete and injection settings from the top-level Settings
-            // fields, but only when they were explicitly set (differ from their defaults).
-            // If they're at defaults, the nested "config" section value (already in `config`
-            // via the clone above) takes precedence.
-            if self.file_autocomplete_limit != default_file_autocomplete_limit() {
+            // fields, but only when they were explicitly set. Unset ones leave the
+            // nested "config" section value (already in `config` via the clone
+            // above) in place.
+            if self.file_autocomplete_limit.is_some() {
                 config.file_autocomplete_limit = self.file_autocomplete_limit;
             }
             if self.file_autocomplete_show_hidden_files {
                 config.file_autocomplete_show_hidden_files = true;
             }
-            if self.file_injection_enabled != default_true() {
+            if self.file_injection_enabled.is_some() {
                 config.file_injection_enabled = self.file_injection_enabled;
             }
-            if self.file_injection_max_size != default_file_injection_max_size() {
+            if self.file_injection_max_size.is_some() {
                 config.file_injection_max_size = self.file_injection_max_size;
             }
             config
@@ -2597,22 +2638,22 @@ pub mod config {
                 status_line: base.config.status_line,
                 cursor_blink_enabled: over.config.cursor_blink_enabled
                     || base.config.cursor_blink_enabled,
-                file_autocomplete_limit: if over.config.file_autocomplete_limit != 0 {
-                    over.config.file_autocomplete_limit
-                } else {
-                    base.config.file_autocomplete_limit
-                },
+                file_autocomplete_limit: over
+                    .config
+                    .file_autocomplete_limit
+                    .or(base.config.file_autocomplete_limit),
                 file_autocomplete_show_hidden_files: over
                     .config
                     .file_autocomplete_show_hidden_files
                     || base.config.file_autocomplete_show_hidden_files,
-                file_injection_enabled: over.config.file_injection_enabled
-                    || base.config.file_injection_enabled,
-                file_injection_max_size: if over.config.file_injection_max_size != 0 {
-                    over.config.file_injection_max_size
-                } else {
-                    base.config.file_injection_max_size
-                },
+                file_injection_enabled: over
+                    .config
+                    .file_injection_enabled
+                    .or(base.config.file_injection_enabled),
+                file_injection_max_size: over
+                    .config
+                    .file_injection_max_size
+                    .or(base.config.file_injection_max_size),
                 include_ignored_files: over.config.include_ignored_files
                     || base.config.include_ignored_files,
                 web_search_fallback: over.config.web_search_fallback
@@ -2712,19 +2753,15 @@ pub mod config {
                 show_cwd: over.show_cwd || base.show_cwd,
                 show_git_branch: over.show_git_branch || base.show_git_branch,
                 auto_compact: over.auto_compact || base.auto_compact,
-                file_autocomplete_limit: if over.file_autocomplete_limit != 0 {
-                    over.file_autocomplete_limit
-                } else {
-                    base.file_autocomplete_limit
-                },
+                file_autocomplete_limit: over
+                    .file_autocomplete_limit
+                    .or(base.file_autocomplete_limit),
                 file_autocomplete_show_hidden_files: over.file_autocomplete_show_hidden_files
                     || base.file_autocomplete_show_hidden_files,
-                file_injection_enabled: over.file_injection_enabled || base.file_injection_enabled,
-                file_injection_max_size: if over.file_injection_max_size != 0 {
-                    over.file_injection_max_size
-                } else {
-                    base.file_injection_max_size
-                },
+                file_injection_enabled: over.file_injection_enabled.or(base.file_injection_enabled),
+                file_injection_max_size: over
+                    .file_injection_max_size
+                    .or(base.file_injection_max_size),
             }
         }
     }
@@ -2868,8 +2905,52 @@ pub mod config {
             let settings: Settings =
                 serde_json::from_str(r#"{"config":{"model":"x"}}"#).expect("partial config");
 
-            assert!(settings.config.file_injection_enabled);
-            assert_eq!(settings.config.file_injection_max_size, 100);
+            assert!(settings.config.file_injection_is_enabled());
+            assert_eq!(settings.config.effective_file_injection_max_size(), 100);
+        }
+
+        #[test]
+        fn a_default_config_still_answers_with_the_documented_values() {
+            // `Config` derives `Default`, which skips every `#[serde(default =
+            // "...")]`. Reading these three through the accessors is what keeps
+            // a session with no settings file from starting with autocomplete
+            // off and injection disabled.
+            let config = Config::default();
+
+            assert_eq!(config.effective_file_autocomplete_limit(), 15);
+            assert!(config.file_injection_is_enabled());
+            assert_eq!(config.effective_file_injection_max_size(), 100);
+        }
+
+        #[test]
+        fn a_stored_zero_limit_falls_back_to_the_documented_value() {
+            // Serialising a `Config::default()` wrote `0` into settings files,
+            // and 0 shows no suggestions at all.
+            let settings: Settings =
+                serde_json::from_str(r#"{"config":{"fileAutocompleteLimit":0}}"#)
+                    .expect("partial config");
+
+            assert_eq!(settings.config.effective_file_autocomplete_limit(), 15);
+        }
+
+        #[test]
+        fn an_unset_option_is_not_written_back() {
+            let json = serde_json::to_string(&Config::default()).expect("serialisable");
+
+            assert!(!json.contains("fileAutocompleteLimit"), "{json}");
+            assert!(!json.contains("fileInjectionEnabled"), "{json}");
+            assert!(!json.contains("fileInjectionMaxSize"), "{json}");
+        }
+
+        #[test]
+        fn an_explicit_choice_survives_a_round_trip() {
+            let settings: Settings = serde_json::from_str(
+                r#"{"config":{"fileAutocompleteLimit":3,"fileInjectionEnabled":false}}"#,
+            )
+            .expect("partial config");
+
+            assert_eq!(settings.config.effective_file_autocomplete_limit(), 3);
+            assert!(!settings.config.file_injection_is_enabled());
         }
     }
 

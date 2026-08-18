@@ -3571,7 +3571,7 @@ impl App {
             self.sync_legacy_prompt_fields();
             return;
         }
-        let file_autocomplete_limit = self.config.file_autocomplete_limit;
+        let file_autocomplete_limit = self.config.effective_file_autocomplete_limit();
         let file_autocomplete_show_hidden = self.config.file_autocomplete_show_hidden_files;
         let mut commands: Vec<(&str, &str)> = PROMPT_SLASH_COMMANDS.to_vec();
         commands.extend(

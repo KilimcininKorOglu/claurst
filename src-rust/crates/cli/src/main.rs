@@ -3996,7 +3996,7 @@ async fn run_interactive(
                         let pending_imgs = app.prompt_input.clear_images();
 
                         // Check for file injection if enabled
-                        if app.config.file_injection_enabled {
+                        if app.config.file_injection_is_enabled() {
                             use claurst_tui::file_injection::parse_at_refs;
 
                             // file_injection_force is set when user chose "inject anyways" in the
@@ -4008,7 +4008,7 @@ async fn run_interactive(
                                 app.file_injection_force = false;
                                 0
                             } else {
-                                app.config.file_injection_max_size
+                                app.config.effective_file_injection_max_size()
                             };
                             let (within_limit, mut oversized) =
                                 parse_at_refs(&input, &tool_ctx.working_dir, effective_limit);
@@ -4052,7 +4052,7 @@ async fn run_interactive(
                                     input.clone(),
                                     pending_imgs,
                                     oversized_summaries,
-                                    app.config.file_injection_max_size,
+                                    app.config.effective_file_injection_max_size(),
                                     Some(tool_ctx.working_dir.clone()),
                                 );
                                 app.set_prompt_text(input);
