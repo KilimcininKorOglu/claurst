@@ -28,6 +28,7 @@ mod permission;
 mod prompt;
 mod runtime;
 mod server;
+mod session_config;
 mod sessions;
 
 use std::sync::Arc;

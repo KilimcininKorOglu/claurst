@@ -9,6 +9,19 @@ use claurst_tools::PendingPermissionStore;
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;
 
+/// What the connected client has changed for this session alone.
+///
+/// Every field is an override on top of the runtime's own configuration, and
+/// none of it is written to `settings.json`: a choice made in an editor panel
+/// belongs to that panel's session, not to the user's next terminal run.
+#[derive(Debug, Clone, Default)]
+pub struct SessionSettings {
+    pub permission_mode: Option<claurst_core::PermissionMode>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub effort: Option<claurst_core::effort::EffortLevel>,
+}
+
 /// One ACP session — a logical conversation with its own cwd, transcript,
 /// MCP server roster, and cancellation token.
 pub struct SessionState {
@@ -19,6 +32,7 @@ pub struct SessionState {
     pub pending_permissions: Arc<parking_lot::Mutex<PendingPermissionStore>>,
     pub file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
     pub current_turn: Arc<std::sync::atomic::AtomicUsize>,
+    pub settings: parking_lot::Mutex<SessionSettings>,
 }
 
 impl SessionState {
@@ -35,6 +49,7 @@ impl SessionState {
                 claurst_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            settings: parking_lot::Mutex::new(SessionSettings::default()),
         })
     }
 }

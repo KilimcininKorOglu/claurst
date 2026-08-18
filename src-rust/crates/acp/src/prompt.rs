@@ -48,12 +48,18 @@ pub async fn handle(
     // Reset the session's cancellation token for this new turn.
     let cancel = session.cancel_token.clone();
 
+    // What the client has changed for this session sits on top of the
+    // runtime's configuration, and only for the turns of this session.
+    let overrides = session.settings.lock().clone();
+    let mut config = runtime.config.clone();
+    crate::session_config::apply_overrides(&mut config, &overrides);
+
     // Build per-session ToolContext.
     let permission_handler: Arc<dyn claurst_core::PermissionHandler> =
         Arc::new(AcpPermissionHandler);
     let tool_ctx = ToolContext {
         working_dir: session.cwd.clone(),
-        permission_mode: runtime.config.permission_mode.clone(),
+        permission_mode: config.permission_mode.clone(),
         permission_handler,
         cost_tracker: runtime.cost_tracker.clone(),
         session_id: session.session_id.0.to_string(),
@@ -61,8 +67,8 @@ pub async fn handle(
         current_turn: session.current_turn.clone(),
         non_interactive: false, // ACP routes permissions via the bridge
         mcp_manager: runtime.mcp_manager.clone(),
-        config: runtime.config.clone(),
-        managed_agent_config: runtime.config.managed_agents.clone(),
+        managed_agent_config: config.managed_agents.clone(),
+        config: config.clone(),
         completion_notifier: None,
         pending_permissions: Some(session.pending_permissions.clone()),
         permission_manager: Some(runtime.permission_manager.clone()),
@@ -94,11 +100,17 @@ pub async fn handle(
     // the one the runtime was started in, so the prompt has to describe the
     // session's directory rather than the runtime's.
     let mut query_config = runtime.query_config.clone();
+    if let Some(model) = &overrides.model {
+        query_config.model = model.clone();
+    }
+    if let Some(effort) = overrides.effort {
+        query_config.effort_level = Some(effort);
+    }
     query_config.working_directory = Some(session.cwd.display().to_string());
     query_config.workspace_roots = claurst_core::workspace::generate_root_names(
         &session.cwd,
-        &runtime.config.additional_dirs,
-        &runtime.config.workspace_paths,
+        &config.additional_dirs,
+        &config.workspace_paths,
     )
     .into_iter()
     .map(|(name, path)| (name, path.display().to_string()))

@@ -86,6 +86,11 @@ impl AgentServer {
                 let result = self.on_prompt(req).await?;
                 serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
             }
+            "session/set_mode" => {
+                let req: acp::SetSessionModeRequest = parse_params(params)?;
+                let result = self.on_set_mode(req).await?;
+                serde_json::to_value(result).map_err(|_| acp::Error::internal_error())
+            }
             other => {
                 warn!(method = other, "ACP: method not found");
                 Err(acp::Error::method_not_found())
@@ -171,22 +176,65 @@ impl AgentServer {
         }
 
         self.sessions.insert(state);
-        Ok(acp::NewSessionResponse::new(session_id))
+        Ok(
+            acp::NewSessionResponse::new(session_id).modes(Some(
+                crate::session_config::mode_state(&self.runtime.config.permission_mode),
+            )),
+        )
+    }
+
+    /// Switch how this session answers permission requests. Session-scoped:
+    /// nothing is written to `settings.json`.
+    async fn on_set_mode(
+        self: &Arc<Self>,
+        req: acp::SetSessionModeRequest,
+    ) -> Result<acp::SetSessionModeResponse, acp::Error> {
+        let session = self.session_or_error(&req.session_id)?;
+        let mode_id = req.mode_id.0.as_ref();
+        let Some(mode) = crate::session_config::permission_mode_for(mode_id) else {
+            return Err(acp::Error::invalid_params().data(Some(serde_json::json!({
+                "reason": "unknown mode",
+                "modeId": mode_id,
+            }))));
+        };
+
+        session.settings.lock().permission_mode = Some(mode.clone());
+        info!(session_id = %req.session_id, mode = mode_id, "ACP: session mode changed");
+
+        // Say it out loud as well as answering: a client with more than one
+        // view of the session updates all of them from the notification.
+        let update =
+            acp::SessionUpdate::CurrentModeUpdate(acp::CurrentModeUpdate::new(req.mode_id.clone()));
+        let notification = acp::SessionNotification::new(req.session_id.clone(), update);
+        if let Err(e) = self
+            .connection
+            .send_notification("session/update", notification)
+            .await
+        {
+            warn!(?e, "ACP: failed to announce the mode change");
+        }
+
+        Ok(acp::SetSessionModeResponse::new())
+    }
+
+    /// Look a session up, or report the id back as invalid.
+    fn session_or_error(
+        &self,
+        session_id: &acp::SessionId,
+    ) -> Result<Arc<SessionState>, acp::Error> {
+        self.sessions.get(session_id).ok_or_else(|| {
+            acp::Error::invalid_params().data(Some(serde_json::json!({
+                "reason": "unknown session",
+                "sessionId": session_id,
+            })))
+        })
     }
 
     async fn on_prompt(
         self: &Arc<Self>,
         req: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
-        let session = match self.sessions.get(&req.session_id) {
-            Some(s) => s,
-            None => {
-                return Err(acp::Error::invalid_params().data(Some(serde_json::json!({
-                    "reason": "unknown session",
-                    "sessionId": req.session_id,
-                }))));
-            }
-        };
+        let session = self.session_or_error(&req.session_id)?;
         crate::prompt::handle(self.runtime.clone(), self.connection.clone(), session, req).await
     }
 }
