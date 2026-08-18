@@ -90,13 +90,27 @@ pub async fn handle(
         ev_rx,
     ));
 
+    // The session names its own directory in `session/new`, which need not be
+    // the one the runtime was started in, so the prompt has to describe the
+    // session's directory rather than the runtime's.
+    let mut query_config = runtime.query_config.clone();
+    query_config.working_directory = Some(session.cwd.display().to_string());
+    query_config.workspace_roots = claurst_core::workspace::generate_root_names(
+        &session.cwd,
+        &runtime.config.additional_dirs,
+        &runtime.config.workspace_paths,
+    )
+    .into_iter()
+    .map(|(name, path)| (name, path.display().to_string()))
+    .collect();
+
     // Run the query loop.
     let outcome = claurst_query::run_query_loop(
         runtime.api_client.as_ref(),
         &mut messages,
         runtime.tools.as_slice(),
         &tool_ctx,
-        &runtime.query_config,
+        &query_config,
         runtime.cost_tracker.clone(),
         Some(ev_tx),
         cancel,
