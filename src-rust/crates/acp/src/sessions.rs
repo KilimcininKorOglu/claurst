@@ -62,3 +62,62 @@ impl SessionRegistry {
         self.inner.remove(id).map(|(_, v)| v)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_session_starts_with_nothing_recorded() {
+        let id = acp::SessionId::new("session-1");
+        let cwd = PathBuf::from("/tmp/claurst-test");
+        let state = SessionState::new(id.clone(), cwd.clone());
+
+        assert_eq!(state.session_id, id);
+        assert_eq!(state.cwd, cwd);
+        assert!(state.messages.lock().is_empty());
+        assert_eq!(
+            state.current_turn.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        // A fresh token, so a cancelled predecessor cannot abort this session.
+        assert!(!state.cancel_token.is_cancelled());
+    }
+
+    #[test]
+    fn two_sessions_cancel_independently() {
+        let first = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+        let second = SessionState::new(acp::SessionId::new("b"), PathBuf::from("/tmp/b"));
+
+        first.cancel_token.cancel();
+
+        assert!(first.cancel_token.is_cancelled());
+        assert!(!second.cancel_token.is_cancelled());
+    }
+
+    #[test]
+    fn a_session_survives_a_round_trip_through_the_registry() {
+        let registry = SessionRegistry::new();
+        let id = acp::SessionId::new("session-2");
+        let state = SessionState::new(id.clone(), PathBuf::from("/tmp"));
+
+        assert!(registry.get(&id).is_none());
+        registry.insert(Arc::clone(&state));
+
+        let fetched = registry.get(&id).expect("present after insert");
+        assert!(
+            Arc::ptr_eq(&fetched, &state),
+            "the registry cloned the state"
+        );
+
+        let removed = registry.remove(&id).expect("present before remove");
+        assert!(Arc::ptr_eq(&removed, &state));
+        assert!(registry.get(&id).is_none());
+    }
+
+    #[test]
+    fn removing_an_unknown_session_is_not_an_error() {
+        let registry = SessionRegistry::new();
+        assert!(registry.remove(&acp::SessionId::new("missing")).is_none());
+    }
+}

@@ -199,3 +199,46 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result
         ))
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct Params {
+        name: String,
+    }
+
+    #[test]
+    fn a_request_without_params_is_rejected() {
+        let error = parse_params::<Params>(None).expect_err("None must not deserialize");
+        assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn a_matching_shape_deserializes() {
+        let parsed: Params = parse_params(Some(serde_json::json!({ "name": "claurst" })))
+            .expect("a matching shape parses");
+        assert_eq!(
+            parsed,
+            Params {
+                name: "claurst".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_mismatched_shape_reports_why() {
+        // The editor sees only what `data` carries, so a bare code would leave
+        // the user with no way to tell which field was wrong.
+        let error = parse_params::<Params>(Some(serde_json::json!({ "wrong_field": 1 })))
+            .expect_err("a mismatched shape must not deserialize");
+
+        assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+        let data = error.data.expect("the error carries the parse failure");
+        assert!(
+            data["deserialize_error"].is_string(),
+            "expected a deserialize_error string, got {data}"
+        );
+    }
+}

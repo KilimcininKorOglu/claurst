@@ -177,3 +177,97 @@ pub fn spawn_drainer(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(tool_name: &str, is_read_only: bool) -> PermissionRequest {
+        PermissionRequest {
+            tool_name: tool_name.to_string(),
+            description: String::new(),
+            details: None,
+            is_read_only,
+            path: None,
+            working_dir: None,
+            allowed_roots: Vec::new(),
+            context_description: None,
+        }
+    }
+
+    #[test]
+    fn a_read_only_call_reads_as_read_whatever_the_tool_is_called() {
+        // The editor draws its icon from this kind, so a read-only Bash call
+        // must not arrive looking like it is about to run something.
+        assert_eq!(infer_tool_kind(&request("Bash", true)), acp::ToolKind::Read);
+        assert_eq!(infer_tool_kind(&request("Rm", true)), acp::ToolKind::Read);
+    }
+
+    #[test]
+    fn a_writing_tool_reads_as_edit() {
+        for name in [
+            "Edit",
+            "FileEdit",
+            "Write",
+            "FileWrite",
+            "BatchEdit",
+            "ApplyPatch",
+        ] {
+            assert_eq!(
+                infer_tool_kind(&request(name, false)),
+                acp::ToolKind::Edit,
+                "tool: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_destructive_tool_is_not_lumped_in_with_an_edit() {
+        assert_eq!(
+            infer_tool_kind(&request("Rm", false)),
+            acp::ToolKind::Delete
+        );
+        assert_eq!(
+            infer_tool_kind(&request("Bash", false)),
+            acp::ToolKind::Execute
+        );
+    }
+
+    #[test]
+    fn an_mcp_tool_falls_back_to_other() {
+        assert_eq!(
+            infer_tool_kind(&request("SomeCustomMcpTool", false)),
+            acp::ToolKind::Other
+        );
+    }
+
+    #[test]
+    fn a_check_defers_without_a_reason_of_its_own() {
+        // `check_permission` never decides; the queue and the client do, and a
+        // reason here would surface before the client had been asked anything.
+        let decision = AcpPermissionHandler.check_permission(&request("Bash", false));
+        assert!(matches!(decision, PermissionDecision::Ask { reason } if reason.is_empty()));
+    }
+
+    #[test]
+    fn a_request_names_the_tool_and_what_it_would_do() {
+        let mut pending = request("Bash", false);
+        pending.details = Some("rm -rf /tmp/x".to_string());
+
+        match AcpPermissionHandler.request_permission(&pending) {
+            PermissionDecision::Ask { reason } => {
+                assert!(reason.contains("Bash"), "{reason}");
+                assert!(reason.contains("rm -rf /tmp/x"), "{reason}");
+            }
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_request_without_details_still_names_the_tool() {
+        match AcpPermissionHandler.request_permission(&request("WebFetch", false)) {
+            PermissionDecision::Ask { reason } => assert!(reason.contains("WebFetch"), "{reason}"),
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+}

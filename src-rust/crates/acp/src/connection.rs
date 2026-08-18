@@ -276,6 +276,17 @@ mod tests {
     use super::*;
     use tokio::io::{duplex, AsyncReadExt};
 
+    #[test]
+    fn a_numeric_id_and_a_string_of_the_same_digits_stay_apart() {
+        // Both are legal JSON-RPC ids and a client may use either. Keying the
+        // pending map on the rendered digits alone would hand one caller's
+        // response to the other.
+        assert_ne!(
+            id_to_key(&acp::RequestId::Number(7)),
+            id_to_key(&acp::RequestId::Str("7".into()))
+        );
+    }
+
     /// `send_response` must emit a newline-delimited JSON object containing
     /// `jsonrpc: "2.0"`, the request id, and the result payload.
     #[tokio::test]

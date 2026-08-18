@@ -339,3 +339,83 @@ fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>) -> String 
     }
     tool_name.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_text_blocks_are_separated_by_a_blank_line() {
+        let blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent::new("first")),
+            acp::ContentBlock::Text(acp::TextContent::new("second")),
+        ];
+        assert_eq!(render_prompt_blocks(&blocks), "first\n\nsecond");
+    }
+
+    #[test]
+    fn a_resource_link_reaches_the_model_as_its_uri() {
+        // The model cannot open the link, so the uri is the only thing that
+        // tells it which file the user meant.
+        let blocks = vec![acp::ContentBlock::ResourceLink(acp::ResourceLink::new(
+            "notes.md",
+            "file:///tmp/notes.md",
+        ))];
+        assert_eq!(
+            render_prompt_blocks(&blocks),
+            "[resource link: file:///tmp/notes.md]"
+        );
+    }
+
+    #[test]
+    fn an_image_is_dropped_and_the_text_around_it_survives() {
+        // The server does not advertise the image capability, so an editor that
+        // sends one anyway must not cost the user the rest of the prompt.
+        let blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent::new("caption")),
+            acp::ContentBlock::Image(acp::ImageContent::new("base64data", "image/png")),
+        ];
+        assert_eq!(render_prompt_blocks(&blocks), "caption");
+    }
+
+    #[test]
+    fn no_blocks_render_as_no_text() {
+        assert_eq!(render_prompt_blocks(&[]), "");
+    }
+
+    #[test]
+    fn a_reading_tool_reads_as_read() {
+        assert_eq!(classify_tool_kind("Read"), acp::ToolKind::Read);
+        assert_eq!(classify_tool_kind("FileRead"), acp::ToolKind::Read);
+    }
+
+    #[test]
+    fn an_unknown_tool_falls_back_to_other() {
+        assert_eq!(classify_tool_kind("SomeMcpTool"), acp::ToolKind::Other);
+    }
+
+    #[test]
+    fn a_title_without_input_is_the_bare_tool_name() {
+        assert_eq!(tool_title("Bash", None), "Bash");
+    }
+
+    #[test]
+    fn a_title_prefers_the_most_specific_path_field() {
+        // Both keys appear on a batch edit; `file_path` names the file the call
+        // acts on, while `path` may name the directory it sits in.
+        let input = serde_json::json!({ "path": "/a", "file_path": "/b" });
+        assert_eq!(tool_title("Edit", Some(&input)), "Edit: /b");
+    }
+
+    #[test]
+    fn a_shell_call_is_titled_by_its_command() {
+        let input = serde_json::json!({ "command": "ls -la" });
+        assert_eq!(tool_title("Bash", Some(&input)), "Bash: ls -la");
+    }
+
+    #[test]
+    fn an_input_with_no_known_field_leaves_the_name_alone() {
+        let input = serde_json::json!({ "unrelated": 42 });
+        assert_eq!(tool_title("CustomTool", Some(&input)), "CustomTool");
+    }
+}
