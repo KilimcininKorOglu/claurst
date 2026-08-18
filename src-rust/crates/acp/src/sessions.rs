@@ -46,6 +46,10 @@ pub struct SessionState {
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// The session this one was forked from, and the message it split at.
     pub forked_from: Option<(String, usize)>,
+    /// What this session spent. One agent process now serves many editor
+    /// panels, so a tracker shared across sessions would make every panel
+    /// report the whole process.
+    pub cost_tracker: Arc<claurst_core::CostTracker>,
 }
 
 impl SessionState {
@@ -111,6 +115,7 @@ impl SessionState {
             title: parking_lot::Mutex::new(title),
             created_at,
             forked_from,
+            cost_tracker: claurst_core::CostTracker::new(),
         })
     }
 
@@ -214,6 +219,21 @@ mod tests {
 
         assert!(current.is_cancelled());
         assert!(!stale.is_cancelled(), "the replaced token was left alone");
+    }
+
+    #[test]
+    fn each_session_counts_only_what_it_spent() {
+        let first = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+        let second = SessionState::new(acp::SessionId::new("b"), PathBuf::from("/tmp/b"));
+
+        first.cost_tracker.add_usage("m", 100, 20, 0, 0);
+
+        assert_eq!(first.cost_tracker.input_tokens(), 100);
+        assert_eq!(
+            second.cost_tracker.input_tokens(),
+            0,
+            "one panel's spending reached another"
+        );
     }
 
     #[test]

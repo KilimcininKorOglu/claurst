@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use claurst_core::config::{Config, Settings};
 use claurst_core::permissions::PermissionManager;
-use claurst_core::CostTracker;
 use claurst_query::QueryConfig;
 use claurst_tools::Tool;
 
@@ -51,7 +50,6 @@ pub struct AgentRuntime {
     pub provider_registry: Arc<claurst_api::ProviderRegistry>,
     pub model_registry: Arc<claurst_api::ModelRegistry>,
     pub tools: Arc<Vec<Box<dyn Tool>>>,
-    pub cost_tracker: Arc<CostTracker>,
     pub query_config: QueryConfig,
     pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
     pub permission_manager: Arc<std::sync::Mutex<PermissionManager>>,
@@ -106,8 +104,6 @@ impl AgentRuntime {
             &settings,
         )));
 
-        let cost_tracker = CostTracker::new();
-
         // MCP servers from settings — connect upfront so their tools are
         // visible to every session. Per-session MCP servers supplied via
         // `session/new` params are additive on top of this (v1: ignored,
@@ -146,7 +142,6 @@ impl AgentRuntime {
             provider_registry,
             model_registry,
             tools,
-            cost_tracker,
             query_config,
             mcp_manager,
             permission_manager,

@@ -116,7 +116,7 @@ pub async fn run(
     let before = config.clone();
     let mut ctx = claurst_commands::CommandContext {
         config,
-        cost_tracker: runtime.cost_tracker.clone(),
+        cost_tracker: session.cost_tracker.clone(),
         messages: session.messages.lock().clone(),
         working_dir: session.cwd.lock().clone(),
         session_id: session.session_id.0.to_string(),
