@@ -1298,21 +1298,54 @@ mod tests {
         assert!(screen.edit_value.is_empty());
     }
 
+    /// The keys the list only carries while file injection is on.
+    const INJECTION_DEPENDENT_KEYS: [&str; 3] = [
+        "fileAutocompleteLimit",
+        "fileAutocompleteShowHiddenFiles",
+        "fileInjectionMaxSize",
+    ];
+
+    fn entry_keys(screen: &SettingsScreen) -> Vec<String> {
+        all_entries(screen).into_iter().map(|e| e.key).collect()
+    }
+
     #[test]
-    fn all_entries_returns_expected_settings() {
+    fn the_file_injection_settings_follow_their_toggle() {
+        let mut screen = SettingsScreen::new();
+
+        screen.file_injection_enabled = true;
+        let keys = entry_keys(&screen);
+        for key in INJECTION_DEPENDENT_KEYS {
+            assert!(
+                keys.iter().any(|k| k == key),
+                "{key} must be editable while injection is on"
+            );
+        }
+
+        screen.file_injection_enabled = false;
+        let keys = entry_keys(&screen);
+        for key in INJECTION_DEPENDENT_KEYS {
+            assert!(
+                !keys.iter().any(|k| k == key),
+                "{key} configures a feature that is switched off"
+            );
+        }
+        assert!(
+            keys.iter().any(|k| k == "fileInjectionEnabled"),
+            "the toggle itself must stay reachable, or injection can never be switched back on"
+        );
+    }
+
+    #[test]
+    fn no_setting_is_listed_twice() {
+        // The screen keys its edits by this string, so a repeated key would
+        // leave one of the two entries permanently uneditable.
         let screen = SettingsScreen::new();
-        let entries = all_entries(&screen);
-        // Base settings are always present, plus 0-3 conditional file injection settings
-        assert!(
-            entries.len() >= 16,
-            "Should have at least 16 editable settings, got {}",
-            entries.len()
-        );
-        assert!(
-            entries.len() <= 25,
-            "Should have at most 25 editable settings, got {}",
-            entries.len()
-        );
+        let mut keys = entry_keys(&screen);
+        let listed = keys.len();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), listed, "duplicate key among {listed} entries");
     }
 
     #[test]
