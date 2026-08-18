@@ -29,6 +29,7 @@ pub async fn handle(
     runtime: Arc<AgentRuntime>,
     connection: Arc<Connection>,
     session: Arc<SessionState>,
+    turn: crate::sessions::TurnGuard,
     params: acp::PromptRequest,
 ) -> Result<acp::PromptResponse, acp::Error> {
     // Convert prompt content blocks → a single user message in Claurst's
@@ -57,9 +58,9 @@ pub async fn handle(
     };
     messages.push(Message::user(turn_text));
 
-    // A fresh token for this turn, so a `session/cancel` that ended an earlier
-    // one cannot end this one before it starts.
-    let cancel = session.begin_turn();
+    // The token this turn was claimed with. It is fresh, so a `session/cancel`
+    // that ended an earlier turn cannot end this one before it starts.
+    let cancel = turn.token().clone();
 
     // What the client has changed for this session sits on top of the
     // runtime's configuration, and only for the turns of this session.

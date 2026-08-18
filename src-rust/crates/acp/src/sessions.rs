@@ -1,6 +1,7 @@
 //! Per-session state for the ACP server.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
@@ -50,6 +51,32 @@ pub struct SessionState {
     /// panels, so a tracker shared across sessions would make every panel
     /// report the whole process.
     pub cost_tracker: Arc<claurst_core::CostTracker>,
+    /// Whether a turn is running. Two prompts on one session would each clone
+    /// the transcript, run against it, and write their own copy back, so the
+    /// second one to finish would erase the first.
+    turn_in_flight: AtomicBool,
+}
+
+/// Proof that this turn owns the session, and the token it is driven by.
+///
+/// Dropping it frees the session for the next prompt, including on the error
+/// paths, so a turn that fails cannot leave the session unusable.
+pub struct TurnGuard {
+    session: Arc<SessionState>,
+    token: CancellationToken,
+}
+
+impl TurnGuard {
+    /// The cancellation token this turn was started with.
+    pub fn token(&self) -> &CancellationToken {
+        &self.token
+    }
+}
+
+impl Drop for TurnGuard {
+    fn drop(&mut self) {
+        self.session.turn_in_flight.store(false, Ordering::SeqCst);
+    }
 }
 
 impl SessionState {
@@ -116,15 +143,23 @@ impl SessionState {
             created_at,
             forked_from,
             cost_tracker: claurst_core::CostTracker::new(),
+            turn_in_flight: AtomicBool::new(false),
         })
     }
 
-    /// Hand out a fresh token for a turn that is about to start, dropping the
-    /// one the previous turn used.
-    pub fn begin_turn(&self) -> CancellationToken {
+    /// Claim the session for a turn, handing out a fresh token for it and
+    /// dropping the one the previous turn used. `None` when a turn is already
+    /// running.
+    pub fn begin_turn(self: &Arc<Self>) -> Option<TurnGuard> {
+        self.turn_in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
         let token = CancellationToken::new();
         *self.cancel_token.lock() = token.clone();
-        token
+        Some(TurnGuard {
+            session: Arc::clone(self),
+            token,
+        })
     }
 
     /// Cancel whatever turn is running. A session with no turn in flight is
@@ -199,13 +234,17 @@ mod tests {
     fn a_cancelled_session_runs_again_on_the_next_turn() {
         let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
 
-        let first_turn = state.begin_turn();
+        let first = state.begin_turn().expect("nothing was running");
         state.cancel();
-        assert!(first_turn.is_cancelled(), "the running turn was cancelled");
+        assert!(
+            first.token().is_cancelled(),
+            "the running turn was cancelled"
+        );
+        drop(first);
 
         // The next prompt must not inherit that verdict.
-        let second_turn = state.begin_turn();
-        assert!(!second_turn.is_cancelled());
+        let second = state.begin_turn().expect("the first turn ended");
+        assert!(!second.token().is_cancelled());
         assert!(!state.is_cancelled());
     }
 
@@ -213,12 +252,49 @@ mod tests {
     fn cancelling_only_reaches_the_turn_that_is_running() {
         let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
 
-        let stale = state.begin_turn();
-        let current = state.begin_turn();
+        let stale = state.begin_turn().expect("nothing was running");
+        let stale_token = stale.token().clone();
+        drop(stale);
+
+        let current = state.begin_turn().expect("the first turn ended");
         state.cancel();
 
-        assert!(current.is_cancelled());
-        assert!(!stale.is_cancelled(), "the replaced token was left alone");
+        assert!(current.token().is_cancelled());
+        assert!(
+            !stale_token.is_cancelled(),
+            "the replaced token was left alone"
+        );
+    }
+
+    #[test]
+    fn a_second_prompt_is_refused_while_one_is_running() {
+        let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+
+        let running = state.begin_turn().expect("nothing was running");
+        assert!(
+            state.begin_turn().is_none(),
+            "two turns would each write their own copy of the transcript"
+        );
+
+        drop(running);
+        assert!(
+            state.begin_turn().is_some(),
+            "the session stayed claimed after its turn ended"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_ends_badly_still_frees_the_session() {
+        let state = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
+
+        // Whatever the turn returns, the guard is dropped on the way out.
+        let failed: Result<(), ()> = {
+            let _guard = state.begin_turn().expect("nothing was running");
+            Err(())
+        };
+
+        assert!(failed.is_err());
+        assert!(state.begin_turn().is_some());
     }
 
     #[test]

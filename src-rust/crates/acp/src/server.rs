@@ -565,7 +565,23 @@ impl AgentServer {
         req: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
         let session = self.session_or_error(&req.session_id)?;
-        crate::prompt::handle(self.runtime.clone(), self.connection.clone(), session, req).await
+        // One turn at a time per session: the second would clone the same
+        // transcript, run against it, and write its own copy back over the
+        // first. A client with two prompts to make opens two sessions.
+        let turn = session.begin_turn().ok_or_else(|| {
+            acp::Error::invalid_request().data(Some(serde_json::json!({
+                "reason": "a turn is already running on this session",
+                "sessionId": req.session_id,
+            })))
+        })?;
+        crate::prompt::handle(
+            self.runtime.clone(),
+            self.connection.clone(),
+            session,
+            turn,
+            req,
+        )
+        .await
     }
 }
 
