@@ -375,12 +375,28 @@ fn startup_notice_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         ]));
     }
 
-    // Additional directories (from --add-dir)
-    for dir in &app.config.additional_dirs {
+    // Additional directories (from --add-dir), under the names path arguments
+    // address them by.
+    let project_dir = app
+        .config
+        .project_dir
+        .clone()
+        .or_else(|| app.current_dir.as_deref().map(std::path::PathBuf::from))
+        .unwrap_or_default();
+    for (name, dir) in claurst_core::workspace::generate_root_names(
+        &project_dir,
+        &app.config.additional_dirs,
+        &app.config.workspace_paths,
+    ) {
+        if name == claurst_core::workspace::MAIN_ROOT {
+            continue;
+        }
+        let label = format!(" &{name} ");
+        let width = max_width.saturating_sub(label.chars().count());
         lines.push(Line::from(vec![
-            Span::styled(" +dir ", Style::default().fg(Color::Cyan)),
+            Span::styled(label, Style::default().fg(Color::Cyan)),
             Span::styled(
-                truncate_end(&dir.display().to_string(), max_width),
+                truncate_end(&dir.display().to_string(), width),
                 Style::default().fg(Color::DarkGray),
             ),
         ]));
@@ -5753,5 +5769,75 @@ mod external_status_line_tests {
         let buffer = draw(&app);
 
         assert_eq!(status_row(&buffer), "");
+    }
+}
+
+#[cfg(test)]
+mod workspace_root_notice_tests {
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use std::path::PathBuf;
+
+    fn notices(config: Config) -> String {
+        let app = App::new(config, CostTracker::new());
+        startup_notice_lines(&app, 80)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn an_extra_directory_is_listed_under_its_root_name() {
+        let config = Config {
+            project_dir: Some(PathBuf::from("/repo")),
+            additional_dirs: vec![PathBuf::from("/elsewhere/docs")],
+            ..Config::default()
+        };
+
+        let text = notices(config);
+        assert!(text.contains("&docs"), "{text:?}");
+        assert!(text.contains("/elsewhere/docs"), "{text:?}");
+    }
+
+    #[test]
+    fn the_working_directory_is_not_listed_again() {
+        let config = Config {
+            project_dir: Some(PathBuf::from("/repo")),
+            additional_dirs: vec![PathBuf::from("/elsewhere/docs")],
+            ..Config::default()
+        };
+
+        assert!(!notices(config).contains("&main"));
+    }
+
+    #[test]
+    fn two_directories_of_the_same_name_are_told_apart() {
+        let config = Config {
+            project_dir: Some(PathBuf::from("/repo")),
+            additional_dirs: vec![PathBuf::from("/a/lib"), PathBuf::from("/b/lib")],
+            ..Config::default()
+        };
+
+        let text = notices(config);
+        assert!(text.contains("&lib "), "{text:?}");
+        assert!(text.contains("&lib-2"), "{text:?}");
+    }
+
+    #[test]
+    fn without_extra_directories_nothing_is_listed() {
+        let config = Config {
+            project_dir: Some(PathBuf::from("/repo")),
+            ..Config::default()
+        };
+
+        assert!(!notices(config).contains('&'));
     }
 }
