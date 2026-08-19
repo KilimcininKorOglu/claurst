@@ -2124,6 +2124,9 @@ fn apply_session_resume(
         }
     }
     app.config.project_dir = Some(tool_ctx.working_dir.clone());
+    // The footer reads its own field, so without this it keeps naming the
+    // directory the session was resumed *from* while tools run in the new one.
+    app.current_dir = tool_ctx.working_dir.to_str().map(|s| s.to_string());
     app.attach_turn_diff_state(tool_ctx.file_history.clone(), tool_ctx.current_turn.clone());
     claurst_tui::update_terminal_title(session.title.as_deref());
     // By characters, not bytes: an id shorter than eight of them would panic
