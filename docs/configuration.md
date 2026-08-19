@@ -659,6 +659,34 @@ and `api_base` override the corresponding environment variables.
 | `models_blacklist` | array          | These model IDs are never offered.              |
 | `options`          | object         | Provider-specific passthrough options.          |
 
+#### `options`
+
+Every key in `options` is copied verbatim into the request body claurst sends
+for that account. This is how an endpoint claurst does not recognise asks for
+behaviour it supports:
+
+```json
+"providers": {
+  "my-gateway": {
+    "api_base": "https://llm.internal.example/v1",
+    "protocol": "openai",
+    "options": {
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+Claurst also fills some of these fields itself for the vendors it knows, and
+those built-in values win. `reasoningEffort` for a GitHub Copilot or Codex
+account, for instance, comes from the effort level `/effort` and the model
+picker set, so writing it in `options` there has no effect. The setting reaches
+the request only for fields claurst does not set for that wire format, which is
+all of them for an endpoint it does not recognise.
+
+Which built-in rules apply is decided by `protocol` (the wire format), not by
+the name the account is filed under.
+
 ---
 
 ## Environment Variables

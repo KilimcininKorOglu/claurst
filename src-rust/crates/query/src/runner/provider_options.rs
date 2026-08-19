@@ -99,13 +99,30 @@ pub(crate) fn is_openaiish_provider(provider_id: &str) -> bool {
     )
 }
 
+/// Assemble the `provider_options` body for one request.
+///
+/// `provider_id` is the wire format the account speaks, not the name it is
+/// filed under, because every rule below keys off a vendor's API shape.
+///
+/// `account_options` is the account's own `options` map from settings. It seeds
+/// the body so an endpoint none of the rules below recognises can still reach
+/// its own wire fields. It goes first rather than last on purpose: the rules
+/// derive `reasoningEffort` from the live effort level, and letting a settings
+/// value land on top of them would leave `/effort` silently inert for that
+/// account.
 pub(crate) fn build_provider_options(
     provider_id: &str,
     model_id: &str,
     effort_level: Option<claurst_core::effort::EffortLevel>,
     thinking_budget: Option<u32>,
+    account_options: Option<&std::collections::HashMap<String, Value>>,
 ) -> Value {
     let mut options = serde_json::Map::new();
+    if let Some(account_options) = account_options {
+        for (key, value) in account_options {
+            options.insert(key.clone(), value.clone());
+        }
+    }
     let model_id = model_id.to_ascii_lowercase();
 
     if provider_id == "github-copilot" {

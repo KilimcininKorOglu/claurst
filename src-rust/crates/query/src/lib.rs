@@ -1090,11 +1090,21 @@ async fn run_query_loop_inner(
                         } else {
                             None
                         },
+                        // `vendor`, not `provider_id_str`: the rules inside key
+                        // off the wire format, so an account filed under a name
+                        // of its owner's choosing would match none of them and
+                        // silently send an empty body. The options, in contrast,
+                        // belong to the account itself.
                         provider_options: build_provider_options(
-                            &provider_id_str,
+                            &vendor,
                             &model_id_str,
                             effective_effort_level,
                             effective_thinking_budget,
+                            tool_ctx
+                                .config
+                                .provider_configs
+                                .get(&provider_id_str)
+                                .map(|entry| &entry.options),
                         ),
                     };
 
@@ -2560,6 +2570,7 @@ mod tests {
             "gemini-3-flash-preview",
             Some(claurst_core::effort::EffortLevel::High),
             None,
+            None,
         );
         assert_eq!(
             options["thinkingConfig"]["thinkingLevel"],
@@ -2578,6 +2589,7 @@ mod tests {
             "gpt-5.4",
             Some(claurst_core::effort::EffortLevel::Medium),
             None,
+            None,
         );
         assert_eq!(options["reasoningEffort"], serde_json::json!("medium"));
         assert_eq!(options["textVerbosity"], serde_json::json!("low"));
@@ -2592,7 +2604,8 @@ mod tests {
             (claurst_core::effort::EffortLevel::Medium, "medium"),
             (claurst_core::effort::EffortLevel::High, "high"),
         ] {
-            let options = build_provider_options("openai-codex", "gpt-5.5", Some(level), None);
+            let options =
+                build_provider_options("openai-codex", "gpt-5.5", Some(level), None, None);
             assert_eq!(options["reasoningEffort"], serde_json::json!(expected));
         }
         // ...but the top "Max" tier becomes "xhigh" (extra high) on Codex.
@@ -2600,6 +2613,7 @@ mod tests {
             "openai-codex",
             "gpt-5.5",
             Some(claurst_core::effort::EffortLevel::Max),
+            None,
             None,
         );
         assert_eq!(options["reasoningEffort"], serde_json::json!("xhigh"));
@@ -2610,6 +2624,7 @@ mod tests {
             "openrouter",
             "gpt-5.4",
             Some(claurst_core::effort::EffortLevel::Max),
+            None,
             None,
         );
         assert_eq!(other["reasoningEffort"], serde_json::json!("high"));
@@ -2622,10 +2637,105 @@ mod tests {
             "anthropic.claude-sonnet-4-6-v1",
             Some(claurst_core::effort::EffortLevel::High),
             Some(10_000),
+            None,
         );
         assert_eq!(
             options["reasoningConfig"]["budgetTokens"],
             serde_json::json!(10_000)
+        );
+    }
+
+    fn account_options(
+        pairs: &[(&str, serde_json::Value)],
+    ) -> std::collections::HashMap<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn an_unknown_endpoint_sends_the_options_its_account_declares() {
+        // The rules in `build_provider_options` key off a fixed list of wire
+        // formats, so a self-hosted OpenAI-compatible endpoint matches none of
+        // them and used to send an empty body. Its account's own options are
+        // the only way it can ask for reasoning at all.
+        let options = build_provider_options(
+            "my-gateway",
+            "some-local-model",
+            Some(claurst_core::effort::EffortLevel::High),
+            None,
+            Some(&account_options(&[
+                ("reasoningEffort", serde_json::json!("high")),
+                ("service_tier", serde_json::json!("priority")),
+            ])),
+        );
+        assert_eq!(options["reasoningEffort"], serde_json::json!("high"));
+        assert_eq!(options["service_tier"], serde_json::json!("priority"));
+    }
+
+    #[test]
+    fn the_live_effort_level_wins_over_the_one_written_in_settings() {
+        // The other order would leave `/effort` and the picker's effort keys
+        // silently inert for any account that pinned the field in its settings.
+        let options = build_provider_options(
+            "github-copilot",
+            "gpt-5.2",
+            Some(claurst_core::effort::EffortLevel::Low),
+            None,
+            Some(&account_options(&[(
+                "reasoningEffort",
+                serde_json::json!("high"),
+            )])),
+        );
+        assert_eq!(options["reasoningEffort"], serde_json::json!("low"));
+    }
+
+    #[test]
+    fn an_account_named_after_its_owner_still_matches_its_wire_format() {
+        // The call site passes the vendor id, so an account filed as "work" but
+        // speaking github-copilot gets the same body as one named after the
+        // vendor. Passing the account name matched no rule and sent nothing.
+        let named_after_vendor = build_provider_options(
+            "github-copilot",
+            "claude-sonnet-4-6",
+            None,
+            Some(8_000),
+            None,
+        );
+        assert_eq!(
+            named_after_vendor["thinking_budget"],
+            serde_json::json!(8_000)
+        );
+        assert_eq!(
+            build_provider_options("work", "claude-sonnet-4-6", None, Some(8_000), None),
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn an_account_without_options_sends_exactly_what_it_sent_before() {
+        let empty = std::collections::HashMap::new();
+        assert_eq!(
+            build_provider_options(
+                "openrouter",
+                "gpt-5.4",
+                Some(claurst_core::effort::EffortLevel::Medium),
+                None,
+                Some(&empty),
+            ),
+            build_provider_options(
+                "openrouter",
+                "gpt-5.4",
+                Some(claurst_core::effort::EffortLevel::Medium),
+                None,
+                None,
+            )
+        );
+        // An account with no rules and no options still sends nothing at all.
+        assert_eq!(
+            build_provider_options("my-gateway", "some-local-model", None, None, Some(&empty)),
+            serde_json::Value::Null
         );
     }
 
