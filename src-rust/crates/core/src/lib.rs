@@ -1400,6 +1400,27 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub mouse_capture: Option<bool>,
+        /// Whether exceeding the turn limit runs one final tool-less turn that
+        /// asks the model to summarise its progress.
+        ///
+        /// `None` and `Some(true)` both run it. Set `"degradationSummary": false`
+        /// to stop at the limit and return the last assistant message instead,
+        /// which is what an automated caller wants when the extra turn only
+        /// costs it a request.
+        #[serde(
+            default,
+            rename = "degradationSummary",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub degradation_summary: Option<bool>,
+        /// Whether the reminder about incomplete todos is appended to the system
+        /// prompt on every turn after the second.
+        ///
+        /// `None` and `Some(true)` both send it. Set `"autoPoke": false` to stop
+        /// sending it, for a session where the todo list is a record rather than
+        /// a work queue.
+        #[serde(default, rename = "autoPoke", skip_serializing_if = "Option::is_none")]
+        pub auto_poke: Option<bool>,
         /// External status line. The command runs in a shell, receives session
         /// data as JSON on stdin, and its stdout is rendered in its own row
         /// above the footer.
@@ -2693,6 +2714,11 @@ pub mod config {
                 managed_agents: over.config.managed_agents.or(base.config.managed_agents),
                 auto_commits: over.config.auto_commits.or(base.config.auto_commits),
                 mouse_capture: over.config.mouse_capture.or(base.config.mouse_capture),
+                degradation_summary: over
+                    .config
+                    .degradation_summary
+                    .or(base.config.degradation_summary),
+                auto_poke: over.config.auto_poke.or(base.config.auto_poke),
                 // SECURITY: the status line command runs in a shell on every
                 // session, so only the user's own global settings may define
                 // it. `over` is the project's `.claurst/settings.json`, which
@@ -2911,6 +2937,78 @@ pub mod config {
             }
         }
         result
+    }
+
+    #[cfg(test)]
+    mod turn_behaviour_toggle_tests {
+        //! `degradationSummary` and `autoPoke` switch off turn behaviour that is
+        //! on today, so an unset value must keep reading as on.
+        use super::*;
+
+        #[test]
+        fn an_unset_toggle_stays_none_so_the_reader_can_default_it_to_on() {
+            let settings: Settings = serde_json::from_str("{}").expect("empty settings parse");
+            assert_eq!(settings.config.degradation_summary, None);
+            assert_eq!(settings.config.auto_poke, None);
+        }
+
+        #[test]
+        fn both_toggles_parse_under_their_camel_case_names() {
+            let settings: Settings =
+                serde_json::from_str(r#"{"config":{"degradationSummary":false,"autoPoke":false}}"#)
+                    .expect("named toggles parse");
+            assert_eq!(settings.config.degradation_summary, Some(false));
+            assert_eq!(settings.config.auto_poke, Some(false));
+        }
+
+        #[test]
+        fn an_unset_toggle_is_not_written_back() {
+            // Serialising every default would rewrite a hand-edited settings
+            // file with keys the user never set.
+            let json = serde_json::to_string(&Settings::default()).expect("serialise");
+            assert!(!json.contains("degradationSummary"), "{json}");
+            assert!(!json.contains("autoPoke"), "{json}");
+        }
+
+        #[test]
+        fn a_project_settings_file_overrides_the_users_value() {
+            // These are behaviour preferences, not security keys, so the nearer
+            // file wins the way every other `config` toggle does.
+            let user = Settings {
+                config: Config {
+                    degradation_summary: Some(true),
+                    auto_poke: Some(true),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let project = Settings {
+                config: Config {
+                    degradation_summary: Some(false),
+                    auto_poke: Some(false),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let merged = Settings::merge(user, project);
+            assert_eq!(merged.config.degradation_summary, Some(false));
+            assert_eq!(merged.config.auto_poke, Some(false));
+        }
+
+        #[test]
+        fn a_silent_project_file_leaves_the_users_value_alone() {
+            let user = Settings {
+                config: Config {
+                    degradation_summary: Some(false),
+                    auto_poke: Some(false),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let merged = Settings::merge(user, Settings::default());
+            assert_eq!(merged.config.degradation_summary, Some(false));
+            assert_eq!(merged.config.auto_poke, Some(false));
+        }
     }
 
     #[cfg(test)]

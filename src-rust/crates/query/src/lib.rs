@@ -100,6 +100,12 @@ pub struct QueryConfig {
     pub model: String,
     pub max_tokens: u32,
     pub max_turns: u32,
+    /// Whether exceeding `max_turns` runs one final tool-less summary turn.
+    /// When false the loop returns the last assistant message at the limit.
+    pub degradation_summary: bool,
+    /// Whether the incomplete-todo reminder is appended to the system prompt
+    /// after the second turn.
+    pub auto_poke: bool,
     pub system_prompt: Option<String>,
     pub append_system_prompt: Option<String>,
     pub output_style: claurst_core::system_prompt::OutputStyle,
@@ -192,6 +198,8 @@ impl Default for QueryConfig {
             model: claurst_core::constants::DEFAULT_MODEL.to_string(),
             max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
             max_turns: claurst_core::constants::MAX_TURNS_DEFAULT,
+            degradation_summary: true,
+            auto_poke: true,
             system_prompt: None,
             append_system_prompt: None,
             output_style: claurst_core::system_prompt::OutputStyle::Default,
@@ -228,6 +236,8 @@ impl QueryConfig {
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
             effort_level: cfg.effective_effort_level(),
+            degradation_summary: cfg.degradation_summary.unwrap_or(true),
+            auto_poke: cfg.auto_poke.unwrap_or(true),
             ..Default::default()
         }
     }
@@ -247,6 +257,8 @@ impl QueryConfig {
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
             effort_level: cfg.effective_effort_level(),
+            degradation_summary: cfg.degradation_summary.unwrap_or(true),
+            auto_poke: cfg.auto_poke.unwrap_or(true),
             ..Default::default()
         }
     }
@@ -553,6 +565,24 @@ async fn run_query_loop_inner(
         // dispatched exactly once, and re-exceeding the cap afterwards returns
         // cold. Applies to both goal and non-goal runs.
         let degradation_turn = if turn > effective_max_turns {
+            // The summary turn costs one more request. A caller that only wants
+            // the work stopped at the limit turns it off and takes what the
+            // model last said.
+            if !config.degradation_summary {
+                info!(
+                    turns = turn,
+                    max = effective_max_turns,
+                    "Max turns reached — summary turn disabled, returning the last message"
+                );
+                let last_msg = messages
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| Message::assistant("Max turns reached."));
+                return QueryOutcome::EndTurn {
+                    message: last_msg,
+                    usage: UsageInfo::default(),
+                };
+            }
             if degradation_done {
                 info!(
                     turns = turn,
@@ -769,7 +799,7 @@ async fn run_query_loop_inner(
             }
 
             // Apply todo nudge on turns > 2.
-            if turn > 2 {
+            if turn > 2 && config.auto_poke {
                 let nudge = build_todo_nudge(&tool_ctx.session_id);
                 if !nudge.is_empty() {
                     patched.append_system_prompt = Some(match &config.append_system_prompt {
@@ -2138,6 +2168,46 @@ mod tests {
         assert_eq!(QueryConfig::from_config(&cfg).effort_level, None);
     }
 
+    #[test]
+    fn both_turn_behaviour_toggles_default_to_on_when_unset() {
+        // `None` must read as enabled, or upgrading would silently switch off
+        // the summary turn and the todo reminder for every existing user.
+        let cfg = claurst_core::config::Config::default();
+        let query = QueryConfig::from_config(&cfg);
+        assert!(query.degradation_summary);
+        assert!(query.auto_poke);
+    }
+
+    #[test]
+    fn switching_a_turn_behaviour_toggle_off_reaches_the_turn() {
+        // Nothing else reads either field, so a missing arm here would leave
+        // the setting written, documented, and ignored on every request.
+        let cfg = claurst_core::config::Config {
+            degradation_summary: Some(false),
+            auto_poke: Some(false),
+            ..Default::default()
+        };
+        let query = QueryConfig::from_config(&cfg);
+        assert!(!query.degradation_summary);
+        assert!(!query.auto_poke);
+    }
+
+    #[test]
+    fn the_registry_constructor_carries_the_same_toggles() {
+        // `from_config_with_registry` is a second, near-identical constructor;
+        // a field added to one and not the other is silently dropped for every
+        // caller that uses model discovery.
+        let cfg = claurst_core::config::Config {
+            degradation_summary: Some(false),
+            auto_poke: Some(false),
+            ..Default::default()
+        };
+        let registry = claurst_api::ModelRegistry::new();
+        let query = QueryConfig::from_config_with_registry(&cfg, &registry);
+        assert!(!query.degradation_summary);
+        assert!(!query.auto_poke);
+    }
+
     // The fallback switch fires on `is_retryable`. These pin that contract:
     // narrowing either classification for some other reason would kill
     // `--fallback-model` silently.
@@ -2239,6 +2309,8 @@ mod tests {
             model: "claude-sonnet-4-6".to_string(),
             max_tokens: 4096,
             max_turns: 10,
+            degradation_summary: true,
+            auto_poke: true,
             system_prompt: sys.map(String::from),
             append_system_prompt: append.map(String::from),
             output_style: claurst_core::system_prompt::OutputStyle::Default,
@@ -3087,6 +3159,17 @@ mod tests {
         tools: Vec<Box<dyn Tool>>,
         continuation: crate::continuation::ContinuationMode,
     ) -> (QueryOutcome, Vec<bool>, Vec<Message>) {
+        drive_loop_with_config(always_end_turn, max_turns, tools, continuation, |_| {}).await
+    }
+
+    /// As above, with a hook that adjusts the `QueryConfig` before the run.
+    async fn drive_loop_with_config(
+        always_end_turn: bool,
+        max_turns: u32,
+        tools: Vec<Box<dyn Tool>>,
+        continuation: crate::continuation::ContinuationMode,
+        tweak: impl FnOnce(&mut QueryConfig),
+    ) -> (QueryOutcome, Vec<bool>, Vec<Message>) {
         let recorded = Arc::new(StdMutex::new(Vec::new()));
         let provider = Arc::new(RecordingProvider {
             id: claurst_core::provider_id::ProviderId::new("mockprov"),
@@ -3112,6 +3195,7 @@ mod tests {
         config.max_turns = max_turns;
         config.provider_registry = Some(registry);
         config.continuation = continuation;
+        tweak(&mut config);
 
         let cost = claurst_core::cost::CostTracker::new();
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -3201,6 +3285,37 @@ mod tests {
             msgs.iter()
                 .any(|m| m.get_all_text().contains("maximum number of steps")),
             "the tool-less summary prompt must be injected into the history"
+        );
+    }
+
+    /// With the summary turn switched off, the same run stops at the limit and
+    /// hands back what the model last said.
+    #[tokio::test]
+    async fn max_steps_returns_the_last_message_when_the_summary_turn_is_off() {
+        let (outcome, recorded, msgs) = drive_loop_with_config(
+            false,
+            2,
+            noop_tools(),
+            crate::continuation::ContinuationMode::Default,
+            |config| config.degradation_summary = false,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, QueryOutcome::EndTurn { .. }),
+            "the loop must still end cleanly"
+        );
+        assert_eq!(
+            recorded.len(),
+            2,
+            "the extra summary request must not be sent, got {:?}",
+            recorded
+        );
+        assert!(
+            !msgs
+                .iter()
+                .any(|m| m.get_all_text().contains("maximum number of steps")),
+            "the summary prompt must not reach the history"
         );
     }
 

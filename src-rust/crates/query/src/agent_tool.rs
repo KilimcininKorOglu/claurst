@@ -378,6 +378,10 @@ impl Tool for AgentTool {
             model,
             max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
             max_turns: resolved_max_turns,
+            // A sub-agent answers its parent, so both settings follow the
+            // session it was spawned from.
+            degradation_summary: ctx.config.degradation_summary.unwrap_or(true),
+            auto_poke: ctx.config.auto_poke.unwrap_or(true),
             system_prompt: Some(system_prompt),
             append_system_prompt: None,
             output_style: ctx.config.effective_output_style(),

@@ -224,6 +224,19 @@ See [Permission Modes](#permission-modes) for a full description of each value.
 | `auto_compact`      | boolean | true    | Automatically compact the conversation context when the context window nears capacity. |
 | `compact_threshold` | float   | 0.85    | Fraction of the context window that triggers auto-compaction (0.0–1.0).                |
 
+### Turn behaviour
+
+| Key                  | Type    | Default | Description                                                                                                                                                                 |
+|----------------------|---------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `degradationSummary` | boolean | true    | Run one final tool-less turn asking the model to summarise its progress when the turn limit is reached. Set to `false` to stop at the limit and take the last message instead. |
+| `autoPoke`           | boolean | true    | Append a reminder about incomplete todos to the system prompt after the second turn. Set to `false` when the todo list is a record rather than a work queue.                   |
+
+Both save one request per run when switched off. Leaving a key unset is the same
+as `true`, so upgrading changes nothing.
+
+The turn limit itself comes from `--max-turns` or from an agent definition's
+`max_turns`.
+
 ### System prompt
 
 | Key                    | Type           | Default | Description                                                                           |
