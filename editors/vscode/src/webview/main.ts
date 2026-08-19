@@ -82,6 +82,7 @@ type HostMessage =
   | { type: 'commands'; commands?: Command[] }
   | { type: 'capabilities'; image: boolean }
   | { type: 'remember'; state: unknown }
+  | { type: 'agentDied'; code: number | null; output: string[]; canRestart: boolean }
   | { type: 'mention'; text: string }
   | { type: 'turnEnded' };
 
@@ -482,6 +483,54 @@ type HostMessage =
     scrollToEnd();
   }
 
+  /** Report that the agent stopped, with what it said on the way out.
+   *
+   * An exit code alone says a crash happened and nothing about what it was, so
+   * the last lines it printed go with it. */
+  function renderAgentDied(msg: {
+    code: number | null;
+    output: string[];
+    canRestart: boolean;
+  }): void {
+    const block = document.createElement('div');
+    block.className = 'permission agent-died';
+
+    const heading = document.createElement('div');
+    heading.className = 'permission-title';
+    heading.textContent =
+      msg.code === null
+        ? 'The agent stopped.'
+        : `The agent stopped (exit code ${msg.code}).`;
+    block.appendChild(heading);
+
+    if (msg.output.length > 0) {
+      const body = document.createElement('div');
+      body.className = 'permission-body';
+      body.textContent = msg.output.join('\n');
+      block.appendChild(body);
+    }
+
+    if (msg.canRestart) {
+      const row = document.createElement('div');
+      row.className = 'permission-options';
+      const restart = document.createElement('button');
+      restart.className = 'permission-option';
+      restart.textContent = 'Restart';
+      restart.addEventListener('click', () => {
+        vscode.postMessage({ type: 'restart' });
+        const done = document.createElement('div');
+        done.className = 'permission-chosen';
+        done.textContent = 'Restarting…';
+        row.replaceWith(done);
+      });
+      row.appendChild(restart);
+      block.appendChild(row);
+    }
+
+    messagesEl.appendChild(block);
+    scrollToEnd();
+  }
+
   function appendTerminalOutput(terminalId: string, chunk: string): void {
     const text = (terminalText.get(terminalId) || '') + chunk;
     terminalText.set(terminalId, text);
@@ -817,6 +866,11 @@ type HostMessage =
       }
       case 'commands': {
         commands = msg.commands || [];
+        break;
+      }
+      case 'agentDied': {
+        endBubble();
+        renderAgentDied(msg);
         break;
       }
       case 'remember': {

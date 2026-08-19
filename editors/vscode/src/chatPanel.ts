@@ -123,6 +123,8 @@ export class ChatPanel {
    * A panel that closes settles them rather than leaving the agent waiting. */
   private pendingPermissions = new Map<number, (answer: PermissionAnswer) => void>();
   private nextPermissionId = 1;
+  /** Stops watching the pool for the agent dying. Replaced on every restart. */
+  private stopWatchingAgent: (() => void) | undefined;
   /** Whether this panel is holding the shared agent. Releasing one it never
    * took would shut the process down under another panel. */
   private holdsAgent = false;
@@ -213,7 +215,7 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     private readonly pool: AgentPool,
     private readonly outputChannel: vscode.OutputChannel,
-    private readonly opening: PanelOpening,
+    private opening: PanelOpening,
   ) {
     this.surface = surface;
     this.cwd = cwdOf(opening);
@@ -269,9 +271,20 @@ export class ChatPanel {
   }
 
   private async startSession(): Promise<void> {
+    // Restarting after a crash comes back through here holding a share of a
+    // process that no longer exists. Giving it back first keeps the count
+    // honest; taking a second one would leave the pool never reaching zero.
+    if (this.holdsAgent) {
+      this.holdsAgent = false;
+      this.pool.release();
+    }
     const client = await this.pool.acquire(this.cwd);
     this.holdsAgent = true;
     this.client = client;
+    // One watcher per panel, not one per start: a restart that added another
+    // would report the next crash once for every restart that came before it.
+    this.stopWatchingAgent?.();
+    this.stopWatchingAgent = this.pool.onDied((code) => this.agentDied(code));
 
     const events = {
       onTextChunk: (text: string, kind: ChunkKind) =>
@@ -357,6 +370,35 @@ export class ChatPanel {
     const fence = excerpt ? `\n\n\`\`\`${document.languageId}\n${excerpt}\n\`\`\`\n` : '';
     this.surface.reveal(true);
     this.postToWebview({ type: 'mention', text: `@${relative} (${where})${fence}` });
+  }
+
+  /** Say the agent is gone, and offer to start another.
+   *
+   * A dead process took every session with it, so the panel is holding an id
+   * that no longer means anything. It used to surface only as whichever
+   * request failed next, which said nothing about what had happened. */
+  private agentDied(code: number | null): void {
+    this.client = undefined;
+    this.postToWebview({
+      type: 'agentDied',
+      code,
+      output: this.pool.lastOutput,
+      canRestart: this.sessionId !== undefined,
+    });
+    this.postToWebview({ type: 'turnEnded' });
+  }
+
+  /** Start another process and reopen this panel's conversation in it. */
+  private async restart(): Promise<void> {
+    const sessionId = this.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    this.sessionId = undefined;
+    // The transcript is on file, so the new session is the old conversation
+    // replayed rather than a fresh one under the same panel.
+    this.opening = { kind: 'load', session: { sessionId, cwd: this.cwd, title: this.surface.title } };
+    await this.startSession();
   }
 
   /** Have the webview hold on to what this panel is showing.
@@ -448,6 +490,9 @@ export class ChatPanel {
         break;
       case 'pickFile':
         this.pickFile().catch((e) => this.reportError(e));
+        break;
+      case 'restart':
+        this.restart().catch((e) => this.reportError(e));
         break;
       case 'permissionAnswer':
         this.answerPermission(msg.requestId, msg.optionId);
@@ -670,6 +715,8 @@ export class ChatPanel {
       ChatPanel.active = ChatPanel.panels.values().next().value;
     }
     ChatPanel.reportState();
+    this.stopWatchingAgent?.();
+    this.stopWatchingAgent = undefined;
     // Closing the panel is not consent. Anything still waiting on an answer is
     // told nobody chose, which denies the call rather than stalling the turn.
     for (const resolve of this.pendingPermissions.values()) {

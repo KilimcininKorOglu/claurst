@@ -391,6 +391,11 @@ body {
   background: var(--vscode-inputValidation-errorBorder, #be1100);
 }
 
+.agent-died {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+  background: var(--vscode-inputValidation-errorBackground, rgba(161, 38, 13, 0.2));
+}
+
 .permission-chosen {
   margin-top: 8px;
   color: var(--vscode-descriptionForeground);

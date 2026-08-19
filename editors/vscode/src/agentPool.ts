@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import { AcpClient } from './acpClient';
 
+/** How many stderr lines to hold on to for a crash report. Enough for a panic
+ * and its message; the output channel keeps the rest. */
+const STDERR_KEPT = 20;
+
 /** Keeps one `claurst acp` process for the whole window.
  *
  * Every panel is a session inside it rather than a process of its own, so the
@@ -11,11 +15,29 @@ export class AgentPool {
   private client: AcpClient | undefined;
   private starting: Promise<AcpClient> | undefined;
   private panels = 0;
+  /** Told when the process goes away on its own, so panels can say so and
+   * offer to start another. Without this a dead agent showed up only as
+   * whatever request happened to fail next. */
+  private readonly watchers = new Set<(code: number | null) => void>();
+  /** The last few lines the process printed before it stopped. An exit code on
+   * its own says a crash happened, not what it was. */
+  private recentStderr: string[] = [];
 
   constructor(
     private readonly version: string,
     private readonly outputChannel: vscode.OutputChannel,
   ) {}
+
+  /** Watch for the process dying. The returned function stops watching. */
+  onDied(watcher: (code: number | null) => void): () => void {
+    this.watchers.add(watcher);
+    return () => this.watchers.delete(watcher);
+  }
+
+  /** What the agent said on its way out. */
+  get lastOutput(): string[] {
+    return [...this.recentStderr];
+  }
 
   /** The shared client, started if it is not running yet. */
   async acquire(cwd: string): Promise<AcpClient> {
@@ -35,6 +57,8 @@ export class AgentPool {
   }
 
   private async start(cwd: string): Promise<AcpClient> {
+    // A new process reports its own failures; the last one's are history.
+    this.recentStderr = [];
     const config = vscode.workspace.getConfiguration('claurst');
     const executablePath = config.get<string>('executablePath', 'claurst');
     const hostTerminals = config.get<boolean>('hostTerminals', false);
@@ -44,7 +68,13 @@ export class AgentPool {
       cwd,
       this.version,
       {
-        onStderr: (line) => this.outputChannel.appendLine(line),
+        onStderr: (line) => {
+          this.outputChannel.appendLine(line);
+          this.recentStderr.push(line);
+          if (this.recentStderr.length > STDERR_KEPT) {
+            this.recentStderr.shift();
+          }
+        },
         onExit: (code) => {
           this.outputChannel.appendLine(
             `[claurst-vscode] agent process exited (code ${code ?? 'unknown'})`,
@@ -53,6 +83,9 @@ export class AgentPool {
           // starts a fresh one rather than talking to a corpse.
           this.client = undefined;
           this.starting = undefined;
+          for (const watcher of this.watchers) {
+            watcher(code);
+          }
         },
       },
       hostTerminals,
