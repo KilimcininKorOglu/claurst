@@ -18,6 +18,64 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
+// Post-create command
+// ---------------------------------------------------------------------------
+
+/// How long a post-create command may run before it is stopped.
+///
+/// The command is model-supplied, so an unbounded one holds the turn open for
+/// as long as it keeps running. Five minutes leaves room for an install step
+/// without leaving the session with no way back.
+const POST_CREATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Why a post-create command produced no output.
+enum PostCreateError {
+    /// It ran past `POST_CREATE_TIMEOUT` and was stopped.
+    TimedOut,
+    /// It could not be started, or the wait failed.
+    Failed(std::io::Error),
+}
+
+/// Run the model-supplied post-create command in the new worktree.
+///
+/// The command is stopped along with everything it started if it runs past its
+/// limit, or if the turn is cancelled while it is running.
+async fn run_post_create(
+    cmd: &str,
+    worktree_path: &std::path::Path,
+) -> Result<std::process::Output, PostCreateError> {
+    let mut builder = if cfg!(target_os = "windows") {
+        let mut builder = tokio::process::Command::new("cmd");
+        builder.args(["/C", cmd]);
+        builder
+    } else {
+        let mut builder = tokio::process::Command::new("sh");
+        builder.args(["-c", cmd]);
+        builder
+    };
+    builder
+        .current_dir(worktree_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+
+    let child = builder.spawn().map_err(PostCreateError::Failed)?;
+    let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+
+    match tokio::time::timeout(POST_CREATE_TIMEOUT, child.wait_with_output()).await {
+        Ok(result) => {
+            tree_guard.disarm();
+            result.map_err(PostCreateError::Failed)
+        }
+        Err(_) => {
+            tree_guard.kill_now();
+            Err(PostCreateError::TimedOut)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Session-level state: only one active worktree per session.
 // ---------------------------------------------------------------------------
 
@@ -245,19 +303,7 @@ impl Tool for EnterWorktreeTool {
                     ) {
                         format!("\nPost-create command '{}' was not run: {}", cmd, e)
                     } else {
-                        let shell_result = if cfg!(target_os = "windows") {
-                            tokio::process::Command::new("cmd")
-                                .args(["/C", &cmd])
-                                .current_dir(&worktree_path)
-                                .output()
-                                .await
-                        } else {
-                            tokio::process::Command::new("sh")
-                                .args(["-c", &cmd])
-                                .current_dir(&worktree_path)
-                                .output()
-                                .await
-                        };
+                        let shell_result = run_post_create(&cmd, &worktree_path).await;
                         match shell_result {
                             Ok(out) if out.status.success() => {
                                 let stdout = String::from_utf8_lossy(&out.stdout);
@@ -279,7 +325,12 @@ impl Tool for EnterWorktreeTool {
                                     stderr.trim()
                                 )
                             }
-                            Err(e) => {
+                            Err(PostCreateError::TimedOut) => format!(
+                                "\nPost-create command '{}' was stopped after {} seconds.",
+                                cmd,
+                                POST_CREATE_TIMEOUT.as_secs()
+                            ),
+                            Err(PostCreateError::Failed(e)) => {
                                 format!("\nCould not run post-create command '{}': {}", cmd, e)
                             }
                         }
@@ -612,5 +663,64 @@ mod tests {
         );
         assert!(!marker.exists(), "denied post-create command must NOT run");
         reset_session().await;
+    }
+    /// A sleep duration no other run can be using, so a process left behind by
+    /// an earlier run is never read as this one's.
+    #[cfg(unix)]
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999334.{}", nanos % 1_000_000_000)
+    }
+
+    #[cfg(unix)]
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// The command is model-supplied and used to run with no limit at all, so
+    /// one that never finished held the turn open for as long as it ran.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cancelled_post_create_command_takes_its_children_with_it() {
+        let marker = unique_marker();
+        let dir = std::env::temp_dir();
+
+        // Dropping the future is what a cancelled turn does to it.
+        {
+            let command = format!("sleep {marker} & wait");
+            let running = run_post_create(&command, &dir);
+            tokio::pin!(running);
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut running).await;
+            assert!(pgrep_matches(&marker), "the child never started");
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the command's child survived the cancel"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_post_create_command_that_finishes_reports_its_output() {
+        let out = run_post_create("echo ready", &std::env::temp_dir())
+            .await
+            .unwrap_or_else(|_| panic!("the command should have run"));
+
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ready");
     }
 }
