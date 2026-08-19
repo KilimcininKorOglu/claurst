@@ -1768,7 +1768,12 @@ fn append_turn_items(
     let width = ctx.width;
     push_rendered_items(
         items,
-        render_transcript_user_message(turn.user_message, width, ctx.show_timestamps),
+        render_transcript_user_message(
+            turn.user_message,
+            width,
+            ctx.show_timestamps,
+            ctx.goal_completed,
+        ),
         Some(turn.user_index),
         true,
     );
@@ -1953,6 +1958,7 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         expanded_thinking: &app.thinking_expanded,
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model: app.config.advisor_model.as_deref(),
+        goal_completed: app.goal_completed,
     };
     let turns = build_transcript_turns(app);
     let mut turn_map = std::collections::HashMap::new();
@@ -2052,6 +2058,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         expanded_thinking: &app.thinking_expanded,
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model: app.config.advisor_model.as_deref(),
+        goal_completed: app.goal_completed,
     };
     let turns = build_transcript_turns(app);
 

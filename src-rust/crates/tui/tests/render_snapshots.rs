@@ -262,7 +262,7 @@ fn user_local_command_output_truncates_at_max_lines() {
 
 #[test]
 fn user_command_shows_chevron_and_name() {
-    let lines = render_user_command("doctor", "");
+    let lines = render_user_command("doctor", "", false);
     assert_eq!(lines.len(), 1);
     let combined = flatten(&lines);
     assert!(combined.contains('\u{25b8}'));
@@ -271,7 +271,7 @@ fn user_command_shows_chevron_and_name() {
 
 #[test]
 fn user_command_shows_args() {
-    let lines = render_user_command("skill", "--verbose");
+    let lines = render_user_command("skill", "--verbose", false);
     let combined = flatten(&lines);
     assert!(combined.contains("skill"));
     assert!(combined.contains("--verbose"));

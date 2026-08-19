@@ -50,6 +50,10 @@ pub struct RenderContext<'a> {
     /// The configured advisor model, shown on the `Advisor` tool block. The
     /// tool input does not carry it, so the renderer supplies it.
     pub advisor_model: Option<&'a str>,
+    /// Whether the session's goal has reached `GoalStatus::Complete`. Drives
+    /// the muted `GOAL COMPLETE` variant of the goal badge; the goal store is
+    /// not reachable from the renderer, so the caller supplies it.
+    pub goal_completed: bool,
 }
 
 /// Shared empty collections so `RenderContext::default()` can hand out
@@ -69,6 +73,7 @@ impl Default for RenderContext<'static> {
             expanded_thinking: &EMPTY_EXPANDED_THINKING,
             show_timestamps: false,
             advisor_model: None,
+            goal_completed: false,
         }
     }
 }
@@ -403,6 +408,7 @@ pub fn render_transcript_user_message(
     msg: &Message,
     width: u16,
     show_timestamps: bool,
+    goal_completed: bool,
 ) -> Vec<Line<'static>> {
     // Goal-event messages injected by the /goal machinery render as a compact
     // event block, not as a user input bubble. The same applies to the user's
@@ -414,7 +420,7 @@ pub fn render_transcript_user_message(
             return render_goal_event(&text, width);
         }
         if let Some(objective) = extract_goal_slash_objective(&text) {
-            return render_goal_active_block(&objective);
+            return render_goal_active_block(&objective, goal_completed);
         }
     }
 
@@ -533,7 +539,7 @@ pub fn render_transcript_user_message(
             }
             ContentBlock::UserCommand { name, args } => {
                 flush_text(&mut pending_text, &mut lines);
-                lines.extend(render_user_command(&name, &args));
+                lines.extend(render_user_command(&name, &args, goal_completed));
             }
             ContentBlock::UserMemoryInput { key, value } => {
                 flush_text(&mut pending_text, &mut lines);
@@ -806,7 +812,7 @@ pub fn render_transcript_assistant_message_tagged(
             ContentBlock::UserCommand { name, args } => {
                 flush_text(&mut pending_text, &mut out, ctx.width);
                 for line in indent_lines(
-                    render_user_command(&name, &args),
+                    render_user_command(&name, &args, ctx.goal_completed),
                     "   ",
                     Style::default(),
                     TRANSCRIPT_TEXT,
@@ -1006,7 +1012,7 @@ pub fn render_transcript_assistant_message(
             ContentBlock::UserCommand { name, args } => {
                 flush_text(&mut pending_text, &mut lines);
                 lines.extend(indent_lines(
-                    render_user_command(&name, &args),
+                    render_user_command(&name, &args, ctx.goal_completed),
                     "   ",
                     Style::default(),
                     TRANSCRIPT_TEXT,
@@ -1865,7 +1871,7 @@ pub fn render_message(msg: &Message, ctx: &RenderContext) -> Vec<Line<'static>> 
             }
             ContentBlock::UserCommand { name, args } => {
                 flush_text(&mut lines, &msg.role, &mut pending_text, ctx);
-                lines.extend(render_user_command(&name, &args));
+                lines.extend(render_user_command(&name, &args, ctx.goal_completed));
             }
             ContentBlock::UserMemoryInput { key, value } => {
                 flush_text(&mut lines, &msg.role, &mut pending_text, ctx);
@@ -1948,10 +1954,10 @@ pub fn render_system_api_error(msg: &str, retry_secs: Option<u32>) -> Vec<Line<'
 /// `[Goal started]` event the machinery injects right after it. Subcommands
 /// (`/goal status`, `pause`, `resume`, `clear`, `complete`) keep the normal
 /// rendering.
-pub fn render_user_command(name: &str, args: &str) -> Vec<Line<'static>> {
+pub fn render_user_command(name: &str, args: &str, goal_completed: bool) -> Vec<Line<'static>> {
     if name == "goal" {
         if let Some(objective) = extract_goal_objective_from_args(args) {
-            return render_goal_active_block(&objective);
+            return render_goal_active_block(&objective, goal_completed);
         }
     }
     vec![Line::from(vec![
@@ -2038,22 +2044,27 @@ fn extract_goal_objective_from_args(args: &str) -> Option<String> {
 
 /// Render the yellow `GOAL ACTIVE / Objective: …` badge that replaces the
 /// `/goal <objective>` user-input line in the transcript.
-fn render_goal_active_block(objective: &str) -> Vec<Line<'static>> {
+///
+/// Once the goal is complete the badge stays in place but goes muted and reads
+/// `GOAL COMPLETE`, so scrolling back through a long session shows which goal
+/// is still being worked on and which one is already closed.
+fn render_goal_active_block(objective: &str, completed: bool) -> Vec<Line<'static>> {
+    let (label, accent, body) = if completed {
+        ("  GOAL COMPLETE", GOAL_MUTED, GOAL_MUTED)
+    } else {
+        ("  GOAL ACTIVE", GOAL_ACCENT, GOAL_BODY)
+    };
     vec![
         Line::from(vec![Span::styled(
-            "  GOAL ACTIVE".to_string(),
-            Style::default()
-                .fg(GOAL_ACCENT)
-                .add_modifier(Modifier::BOLD),
+            label.to_string(),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![
             Span::styled(
                 "  Objective: ".to_string(),
-                Style::default()
-                    .fg(GOAL_ACCENT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(objective.to_string(), Style::default().fg(GOAL_BODY)),
+            Span::styled(objective.to_string(), Style::default().fg(body)),
         ]),
     ]
 }
@@ -2682,7 +2693,7 @@ mod tests {
 
     #[test]
     fn test_render_user_command() {
-        let result = render_user_command("doctor", "--verbose");
+        let result = render_user_command("doctor", "--verbose", false);
         assert!(!result.is_empty());
         let text = line_text(&result[0]);
         assert!(text.contains('\u{25b8}'), "should have ▸ prefix");
@@ -2692,7 +2703,7 @@ mod tests {
 
     #[test]
     fn goal_objective_renders_goal_active_block_not_user_command() {
-        let result = render_user_command("goal", "Migrate to React");
+        let result = render_user_command("goal", "Migrate to React", false);
         let header = line_text(&result[0]);
         let body = line_text(&result[1]);
         assert!(header.contains("GOAL ACTIVE"));
@@ -2705,9 +2716,28 @@ mod tests {
     }
 
     #[test]
+    fn completed_goal_renders_a_muted_complete_block() {
+        let active = render_user_command("goal", "Migrate to React", false);
+        let complete = render_user_command("goal", "Migrate to React", true);
+
+        let header = line_text(&complete[0]);
+        let body = line_text(&complete[1]);
+        assert!(header.contains("GOAL COMPLETE"), "{header:?}");
+        assert!(!header.contains("GOAL ACTIVE"), "{header:?}");
+        assert!(body.contains("Migrate to React"), "{body:?}");
+
+        // The objective text must go from the amber body colour to the muted
+        // one; matching on the text alone would pass with the block unchanged.
+        assert_eq!(active[1].spans[1].style.fg, Some(GOAL_BODY));
+        assert_eq!(complete[1].spans[1].style.fg, Some(GOAL_MUTED));
+        assert_eq!(active[0].spans[0].style.fg, Some(GOAL_ACCENT));
+        assert_eq!(complete[0].spans[0].style.fg, Some(GOAL_MUTED));
+    }
+
+    #[test]
     fn goal_subcommands_render_as_normal_user_command() {
         for sub in ["status", "pause", "resume", "clear", "complete"] {
-            let result = render_user_command("goal", sub);
+            let result = render_user_command("goal", sub, false);
             let text = line_text(&result[0]);
             assert!(
                 text.contains('\u{25b8}'),
@@ -2719,7 +2749,7 @@ mod tests {
 
     #[test]
     fn goal_with_tokens_flag_strips_flag_from_objective() {
-        let result = render_user_command("goal", "--tokens 250K Migrate to React");
+        let result = render_user_command("goal", "--tokens 250K Migrate to React", false);
         let body = line_text(&result[1]);
         assert!(body.contains("Migrate to React"));
         assert!(
@@ -2990,7 +3020,7 @@ mod tests {
     fn user_message_omits_time_when_the_setting_is_off() {
         let msg = Message::user("hello");
         assert!(msg.timestamp.is_some(), "constructor stamps the instant");
-        let rendered: String = render_transcript_user_message(&msg, 80, false)
+        let rendered: String = render_transcript_user_message(&msg, 80, false, false)
             .iter()
             .map(line_text)
             .collect();
@@ -3003,7 +3033,7 @@ mod tests {
     #[test]
     fn user_message_shows_time_when_the_setting_is_on() {
         let msg = Message::user("hello");
-        let rendered: String = render_transcript_user_message(&msg, 80, true)
+        let rendered: String = render_transcript_user_message(&msg, 80, true, false)
             .iter()
             .map(line_text)
             .collect();
@@ -3016,7 +3046,7 @@ mod tests {
         // A turn restored from a transcript written before timestamping.
         let mut msg = Message::user("legacy");
         msg.timestamp = None;
-        let rendered: String = render_transcript_user_message(&msg, 80, true)
+        let rendered: String = render_transcript_user_message(&msg, 80, true, false)
             .iter()
             .map(line_text)
             .collect();

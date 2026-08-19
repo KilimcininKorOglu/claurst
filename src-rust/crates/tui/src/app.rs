@@ -1576,6 +1576,10 @@ pub struct App {
     /// Goal badge string shown in the footer, e.g. "active · 5m · 3 turns".
     /// None when no goal is active. Updated by the REPL after each turn.
     pub active_goal_badge: Option<String>,
+    /// Whether this session's goal has reached `GoalStatus::Complete`. Set from
+    /// the same store read that refreshes `active_goal_badge`, and read by the
+    /// transcript renderer to mute the goal badge block.
+    pub goal_completed: bool,
 
     // ---- Thinking block expansion state ----------------------------------
     /// Set of thinking block content hashes that are expanded.
@@ -1946,6 +1950,7 @@ impl App {
             worktree_branch: None,
             agent_type_badge: None,
             active_goal_badge: None,
+            goal_completed: false,
             thinking_expanded: std::collections::HashSet::new(),
             last_msg_area: Cell::new(ratatui::layout::Rect::default()),
             last_selectable_area: Cell::new(ratatui::layout::Rect::default()),

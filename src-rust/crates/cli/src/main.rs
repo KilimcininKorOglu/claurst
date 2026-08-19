@@ -2450,6 +2450,27 @@ fn settle_pending_permission(
     })
 }
 
+/// Derive the two goal surfaces from a single store read: the footer badge
+/// string (only while the goal is still running) and whether the transcript
+/// should mute the goal badge block.
+///
+/// Paused, budget-limited and absent goals clear the footer badge without
+/// counting as complete, which is what makes the muted transcript block mean
+/// "this goal is closed" rather than "this goal is not running right now".
+fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, bool) {
+    let badge = goal
+        .filter(|goal| goal.status == claurst_core::GoalStatus::Active)
+        .map(|goal| {
+            format!(
+                "active · {} · {} turns",
+                goal.elapsed_display(),
+                goal.turns_used
+            )
+        });
+    let completed = goal.is_some_and(|goal| goal.status == claurst_core::GoalStatus::Complete);
+    (badge, completed)
+}
+
 async fn run_interactive(
     config: Config,
     settings: claurst_core::config::Settings,
@@ -5393,16 +5414,15 @@ async fn run_interactive(
                 // (or absent), so this clears the badge in the common case. The
                 // paused / budget / runaway notes are surfaced live from within
                 // the loop via QueryEvent::Status.
+                // One store read feeds both surfaces: the footer badge only
+                // fills while the goal is still running, and the transcript
+                // badge goes muted once it is complete.
                 if claurst_core::goals_enabled() {
-                    app.active_goal_badge = claurst_core::GoalStore::open_default()
-                        .and_then(|s| s.get_active_goal(&session.id))
-                        .map(|goal| {
-                            format!(
-                                "active · {} · {} turns",
-                                goal.elapsed_display(),
-                                goal.turns_used
-                            )
-                        });
+                    let goal = claurst_core::GoalStore::open_default()
+                        .and_then(|s| s.get_goal(&session.id));
+                    let (badge, completed) = goal_display_state(goal.as_ref());
+                    app.active_goal_badge = badge;
+                    app.goal_completed = completed;
                 }
             }
         }
@@ -6502,6 +6522,63 @@ mod bare_mode_tests {
         hooks.clear(); // mirrors `config.hooks.clear()` in bare mode
 
         assert!(hooks.is_empty(), "bare mode leaves no hooks to run");
+    }
+}
+
+#[cfg(test)]
+mod goal_display_state_tests {
+    //! The footer badge and the transcript's muted goal block come from one
+    //! store read. Before this, only the badge was fed and the muted variant
+    //! could never trigger.
+    use super::*;
+    use claurst_core::{Goal, GoalStatus};
+
+    fn goal(status: GoalStatus) -> Goal {
+        Goal {
+            id: "g1".to_string(),
+            session_id: "s1".to_string(),
+            objective: "Migrate to React".to_string(),
+            status,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_secs: 90,
+            turns_used: 3,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn active_goal_fills_the_badge_and_is_not_completed() {
+        let (badge, completed) = goal_display_state(Some(&goal(GoalStatus::Active)));
+        let badge = badge.expect("an active goal must show a footer badge");
+        assert!(badge.starts_with("active · "), "{badge:?}");
+        assert!(badge.ends_with("3 turns"), "{badge:?}");
+        assert!(!completed);
+    }
+
+    #[test]
+    fn complete_goal_clears_the_badge_and_sets_the_flag() {
+        let (badge, completed) = goal_display_state(Some(&goal(GoalStatus::Complete)));
+        assert_eq!(badge, None);
+        assert!(completed);
+    }
+
+    #[test]
+    fn paused_and_budget_limited_goals_are_neither_shown_nor_completed() {
+        for status in [GoalStatus::Paused, GoalStatus::BudgetLimited] {
+            let goal = goal(status);
+            let (badge, completed) = goal_display_state(Some(&goal));
+            assert_eq!(badge, None, "{:?} must not fill the badge", goal.status);
+            assert!(!completed, "{:?} must not read as complete", goal.status);
+        }
+    }
+
+    #[test]
+    fn no_goal_leaves_both_surfaces_empty() {
+        let (badge, completed) = goal_display_state(None);
+        assert_eq!(badge, None);
+        assert!(!completed);
     }
 }
 
