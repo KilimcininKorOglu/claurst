@@ -1471,6 +1471,12 @@ pub struct App {
     /// When `true`, the main event loop should spawn an async task to load
     /// the session list from disk and populate the session browser.
     pub session_list_pending: bool,
+    /// A session the browser asked to resume, for the CLI loop to load.
+    ///
+    /// Swapping sessions moves the model, the working directory and the
+    /// turn-diff state as well as the transcript, and the TUI holds none of
+    /// those, so the request is handed over rather than acted on here.
+    pub pending_resume_session_id: Option<String>,
     /// Receiver for background session-list results.
     pub session_list_rx:
         Option<tokio::sync::mpsc::Receiver<Vec<crate::session_browser::SessionEntry>>>,
@@ -1868,6 +1874,7 @@ impl App {
             model_picker_fetch_pending: false,
             model_picker_provider_id: None,
             session_list_pending: false,
+            pending_resume_session_id: None,
             session_list_rx: None,
             recent_sessions: Vec::new(),
             // Load recent activity once, lazily, on the first run-loop iteration.
@@ -4833,6 +4840,7 @@ impl App {
                     KeyCode::Char('r') => self.session_browser.start_rename(),
                     KeyCode::Char('a') => self.session_browser.toggle_paths(),
                     KeyCode::Char('p') => self.session_browser.toggle_preview(),
+                    KeyCode::Enter => self.request_session_resume(),
                     _ => {}
                 },
                 SessionBrowserMode::Rename => match key.code {
@@ -8065,6 +8073,18 @@ impl App {
         }
     }
 
+    /// Ask the CLI loop to resume the session under the browser's cursor.
+    ///
+    /// The browser closes straight away: leaving it open over a transcript that
+    /// is about to be replaced shows the wrong thing for a frame or two.
+    pub fn request_session_resume(&mut self) {
+        let Some(session) = self.session_browser.selected_session() else {
+            return;
+        };
+        self.pending_resume_session_id = Some(session.id.clone());
+        self.session_browser.close();
+    }
+
     /// Load the welcome screen's recent-activity list once at startup.
     pub fn pump_recent_sessions(&mut self) {
         if let Some(ref mut rx) = self.recent_sessions_rx {
@@ -10162,6 +10182,34 @@ mod background_pump_tests {
 
         deliver_voice(&mut app, vec![VoiceEvent::RecordingStopped]).await;
         assert!(!app.voice_recording);
+    }
+
+    #[tokio::test]
+    async fn enter_hands_the_selected_session_over_to_be_resumed() {
+        // The footer has advertised "Enter=resume" all along while nothing
+        // answered the key.
+        let mut app = app();
+        app.session_browser.open(vec![entry("one"), entry("two")]);
+        app.session_browser.selected_idx = 1;
+
+        app.request_session_resume();
+
+        assert_eq!(app.pending_resume_session_id.as_deref(), Some("two"));
+        assert!(
+            !app.session_browser.visible,
+            "the browser gets out of the way of the transcript it is replacing"
+        );
+    }
+
+    #[tokio::test]
+    async fn enter_on_an_empty_browser_asks_for_nothing() {
+        let mut app = app();
+        app.session_browser.open(vec![]);
+
+        app.request_session_resume();
+
+        assert!(app.pending_resume_session_id.is_none());
+        assert!(app.session_browser.visible, "and the browser stays open");
     }
 
     #[tokio::test]

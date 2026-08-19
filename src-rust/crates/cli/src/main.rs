@@ -2088,6 +2088,50 @@ async fn apply_session_rename(
     app.status_message = Some(format!("Session renamed to \"{}\".", title));
 }
 
+/// Swap the running session for `resumed`, moving every piece of state with it.
+///
+/// The session id, the model, the working directory and the turn-diff state all
+/// belong to the session, so leaving any one of them behind sends the next turn
+/// out under the wrong session. Kept in one place because two callers need it:
+/// `/resume <id>` and the session browser's Enter.
+fn apply_session_resume(
+    resumed: claurst_core::history::ConversationSession,
+    session: &mut claurst_core::history::ConversationSession,
+    messages: &mut Vec<claurst_core::types::Message>,
+    cmd_ctx: &mut claurst_commands::CommandContext,
+    tool_ctx: &mut ToolContext,
+    app: &mut claurst_tui::App,
+) {
+    *session = resumed;
+    *messages = session.messages.clone();
+    app.replace_messages(messages.clone());
+    cmd_ctx.config.model = Some(session.model.clone());
+    app.config.model = Some(session.model.clone());
+    tool_ctx.config.model = Some(session.model.clone());
+    app.model_name = session.model.clone();
+    tool_ctx.session_id = session.id.clone();
+    tool_ctx.file_history = Arc::new(ParkingMutex::new(
+        claurst_core::file_history::FileHistory::new(),
+    ));
+    tool_ctx.current_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    cmd_ctx.session_id = session.id.clone();
+    cmd_ctx.session_title = session.title.clone();
+    if let Some(saved_dir) = session.working_dir.as_ref() {
+        let saved_path = std::path::PathBuf::from(saved_dir);
+        if saved_path.exists() {
+            tool_ctx.working_dir = saved_path.clone();
+            cmd_ctx.working_dir = saved_path;
+        }
+    }
+    app.config.project_dir = Some(tool_ctx.working_dir.clone());
+    app.attach_turn_diff_state(tool_ctx.file_history.clone(), tool_ctx.current_turn.clone());
+    claurst_tui::update_terminal_title(session.title.as_deref());
+    // By characters, not bytes: an id shorter than eight of them would panic
+    // a byte slice, and nothing guarantees the length of one.
+    let short_id: String = session.id.chars().take(8).collect();
+    app.status_message = Some(format!("Resumed session {}.", short_id));
+}
+
 /// Whether the session can turn a queued remote prompt into a turn right now.
 ///
 /// Kept as a free function over plain booleans so the rule can be tested
@@ -2922,6 +2966,28 @@ async fn run_interactive(
         app.pump_recent_sessions();
         app.pump_voice_events();
 
+        // The session browser's Enter hands the id over rather than acting on
+        // it, because swapping sessions moves state the TUI does not hold.
+        if let Some(id) = app.pending_resume_session_id.take() {
+            match claurst_core::history::load_session(&id).await {
+                Ok(resumed) => apply_session_resume(
+                    resumed,
+                    &mut session,
+                    &mut messages,
+                    &mut cmd_ctx,
+                    &mut tool_ctx,
+                    &mut app,
+                ),
+                Err(e) => {
+                    app.push_notification(
+                        claurst_tui::NotificationKind::Error,
+                        format!("Could not resume session: {e}"),
+                        Some(8),
+                    );
+                }
+            }
+        }
+
         // Process file injection dialog outcome (if any)
         if let Some((outcome, pending_input, pending_imgs)) =
             app.file_injection_dialog.take_outcome()
@@ -3393,36 +3459,14 @@ async fn run_interactive(
                                         Some("Select what to import from ~/.claude.".to_string());
                                 }
                                 Some(CommandResult::ResumeSession(resumed_session)) => {
-                                    session = resumed_session;
-                                    messages = session.messages.clone();
-                                    app.replace_messages(messages.clone());
-                                    cmd_ctx.config.model = Some(session.model.clone());
-                                    app.config.model = Some(session.model.clone());
-                                    tool_ctx.config.model = Some(session.model.clone());
-                                    app.model_name = session.model.clone();
-                                    tool_ctx.session_id = session.id.clone();
-                                    tool_ctx.file_history = Arc::new(ParkingMutex::new(
-                                        claurst_core::file_history::FileHistory::new(),
-                                    ));
-                                    tool_ctx.current_turn =
-                                        Arc::new(std::sync::atomic::AtomicUsize::new(0));
-                                    cmd_ctx.session_id = session.id.clone();
-                                    cmd_ctx.session_title = session.title.clone();
-                                    if let Some(saved_dir) = session.working_dir.as_ref() {
-                                        let saved_path = std::path::PathBuf::from(saved_dir);
-                                        if saved_path.exists() {
-                                            tool_ctx.working_dir = saved_path.clone();
-                                            cmd_ctx.working_dir = saved_path;
-                                        }
-                                    }
-                                    app.config.project_dir = Some(tool_ctx.working_dir.clone());
-                                    app.attach_turn_diff_state(
-                                        tool_ctx.file_history.clone(),
-                                        tool_ctx.current_turn.clone(),
+                                    apply_session_resume(
+                                        resumed_session,
+                                        &mut session,
+                                        &mut messages,
+                                        &mut cmd_ctx,
+                                        &mut tool_ctx,
+                                        &mut app,
                                     );
-                                    claurst_tui::update_terminal_title(session.title.as_deref());
-                                    app.status_message =
-                                        Some(format!("Resumed session {}.", &session.id[..8]));
                                     transcript_replaced = true;
                                 }
                                 Some(CommandResult::RenameSession(title)) => {
