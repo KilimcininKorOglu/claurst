@@ -176,7 +176,8 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
     let timeout =
         std::time::Duration::from_millis(hook.timeout_ms.unwrap_or(DEFAULT_HOOK_TIMEOUT_MS));
 
-    let mut child = match Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+    let mut builder = Command::new(if cfg!(windows) { "cmd" } else { "sh" });
+    builder
         .args(if cfg!(windows) {
             vec!["/C", &hook.command]
         } else {
@@ -187,9 +188,9 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
         .stderr(Stdio::piped())
         .env("CLAUDE_PLUGIN_ROOT", &hook.plugin_root)
         .env("CLAUDE_PLUGIN_NAME", &hook.plugin_name)
-        .envs(crate::plugin_config_env(&hook.plugin_name))
-        .spawn()
-    {
+        .envs(crate::plugin_config_env(&hook.plugin_name));
+    claurst_core::process_tree::spawn_std_in_own_group(&mut builder);
+    let mut child = match builder.spawn() {
         Ok(c) => c,
         Err(e) => {
             let msg = format!(
@@ -214,6 +215,9 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
             Ok(Some(_)) => break,
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
+                    // The shell is only the wrapper: killing it left whatever
+                    // the hook started running past the limit it was given.
+                    claurst_core::process_tree::kill_tree(child.id());
                     let _ = child.kill();
                     let _ = child.wait();
                     let msg = format!(
@@ -540,5 +544,49 @@ mod tests {
         });
         let config = parse_hooks_value(&raw).unwrap();
         assert!(config.events.contains_key("Stop"));
+    }
+    /// A sleep duration no other run can be using, so a process left behind by
+    /// an earlier run is never read as this one's.
+    #[cfg(unix)]
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999335.{}", nanos % 1_000_000_000)
+    }
+
+    #[cfg(unix)]
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Stopping a hook at its limit reached the shell alone, so the process the
+    /// hook started ran on past the limit it was given.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_stopped_at_its_limit_takes_its_children_with_it() {
+        let marker = unique_marker();
+        let outcome = run_hook_sync(
+            &hook(&format!("sleep {marker} & wait"), false, Some(700)),
+            "{}",
+        );
+
+        assert!(matches!(outcome, HookOutcome::Error(_)), "{outcome:?}");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the hook's child survived being stopped"
+        );
     }
 }
