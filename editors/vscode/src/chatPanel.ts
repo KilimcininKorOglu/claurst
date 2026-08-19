@@ -296,6 +296,7 @@ export class ChatPanel {
         title: toolCall.title ?? 'Claurst is requesting permission',
         description: toolCall.output,
         diffs: toolCall.diffs,
+        locations: toolCall.locations,
         options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
       });
     });
@@ -334,6 +335,13 @@ export class ChatPanel {
         break;
       case 'permissionAnswer':
         this.answerPermission(msg.requestId, msg.optionId);
+        break;
+      case 'openLocation':
+        if (typeof msg.path === 'string') {
+          openLocation(msg.path, typeof msg.line === 'number' ? msg.line : undefined).catch((e) =>
+            this.reportError(e),
+          );
+        }
         break;
       default:
         break;
@@ -523,6 +531,26 @@ export class ChatPanel {
   }
 }
 
+/** Open the file a tool call named, at the line it named.
+ *
+ * The agent reports absolute paths, so the document is addressed directly
+ * rather than searched for; a path outside the workspace still opens, which is
+ * what the agent said it was working on. */
+async function openLocation(target: string, line?: number): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+  const editor = await vscode.window.showTextDocument(doc, { preview: true });
+  if (line === undefined) {
+    return;
+  }
+  // The protocol counts from 1 and the editor counts from 0. A line past the
+  // end of the file is clamped rather than refused: the file may have changed
+  // since the agent looked at it.
+  const zeroBased = Math.min(Math.max(line - 1, 0), Math.max(doc.lineCount - 1, 0));
+  const at = new vscode.Range(zeroBased, 0, zeroBased, 0);
+  editor.selection = new vscode.Selection(at.start, at.start);
+  editor.revealRange(at, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
 /** Every `@path` mention in what the user typed. */
 function mentionsIn(text: string): string[] {
   const found = new Set<string>();
@@ -540,6 +568,7 @@ function toolCallPayload(update: ToolCallUpdate) {
     title: update.title,
     status: update.status,
     kind: update.kind,
+    locations: update.locations,
     output: update.output,
     diffs: update.diffs,
     terminalId: update.terminalId,

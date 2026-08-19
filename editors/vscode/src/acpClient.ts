@@ -20,11 +20,20 @@ export type ToolDiff = {
   newText: string;
 };
 
+/** A place in the workspace a tool call is about. */
+export type ToolCallLocation = {
+  path: string;
+  /** 1-based, when the agent knows which line. */
+  line?: number;
+};
+
 export type ToolCallUpdate = {
   toolCallId?: string;
   title?: string;
   status?: string;
   kind?: string;
+  /** The files this call touches, so the panel can offer to open them. */
+  locations: ToolCallLocation[];
   /** The text the agent attached to this call: what the tool returned once it
    * ran, or what the call is about to do when it is asking to be approved. */
   output?: string;
@@ -681,10 +690,27 @@ function toolCallOf(update: any): ToolCallUpdate {
     title: update.title,
     status: update.status,
     kind: update.kind,
+    locations: locationsOf(update.locations),
     output: output.length > 0 ? output : undefined,
     diffs,
     terminalId: terminal?.terminalId ?? undefined,
   };
+}
+
+/** Where the agent said the call is working.
+ *
+ * A location without a path is dropped rather than kept as a blank entry: the
+ * panel turns each one into something to click, and there is nothing to open. */
+function locationsOf(raw: any): ToolCallLocation[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .filter((location) => typeof location?.path === 'string' && location.path.length > 0)
+    .map((location) => ({
+      path: location.path,
+      line: typeof location.line === 'number' ? location.line : undefined,
+    }));
 }
 
 function extractText(content: any): string {

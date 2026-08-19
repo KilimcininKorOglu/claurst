@@ -36,12 +36,18 @@ interface Diff {
   newText?: string;
 }
 
+interface ToolCallLocation {
+  path: string;
+  line?: number;
+}
+
 interface ToolCallMessage {
   type: 'toolCall' | 'toolCallUpdate';
   toolCallId?: string;
   title?: string;
   status?: string;
   kind?: string;
+  locations?: ToolCallLocation[];
   diffs?: Diff[];
   terminalId?: string;
 }
@@ -58,6 +64,7 @@ interface PermissionMessage {
   title: string;
   description?: string;
   diffs?: Diff[];
+  locations?: ToolCallLocation[];
   options: PermissionOption[];
 }
 
@@ -164,6 +171,28 @@ type HostMessage =
     }
   }
 
+  /** The files a call is about, each one a way to open it.
+   *
+   * Only the last path segment is shown: the agent sends absolute paths, and a
+   * full one would push the tool's own title off the row. The whole path is on
+   * the tooltip. */
+  function renderLocations(locations: ToolCallLocation[]): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'tool-locations';
+    for (const location of locations) {
+      const link = document.createElement('button');
+      link.className = 'tool-location';
+      const name = location.path.split(/[\\/]/).pop() || location.path;
+      link.textContent = location.line === undefined ? name : `${name}:${location.line}`;
+      link.title = location.path;
+      link.addEventListener('click', () =>
+        vscode.postMessage({ type: 'openLocation', path: location.path, line: location.line }),
+      );
+      row.appendChild(link);
+    }
+    return row;
+  }
+
   function upsertToolCall(msg: ToolCallMessage): void {
     let el = msg.toolCallId ? toolCallEls.get(msg.toolCallId) : undefined;
     if (!el) {
@@ -181,6 +210,10 @@ type HostMessage =
     heading.className = 'tool-title';
     heading.textContent = `${statusIcon(msg.status)} ${msg.title || '(tool call)'}`;
     el.appendChild(heading);
+
+    if (msg.locations && msg.locations.length > 0) {
+      el.appendChild(renderLocations(msg.locations));
+    }
 
     for (const diff of msg.diffs || []) {
       el.appendChild(renderDiff(diff));
@@ -209,6 +242,10 @@ type HostMessage =
     heading.className = 'permission-title';
     heading.textContent = msg.title;
     block.appendChild(heading);
+
+    if (msg.locations && msg.locations.length > 0) {
+      block.appendChild(renderLocations(msg.locations));
+    }
 
     if (msg.description) {
       const body = document.createElement('div');
