@@ -130,6 +130,19 @@ Resume a previous session from the session store. Displays a list of recent sess
 /resume <session-id>
 ```
 
+Sessions are stored in one directory shared by every project, so the list mixes them together. Keys in the browser:
+
+| Key      | Action                                                        |
+|----------|---------------------------------------------------------------|
+| `↑` `↓`  | Move between sessions                                         |
+| `Enter`  | Resume the selected session                                   |
+| `r`      | Rename it                                                     |
+| `a`      | Show each session's working directory under its row           |
+| `p`      | Show the selected session's full ID and untruncated directory |
+| `Esc`    | Close                                                         |
+
+Both toggles are off again every time the browser opens. Resuming moves the working directory as well as the transcript, so tools run where that session left off.
+
 ---
 
 ### /session
