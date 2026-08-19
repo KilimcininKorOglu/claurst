@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AgentPool } from './agentPool';
 import { CHAT_VIEW_TYPE, ChatPanel } from './chatPanel';
+import { CHAT_VIEW_ID, ChatViewProvider } from './chatView';
 import { StatusBar } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
@@ -13,6 +14,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const pool = new AgentPool(version, outputChannel);
   context.subscriptions.push({ dispose: () => pool.dispose() });
   context.subscriptions.push(watchConfiguration(pool));
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      CHAT_VIEW_ID,
+      new ChatViewProvider(context.extensionUri, pool, outputChannel),
+      // Same reason as the editor panel: without this the view is torn down
+      // whenever the sidebar shows something else, and the transcript would be
+      // refetched every time the user glanced at the file explorer.
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
 
   // Panels open when the window closes are handed back on the next launch.
   context.subscriptions.push(

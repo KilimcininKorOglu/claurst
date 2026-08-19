@@ -14,6 +14,7 @@ import {
   ToolCallUpdate,
 } from './acpClient';
 import { AgentPool } from './agentPool';
+import { ChatSurface, PanelSurface, ViewSurface } from './chatSurface';
 import { AgentState } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
@@ -110,7 +111,7 @@ export class ChatPanel {
    * between the two and started again immediately. */
   readonly started: Promise<void>;
 
-  private readonly panel: vscode.WebviewPanel;
+  private readonly surface: ChatSurface;
   private client: AcpClient | undefined;
   private sessionId: string | undefined;
   private disposables: vscode.Disposable[] = [];
@@ -138,7 +139,19 @@ export class ChatPanel {
       vscode.ViewColumn.Beside,
       webviewOptions(extensionUri),
     );
-    return new ChatPanel(panel, extensionUri, pool, outputChannel, opening);
+    return new ChatPanel(new PanelSurface(panel), extensionUri, pool, outputChannel, opening);
+  }
+
+  /** Open a conversation in the sidebar view VS Code just handed over. */
+  static inView(
+    view: vscode.WebviewView,
+    extensionUri: vscode.Uri,
+    pool: AgentPool,
+    outputChannel: vscode.OutputChannel,
+    opening: PanelOpening,
+  ): ChatPanel {
+    view.webview.options = webviewOptions(extensionUri);
+    return new ChatPanel(new ViewSurface(view), extensionUri, pool, outputChannel, opening);
   }
 
   /** Take back a panel VS Code kept across a window reload.
@@ -161,7 +174,7 @@ export class ChatPanel {
       return;
     }
     panel.webview.options = webviewOptions(extensionUri);
-    new ChatPanel(panel, extensionUri, pool, outputChannel, {
+    new ChatPanel(new PanelSurface(panel), extensionUri, pool, outputChannel, {
       kind: 'load',
       session: {
         sessionId: saved.sessionId,
@@ -182,7 +195,7 @@ export class ChatPanel {
   ): Promise<ChatPanel | undefined> {
     const existing = ChatPanel.active ?? ChatPanel.panels.values().next().value;
     if (existing) {
-      existing.panel.reveal();
+      existing.surface.reveal(false);
       return existing;
     }
     const cwd = await chooseWorkingFolder();
@@ -196,39 +209,33 @@ export class ChatPanel {
   }
 
   private constructor(
-    panel: vscode.WebviewPanel,
+    surface: ChatSurface,
     extensionUri: vscode.Uri,
     private readonly pool: AgentPool,
     private readonly outputChannel: vscode.OutputChannel,
     private readonly opening: PanelOpening,
   ) {
-    this.panel = panel;
+    this.surface = surface;
     this.cwd = cwdOf(opening);
     ChatPanel.panels.add(this);
     ChatPanel.active = this;
     ChatPanel.reportState();
 
-    this.panel.webview.html = this.renderHtml(extensionUri);
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-    this.panel.onDidChangeViewState(
-      () => {
-        if (this.panel.active) {
-          ChatPanel.active = this;
-        }
-      },
-      null,
-      this.disposables,
+    this.surface.webview.html = this.renderHtml(extensionUri);
+    this.disposables.push(this.surface.onDidDispose(() => this.dispose()));
+    this.disposables.push(
+      this.surface.onDidBecomeActive(() => {
+        ChatPanel.active = this;
+      }),
     );
-    this.panel.webview.onDidReceiveMessage(
-      (msg) => this.handleWebviewMessage(msg),
-      null,
-      this.disposables,
+    this.disposables.push(
+      this.surface.webview.onDidReceiveMessage((msg) => this.handleWebviewMessage(msg)),
     );
     this.started = this.startSession().catch((e) => this.reportError(e));
   }
 
   private renderHtml(extensionUri: vscode.Uri): string {
-    const webview = this.panel.webview;
+    const webview = this.surface.webview;
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'main.css'));
     // A CSP nonce only keeps injected script out if it cannot be guessed, and
@@ -292,7 +299,7 @@ export class ChatPanel {
       onPlan: (entries: PlanEntry[]) => this.postToWebview({ type: 'plan', entries }),
       onSessionInfo: (title?: string) => {
         if (title) {
-          this.panel.title = title;
+          this.surface.title = title;
           this.rememberSession();
         }
       },
@@ -348,7 +355,7 @@ export class ChatPanel {
       : `lines ${selection.start.line + 1}-${selection.end.line + 1}`;
     const excerpt = selection.isEmpty ? '' : document.getText(selection);
     const fence = excerpt ? `\n\n\`\`\`${document.languageId}\n${excerpt}\n\`\`\`\n` : '';
-    this.panel.reveal(undefined, true);
+    this.surface.reveal(true);
     this.postToWebview({ type: 'mention', text: `@${relative} (${where})${fence}` });
   }
 
@@ -360,7 +367,7 @@ export class ChatPanel {
     if (this.sessionId) {
       this.postToWebview({
         type: 'remember',
-        state: { sessionId: this.sessionId, cwd: this.cwd, title: this.panel.title },
+        state: { sessionId: this.sessionId, cwd: this.cwd, title: this.surface.title },
       });
     }
   }
@@ -368,7 +375,7 @@ export class ChatPanel {
   /** What this panel is talking to, for a command that acts on it. */
   get session(): { sessionId: string; cwd: string; title: string } | undefined {
     return this.sessionId
-      ? { sessionId: this.sessionId, cwd: this.cwd, title: this.panel.title }
+      ? { sessionId: this.sessionId, cwd: this.cwd, title: this.surface.title }
       : undefined;
   }
 
@@ -644,7 +651,7 @@ export class ChatPanel {
   }
 
   private postToWebview(msg: unknown): void {
-    this.panel.webview.postMessage(msg);
+    this.surface.webview.postMessage(msg);
   }
 
   private reportError(e: unknown): void {
@@ -680,7 +687,7 @@ export class ChatPanel {
       this.holdsAgent = false;
       this.pool.release();
     }
-    this.panel.dispose();
+    this.surface.dispose();
     for (const d of this.disposables) {
       d.dispose();
     }

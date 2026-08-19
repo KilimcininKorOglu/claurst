@@ -96,6 +96,24 @@
         }
       ]
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claurst",
+          "title": "Claurst",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claurst": [
+        {
+          "type": "webview",
+          "id": "claurst.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
     "configuration": {
       "title": "Claurst",
       "properties": {
