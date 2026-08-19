@@ -194,6 +194,8 @@ use claurst_core::message_utils::text_from_blocks as text_from_content_blocks;
 // ---------------------------------------------------------------------------
 mod goal;
 pub use goal::*;
+mod todos;
+pub use todos::*;
 mod speech;
 pub use speech::*;
 mod config_cmd;
@@ -1527,6 +1529,8 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(ManagedAgentsCommand),
         // Durable long-running goals
         Box::new(GoalCommand),
+        // The session's TodoWrite list
+        Box::new(TodosCommand),
         // Session navigation ported from opencode: /new (lazy home) + /move.
         Box::new(NewCommand),
         Box::new(MoveCommand),
