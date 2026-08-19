@@ -1236,7 +1236,11 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
     // fixed header (which permanently ate ~9 rows, issue #310); instead a compact
     // banner is prepended to the transcript (see `welcome_banner_lines`) so it
     // scrolls away with the content and the conversation reclaims the space.
+    // A system annotation counts: a shell command run before anything was said
+    // has no message behind it, and hiding it behind the welcome box would draw
+    // nothing at all for a command that ran.
     let transcript_empty = app.messages.is_empty()
+        && app.system_annotations.is_empty()
         && app.streaming_text.is_empty()
         && app.streaming_thinking.is_empty()
         && app.tool_use_blocks.is_empty();
@@ -2512,6 +2516,26 @@ fn render_system_annotation_lines(
         SystemMessageStyle::Warning => (Color::Yellow, Color::Yellow),
         SystemMessageStyle::Compact => unreachable!(),
     };
+
+    // A block of text (a shell command and its output) has no business in a
+    // one-line rule: it would run off the edge and take the whole thing with
+    // it. Draw it as indented lines under a rule instead.
+    if ann.text.contains('\n') {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", "\u{2500}".repeat(width.saturating_sub(4))),
+            Style::default().fg(border_color),
+        )));
+        for line in ann.text.lines() {
+            for wrapped in crate::prompt_input::wrap_line(line, width.saturating_sub(4)) {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", wrapped),
+                    Style::default().fg(text_color).add_modifier(Modifier::DIM),
+                )));
+            }
+        }
+        lines.push(Line::from(""));
+        return;
+    }
 
     // Centred, padded rule: "─── text ───"
     let text = ann.text.as_str();
@@ -6383,5 +6407,89 @@ mod bridge_indicator_tests {
     #[test]
     fn a_disconnected_bridge_draws_nothing() {
         assert!(!status_row(false).contains('\u{1F517}'));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A system annotation with no message behind it
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod annotation_only_transcript_tests {
+    use super::*;
+    use crate::app::{App, SystemMessageStyle};
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn drawn_rows(app: &App) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render_app(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol().to_string()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn drawn(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render_app(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_output_line_gets_its_own_row() {
+        // The one-line rule shape a short notice uses would run a command's
+        // output off the edge and lose everything past the width.
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.push_system_message(
+            "$ ls\nfirst-file\nsecond-file\nthird-file".to_string(),
+            SystemMessageStyle::Info,
+        );
+
+        let rows: Vec<String> = drawn_rows(&app);
+        for wanted in ["first-file", "second-file", "third-file"] {
+            assert!(
+                rows.iter().any(|row| row.contains(wanted)),
+                "{wanted} is missing from {rows:?}"
+            );
+        }
+        assert!(
+            rows.iter().filter(|row| row.contains("-file")).count() == 3,
+            "each output line needs its own row: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn a_shell_command_run_before_anything_was_said_is_still_drawn() {
+        // The bang path pushes an annotation and no message, so a transcript
+        // judged empty by message count alone would hide a command that ran.
+        let mut app = App::new(Config::default(), CostTracker::new());
+        assert!(
+            drawn(&app).contains("MikMik"),
+            "the welcome box is what an empty transcript draws"
+        );
+
+        app.push_system_message("$ pwd\n/some/where".to_string(), SystemMessageStyle::Info);
+
+        let after = drawn(&app);
+        assert!(after.contains("/some/where"), "{after:?}");
+        assert!(
+            !after.contains("MikMik"),
+            "the welcome box must give way to the output"
+        );
     }
 }

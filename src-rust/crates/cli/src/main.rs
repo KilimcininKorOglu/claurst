@@ -96,8 +96,12 @@ struct Cli {
     model: Option<String>,
 
     /// Permission mode
-    #[arg(long = "permission-mode", value_enum, default_value_t = CliPermissionMode::Default)]
-    permission_mode: CliPermissionMode,
+    ///
+    /// No default: an absent flag has to leave whatever `permission_mode` the
+    /// settings file holds alone, or a mode saved by `/yolo` would be reset to
+    /// `default` on every launch.
+    #[arg(long = "permission-mode", value_enum)]
+    permission_mode: Option<CliPermissionMode>,
 
     /// Resume a previous session by ID (omit ID to resume the most recent session)
     #[arg(long = "resume", num_args(0..=1), default_missing_value("__last__"))]
@@ -602,8 +606,8 @@ async fn main() -> anyhow::Result<()> {
             );
         }
         config.permission_mode = PermissionMode::BypassPermissions;
-    } else {
-        config.permission_mode = cli.permission_mode.into();
+    } else if let Some(mode) = cli.permission_mode {
+        config.permission_mode = mode.into();
     }
     config.additional_dirs = cli.add_dir.clone();
     if cli.no_auto_compact {
