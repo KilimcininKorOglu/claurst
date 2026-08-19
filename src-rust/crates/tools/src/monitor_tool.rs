@@ -141,22 +141,12 @@ impl Tool for MonitorTool {
                     None => ToolResult::error(format!("Task {} not found", id)),
                     Some(t) => {
                         if let TaskStatus::Running = t.status {
-                            // Kill by PID if available.
+                            // Stop the whole tree, not the recorded pid alone:
+                            // a background command runs under a shell, so the
+                            // pid names the wrapper and killing it left the
+                            // work the user asked to stop still running.
                             if let Some(pid) = t.pid {
-                                // On Windows use taskkill; on Unix send SIGTERM.
-                                #[cfg(windows)]
-                                {
-                                    let _ = std::process::Command::new("taskkill")
-                                        .args(["/PID", &pid.to_string(), "/F"])
-                                        .output();
-                                }
-                                #[cfg(unix)]
-                                {
-                                    use std::process::Command;
-                                    let _ = Command::new("kill")
-                                        .args(["-TERM", &pid.to_string()])
-                                        .output();
-                                }
+                                claurst_core::process_tree::terminate_tree(pid);
                             }
                             // Signal the task's cancellation token (if any) and
                             // mark it Cancelled. For an in-process background
@@ -290,5 +280,88 @@ mod tests {
             current_call: None,
             editor: None,
         }
+    }
+    /// Cancelling a task used to reach the recorded pid alone, which for a
+    /// background command is the shell wrapper, so the work the user asked to
+    /// stop kept running.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn cancelling_a_task_stops_what_its_shell_started() {
+        let marker = unique_marker();
+        // Driven through the tool, so the test exercises the path a task
+        // actually takes into the registry.
+        let started = crate::pty_bash::PtyBashTool
+            .execute(
+                json!({
+                    "command": format!("sleep {marker} & wait"),
+                    "run_in_background": true,
+                }),
+                &bypassing_ctx(),
+            )
+            .await;
+        assert!(!started.is_error, "{}", started.content);
+
+        let task_id = started
+            .content
+            .lines()
+            .find_map(|line| line.strip_prefix("Task ID: "))
+            .expect("the tool reports the task id")
+            .to_string();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(pgrep_matches(&marker), "the child never started");
+
+        let result = MonitorTool
+            .execute(
+                json!({"action": "cancel", "task_id": task_id}),
+                &make_test_ctx(),
+            )
+            .await;
+        assert!(!result.is_error, "{}", result.content);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the shell's child survived the cancel"
+        );
+    }
+
+    /// The bash tool asks before running; this test is about what a cancel
+    /// kills, not about the prompt.
+    #[cfg(not(windows))]
+    fn bypassing_ctx() -> ToolContext {
+        let mut ctx = make_test_ctx();
+        ctx.permission_handler =
+            std::sync::Arc::new(claurst_core::permissions::AutoPermissionHandler {
+                mode: claurst_core::config::PermissionMode::BypassPermissions,
+            });
+        ctx
+    }
+
+    /// A sleep duration no other run can be using.
+    ///
+    /// A fixed marker made the test fail whenever an earlier run had left a
+    /// process behind: `pgrep` found that one and read it as this run's.
+    #[cfg(not(windows))]
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999339.{}", nanos % 1_000_000_000)
+    }
+
+    #[cfg(not(windows))]
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
     }
 }

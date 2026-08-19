@@ -1376,9 +1376,15 @@ mod tests {
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_timed_out_background_command_takes_its_children_with_it() {
-        // The marker carries this run's pid: a leftover from an earlier run
-        // would otherwise be found by `pgrep` and fail every later run.
-        let marker = format!("313380.{}", std::process::id());
+        // A sleep duration no other run can be using. A fixed marker made the
+        // test fail whenever an earlier run had left a process behind:
+        // `pgrep` found that one and read it as this run's.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        let marker = format!("999338.{}", nanos % 1_000_000_000);
         let result = run_in_background(
             format!("sleep {marker} & wait"),
             std::env::temp_dir(),
