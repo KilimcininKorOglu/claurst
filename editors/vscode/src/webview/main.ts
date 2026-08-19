@@ -1,25 +1,82 @@
 // Webview-side script. Runs in a restricted context with no Node access;
 // all agent communication goes through the extension host via postMessage.
+//
+// Bundled to out/webview.js by esbuild. It shares no module with the extension
+// host on purpose: the two run in different sandboxes, and anything that
+// reached for `vscode` here would fail at load rather than at the call.
+
+interface VsCodeApi {
+  postMessage(message: unknown): void;
+  getState(): unknown;
+  setState(state: unknown): void;
+}
+
+declare function acquireVsCodeApi(): VsCodeApi;
+
+interface Pill {
+  key: string;
+  label: string;
+  value: string;
+}
+
+interface PlanEntry {
+  content: string;
+  status?: string;
+}
+
+interface Command {
+  name: string;
+  description?: string;
+  hint?: string;
+}
+
+interface Diff {
+  path: string;
+  oldText?: string | null;
+  newText?: string;
+}
+
+interface ToolCallMessage {
+  type: 'toolCall' | 'toolCallUpdate';
+  toolCallId?: string;
+  title?: string;
+  status?: string;
+  kind?: string;
+  diffs?: Diff[];
+  terminalId?: string;
+}
+
+type HostMessage =
+  | { type: 'textChunk'; text: string; kind?: string }
+  | ToolCallMessage
+  | { type: 'terminalOutput'; terminalId: string; chunk: string }
+  | { type: 'status'; text: string }
+  | { type: 'header'; pills?: Pill[] }
+  | { type: 'plan'; entries?: PlanEntry[] }
+  | { type: 'commands'; commands?: Command[] }
+  | { type: 'mention'; text: string }
+  | { type: 'turnEnded' };
+
 (function () {
   const vscode = acquireVsCodeApi();
-  const headerEl = document.getElementById('header');
-  const planEl = document.getElementById('plan');
-  const messagesEl = document.getElementById('messages');
-  const completionsEl = document.getElementById('completions');
-  const inputEl = document.getElementById('input-box');
-  const sendBtn = document.getElementById('send-btn');
-  const stopBtn = document.getElementById('stop-btn');
+  const headerEl = document.getElementById('header') as HTMLElement;
+  const planEl = document.getElementById('plan') as HTMLElement;
+  const messagesEl = document.getElementById('messages') as HTMLElement;
+  const completionsEl = document.getElementById('completions') as HTMLElement;
+  const inputEl = document.getElementById('input-box') as HTMLTextAreaElement;
+  const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
+  const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
 
-  let currentAgentBubble = null;
-  const toolCallEls = new Map();
+  let currentAgentBubble: HTMLElement | null = null;
+  const toolCallEls = new Map<string, HTMLElement>();
   /** What each hosted terminal has said, and where it is being drawn. */
-  const terminalText = new Map();
-  const terminalEls = new Map();
-  let commands = [];
+  const terminalText = new Map<string, string>();
+  const terminalEls = new Map<string, HTMLElement>();
+  let commands: Command[] = [];
   let completionIndex = 0;
-  let completionMatches = [];
+  let completionMatches: Command[] = [];
 
-  function appendRow(text, cls) {
+  function appendRow(text: string, cls: string): HTMLElement {
     const row = document.createElement('div');
     row.className = 'row ' + cls;
     const bubble = document.createElement('div');
@@ -31,7 +88,7 @@
     return bubble;
   }
 
-  function statusIcon(status) {
+  function statusIcon(status: string | undefined): string {
     if (status === 'completed') return '✓';
     if (status === 'failed') return '✗';
     if (status === 'in_progress' || status === 'pending') return '◌';
@@ -40,7 +97,7 @@
 
   // A diff is drawn line by line rather than as a blob of text: which lines
   // moved is the whole point of showing it.
-  function renderDiff(diff) {
+  function renderDiff(diff: Diff): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'diff';
 
@@ -61,7 +118,7 @@
     return wrapper;
   }
 
-  function commonPrefix(before, after) {
+  function commonPrefix(before: string[], after: string[]): number {
     let i = 0;
     while (i < before.length && i < after.length && before[i] === after[i]) {
       i += 1;
@@ -69,7 +126,7 @@
     return i;
   }
 
-  function commonSuffix(before, after, prefix) {
+  function commonSuffix(before: string[], after: string[], prefix: number): number {
     let i = 0;
     while (
       i < before.length - prefix &&
@@ -81,7 +138,7 @@
     return i;
   }
 
-  function appendDiffLines(wrapper, lines, cls) {
+  function appendDiffLines(wrapper: HTMLElement, lines: string[], cls: string): void {
     const marker = cls === 'added' ? '+' : cls === 'removed' ? '-' : ' ';
     for (const line of lines) {
       const el = document.createElement('div');
@@ -91,8 +148,8 @@
     }
   }
 
-  function upsertToolCall(msg) {
-    let el = msg.toolCallId ? toolCallEls.get(msg.toolCallId) : null;
+  function upsertToolCall(msg: ToolCallMessage): void {
+    let el = msg.toolCallId ? toolCallEls.get(msg.toolCallId) : undefined;
     if (!el) {
       el = document.createElement('div');
       el.className = 'tool-call';
@@ -124,7 +181,7 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function appendTerminalOutput(terminalId, chunk) {
+  function appendTerminalOutput(terminalId: string, chunk: string): void {
     const text = (terminalText.get(terminalId) || '') + chunk;
     terminalText.set(terminalId, text);
     const pre = terminalEls.get(terminalId);
@@ -136,7 +193,7 @@
 
   // The pills are whatever the agent said it offers, so they are rebuilt from
   // the message rather than hardcoded here.
-  function renderHeader(pills) {
+  function renderHeader(pills: Pill[]): void {
     headerEl.textContent = '';
     for (const pill of pills) {
       const button = document.createElement('button');
@@ -148,13 +205,13 @@
     }
   }
 
-  function planIcon(status) {
+  function planIcon(status: string | undefined): string {
     if (status === 'completed') return '✓';
     if (status === 'in_progress') return '▸';
     return '○';
   }
 
-  function renderPlan(entries) {
+  function renderPlan(entries: PlanEntry[]): void {
     planEl.textContent = '';
     planEl.classList.toggle('hidden', entries.length === 0);
     for (const entry of entries) {
@@ -165,7 +222,7 @@
     }
   }
 
-  function renderCompletions() {
+  function renderCompletions(): void {
     completionsEl.textContent = '';
     completionsEl.classList.toggle('hidden', completionMatches.length === 0);
     completionMatches.forEach((command, index) => {
@@ -187,14 +244,14 @@
     });
   }
 
-  function applyCompletion(command) {
+  function applyCompletion(command: Command): void {
     inputEl.value = '/' + command.name + ' ';
     completionMatches = [];
     renderCompletions();
     inputEl.focus();
   }
 
-  function updateCompletions() {
+  function updateCompletions(): void {
     const text = inputEl.value;
     const match = /^\/([a-zA-Z0-9-]*)$/.exec(text);
     if (!match) {
@@ -210,12 +267,12 @@
     renderCompletions();
   }
 
-  function setBusy(busy) {
+  function setBusy(busy: boolean): void {
     sendBtn.disabled = busy;
     stopBtn.classList.toggle('hidden', !busy);
   }
 
-  function autoResize() {
+  function autoResize(): void {
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
   }
@@ -230,7 +287,7 @@
     }
   });
 
-  function send() {
+  function send(): void {
     const text = inputEl.value.trim();
     if (!text) {
       return;
@@ -281,7 +338,7 @@
 
   setBusy(false);
 
-  window.addEventListener('message', (event) => {
+  window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     const msg = event.data;
     switch (msg.type) {
       case 'textChunk': {

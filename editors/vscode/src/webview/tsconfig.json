@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // The webview has no Node and no `vscode`. Leaving @types/node visible here
+    // would let a `require` or a `Buffer` type-check and then fail at runtime.
+    "types": []
+  },
+  "include": ["**/*.ts"]
+}

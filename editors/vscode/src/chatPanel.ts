@@ -94,7 +94,10 @@ export class ChatPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
+        localResourceRoots: [
+          vscode.Uri.joinPath(extensionUri, 'media'),
+          vscode.Uri.joinPath(extensionUri, 'out'),
+        ],
       },
     );
     return new ChatPanel(panel, extensionUri, pool, outputChannel, opening);
@@ -154,7 +157,7 @@ export class ChatPanel {
 
   private renderHtml(extensionUri: vscode.Uri): string {
     const webview = this.panel.webview;
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'main.js'));
+    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'main.css'));
     const nonce = String(Math.random()).slice(2);
     return `<!DOCTYPE html>

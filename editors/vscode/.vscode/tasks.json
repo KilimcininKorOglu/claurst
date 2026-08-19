@@ -3,9 +3,17 @@
   "tasks": [
     {
       "type": "npm",
+      "script": "check",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      // esbuild does not type-check, so the build runs tsc first: its errors are
+      // what $tsc matches. esbuild's own syntax errors go to the terminal.
+      "type": "npm",
       "script": "compile",
       "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": ["$tsc"]
+      "dependsOn": ["npm: check"],
+      "problemMatcher": []
     }
   ]
 }

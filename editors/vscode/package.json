@@ -78,13 +78,15 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -w -p ./",
-    "vscode:prepublish": "npm run compile"
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc -p ./ && tsc -p src/webview",
+    "vscode:prepublish": "npm run check && node esbuild.mjs --production"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "esbuild": "^0.25.0",
     "typescript": "^5.4.0"
   }
 }

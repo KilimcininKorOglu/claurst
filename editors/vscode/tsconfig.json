@@ -7,7 +7,9 @@
     "sourceMap": true,
     "rootDir": "src",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true
   },
-  "exclude": ["node_modules", ".vscode-test"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", ".vscode-test", "src/webview"]
 }
