@@ -220,7 +220,6 @@ Rename the current session. The new name is used in session listings and exports
 ---
 
 ### /rewind
-**Aliases:** `checkpoint`
 
 Rewind the conversation to a previous message. Displays a numbered list of messages; enter a number to truncate history to that point and resume from there.
 
@@ -228,6 +227,21 @@ Rewind the conversation to a previous message. Displays a numbered list of messa
 /rewind
 /rewind <message-index>
 ```
+
+---
+
+### /checkpoint
+
+List the points the conversation can be returned to, or return to one. A checkpoint is recorded at the end of every turn.
+
+```
+/checkpoint list
+/checkpoint restore <n>
+```
+
+Restoring drops the turns after that point from the conversation. They are not deleted: the session transcript keeps them on a sibling branch, and the checkpoint before them can be restored again.
+
+Not to be confused with `/checkpoints` (plural), which lists the turns that changed files, or `/revert`, which rolls those files back.
 
 ---
 

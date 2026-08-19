@@ -119,7 +119,9 @@ Opens an interactive visualisation of which parts of the context are consuming t
 
 Sessions are stored as JSONL files under `~/.claurst/projects/<base64url(project-root)>/<session-id>.jsonl`. Each line in the file is a JSON object representing a message or event in the conversation. The per-session metadata index lives at `~/.claurst/sessions/<id>.json`.
 
-The transcript directory is derived from the working directory at session start. Worktrees and path sanitisation mean the per-project folder name is a normalised representation of the absolute path.
+The transcript directory is derived from the project root: the git repository the working directory sits in, or the working directory itself when there is none. A session started in a subdirectory therefore files its transcript under the repository, which is where `/stats`, `/rewind` and the welcome screen's recent activity look for it.
+
+`--print` writes the same three stores as an interactive session, so a headless conversation can be listed, resumed, searched and counted like any other.
 
 ### Commands
 
@@ -131,6 +133,9 @@ The transcript directory is derived from the working directory at session start.
 | `/rename <title>`        | Rename the current session. Appends a custom-title entry to the JSONL file.                       |
 | `/export`                | Export the current session transcript.                                                            |
 | `/rewind`                | Step back to an earlier point in the conversation.                                                |
+| `/checkpoint`            | List the points recorded at the end of each turn, or return to one.                               |
+
+`--resume <id>` continues a named session and `-c` / `--continue` continues the most recent one. Both work in `--print` as well as at the keyboard; headless exits non-zero when the named session cannot be loaded, rather than starting a fresh conversation.
 
 ### JSONL transcript format
 

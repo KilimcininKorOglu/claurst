@@ -38,7 +38,7 @@ These bindings are active in all contexts.
 | `Ctrl+D`       | exit           | Exit Claurst (non-rebindable)                           |
 | `Ctrl+L`       | redraw         | Redraw the terminal screen                              |
 | `Ctrl+R`       | historySearch  | Open interactive history search                         |
-| `Ctrl+B`       | createBranch   | Create a new git branch                                 |
+| `Ctrl+B`       | createBranch   | Open the session branch screen                          |
 | `Ctrl+Shift+L` | toggleTimeline | Show the execution timeline panel, focus it, then hide it |
 | `Alt+H`        | openHelp       | Open the help panel                                     |
 
