@@ -37,6 +37,7 @@ impl SlashCommand for GoalCommand {
     fn help(&self) -> &str {
         "Usage:\n\
          /goal <objective>              — set a new goal and begin working autonomously\n\
+         /goal set <objective>          — the same, spelled out\n\
          /goal --tokens 250K <text>     — set a goal with a soft token budget\n\
          /goal                          — show current goal status\n\
          /goal status                   — show current goal status\n\
@@ -66,6 +67,9 @@ impl SlashCommand for GoalCommand {
         // Parse subcommands with no objective
         match args {
             "" | "status" => return goal_status(session_id),
+            // `set` names the objective that follows it, so a bare `set` is a
+            // usage error rather than an objective literally called "set".
+            "set" => return goal_usage(),
             "pause" => {
                 let store = match open_goal_store() {
                     Some(s) => s,
@@ -154,25 +158,10 @@ impl SlashCommand for GoalCommand {
             _ => {} // fall through to parse as objective (possibly with --tokens)
         }
 
-        // Parse optional --tokens flag
-        let (token_budget, objective) = if args.starts_with("--tokens") {
-            // Expected: --tokens <budget> <objective>
-            let rest = args.trim_start_matches("--tokens").trim();
-            let mut parts = rest.splitn(2, char::is_whitespace);
-            let budget_str = parts.next().unwrap_or("");
-            let obj = parts.next().unwrap_or("").trim();
-            let budget = parse_token_budget(budget_str);
-            (budget, obj)
-        } else {
-            (None, args)
-        };
+        let (token_budget, objective) = parse_objective_args(args);
 
         if objective.is_empty() {
-            return CommandResult::Message(
-                "Usage: /goal <objective> [--tokens 250K]\n\
-                 Or: /goal status|pause|resume|clear|complete"
-                    .to_string(),
-            );
+            return goal_usage();
         }
 
         let store = match open_goal_store() {
@@ -193,6 +182,40 @@ impl SlashCommand for GoalCommand {
             }
         }
     }
+}
+
+/// Split the objective-carrying form of `/goal` into its optional token budget
+/// and the objective text.
+///
+/// `/goal set <objective>` is the explicit spelling of `/goal <objective>`, so
+/// the verb is stripped before `--tokens` is read. Both orders of the two
+/// prefixes therefore reduce to the same objective, and the transcript
+/// renderer's `extract_goal_objective_from_args` strips them the same way. If
+/// the two ever disagree the command stores one objective while the transcript
+/// draws another.
+fn parse_objective_args(args: &str) -> (Option<u64>, &str) {
+    let args = match args.split_once(char::is_whitespace) {
+        Some((verb, rest)) if verb.eq_ignore_ascii_case("set") => rest.trim_start(),
+        _ => args,
+    };
+    let Some(rest) = args.strip_prefix("--tokens") else {
+        return (None, args);
+    };
+    // Expected: --tokens <budget> <objective>
+    let rest = rest.trim();
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let budget_str = parts.next().unwrap_or("");
+    let objective = parts.next().unwrap_or("").trim();
+    (parse_token_budget(budget_str), objective)
+}
+
+/// The usage text shown for `/goal` forms that carry no objective.
+fn goal_usage() -> CommandResult {
+    CommandResult::Message(
+        "Usage: /goal [set] <objective> [--tokens 250K]\n\
+         Or: /goal status|pause|resume|clear|complete"
+            .to_string(),
+    )
 }
 
 fn open_goal_store() -> Option<claurst_core::GoalStore> {
@@ -227,5 +250,69 @@ fn goal_status(session_id: &str) -> CommandResult {
                 g.objective,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_objective_carries_no_budget() {
+        assert_eq!(
+            parse_objective_args("Migrate to React"),
+            (None, "Migrate to React")
+        );
+    }
+
+    #[test]
+    fn set_verb_is_not_part_of_the_objective() {
+        assert_eq!(
+            parse_objective_args("set Migrate to React"),
+            (None, "Migrate to React")
+        );
+        assert_eq!(
+            parse_objective_args("SET Migrate to React"),
+            (None, "Migrate to React")
+        );
+    }
+
+    #[test]
+    fn a_word_merely_starting_with_set_stays_in_the_objective() {
+        assert_eq!(
+            parse_objective_args("settle the migration"),
+            (None, "settle the migration")
+        );
+    }
+
+    #[test]
+    fn set_and_tokens_compose_in_that_order() {
+        assert_eq!(
+            parse_objective_args("set --tokens 250K Migrate to React"),
+            (Some(250_000), "Migrate to React")
+        );
+        assert_eq!(
+            parse_objective_args("--tokens 250K Migrate to React"),
+            (Some(250_000), "Migrate to React")
+        );
+    }
+
+    #[test]
+    fn bare_set_leaves_no_objective_to_store() {
+        // `execute` short-circuits a bare `set` before it reaches here, but an
+        // objective made only of the verb must not survive this parse either.
+        assert_eq!(parse_objective_args("set").1, "set");
+        assert_eq!(
+            parse_objective_args("set --tokens 250K"),
+            (Some(250_000), "")
+        );
+    }
+
+    #[test]
+    fn usage_names_the_set_spelling() {
+        let CommandResult::Message(text) = goal_usage() else {
+            panic!("usage must be a plain message");
+        };
+        assert!(text.contains("/goal [set] <objective>"), "{text:?}");
     }
 }

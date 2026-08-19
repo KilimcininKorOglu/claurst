@@ -2007,9 +2007,20 @@ fn extract_goal_slash_objective(text: &str) -> Option<String> {
 
 /// Pulls the objective text out of the `args` portion of a `/goal …` slash
 /// command. Returns `None` for empty args or for the subcommand forms
-/// (`status`, `pause`, `resume`, `clear`, `complete`).
+/// (`set`, `status`, `pause`, `resume`, `clear`, `complete`).
 fn extract_goal_objective_from_args(args: &str) -> Option<String> {
     let trimmed = args.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // `/goal set <objective>` is the explicit spelling of `/goal <objective>`.
+    // The verb is not part of the objective, and it comes before `--tokens`,
+    // so it has to be stripped first. A bare `set` carries no objective and
+    // falls through to the subcommand rejection below.
+    let trimmed = match trimmed.split_once(char::is_whitespace) {
+        Some((verb, rest)) if verb.eq_ignore_ascii_case("set") => rest.trim_start(),
+        _ => trimmed,
+    };
     if trimmed.is_empty() {
         return None;
     }
@@ -2035,7 +2046,7 @@ fn extract_goal_objective_from_args(args: &str) -> Option<String> {
         .to_ascii_lowercase();
     if matches!(
         first.as_str(),
-        "status" | "pause" | "resume" | "clear" | "complete"
+        "set" | "status" | "pause" | "resume" | "clear" | "complete"
     ) {
         return None;
     }
@@ -2713,6 +2724,37 @@ mod tests {
         );
         assert!(body.contains("Objective:"));
         assert!(body.contains("Migrate to React"));
+    }
+
+    #[test]
+    fn goal_set_verb_is_stripped_from_the_displayed_objective() {
+        // The command stores the objective with `set` stripped, so the
+        // transcript has to strip it the same way or the two disagree.
+        let body = line_text(&render_user_command("goal", "set Migrate to React", false)[1]);
+        assert!(body.contains("Migrate to React"), "{body:?}");
+        assert!(!body.contains("set Migrate"), "{body:?}");
+
+        let body =
+            line_text(&render_user_command("goal", "set --tokens 250K Migrate to React", false)[1]);
+        assert!(body.contains("Migrate to React"), "{body:?}");
+        assert!(!body.contains("--tokens"), "{body:?}");
+        assert!(!body.contains("250K"), "{body:?}");
+    }
+
+    #[test]
+    fn bare_goal_set_renders_as_a_normal_user_command() {
+        let text = line_text(&render_user_command("goal", "set", false)[0]);
+        assert!(
+            text.contains('\u{25b8}'),
+            "/goal set carries no objective: {text:?}"
+        );
+        assert!(text.contains("set"), "{text:?}");
+    }
+
+    #[test]
+    fn a_word_merely_starting_with_set_stays_in_the_objective() {
+        let body = line_text(&render_user_command("goal", "settle the migration", false)[1]);
+        assert!(body.contains("settle the migration"), "{body:?}");
     }
 
     #[test]
