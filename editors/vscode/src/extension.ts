@@ -11,6 +11,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const version: string = context.extension.packageJSON.version;
   const pool = new AgentPool(version, outputChannel);
   context.subscriptions.push({ dispose: () => pool.dispose() });
+  context.subscriptions.push(watchConfiguration(pool));
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.openChat', async () => {
@@ -109,6 +110,37 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+}
+
+/** Tell the user when a setting they changed will not take effect yet.
+ *
+ * These three are read once, when the agent process starts. Changing one and
+ * seeing nothing happen reads as the setting not working, so the offer to
+ * restart is made where the change was made. */
+function watchConfiguration(pool: AgentPool): vscode.Disposable {
+  const startupSettings = [
+    'claurst.executablePath',
+    'claurst.hostTerminals',
+    'claurst.requestTimeoutSeconds',
+  ];
+  return vscode.workspace.onDidChangeConfiguration(async (event) => {
+    if (!startupSettings.some((setting) => event.affectsConfiguration(setting))) {
+      return;
+    }
+    const restart = 'Restart agent';
+    const answer = await vscode.window.showInformationMessage(
+      'Claurst: this setting applies when the agent starts. Restart it now?',
+      restart,
+    );
+    if (answer !== restart) {
+      return;
+    }
+    // Every open panel is a session inside the process, so they go with it.
+    // Reopening one against a half-dead process would fail later and less
+    // clearly than closing them here.
+    ChatPanel.disposeAll();
+    pool.dispose();
+  });
 }
 
 export function deactivate(): void {
