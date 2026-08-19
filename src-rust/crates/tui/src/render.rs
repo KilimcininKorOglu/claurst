@@ -3132,6 +3132,32 @@ fn shimmer_spans(text: &str, frame_count: u64) -> Vec<Span<'static>> {
 // Keybinding hints footer
 // -----------------------------------------------------------------------
 
+/// `(done, total)` for the most recent TodoWrite call, or `None` when this
+/// session has no todo list.
+///
+/// Read from the tool blocks already in memory rather than from the persisted
+/// list: the footer redraws on every frame, so a disk read here would be one
+/// file read per frame, and the in-memory copy is the same one the transcript
+/// checklist draws from, so the two can never disagree.
+fn footer_todo_progress(app: &App) -> Option<(usize, usize)> {
+    let block = app.tool_use_blocks.iter().rev().find(|block| {
+        matches!(
+            block.name.to_ascii_lowercase().as_str(),
+            "todowrite" | "todo_write" | "todo"
+        )
+    })?;
+    let input: serde_json::Value = serde_json::from_str(&block.input_json).ok()?;
+    let todos = input.get("todos")?.as_array()?;
+    if todos.is_empty() {
+        return None;
+    }
+    let done = todos
+        .iter()
+        .filter(|todo| todo.get("status").and_then(|s| s.as_str()) == Some("completed"))
+        .count();
+    Some((done, todos.len()))
+}
+
 /// Single footer line matching the TS contract more closely:
 /// - `? for shortcuts` is suppressed once the prompt becomes non-empty
 /// - the right side shows comprehensive status info and notifications
@@ -3421,6 +3447,22 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             };
             parts.push(Span::styled(
                 format!("Tokens: {}/{} ({}%)", used, max, pct),
+                Style::default().fg(color),
+            ));
+        }
+
+        // 3c. Todo progress — mirrors the checklist block in the transcript.
+        if let Some((done, total)) = footer_todo_progress(app) {
+            if !parts.is_empty() {
+                parts.push(Span::raw("  "));
+            }
+            let color = if done == total {
+                Color::Green
+            } else {
+                Color::Yellow
+            };
+            parts.push(Span::styled(
+                format!("\u{2713}{}/{}", done, total),
                 Style::default().fg(color),
             ));
         }
@@ -5846,5 +5888,121 @@ mod workspace_root_notice_tests {
         };
 
         assert!(!notices(config).contains('&'));
+    }
+}
+
+#[cfg(test)]
+mod footer_todo_progress_tests {
+    //! The footer counter reads the tool blocks already in memory, so it has
+    //! to survive a missing `todos` array, an empty list and unparseable
+    //! input without drawing a misleading count.
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use claurst_query::QueryEvent;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn app_with_todos(input_json: &str) -> App {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.handle_query_event(QueryEvent::ToolStart {
+            tool_name: "TodoWrite".to_string(),
+            tool_id: "todo-1".to_string(),
+            input_json: input_json.to_string(),
+        });
+        app
+    }
+
+    fn footer_row(app: &App, width: u16, height: u16) -> String {
+        let mut terminal = match Terminal::new(TestBackend::new(width, height)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_app(frame, app)) {
+            panic!("draw: {err}");
+        }
+        let buffer = terminal.backend().buffer();
+        let row = buffer.area.height - 1;
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, row)].symbol())
+            .collect()
+    }
+
+    #[test]
+    fn counts_completed_against_total() {
+        let app = app_with_todos(
+            r#"{"todos":[
+                {"id":"1","content":"a","status":"completed"},
+                {"id":"2","content":"b","status":"in_progress"},
+                {"id":"3","content":"c","status":"pending"}
+            ]}"#,
+        );
+        assert_eq!(footer_todo_progress(&app), Some((1, 3)));
+    }
+
+    #[test]
+    fn only_the_most_recent_call_counts() {
+        let mut app = app_with_todos(r#"{"todos":[{"id":"1","content":"a","status":"pending"}]}"#);
+        app.handle_query_event(QueryEvent::ToolStart {
+            tool_name: "TodoWrite".to_string(),
+            tool_id: "todo-2".to_string(),
+            input_json: r#"{"todos":[
+                {"id":"1","content":"a","status":"completed"},
+                {"id":"2","content":"b","status":"completed"}
+            ]}"#
+            .to_string(),
+        });
+        assert_eq!(footer_todo_progress(&app), Some((2, 2)));
+    }
+
+    #[test]
+    fn no_todo_call_no_empty_list_and_no_broken_input_draw_a_counter() {
+        let bare = App::new(Config::default(), CostTracker::new());
+        assert_eq!(footer_todo_progress(&bare), None);
+        assert_eq!(
+            footer_todo_progress(&app_with_todos(r#"{"todos":[]}"#)),
+            None
+        );
+        assert_eq!(
+            footer_todo_progress(&app_with_todos(r#"{"other":1}"#)),
+            None
+        );
+        assert_eq!(footer_todo_progress(&app_with_todos("not json")), None);
+    }
+
+    #[test]
+    fn the_counter_reaches_the_drawn_footer() {
+        let app = app_with_todos(
+            r#"{"todos":[
+                {"id":"1","content":"a","status":"completed"},
+                {"id":"2","content":"b","status":"pending"}
+            ]}"#,
+        );
+        let footer = footer_row(&app, 120, 24);
+        assert!(footer.contains("\u{2713}1/2"), "{footer:?}");
+    }
+
+    #[test]
+    fn an_empty_list_draws_no_counter() {
+        // Same app shape as the populated case, so the only difference in the
+        // footer is the counter itself.
+        let empty = footer_row(&app_with_todos(r#"{"todos":[]}"#), 120, 24);
+        let populated = footer_row(
+            &app_with_todos(r#"{"todos":[{"id":"1","content":"a","status":"pending"}]}"#),
+            120,
+            24,
+        );
+        assert!(!empty.contains('\u{2713}'), "{empty:?}");
+        assert!(populated.contains("\u{2713}0/1"), "{populated:?}");
+    }
+
+    #[test]
+    fn a_narrow_terminal_still_draws_a_single_footer_row() {
+        // The counter lengthens an already crowded right-hand side; the
+        // rightmost section may be clipped, but the layout must not break.
+        let app = app_with_todos(r#"{"todos":[{"id":"1","content":"a","status":"pending"}]}"#);
+        let footer = footer_row(&app, 40, 24);
+        assert_eq!(footer.chars().count(), 40, "{footer:?}");
     }
 }
