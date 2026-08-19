@@ -1991,6 +1991,10 @@ async fn run_headless(
         }
     }
 
+    // Interpreters started by the REPL tool are kept alive between calls on
+    // purpose; this is where that purpose ends.
+    claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
+
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::SessionEnd,
         None,
@@ -5889,6 +5893,10 @@ async fn run_interactive(
     if let Some(status_line) = status_line {
         status_line.shutdown();
     }
+
+    // Interpreters started by the REPL tool are kept alive between calls on
+    // purpose; this is where that purpose ends.
+    claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
 
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::SessionEnd,

@@ -498,10 +498,15 @@ async fn run_agent(
     for (key, value) in &config.env {
         command.env(key, value);
     }
+    claurst_core::process_tree::spawn_in_own_group(&mut command);
 
     let mut child = command
         .spawn()
         .map_err(|e| format!("could not start {:?}: {e}", config.command))?;
+
+    // `kill_on_drop` reaps the agent itself; whatever the agent started is
+    // reachable only through its process tree.
+    let _tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill().await;

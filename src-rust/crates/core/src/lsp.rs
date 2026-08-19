@@ -200,6 +200,8 @@ impl LspClient {
             cmd.creation_flags(0x0800_0000u32);
         }
 
+        crate::process_tree::spawn_in_own_group(&mut cmd);
+
         let mut child = cmd.spawn().map_err(|e| {
             anyhow::anyhow!("Failed to start LSP server '{}': {}", config.command, e)
         })?;
@@ -589,8 +591,15 @@ impl LspClient {
         self.writer.take();
 
         if let Some(mut child) = self.process.take() {
+            let pid = child.id();
             // Give the process a moment to exit cleanly.
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+            // The tree first: killing the server orphans whatever it started,
+            // and a language server that spawns a compiler or a watcher would
+            // otherwise leave it behind.
+            if let Some(pid) = pid {
+                crate::process_tree::kill_tree(pid);
+            }
             let _ = child.kill().await;
         }
         self.is_initialized = false;

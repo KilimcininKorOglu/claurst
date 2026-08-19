@@ -33,9 +33,9 @@ use tracing::debug;
 // ---------------------------------------------------------------------------
 
 struct ReplSession {
-    // We hold the Child handle so that the process is not killed when the
-    // session is dropped.  We don't read from it directly after spawn.
-    #[allow(dead_code)]
+    // The handle is held so the interpreter can be killed at session end; it
+    // is never read from after the spawn. Dropping it would not stop the
+    // process either way, since `kill_on_drop` is deliberately not set.
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
@@ -43,14 +43,35 @@ struct ReplSession {
 
 /// Key: (session_id, language)
 ///
-// TODO(#209): interpreter processes are intentionally kept alive across tool
-// calls and are only removed here when they die or on the next call. There is
-// currently no session-end teardown hook wired into the app that could kill
-// leftover interpreters for a finished session, so we do not attempt it here.
-// When such a hook exists, drain REPL_SESSIONS for the ending session_id and
-// kill each child. The security gate above is the priority for #209.
+/// Interpreters are kept alive across tool calls on purpose, which is what
+/// makes a REPL a REPL. `shutdown_session` is what ends them; without it they
+/// outlived the session that started them.
 static REPL_SESSIONS: Lazy<Arc<DashMap<(String, String), Arc<Mutex<ReplSession>>>>> =
     Lazy::new(|| Arc::new(DashMap::new()));
+
+/// Stop every interpreter started for `session_id`.
+///
+/// Called when a session ends. Each interpreter is killed along with anything
+/// it started, because a REPL is exactly the place where a user starts a
+/// server or a watcher and leaves it running.
+pub async fn shutdown_session(session_id: &str) {
+    let keys: Vec<(String, String)> = REPL_SESSIONS
+        .iter()
+        .map(|entry| entry.key().clone())
+        .filter(|(id, _)| id == session_id)
+        .collect();
+
+    for key in keys {
+        let Some((_, session)) = REPL_SESSIONS.remove(&key) else {
+            continue;
+        };
+        let mut session = session.lock().await;
+        if let Some(pid) = session.child.id() {
+            claurst_core::process_tree::kill_tree(pid);
+        }
+        let _ = session.child.kill().await;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Sentinel values
@@ -110,11 +131,16 @@ async fn get_or_spawn_session(
     let (cmd, args) =
         interpreter_for(language).ok_or_else(|| format!("Unsupported language: {}", language))?;
 
-    let mut child = tokio::process::Command::new(cmd)
+    let mut builder = tokio::process::Command::new(cmd);
+    builder
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Its own group, so `shutdown_session` can reach what the interpreter
+    // started and not only the interpreter.
+    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+    let mut child = builder
         .spawn()
         .map_err(|e| format!("Failed to spawn '{}': {}", cmd, e))?;
 
@@ -414,6 +440,66 @@ mod tests {
                 .get(&("repl-critical-test".to_string(), "bash".to_string()))
                 .is_none(),
             "no bash REPL session must be spawned for a Critical command"
+        );
+    }
+    /// A sleep duration no other run can be using, so a process left behind by
+    /// an earlier run is never read as this one's.
+    #[cfg(unix)]
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999332.{}", nanos % 1_000_000_000)
+    }
+
+    #[cfg(unix)]
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Interpreters outlived the session that started them: nothing ever ended
+    /// them, so they sat in the registry until the process exited.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ending_a_session_stops_its_interpreters_and_their_children() {
+        let marker = unique_marker();
+        let session_id = format!("repl-shutdown-{marker}");
+        let ctx = ctx_with(Arc::new(AllowHandler), &session_id);
+
+        let result = ReplTool
+            .execute(
+                json!({
+                    "language": "bash",
+                    "code": format!("sleep {marker} >/dev/null 2>&1 &"),
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(!result.is_error, "{}", result.content);
+        assert!(pgrep_matches(&marker), "the child never started");
+
+        shutdown_session(&session_id).await;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the interpreter's child survived the session"
+        );
+        assert!(
+            REPL_SESSIONS
+                .iter()
+                .all(|entry| entry.key().0 != session_id),
+            "the session's entries must be gone from the registry"
         );
     }
 }
