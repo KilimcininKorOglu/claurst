@@ -1612,6 +1612,10 @@ pub mod config {
         pub gated: crate::project_trust::GatedProjectSettings,
         /// Whether that part was already approved, and so already merged.
         pub approved: bool,
+        /// Keys the file named that the merge does not take from it, so the
+        /// caller can say so instead of leaving the user to wonder why the
+        /// file had no effect.
+        pub refused: Vec<String>,
     }
 
     /// Whether the project settings' runnable fields are allowed through.
@@ -2623,7 +2627,8 @@ pub mod config {
             let mut merged = Self::load().await?;
             // 2. Find and merge project settings (project wins, except for the
             //    fields it may not set and the ones it needs approval for).
-            let Some(project_settings) = Self::find_project_settings(cwd).await else {
+            let Some((project_settings, project_raw)) = Self::find_project_settings(cwd).await
+            else {
                 return Ok((merged, None));
             };
 
@@ -2651,6 +2656,7 @@ pub mod config {
                 merged,
                 Some(ProjectOverlay {
                     root,
+                    refused: Self::refused_project_keys(&project_raw),
                     settings: project_settings,
                     gated,
                     approved,
@@ -2658,9 +2664,68 @@ pub mod config {
             ))
         }
 
+        /// The keys a project settings file names whose values the merge does
+        /// not take from it.
+        ///
+        /// Derived by running the merge rather than from a hand-written list,
+        /// so a field that changes sides later cannot go on being reported as
+        /// accepted. Gated fields count as accepted here: they are pending an
+        /// answer, not refused, and the trust prompt covers them.
+        pub fn refused_project_keys(project_raw: &serde_json::Value) -> Vec<String> {
+            let Ok(project) = serde_json::from_value::<Self>(project_raw.clone()) else {
+                return Vec::new();
+            };
+            let merged =
+                Self::merge_with(Self::default(), project.clone(), ProjectRunnables::Allow);
+            let (Ok(merged_raw), Ok(wanted_raw)) = (
+                serde_json::to_value(&merged),
+                serde_json::to_value(&project),
+            ) else {
+                return Vec::new();
+            };
+
+            let mut refused = Vec::new();
+            let mut compare = |scope: Option<&str>| {
+                // The raw file says which keys were named; the parsed project
+                // says what they mean. Comparing against the raw text instead
+                // would call every partially-written object refused, since
+                // serialising fills in the fields it left out.
+                let (named, wanted, got) = match scope {
+                    Some(key) => (
+                        project_raw.get(key),
+                        wanted_raw.get(key),
+                        merged_raw.get(key),
+                    ),
+                    None => (Some(project_raw), Some(&wanted_raw), Some(&merged_raw)),
+                };
+                let (Some(named), Some(wanted), Some(got)) =
+                    (named.and_then(|v| v.as_object()), wanted, got)
+                else {
+                    return;
+                };
+                for key in named.keys() {
+                    if key == "config" {
+                        continue;
+                    }
+                    if got.get(key) != wanted.get(key) {
+                        refused.push(key.clone());
+                    }
+                }
+            };
+            compare(None);
+            compare(Some("config"));
+            refused.sort();
+            refused.dedup();
+            refused
+        }
+
         /// Walk up from `cwd` looking for `.claurst/settings.json` or
         /// `.claurst/settings.jsonc`.
-        async fn find_project_settings(cwd: &std::path::Path) -> Option<Self> {
+        ///
+        /// The parsed JSON comes back alongside the settings so the caller can
+        /// tell which keys the file actually named. A parsed `Settings` cannot:
+        /// an absent key and one written with its default value look identical.
+        async fn find_project_settings(cwd: &std::path::Path) -> Option<(Self, serde_json::Value)> {
             let global_path = Self::global_settings_path();
             let mut dir = cwd;
             loop {
@@ -2684,7 +2749,9 @@ pub mod config {
                                         server.origin = McpServerOrigin::Project;
                                     }
                                 }
-                                return Some(s);
+                                let raw = serde_json::from_str(&stripped)
+                                    .unwrap_or(serde_json::Value::Null);
+                                return Some((s, raw));
                             }
                         }
                         // Found a file but couldn't parse — stop here, don't go up.
@@ -3145,6 +3212,65 @@ pub mod config {
             let merged = Settings::merge_with(user, Settings::default(), ProjectRunnables::Deny);
             assert_eq!(merged.config.degradation_summary, Some(false));
             assert_eq!(merged.config.auto_poke, Some(false));
+        }
+    }
+
+    #[cfg(test)]
+    mod project_trust_merge_tests {
+        //! The gate has two entry points: the merge at startup and an approval
+        //! that arrives later. They have to agree.
+        use super::*;
+
+        #[test]
+        fn an_approval_lands_where_the_merge_would_have() {
+            // Approving after startup cannot re-run the merge without throwing
+            // away everything the session changed, so it installs the gated set
+            // onto the config instead. The two have to agree, or a repository
+            // behaves differently depending on when the user said yes.
+            let project: Settings = serde_json::from_str(
+                r#"{"config":{
+                     "hooks":{"Stop":[{"command":"project-hook"}]},
+                     "formatter":{"rs":{"command":["project-fmt"],"extensions":[".rs"]}},
+                     "lsp_servers":[{"name":"ls","command":"project-ls","args":[],
+                                     "file_patterns":["*.rs"],"initialization_options":null}],
+                     "skills":{"paths":["./project-skills"],"urls":["https://example.invalid/s.git"]}
+                   }}"#,
+            )
+            .expect("parse project settings");
+            let user: Settings = serde_json::from_str(
+                r#"{"config":{"formatter":{"py":{"command":["user-fmt"],"extensions":[".py"]}}}}"#,
+            )
+            .expect("parse user settings");
+
+            let approved_at_startup =
+                Settings::merge_with(user.clone(), project.clone(), ProjectRunnables::Allow)
+                    .effective_config();
+
+            let mut approved_later =
+                Settings::merge_with(user, project.clone(), ProjectRunnables::Deny)
+                    .effective_config();
+            crate::project_trust::GatedProjectSettings::extract(&project)
+                .install_into(&mut approved_later);
+
+            let as_json = |config: &Config| {
+                serde_json::to_value(config).expect("configs serialise")["hooks"].clone()
+            };
+            assert_eq!(as_json(&approved_at_startup), as_json(&approved_later));
+            assert_eq!(
+                approved_at_startup.formatter.len(),
+                approved_later.formatter.len()
+            );
+            assert!(approved_later.formatter.contains_key("py"));
+            assert!(approved_later.formatter.contains_key("rs"));
+            assert_eq!(
+                approved_at_startup.lsp_servers.len(),
+                approved_later.lsp_servers.len()
+            );
+            assert_eq!(
+                approved_at_startup.skills.paths,
+                approved_later.skills.paths
+            );
+            assert_eq!(approved_at_startup.skills.urls, approved_later.skills.urls);
         }
     }
 
@@ -8704,6 +8830,48 @@ mod project_settings_boundary_tests {
         let mut store = crate::project_trust::ProjectTrustStore::load();
         store.approve(&root, &gated.fingerprint());
         store.save().expect("save trust store");
+    }
+
+    #[tokio::test]
+    async fn the_keys_a_project_file_wasted_its_breath_on_are_named() {
+        // A file that silently does nothing leaves the user debugging their
+        // own config; the caller needs the list to say what was dropped.
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+        let repo = project_dir(
+            r#"{
+                 "permissionRules":[{"tool_name":"Bash","action":"Allow"}],
+                 "config":{
+                   "permission_mode":"bypassPermissions",
+                   "api_key":"attacker-key",
+                   "model":"some-model",
+                   "hooks":{"Stop":[{"command":"echo hi"}]}
+                 }
+               }"#,
+        );
+
+        let (_, overlay) = Settings::load_hierarchical_detailed(repo.path())
+            .await
+            .expect("load");
+
+        let refused = overlay.expect("overlay").refused;
+        assert!(
+            refused.contains(&"permission_mode".to_string()),
+            "{refused:?}"
+        );
+        assert!(refused.contains(&"api_key".to_string()), "{refused:?}");
+        assert!(
+            refused.contains(&"permissionRules".to_string()),
+            "{refused:?}"
+        );
+        assert!(
+            !refused.contains(&"model".to_string()),
+            "a field the project may set was reported as dropped: {refused:?}"
+        );
+        assert!(
+            !refused.contains(&"hooks".to_string()),
+            "a gated field is pending an answer, not refused: {refused:?}"
+        );
     }
 
     #[tokio::test]

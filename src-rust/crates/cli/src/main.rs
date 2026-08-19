@@ -544,16 +544,17 @@ async fn main() -> anyhow::Result<()> {
     // Load settings from disk (hierarchical: global < project). A malformed
     // global file is kept intact; interactive mode displays the error in the
     // startup dialog, while headless mode reports it on stderr.
-    let (mut settings, settings_load_error) = match Settings::load_hierarchical(&cwd).await {
-        Ok(settings) => (settings, None),
-        Err(error) => {
-            let message = error.to_string();
-            if is_headless {
-                eprintln!("Warning: {}", message);
+    let (mut settings, project_overlay, settings_load_error) =
+        match Settings::load_hierarchical_detailed(&cwd).await {
+            Ok((settings, overlay)) => (settings, overlay, None),
+            Err(error) => {
+                let message = error.to_string();
+                if is_headless {
+                    eprintln!("Warning: {}", message);
+                }
+                (Settings::default(), None, Some(message))
             }
-            (Settings::default(), Some(message))
-        }
-    };
+        };
     // `--trust-project-mcp` (and automation use cases) flip on the same global
     // trust the user could set via `trustProjectMcpServers`. Folding it into
     // `settings` here keeps a single source of truth for the gate, including
@@ -887,6 +888,33 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
+    // SECURITY (issue #389): the same reasoning, for the rest of the project
+    // settings file. Hooks, formatters, language servers and skill sources all
+    // name something to run or fetch, so they wait for the user to see them and
+    // agree. The keys a repository may never set were already dropped by the
+    // merge; they are reported here so the file does not fail silently.
+    let project_trust_root = project_overlay.as_ref().and_then(|o| o.root.clone());
+    let project_trust_pending = project_overlay.as_ref().and_then(|overlay| {
+        (!overlay.approved && !overlay.gated.is_empty()).then(|| overlay.gated.clone())
+    });
+    if let Some(overlay) = project_overlay.as_ref() {
+        if !overlay.refused.is_empty() {
+            warn!(
+                keys = ?overlay.refused,
+                "Ignoring project settings keys that only your own settings may set."
+            );
+        }
+    }
+    if is_headless {
+        if let Some(pending) = project_trust_pending.as_ref() {
+            warn!(
+                declares = ?pending.describe(),
+                "Skipping what this project's settings file wants to run: \
+                 approving it needs the interactive TUI."
+            );
+        }
+    }
+
     let mcp_manager_arc = connect_mcp_manager_arc(&mcp_decision.allowed).await;
 
     let pending_permissions = Arc::new(ParkingMutex::new(
@@ -1064,6 +1092,8 @@ async fn main() -> anyhow::Result<()> {
             user_question_rx,
             pending_project_mcp,
             mcp_project_root,
+            project_trust_pending,
+            project_trust_root,
         )
         .await
     };
@@ -2590,6 +2620,8 @@ async fn run_interactive(
     >,
     pending_project_mcp: Vec<claurst_core::config::McpServerConfig>,
     mcp_project_root: Option<PathBuf>,
+    project_trust_pending: Option<claurst_core::project_trust::GatedProjectSettings>,
+    project_trust_root: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     use claurst_bridge::{BridgeOutbound, TuiBridgeEvent};
     use claurst_commands::{execute_command, CommandContext, CommandResult};
@@ -2701,6 +2733,11 @@ async fn run_interactive(
     // user must approve before they are allowed to launch (issue #123).
     app.mcp_project_root = mcp_project_root;
     app.mcp_pending_project = pending_project_mcp.into_iter().collect();
+    // The dialog asks the question; the settings live here, so the answer is
+    // applied here. This copy is what gets installed if the user says yes.
+    let mut project_gated = project_trust_pending.clone();
+    app.project_trust_root = project_trust_root;
+    app.project_trust_pending = project_trust_pending;
     if let Some(warning) = resume_warning {
         app.status_message = Some(warning);
     }
@@ -5815,6 +5852,29 @@ async fn run_interactive(
                     if connected == 1 { "" } else { "s" }
                 )
             });
+        }
+
+        // Ask whether the checkout's settings file may run what it declares
+        // (#389), and install it if the user says so. Waits behind the same
+        // startup dialog as the MCP prompt below.
+        if !app.is_streaming && current_query.is_none() && !app.bypass_permissions_dialog.visible {
+            app.maybe_prompt_project_trust();
+        }
+        if app.take_project_trust_granted() {
+            if let Some(gated) = project_gated.take() {
+                // Re-running the merge would also undo everything the session
+                // changed since it started, so the approved set is folded into
+                // the live configs instead. All three carry a copy.
+                gated.install_into(&mut cmd_ctx.config);
+                gated.install_into(&mut tool_ctx.config);
+                gated.install_into(&mut app.config);
+                let (session_commands, skill_count) =
+                    session_slash_commands(&tool_ctx.working_dir, &cmd_ctx.config);
+                app.set_extra_slash_commands(session_commands);
+                app.skill_count = skill_count;
+                tools_arc =
+                    claurst_query::build_tool_roster(app.mcp_manager.clone(), &tool_ctx.config);
+            }
         }
 
         // Prompt for any project-defined MCP servers awaiting approval (#123).

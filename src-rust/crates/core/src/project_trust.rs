@@ -151,6 +151,34 @@ impl GatedProjectSettings {
 
         lines
     }
+
+    /// Fold an approved set into a config that was built without it.
+    ///
+    /// The counterpart to the merge's allow branch, for the case where the
+    /// answer arrives after the config already exists: re-running the whole
+    /// merge would also undo whatever the session has changed since it started.
+    /// The approved value wins on a collision, exactly as it does in the merge.
+    /// `an_approval_lands_where_the_merge_would_have` pins the two paths to the
+    /// same result.
+    pub fn install_into(&self, config: &mut crate::config::Config) {
+        for (event, entries) in &self.hooks {
+            config.hooks.insert(event.clone(), entries.clone());
+        }
+        for (name, cfg) in &self.formatter {
+            config.formatter.insert(name.clone(), cfg.clone());
+        }
+        config.lsp_servers.extend(self.lsp_servers.iter().cloned());
+        for path in &self.skills.paths {
+            if !config.skills.paths.contains(path) {
+                config.skills.paths.push(path.clone());
+            }
+        }
+        for url in &self.skills.urls {
+            if !config.skills.urls.contains(url) {
+                config.skills.urls.push(url.clone());
+            }
+        }
+    }
 }
 
 /// Per-user record of which project settings have been approved.
