@@ -79,6 +79,23 @@ body {
   color: var(--vscode-descriptionForeground);
   font-style: italic;
   padding-left: 0;
+  max-width: none;
+}
+
+.thought-fold {
+  max-width: 85%;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.9em;
+}
+
+.thought-fold > summary {
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+
+.thought-fold > summary:hover {
+  color: var(--vscode-foreground);
 }
 
 /* The agent's own turns are markdown, so their whitespace is structure the

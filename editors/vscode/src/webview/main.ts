@@ -117,10 +117,25 @@ type HostMessage =
     const bubble = document.createElement('div');
     bubble.className = 'bubble ' + cls;
     bubble.textContent = text;
-    row.appendChild(bubble);
+    row.appendChild(cls === 'thought' ? foldThought(bubble) : bubble);
     messagesEl.appendChild(row);
     scrollToEnd();
     return bubble;
+  }
+
+  /** Put reasoning behind a disclosure rather than in the flow.
+   *
+   * A long chain of thought pushes the answer it led to off the screen. It
+   * stays available, and stays where it happened, but it does not compete with
+   * the reply for the reader's attention. */
+  function foldThought(bubble: HTMLElement): HTMLElement {
+    const details = document.createElement('details');
+    details.className = 'thought-fold';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Thinking';
+    details.appendChild(summary);
+    details.appendChild(bubble);
+    return details;
   }
 
   /** Draw an image the agent sent or the transcript replayed.
