@@ -2528,6 +2528,33 @@ fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, boo
     (badge, completed)
 }
 
+/// Run a `!command` line and render it for the transcript.
+///
+/// No permission is asked: the rules bound what the model may do, and this is
+/// a command the user typed. The result goes back as a system annotation,
+/// which `App` keeps out of `messages`, so nothing here reaches the model or
+/// costs a token.
+async fn run_bang_command(
+    command: &str,
+    tool_ctx: &claurst_tools::ToolContext,
+) -> (String, claurst_tui::app::SystemMessageStyle) {
+    let result = claurst_tools::PtyBashTool
+        .run_unprompted(command, tool_ctx)
+        .await;
+    let body = result.content.trim_end();
+    let text = if body.is_empty() {
+        format!("$ {command}")
+    } else {
+        format!("$ {command}\n{body}")
+    };
+    let style = if result.is_error {
+        claurst_tui::app::SystemMessageStyle::Warning
+    } else {
+        claurst_tui::app::SystemMessageStyle::Info
+    };
+    (text, style)
+}
+
 /// Whether the plan badge belongs on screen for `mode`.
 ///
 /// Both config-changing command arms derive the flag from the same place, so a
@@ -3159,6 +3186,18 @@ async fn run_interactive(
                         // Queue the message: it will auto-submit once the
                         // current turn finishes (issue #149).
                         let input = app.take_input();
+                        if claurst_tui::input::is_bang_command(&input) {
+                            // A queued bang would reach the model as a message
+                            // once the turn ended, which is the one thing this
+                            // path exists to avoid. Hand the text back instead.
+                            app.set_prompt_text(input);
+                            app.notifications.push(
+                                claurst_tui::NotificationKind::Warning,
+                                "Shell commands wait for the turn to finish.".to_string(),
+                                Some(3),
+                            );
+                            continue;
+                        }
                         if !input.is_empty() {
                             let preview: String = input.chars().take(40).collect();
                             app.queued_messages.push_back(input);
@@ -3198,6 +3237,30 @@ async fn run_interactive(
 
                         let input = app.take_input();
                         if input.is_empty() {
+                            continue;
+                        }
+
+                        // Check for a shell command to run here, before the
+                        // slash check: a bang line never reaches the model.
+                        if claurst_tui::input::is_bang_command(&input) {
+                            let command =
+                                claurst_tui::input::parse_bang_command(&input).to_string();
+                            if command.is_empty() {
+                                app.set_prompt_text(input);
+                                app.status_message =
+                                    Some("A bang with no command runs nothing.".to_string());
+                                continue;
+                            }
+                            if app.plan_mode {
+                                app.set_prompt_text(input);
+                                app.status_message = Some(
+                                    "Plan mode touches nothing, shell commands included."
+                                        .to_string(),
+                                );
+                                continue;
+                            }
+                            let (text, style) = run_bang_command(&command, &tool_ctx).await;
+                            app.push_system_message(text, style);
                             continue;
                         }
 
@@ -7543,5 +7606,91 @@ mod plan_badge_tests {
         assert!(plan_mode);
         plan_mode = plan_badge_for(PermissionMode::BypassPermissions);
         assert!(!plan_mode);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bang_command_tests {
+    use super::*;
+
+    /// Permission handler that refuses everything, to prove the bang path does
+    /// not consult it.
+    struct DenyAll;
+
+    impl claurst_core::permissions::PermissionHandler for DenyAll {
+        fn check_permission(
+            &self,
+            _request: &claurst_core::permissions::PermissionRequest,
+        ) -> claurst_core::permissions::PermissionDecision {
+            claurst_core::permissions::PermissionDecision::Deny
+        }
+
+        fn request_permission(
+            &self,
+            _request: &claurst_core::permissions::PermissionRequest,
+        ) -> claurst_core::permissions::PermissionDecision {
+            claurst_core::permissions::PermissionDecision::Deny
+        }
+    }
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_handler: std::sync::Arc::new(DenyAll),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            session_id: "bang-command-test".to_string(),
+            file_history: std::sync::Arc::new(parking_lot::Mutex::new(
+                claurst_core::file_history::FileHistory::new(),
+            )),
+            current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config: claurst_core::config::Config::default(),
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
+            editor: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_block_carries_the_command_above_its_output() {
+        let (text, style) = run_bang_command("echo hello", &ctx()).await;
+
+        assert!(text.starts_with("$ echo hello\n"), "{text:?}");
+        assert!(text.contains("hello"), "{text:?}");
+        assert_eq!(style, claurst_tui::app::SystemMessageStyle::Info);
+    }
+
+    #[tokio::test]
+    async fn a_failing_command_is_drawn_as_a_warning() {
+        let (text, style) = run_bang_command("exit 3", &ctx()).await;
+
+        assert_eq!(style, claurst_tui::app::SystemMessageStyle::Warning);
+        assert!(text.contains("exit 3"), "{text:?}");
+    }
+
+    #[tokio::test]
+    async fn the_session_shell_carries_cd_from_one_command_to_the_next() {
+        // The point of running through the tool rather than a fresh process:
+        // the typed command and the model's share one shell. The directory is
+        // freshly made so no default working directory can satisfy the check.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir
+            .path()
+            .file_name()
+            .expect("temp dir name")
+            .to_string_lossy()
+            .into_owned();
+
+        run_bang_command(&format!("cd {}", dir.path().display()), &ctx()).await;
+        let (text, _) = run_bang_command("pwd", &ctx()).await;
+
+        assert!(text.contains(&marker), "{text:?}");
     }
 }

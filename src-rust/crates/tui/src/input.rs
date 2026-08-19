@@ -5,6 +5,25 @@ pub fn is_slash_command(input: &str) -> bool {
     input.starts_with('/') && !input.starts_with("//")
 }
 
+/// Check whether a string looks like a shell command to run here (e.g. "!ls").
+///
+/// `!!` escapes it for the same reason `//` escapes a slash command: a line
+/// that starts with a bang and is meant for the model has to have some way to
+/// say so.
+pub fn is_bang_command(input: &str) -> bool {
+    input.starts_with('!') && !input.starts_with("!!")
+}
+
+/// The command in a bang line, without the bang and without surrounding space.
+///
+/// Returns `""` for anything that is not a bang line, and for a bare `!`.
+pub fn parse_bang_command(input: &str) -> &str {
+    if !is_bang_command(input) {
+        return "";
+    }
+    input[1..].trim()
+}
+
 /// Parse a slash command into `(command_name, args)`.
 /// Returns `("", "")` if the input is not a slash command.
 pub fn parse_slash_command(input: &str) -> (&str, &str) {
@@ -33,6 +52,28 @@ mod tests {
         assert!(!is_slash_command("//comment"));
         assert!(!is_slash_command("hello"));
         assert!(!is_slash_command(""));
+    }
+
+    #[test]
+    fn bang_command_detection() {
+        assert!(is_bang_command("!ls"));
+        assert!(is_bang_command("!ls -la"));
+        // A bare bang is a bang line; the run path is what refuses an empty
+        // command, so detection must not swallow it here.
+        assert!(is_bang_command("!"));
+        assert!(!is_bang_command("!!literal"));
+        assert!(!is_bang_command("/help"));
+        assert!(!is_bang_command("hello!"));
+        assert!(!is_bang_command(""));
+    }
+
+    #[test]
+    fn parse_bang_takes_the_command_and_leaves_the_bang() {
+        assert_eq!(parse_bang_command("!ls -la"), "ls -la");
+        assert_eq!(parse_bang_command("!  pwd  "), "pwd");
+        assert_eq!(parse_bang_command("!"), "");
+        assert_eq!(parse_bang_command("!!literal"), "");
+        assert_eq!(parse_bang_command("hello"), "");
     }
 
     #[test]

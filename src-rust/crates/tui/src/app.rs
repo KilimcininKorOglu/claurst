@@ -10321,3 +10321,27 @@ mod clipboard_hint_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod system_annotation_tests {
+    //! A bang command's output is drawn in the transcript but must never join
+    //! the conversation. `messages` is what reaches the model, so the whole
+    //! "runs for free" claim rests on this staying true.
+    use super::*;
+
+    #[test]
+    fn a_system_message_does_not_join_the_conversation() {
+        let mut app = App::new(Config::default(), claurst_core::cost::CostTracker::new());
+        let before = app.messages.len();
+
+        app.push_system_message("$ ls\nCargo.toml".to_string(), SystemMessageStyle::Info);
+
+        assert_eq!(
+            app.messages.len(),
+            before,
+            "a system annotation must not become a message"
+        );
+        assert_eq!(app.system_annotations.len(), 1);
+        assert!(app.system_annotations[0].text.contains("Cargo.toml"));
+    }
+}

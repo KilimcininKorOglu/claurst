@@ -3422,8 +3422,10 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(Span::styled(label, style));
         }
 
-        // Bash prefix indicator — shown when prompt starts with '!'
-        if app.prompt_input.text.starts_with('!') {
+        // Bash prefix indicator — shown when the line will run as a shell
+        // command. `!!` escapes the bang, so that line goes to the model and
+        // must not be badged as one that does not.
+        if crate::input::is_bang_command(&app.prompt_input.text) {
             if !spans.is_empty() {
                 spans.push(Span::raw("  "));
             }
