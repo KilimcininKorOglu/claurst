@@ -2952,8 +2952,22 @@ async fn run_interactive(
             last_auto_scroll = app.auto_scroll;
         }
 
-        // Draw the UI
-        terminal.draw(|f| render_app(f, &app))?;
+        // Draw the UI, and scan the frame that was just painted for URL runs.
+        // ratatui swaps its two buffers at the end of draw(), so by the time
+        // draw() returns `terminal.current_buffer_mut()` points at the empty
+        // next-frame slot; `CompletedFrame.buffer` is the one that holds what
+        // the user is looking at.
+        let osc8_hits = {
+            let completed = terminal.draw(|f| render_app(f, &app))?;
+            claurst_tui::osc8::scan_buffer_for_urls(completed.buffer)
+        };
+
+        // Re-emit those cells wrapped in hyperlink escapes so terminals that
+        // support OSC 8 make them clickable. A failed write is never worth
+        // killing the TUI over.
+        if let Err(err) = claurst_tui::osc8::emit_hits(&osc8_hits) {
+            tracing::debug!(target: "osc8", "hyperlink overlay write failed: {err}");
+        }
 
         // Level-sync the terminal progress indicator (OSC 9;4) to streaming
         // state, so supporting terminals (iTerm2, WezTerm, Windows Terminal, …)
