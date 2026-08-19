@@ -2718,6 +2718,50 @@ fn render_tool_block_lines(
     }
 }
 
+/// The confidence score to show for one todo item.
+///
+/// A completed item prefers the score recorded at completion and falls back to
+/// the up-front estimate, so an item completed without a fresh score still
+/// shows the number the model last stood behind.
+fn todo_confidence(todo: &serde_json::Value) -> Option<u8> {
+    let completed = todo.get("status").and_then(|status| status.as_str()) == Some("completed");
+    let value = completed
+        .then(|| todo.get("completion_confidence"))
+        .flatten()
+        .filter(|value| !value.is_null())
+        .or_else(|| todo.get("confidence"))?;
+    claurst_tools::todo_write::parse_confidence(value)
+}
+
+/// One score for the whole list, weighted by priority so a shaky high-priority
+/// item is not averaged away by several confident trivial ones.
+fn aggregate_todo_confidence(todos: &[serde_json::Value]) -> Option<u8> {
+    let mut weighted_sum = 0u32;
+    let mut total_weight = 0u32;
+    for todo in todos {
+        let Some(score) = todo_confidence(todo) else {
+            continue;
+        };
+        let weight = match todo.get("priority").and_then(|priority| priority.as_str()) {
+            Some("high") => 3,
+            Some("medium") => 2,
+            _ => 1,
+        };
+        weighted_sum += u32::from(score) * weight;
+        total_weight += weight;
+    }
+    (total_weight > 0).then(|| ((weighted_sum + total_weight / 2) / total_weight) as u8)
+}
+
+/// Named colours rather than RGB, so a terminal theme still applies.
+fn confidence_color(score: u8) -> Color {
+    match score {
+        80..=100 => Color::Green,
+        50..=79 => Color::Yellow,
+        _ => Color::Red,
+    }
+}
+
 /// Render a TodoWrite call as a checklist. Returns `false` (so the caller can
 /// fall back to the generic block) when the input carries no `todos` array.
 fn render_todo_block(
@@ -2761,6 +2805,12 @@ fn render_todo_block(
             format!("  {}/{} done", done, total),
             Style::default().fg(Color::DarkGray),
         ));
+        if let Some(confidence) = aggregate_todo_confidence(todos) {
+            header.push(Span::styled(
+                format!(" · confidence {}%", confidence),
+                Style::default().fg(confidence_color(confidence)),
+            ));
+        }
     }
     lines.push(Line::from(header));
 
@@ -2796,10 +2846,17 @@ fn render_todo_block(
                 Style::default().fg(Color::Rgb(170, 170, 170)),
             ),
         };
-        lines.push(Line::from(vec![
+        let mut item = vec![
             Span::styled(format!("     {} ", glyph), Style::default().fg(glyph_color)),
             Span::styled(content.to_string(), text_style),
-        ]));
+        ];
+        if let Some(score) = todo_confidence(t) {
+            item.push(Span::styled(
+                format!(" [{}%]", score),
+                Style::default().fg(confidence_color(score)),
+            ));
+        }
+        lines.push(Line::from(item));
     }
     if total > MAX_ITEMS {
         lines.push(Line::from(vec![
@@ -4521,6 +4578,76 @@ mod tool_block_tests {
         assert!(
             !joined.contains("Todo list updated"),
             "preview suppressed: {joined:?}"
+        );
+        // A list with no scores must look exactly as it did before.
+        assert!(
+            !joined.contains('%'),
+            "no score, no percentages: {joined:?}"
+        );
+    }
+
+    #[test]
+    fn todo_checklist_shows_confidence_when_present() {
+        let b = block(
+            "TodoWrite",
+            ToolStatus::Done,
+            r#"{"todos":[
+                {"content":"Locate files","status":"completed","completion_confidence":90},
+                {"content":"Build importer","status":"in_progress","confidence":70},
+                {"content":"Wire adapter","status":"pending","confidence":50}
+            ]}"#,
+            Some("Todo list updated (3 total)"),
+        );
+        let joined = render(&b).join("\n");
+        assert!(joined.contains("[x] Locate files [90%]"), "{joined:?}");
+        assert!(joined.contains("[>] Build importer [70%]"), "{joined:?}");
+        assert!(joined.contains("[ ] Wire adapter [50%]"), "{joined:?}");
+        assert!(joined.contains("confidence 70%"), "aggregate: {joined:?}");
+    }
+
+    #[test]
+    fn a_completed_item_falls_back_to_its_up_front_score() {
+        let b = block(
+            "TodoWrite",
+            ToolStatus::Done,
+            r#"{"todos":[{"content":"Locate files","status":"completed","confidence":60}]}"#,
+            None,
+        );
+        assert!(render(&b).join("\n").contains("[60%]"));
+    }
+
+    #[test]
+    fn priority_weights_the_aggregate_score() {
+        // Without weighting this would read 60%; the high-priority item counts
+        // three times, so the shaky task dominates.
+        let b = block(
+            "TodoWrite",
+            ToolStatus::Done,
+            r#"{"todos":[
+                {"content":"Risky","status":"pending","confidence":20,"priority":"high"},
+                {"content":"Easy","status":"pending","confidence":100,"priority":"low"}
+            ]}"#,
+            None,
+        );
+        assert!(render(&b).join("\n").contains("confidence 40%"));
+    }
+
+    #[test]
+    fn an_unscored_item_is_skipped_rather_than_counted_as_zero() {
+        let b = block(
+            "TodoWrite",
+            ToolStatus::Done,
+            r#"{"todos":[
+                {"content":"Scored","status":"pending","confidence":80},
+                {"content":"Unscored","status":"pending"}
+            ]}"#,
+            None,
+        );
+        let joined = render(&b).join("\n");
+        assert!(joined.contains("confidence 80%"), "{joined:?}");
+        assert!(
+            joined.contains("[ ] Unscored\n") || joined.ends_with("[ ] Unscored"),
+            "{joined:?}"
         );
     }
 
