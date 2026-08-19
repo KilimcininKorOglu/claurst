@@ -159,7 +159,9 @@ export class ChatPanel {
     const webview = this.panel.webview;
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'main.css'));
-    const nonce = String(Math.random()).slice(2);
+    // A CSP nonce only keeps injected script out if it cannot be guessed, and
+    // Math.random is seeded predictably enough that it can be.
+    const nonce = crypto.randomUUID().replace(/-/g, '');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
