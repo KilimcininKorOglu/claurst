@@ -40,10 +40,123 @@ pub async fn try_format_file(path: &str, ctx: &ToolContext) {
             cmd.arg(path);
         }
 
-        // Run with a 30-second timeout; silently ignore all errors.
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output()).await;
+        // The formatter is only the wrapper for whatever it starts, and a
+        // timeout that drops the future leaves all of it running. Guard the
+        // tree so a cancelled turn or an expired limit takes the whole thing.
+        claurst_core::process_tree::spawn_in_own_group(&mut cmd);
+        let Ok(child) = cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        else {
+            // Silently ignored, as every other formatter failure is: a file
+            // that did not get formatted is not worth interrupting a turn for.
+            // `break`, not `continue`: the first matching formatter is the only
+            // one that runs, whether or not it started.
+            break;
+        };
+        let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+        match tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+            .await
+        {
+            Ok(_) => tree_guard.disarm(),
+            Err(_) => tree_guard.kill_now(),
+        }
 
         // Only apply the first matching formatter.
         break;
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use claurst_core::config::FormatterConfig;
+
+    /// A sleep duration no other run can be using, so a process left behind by
+    /// an earlier run is never read as this one's.
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999333.{}", nanos % 1_000_000_000)
+    }
+
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn ctx_with_formatter(command: Vec<String>) -> ToolContext {
+        let mut config = claurst_core::config::Config::default();
+        config.formatter.insert(
+            "test".to_string(),
+            FormatterConfig {
+                command,
+                extensions: vec![".txt".to_string()],
+                disabled: false,
+            },
+        );
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            permission_mode: claurst_core::config::PermissionMode::BypassPermissions,
+            permission_handler: std::sync::Arc::new(
+                claurst_core::permissions::AutoPermissionHandler {
+                    mode: claurst_core::config::PermissionMode::BypassPermissions,
+                },
+            ),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            session_id: "formatter-test".to_string(),
+            file_history: std::sync::Arc::new(parking_lot::Mutex::new(
+                claurst_core::file_history::FileHistory::new(),
+            )),
+            current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config,
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
+            editor: None,
+        }
+    }
+
+    /// A cancelled turn used to leave the formatter and everything it started
+    /// running: there was a time limit but nothing killed anything on drop.
+    #[tokio::test]
+    async fn a_cancelled_format_takes_the_formatter_with_it() {
+        let marker = unique_marker();
+        let ctx = ctx_with_formatter(vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            format!("sleep {marker} & wait"),
+        ]);
+
+        {
+            let running = try_format_file("/tmp/whatever.txt", &ctx);
+            tokio::pin!(running);
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut running).await;
+            assert!(pgrep_matches(&marker), "the formatter never started");
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the formatter's child survived the cancel"
+        );
     }
 }
