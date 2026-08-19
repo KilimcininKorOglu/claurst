@@ -5129,17 +5129,24 @@ pub mod history {
     use crate::types::Message;
     use serde::{Deserialize, Serialize};
 
-    /// A checkpoint snapshot of conversation messages at a specific point in time.
+    /// A point in the conversation that can be returned to.
+    ///
+    /// A position rather than a copy of the messages: a checkpoint per turn
+    /// that each carried its own snapshot would grow the session file with the
+    /// square of its length. What a rewind discards is not lost either way —
+    /// the transcript keeps it on a sibling branch.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SessionCheckpoint {
-        /// The message index this checkpoint was taken at (exclusive upper bound).
+        /// How many messages the conversation held at this point.
         pub message_idx: usize,
         /// Optional human-readable label.
         pub label: Option<String>,
         /// When this checkpoint was created.
         pub created_at: chrono::DateTime<chrono::Utc>,
-        /// Snapshot of all messages up to (and including) `message_idx - 1`.
-        pub snapshot: Vec<Message>,
+        /// The uuid of the last message at this point, so the transcript's
+        /// active tip can be moved to the same place.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub leaf_uuid: Option<String>,
     }
 
     /// A single persisted conversation session.
@@ -5225,33 +5232,47 @@ pub mod history {
     // Checkpoint helpers (synchronous, operate on a mutable session in-memory)
     // -------------------------------------------------------------------------
 
-    /// Create a checkpoint at the current end of the session's message list.
-    /// The checkpoint captures all messages currently in the session.
+    /// How many checkpoints a session keeps. Older ones fall off the front.
+    pub const MAX_CHECKPOINTS: usize = 20;
+
+    /// Mark the current end of the conversation as a point to return to.
+    ///
+    /// A second checkpoint at the same position replaces the first rather than
+    /// stacking, so a turn that added nothing does not leave a duplicate.
     pub fn create_checkpoint(session: &mut ConversationSession, label: Option<&str>) {
         let idx = session.messages.len();
         let checkpoint = SessionCheckpoint {
             message_idx: idx,
             label: label.map(|s| s.to_string()),
             created_at: chrono::Utc::now(),
-            snapshot: session.messages.clone(),
+            leaf_uuid: session.messages.last().and_then(|m| m.uuid.clone()),
         };
-        session.checkpoints.push(checkpoint);
+        match session.checkpoints.last_mut() {
+            Some(last) if last.message_idx == idx => *last = checkpoint,
+            _ => session.checkpoints.push(checkpoint),
+        }
+        if session.checkpoints.len() > MAX_CHECKPOINTS {
+            let excess = session.checkpoints.len() - MAX_CHECKPOINTS;
+            session.checkpoints.drain(..excess);
+        }
         session.updated_at = chrono::Utc::now();
     }
 
-    /// Restore the session's messages to those saved in checkpoint `idx`.
+    /// Return the conversation to checkpoint `idx`.
     ///
-    /// Returns the messages that were replaced (i.e. the messages discarded by
-    /// the rewind).  The session's `messages` field is replaced with the
-    /// checkpoint snapshot; `updated_at` is refreshed.
-    ///
-    /// # Panics
-    /// Panics if `idx` is out of bounds (i.e. >= `session.checkpoints.len()`).
-    pub fn restore_checkpoint(session: &mut ConversationSession, idx: usize) -> Vec<Message> {
-        let snapshot = session.checkpoints[idx].snapshot.clone();
-        let replaced = std::mem::replace(&mut session.messages, snapshot);
+    /// Answers the messages that were dropped, or `None` when `idx` names no
+    /// checkpoint or the conversation is already shorter than it.
+    pub fn restore_checkpoint(
+        session: &mut ConversationSession,
+        idx: usize,
+    ) -> Option<Vec<Message>> {
+        let at = session.checkpoints.get(idx)?.message_idx;
+        if at > session.messages.len() {
+            return None;
+        }
+        let dropped = session.messages.split_off(at);
         session.updated_at = chrono::Utc::now();
-        replaced
+        Some(dropped)
     }
 
     // -------------------------------------------------------------------------
@@ -8693,6 +8714,95 @@ mod account_schema_tests {
             assert_eq!(route.account, id, "account for {id}");
             assert_eq!(route.model, "foo", "model for {id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    //! Nothing wrote a checkpoint before, so nothing on disk carries the old
+    //! shape and these fix the new one.
+    use crate::history::{
+        create_checkpoint, restore_checkpoint, ConversationSession, MAX_CHECKPOINTS,
+    };
+    use crate::types::Message;
+
+    fn session_with(count: usize) -> ConversationSession {
+        let mut session = ConversationSession::new("m".into());
+        for i in 0..count {
+            let mut message = Message::user(format!("turn {i}"));
+            message.uuid = Some(format!("uuid-{i}"));
+            session.messages.push(message);
+        }
+        session
+    }
+
+    #[test]
+    fn a_checkpoint_marks_where_the_conversation_stands() {
+        let mut session = session_with(3);
+        create_checkpoint(&mut session, Some("before the risky bit"));
+
+        assert_eq!(session.checkpoints.len(), 1);
+        assert_eq!(session.checkpoints[0].message_idx, 3);
+        assert_eq!(session.checkpoints[0].leaf_uuid.as_deref(), Some("uuid-2"));
+    }
+
+    #[test]
+    fn a_turn_that_added_nothing_leaves_no_second_checkpoint() {
+        let mut session = session_with(2);
+        create_checkpoint(&mut session, None);
+        create_checkpoint(&mut session, Some("same place"));
+
+        assert_eq!(session.checkpoints.len(), 1);
+        assert_eq!(
+            session.checkpoints[0].label.as_deref(),
+            Some("same place"),
+            "the newer one wins"
+        );
+    }
+
+    #[test]
+    fn the_oldest_checkpoints_fall_off_rather_than_accumulating() {
+        let mut session = ConversationSession::new("m".into());
+        for i in 0..(MAX_CHECKPOINTS + 5) {
+            session.messages.push(Message::user(format!("turn {i}")));
+            create_checkpoint(&mut session, None);
+        }
+
+        assert_eq!(session.checkpoints.len(), MAX_CHECKPOINTS);
+        assert_eq!(
+            session.checkpoints[0].message_idx, 6,
+            "the front of the list is what was dropped"
+        );
+    }
+
+    #[test]
+    fn restoring_drops_the_turns_after_the_checkpoint() {
+        let mut session = session_with(2);
+        create_checkpoint(&mut session, None);
+        session.messages.push(Message::user("later"));
+        session.messages.push(Message::user("later still"));
+
+        let dropped = restore_checkpoint(&mut session, 0).expect("a checkpoint at 2");
+
+        assert_eq!(session.messages.len(), 2);
+        assert_eq!(dropped.len(), 2);
+    }
+
+    #[test]
+    fn a_checkpoint_that_is_not_there_is_not_a_panic() {
+        // It used to index straight into the list.
+        let mut session = session_with(1);
+        assert!(restore_checkpoint(&mut session, 7).is_none());
+    }
+
+    #[test]
+    fn a_checkpoint_past_the_end_of_a_shortened_conversation_is_refused() {
+        let mut session = session_with(4);
+        create_checkpoint(&mut session, None);
+        session.messages.truncate(1);
+
+        assert!(restore_checkpoint(&mut session, 0).is_none());
+        assert_eq!(session.messages.len(), 1, "nothing was touched");
     }
 }
 

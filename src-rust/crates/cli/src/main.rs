@@ -2097,6 +2097,7 @@ async fn run_headless(
         }
         session.messages = final_messages;
         session.updated_at = chrono::Utc::now();
+        claurst_core::history::create_checkpoint(&mut session, None);
         session.model = query_config.model.clone();
         session.working_dir = Some(tool_ctx.working_dir.display().to_string());
         if let Err(e) = persist_session(&session).await {
@@ -3728,6 +3729,19 @@ async fn run_interactive(
                                     app.replace_messages(new_msgs);
                                     session.messages = messages.clone();
                                     session.updated_at = chrono::Utc::now();
+                                    // The transcript keeps what was dropped on
+                                    // a sibling branch; its tip has to follow
+                                    // the conversation or the next launch
+                                    // reloads the turns just rewound away.
+                                    let tip = messages.last().and_then(|m| m.uuid.clone());
+                                    if let Err(e) = transcript.set_active_leaf(tip.as_deref()).await
+                                    {
+                                        app.push_notification(
+                                            claurst_tui::NotificationKind::Error,
+                                            format!("Could not move the transcript's tip: {e}"),
+                                            None,
+                                        );
+                                    }
                                     app.status_message = Some(format!(
                                         "Rewound {} message{}.",
                                         removed,
@@ -5852,6 +5866,8 @@ async fn run_interactive(
                 session.model =
                     claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
                 session.working_dir = Some(tool_ctx.working_dir.display().to_string());
+                // A point to come back to, recorded once the turn is whole.
+                claurst_core::history::create_checkpoint(&mut session, None);
                 app.is_streaming = false;
                 app.status_message = None;
                 // Drain one queued message into the prompt and request an

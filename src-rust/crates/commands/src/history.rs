@@ -318,3 +318,96 @@ impl SlashCommand for SnapshotDiffCommand {
         }
     }
 }
+
+// ---- /checkpoint -----------------------------------------------------------
+
+pub struct CheckpointCommand;
+
+#[async_trait]
+impl SlashCommand for CheckpointCommand {
+    fn name(&self) -> &str {
+        "checkpoint"
+    }
+
+    fn description(&self) -> &str {
+        "List conversation checkpoints, or return to one"
+    }
+
+    fn help(&self) -> &str {
+        "Usage: /checkpoint [list|restore <n>]\n\n\
+         A checkpoint is a point in the conversation, recorded at the end of\n\
+         each turn. Restoring one drops the turns after it; they stay on disk\n\
+         in the session transcript and the checkpoint before them can be\n\
+         restored again.\n\n\
+         This is about the conversation. /checkpoints (plural) lists the turns\n\
+         that changed files, and /revert rolls those files back."
+    }
+
+    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
+        let session = match claurst_core::history::load_session(&ctx.session_id).await {
+            Ok(session) => session,
+            Err(e) => {
+                return CommandResult::Error(format!(
+                    "No saved session to read checkpoints from: {e}"
+                ))
+            }
+        };
+
+        if session.checkpoints.is_empty() {
+            return CommandResult::Message(
+                "No checkpoints yet. One is recorded at the end of each turn.".into(),
+            );
+        }
+
+        let mut parts = args.split_whitespace();
+        match parts.next().unwrap_or("list") {
+            "list" => {
+                let mut lines = vec![format!("{} checkpoint(s):", session.checkpoints.len())];
+                for (i, cp) in session.checkpoints.iter().enumerate() {
+                    lines.push(format!(
+                        "  [{}] {} message(s) — {}{}",
+                        i + 1,
+                        cp.message_idx,
+                        cp.created_at.format("%Y-%m-%d %H:%M"),
+                        cp.label
+                            .as_deref()
+                            .map(|l| format!(" — {l}"))
+                            .unwrap_or_default(),
+                    ));
+                }
+                lines.push(String::new());
+                lines.push("Use /checkpoint restore <n> to go back to one.".to_string());
+                CommandResult::Message(lines.join("\n"))
+            }
+            "restore" => {
+                let Some(n) = parts.next().and_then(|n| n.parse::<usize>().ok()) else {
+                    return CommandResult::Error(
+                        "Usage: /checkpoint restore <n>. Run /checkpoint list to see them.".into(),
+                    );
+                };
+                if n == 0 || n > session.checkpoints.len() {
+                    return CommandResult::Error(format!(
+                        "Checkpoint {n} out of range (1–{}).",
+                        session.checkpoints.len()
+                    ));
+                }
+                // Restored against the live conversation rather than the saved
+                // one: the turn in progress has not been written yet.
+                let mut live = session.clone();
+                live.messages = ctx.messages.clone();
+                match claurst_core::history::restore_checkpoint(&mut live, n - 1) {
+                    Some(dropped) if dropped.is_empty() => {
+                        CommandResult::Message("Already at that checkpoint.".into())
+                    }
+                    Some(_) => CommandResult::SetMessages(live.messages),
+                    None => CommandResult::Error(
+                        "That checkpoint is past the end of this conversation.".into(),
+                    ),
+                }
+            }
+            other => CommandResult::Error(format!(
+                "Unknown subcommand: {other}\n\nUsage: /checkpoint [list|restore <n>]"
+            )),
+        }
+    }
+}

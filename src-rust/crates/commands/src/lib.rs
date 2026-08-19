@@ -1528,6 +1528,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(UndoCommand),
         Box::new(RevertCommand),
         Box::new(CheckpointsCommand),
+        Box::new(CheckpointCommand),
         Box::new(SnapshotDiffCommand),
         // Multi-provider support
         Box::new(ProvidersCommand),

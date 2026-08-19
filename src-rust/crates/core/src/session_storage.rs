@@ -882,10 +882,16 @@ impl TranscriptRecorder {
     }
 
     /// Move the active tip, e.g. after restoring a checkpoint.
+    ///
+    /// The next turn chains onto the new tip and re-points the leaf at itself:
+    /// entries appended after a leaf that names an earlier one are not on the
+    /// active branch, so without that the turns taken after a restore would be
+    /// missing from the conversation on the next load.
     pub async fn set_active_leaf(&mut self, leaf_uuid: Option<&str>) -> crate::Result<()> {
         let path = self.path()?;
         set_leaf(&path, leaf_uuid).await?;
         self.last_uuid = leaf_uuid.map(|u| u.to_string());
+        self.needs_leaf = true;
         Ok(())
     }
 
@@ -1677,6 +1683,39 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].title.as_deref(), Some("the answer"));
         assert_eq!(listed[0].last_prompt.as_deref(), Some("what is the answer"));
+    }
+
+    #[tokio::test]
+    async fn a_turn_after_a_restore_stays_on_the_active_branch() {
+        // The leaf named the restore point; entries appended after it are on
+        // the active branch only once a newer leaf names their tip.
+        let dir = tempdir().unwrap();
+        let mut recorder = recorder_in(dir.path());
+        let mut messages = vec![user("one"), assistant("two"), user("three")];
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        let restore_point = messages[1].uuid.clone().expect("stamped");
+        recorder
+            .set_active_leaf(Some(&restore_point))
+            .await
+            .unwrap();
+        messages.truncate(2);
+        messages.push(user("four"));
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        let entries = load_transcript(&recorder.path().unwrap()).await.unwrap();
+        let active = active_branch_messages(&entries);
+        assert_eq!(
+            active.len(),
+            3,
+            "the restored prefix plus the turn taken after it"
+        );
     }
 
     #[test]
