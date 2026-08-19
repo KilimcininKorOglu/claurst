@@ -18,6 +18,9 @@
     "Chat"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onWebviewPanel:claurstChat"
+  ],
   "contributes": {
     "commands": [
       {

@@ -33,6 +33,27 @@ const FILE_PICK_LIMIT = 5000;
 /** An image the user pasted into the input box, as the webview hands it over. */
 type PastedImage = { mimeType: string; data: string };
 
+/** Names the panel to VS Code, so it can hand one back after a reload. */
+export const CHAT_VIEW_TYPE = 'claurstChat';
+
+/** What the webview is allowed to do and load.
+ *
+ * `retainContextWhenHidden` stays on even though the panel now saves its
+ * session id. Without it the webview is torn down whenever its tab is not
+ * visible, and the whole transcript would have to be fetched and replayed on
+ * every tab switch. The saved id is for a window reload, which destroys the
+ * webview whatever this says. */
+function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+  return {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+    localResourceRoots: [
+      vscode.Uri.joinPath(extensionUri, 'media'),
+      vscode.Uri.joinPath(extensionUri, 'out'),
+    ],
+  };
+}
+
 /** How a panel's session comes to exist.
  *
  * Every shape carries the folder it works in, directly or through the session
@@ -112,19 +133,42 @@ export class ChatPanel {
     opening: PanelOpening,
   ): ChatPanel {
     const panel = vscode.window.createWebviewPanel(
-      'claurstChat',
+      CHAT_VIEW_TYPE,
       titleOf(opening) ?? 'Claurst',
       vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(extensionUri, 'media'),
-          vscode.Uri.joinPath(extensionUri, 'out'),
-        ],
-      },
+      webviewOptions(extensionUri),
     );
     return new ChatPanel(panel, extensionUri, pool, outputChannel, opening);
+  }
+
+  /** Take back a panel VS Code kept across a window reload.
+   *
+   * The webview itself is gone by then; what survived is the session id it
+   * saved, which is enough to reopen the conversation and replay it. A panel
+   * whose state is missing or malformed is closed rather than left as an empty
+   * window the user has to work out the meaning of. */
+  static restore(
+    panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
+    pool: AgentPool,
+    outputChannel: vscode.OutputChannel,
+    state: unknown,
+  ): void {
+    const saved = state as { sessionId?: unknown; cwd?: unknown; title?: unknown } | undefined;
+    if (typeof saved?.sessionId !== 'string' || typeof saved?.cwd !== 'string') {
+      outputChannel.appendLine('[claurst-vscode] a restored panel named no session; closing it');
+      panel.dispose();
+      return;
+    }
+    panel.webview.options = webviewOptions(extensionUri);
+    new ChatPanel(panel, extensionUri, pool, outputChannel, {
+      kind: 'load',
+      session: {
+        sessionId: saved.sessionId,
+        cwd: saved.cwd,
+        title: typeof saved.title === 'string' ? saved.title : undefined,
+      },
+    });
   }
 
   /** Reveal a panel if there is one, otherwise start one.
@@ -249,6 +293,7 @@ export class ChatPanel {
       onSessionInfo: (title?: string) => {
         if (title) {
           this.panel.title = title;
+          this.rememberSession();
         }
       },
       onTerminalOutput: (terminalId: string, chunk: string) =>
@@ -279,6 +324,7 @@ export class ChatPanel {
       this.sessionId = session.sessionId;
       this.options = session.configOptions;
       this.modes = session.modes;
+      this.rememberSession();
       this.pushHeader();
       this.postToWebview({ type: 'capabilities', image: client.agent.image });
       this.postToWebview({ type: 'status', text: `${opened}${agentSuffix(client)}` });
@@ -304,6 +350,19 @@ export class ChatPanel {
     const fence = excerpt ? `\n\n\`\`\`${document.languageId}\n${excerpt}\n\`\`\`\n` : '';
     this.panel.reveal(undefined, true);
     this.postToWebview({ type: 'mention', text: `@${relative} (${where})${fence}` });
+  }
+
+  /** Have the webview hold on to what this panel is showing.
+   *
+   * Only the webview's own state survives a window reload, so the id has to
+   * live there rather than here for the serializer to find it. */
+  private rememberSession(): void {
+    if (this.sessionId) {
+      this.postToWebview({
+        type: 'remember',
+        state: { sessionId: this.sessionId, cwd: this.cwd, title: this.panel.title },
+      });
+    }
   }
 
   /** What this panel is talking to, for a command that acts on it. */

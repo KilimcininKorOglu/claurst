@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { AgentPool } from './agentPool';
-import { ChatPanel } from './chatPanel';
+import { CHAT_VIEW_TYPE, ChatPanel } from './chatPanel';
 import { StatusBar } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
@@ -13,6 +13,15 @@ export function activate(context: vscode.ExtensionContext): void {
   const pool = new AgentPool(version, outputChannel);
   context.subscriptions.push({ dispose: () => pool.dispose() });
   context.subscriptions.push(watchConfiguration(pool));
+
+  // Panels open when the window closes are handed back on the next launch.
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(CHAT_VIEW_TYPE, {
+      async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown) {
+        ChatPanel.restore(panel, context.extensionUri, pool, outputChannel, state);
+      },
+    }),
+  );
 
   const statusBar = new StatusBar();
   context.subscriptions.push(statusBar);

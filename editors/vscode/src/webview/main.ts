@@ -81,6 +81,7 @@ type HostMessage =
   | { type: 'plan'; entries?: PlanEntry[] }
   | { type: 'commands'; commands?: Command[] }
   | { type: 'capabilities'; image: boolean }
+  | { type: 'remember'; state: unknown }
   | { type: 'mention'; text: string }
   | { type: 'turnEnded' };
 
@@ -816,6 +817,12 @@ type HostMessage =
       }
       case 'commands': {
         commands = msg.commands || [];
+        break;
+      }
+      case 'remember': {
+        // Only this side's state is kept across a window reload, which is how
+        // the panel finds its way back to the same conversation.
+        vscode.setState(msg.state);
         break;
       }
       case 'capabilities': {
