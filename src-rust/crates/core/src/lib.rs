@@ -624,13 +624,17 @@ pub mod types {
         pub input_schema: Value,
     }
 
+    /// `#[serde(default)]` on the container, not the fields: a provider sends
+    /// usage in pieces. Anthropic's `message_delta` carries `output_tokens`
+    /// alone, and with `input_tokens` mandatory that body failed to parse, so
+    /// every streamed turn recorded zero output tokens and priced itself on
+    /// its input.
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    #[serde(default)]
     pub struct UsageInfo {
         pub input_tokens: u64,
         pub output_tokens: u64,
-        #[serde(default)]
         pub cache_creation_input_tokens: u64,
-        #[serde(default)]
         pub cache_read_input_tokens: u64,
     }
 
@@ -8643,6 +8647,40 @@ mod account_schema_tests {
     }
 }
 
+#[cfg(test)]
+mod usage_shape_tests {
+    //! A provider reports usage in pieces, and a piece that fails to parse is
+    //! a piece that never reaches the bill.
+    use crate::types::UsageInfo;
+
+    #[test]
+    fn the_delta_that_carries_only_output_tokens_still_parses() {
+        // Anthropic's documented `message_delta` body. With `input_tokens`
+        // mandatory this failed, and every streamed turn ended up priced on
+        // its input alone.
+        let usage: UsageInfo = serde_json::from_str(r#"{"output_tokens":567}"#)
+            .expect("the documented delta shape parses");
+
+        assert_eq!(usage.output_tokens, 567);
+        assert_eq!(usage.input_tokens, 0);
+    }
+
+    #[test]
+    fn a_full_usage_body_is_unchanged() {
+        let usage: UsageInfo = serde_json::from_str(
+            r#"{"input_tokens":10,"output_tokens":20,
+                "cache_creation_input_tokens":3,"cache_read_input_tokens":4}"#,
+        )
+        .expect("parse");
+
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.cache_creation_input_tokens, 3);
+        assert_eq!(usage.cache_read_input_tokens, 4);
+    }
+}
+
+#[cfg(test)]
 #[cfg(test)]
 mod project_settings_boundary_tests {
     //! A repository's `.claurst/settings.json` arrives with the checkout and
