@@ -71,6 +71,7 @@ interface PermissionMessage {
 
 type HostMessage =
   | { type: 'textChunk'; text: string; kind?: string }
+  | { type: 'image'; mimeType: string; data: string; kind?: string }
   | ToolCallMessage
   | PermissionMessage
   | { type: 'terminalOutput'; terminalId: string; chunk: string }
@@ -110,6 +111,25 @@ type HostMessage =
     messagesEl.appendChild(row);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return bubble;
+  }
+
+  /** Draw an image the agent sent or the transcript replayed.
+   *
+   * The bytes arrive base64-encoded and are shown as a data URL, which is the
+   * only image source the panel's CSP allows. */
+  function appendImage(mimeType: string, data: string, cls: string): void {
+    // The type comes from the other side of the protocol, and it is being
+    // pasted into a URL. Anything that is not plainly an image type is drawn
+    // as a generic one rather than trusted into the data URL.
+    const safeType = /^image\/[a-zA-Z0-9.+-]+$/.test(mimeType) ? mimeType : 'image/png';
+    const row = document.createElement('div');
+    row.className = 'row ' + cls;
+    const image = document.createElement('img');
+    image.className = 'attachment';
+    image.src = `data:${safeType};base64,${data}`;
+    row.appendChild(image);
+    messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function statusIcon(status: string | undefined): string {
@@ -466,6 +486,11 @@ type HostMessage =
       case 'toolCallUpdate': {
         currentAgentBubble = null;
         upsertToolCall(msg);
+        break;
+      }
+      case 'image': {
+        currentAgentBubble = null;
+        appendImage(msg.mimeType, msg.data, msg.kind || 'agent');
         break;
       }
       case 'permission': {

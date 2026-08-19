@@ -86,6 +86,13 @@ body {
   padding: 2px 0;
 }
 
+.attachment {
+  max-width: 85%;
+  max-height: 24em;
+  border-radius: var(--bubble-radius);
+  border: 1px solid var(--vscode-panel-border);
+}
+
 .tool-call {
   align-self: flex-start;
   max-width: 90%;

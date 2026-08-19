@@ -98,9 +98,12 @@ export type StoredSession = {
   updatedAt?: string;
 };
 
-/** A block of a prompt: plain text, a named file, or a file's contents. */
+/** A block of a prompt: plain text, an image, a named file, or a file's
+ * contents. The agent declares `prompt_capabilities.image`, so an image
+ * reaches the model rather than being described to it. */
 export type PromptBlock =
   | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; data: string }
   | { type: 'resource_link'; uri: string; name: string }
   | { type: 'resource'; resource: { uri: string; text: string; mimeType?: string } };
 
@@ -114,6 +117,8 @@ export type ChunkKind = 'agent' | 'thought' | 'user';
 /** What one session's panel wants to hear about. */
 export interface SessionEvents {
   onTextChunk?: (text: string, kind: ChunkKind) => void;
+  /** An image in a streamed or replayed turn, as base64 with its media type. */
+  onImage?: (mimeType: string, data: string, kind: ChunkKind) => void;
   onToolCall?: (update: ToolCallUpdate) => void;
   onToolCallUpdate?: (update: ToolCallUpdate) => void;
   /** Resolves to a chosen option id, or to `{cancelled: true}` when the user
@@ -423,13 +428,13 @@ export class AcpClient {
       case 'user_message_chunk':
         // Only a replayed transcript carries these, and drawing them as the
         // agent would put the user's own words in its mouth.
-        handler.onTextChunk?.(extractText(update.content), 'user');
+        deliver(handler, update.content, 'user');
         break;
       case 'agent_message_chunk':
-        handler.onTextChunk?.(extractText(update.content), 'agent');
+        deliver(handler, update.content, 'agent');
         break;
       case 'agent_thought_chunk':
-        handler.onTextChunk?.(extractText(update.content), 'thought');
+        deliver(handler, update.content, 'thought');
         break;
       case 'tool_call':
         handler.onToolCall?.(toolCallOf(update));
@@ -711,6 +716,36 @@ function locationsOf(raw: any): ToolCallLocation[] {
       path: location.path,
       line: typeof location.line === 'number' ? location.line : undefined,
     }));
+}
+
+/** Hand one content block to whichever event can carry it.
+ *
+ * Every block shape the agent can send is named here. A block that only
+ * `extractText` understood used to arrive as an empty string, which drew a
+ * blank bubble: a replayed turn with an attached file showed nothing where the
+ * attachment was, and an image showed nothing at all. */
+function deliver(handler: SessionEvents, content: any, kind: ChunkKind): void {
+  switch (content?.type) {
+    case 'text':
+      handler.onTextChunk?.(content.text ?? '', kind);
+      return;
+    case 'image':
+      if (typeof content.data === 'string' && content.data.length > 0) {
+        handler.onImage?.(content.mimeType ?? 'image/png', content.data, kind);
+      }
+      return;
+    case 'resource_link':
+      handler.onTextChunk?.(`@${content.name ?? content.uri ?? ''}`, kind);
+      return;
+    case 'resource':
+      // The contents travelled with the prompt and are already in the model's
+      // view. Replaying them into the panel would bury the turn that carried
+      // them, so the attachment is named instead.
+      handler.onTextChunk?.(`@${content.resource?.uri ?? ''}`, kind);
+      return;
+    default:
+      return;
+  }
 }
 
 function extractText(content: any): string {

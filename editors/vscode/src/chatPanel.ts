@@ -170,7 +170,9 @@ export class ChatPanel {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
+  <!-- img-src is data: only. Allowing a remote origin would let an image the
+       agent chose reach the network from inside the panel. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src data:; script-src 'nonce-${nonce}';" />
   <link href="${styleUri}" rel="stylesheet" />
   <title>Claurst</title>
 </head>
@@ -197,6 +199,8 @@ export class ChatPanel {
     const events = {
       onTextChunk: (text: string, kind: ChunkKind) =>
         this.postToWebview({ type: 'textChunk', text, kind }),
+      onImage: (mimeType: string, data: string, kind: ChunkKind) =>
+        this.postToWebview({ type: 'image', mimeType, data, kind }),
       onToolCall: (update: ToolCallUpdate) =>
         this.postToWebview({ type: 'toolCall', ...toolCallPayload(update) }),
       onToolCallUpdate: (update: ToolCallUpdate) =>
