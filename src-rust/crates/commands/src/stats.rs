@@ -516,7 +516,8 @@ impl Aggregated {
 }
 
 fn aggregate(args: &Args, ctx: &CommandContext) -> Aggregated {
-    let paths = collect_jsonl_paths(&ctx.working_dir, args.all_projects);
+    let root = claurst_core::session_storage::transcript_root_for(&ctx.working_dir);
+    let paths = collect_jsonl_paths(&root, args.all_projects);
     let mut sessions: Vec<SessionStats> = Vec::with_capacity(paths.len());
 
     for (project_dir, path) in paths {

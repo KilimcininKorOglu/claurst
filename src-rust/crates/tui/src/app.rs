@@ -8206,7 +8206,9 @@ impl App {
 
         if self.recent_sessions_pending {
             self.recent_sessions_pending = false;
-            let root = self.project_root();
+            // The same root the recorder files under; deriving it differently
+            // here is how this panel came to read an empty directory.
+            let root = claurst_core::session_storage::transcript_root_for(&self.project_root());
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             self.recent_sessions_rx = Some(rx);
             tokio::spawn(async move {

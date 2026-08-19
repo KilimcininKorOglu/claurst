@@ -2116,12 +2116,22 @@ async fn apply_session_rename(
     session: &mut claurst_core::history::ConversationSession,
     cmd_ctx: &mut claurst_commands::CommandContext,
     app: &mut claurst_tui::App,
+    transcript: &mut claurst_core::session_storage::TranscriptRecorder,
 ) {
     session.title = Some(title.clone());
     session.updated_at = chrono::Utc::now();
     cmd_ctx.session_title = session.title.clone();
     app.session_title = session.title.clone();
     let _ = claurst_core::history::save_session(session).await;
+    // The session list reads the title off the transcript's tail, so a rename
+    // that stopped at the session record would not reach it.
+    if let Err(e) = transcript.record_title(&title).await {
+        app.push_notification(
+            claurst_tui::NotificationKind::Error,
+            format!("Renamed the session, but could not record it: {e}"),
+            None,
+        );
+    }
     claurst_tui::update_terminal_title(Some(&title));
     app.status_message = Some(format!("Session renamed to \"{}\".", title));
 }
@@ -2139,6 +2149,7 @@ fn apply_session_resume(
     cmd_ctx: &mut claurst_commands::CommandContext,
     tool_ctx: &mut ToolContext,
     app: &mut claurst_tui::App,
+    transcript: &mut claurst_core::session_storage::TranscriptRecorder,
 ) {
     *session = resumed;
     *messages = session.messages.clone();
@@ -2166,6 +2177,12 @@ fn apply_session_resume(
     // directory the session was resumed *from* while tools run in the new one.
     app.current_dir = tool_ctx.working_dir.to_str().map(|s| s.to_string());
     app.attach_turn_diff_state(tool_ctx.file_history.clone(), tool_ctx.current_turn.clone());
+    // The resumed session has its own transcript, under whatever root its
+    // working directory resolves to.
+    transcript.rebind(
+        claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+        session.id.clone(),
+    );
     claurst_tui::update_terminal_title(session.title.as_deref());
     // By characters, not bytes: an id shorter than eight of them would panic
     // a byte slice, and nothing guarantees the length of one.
@@ -2709,6 +2726,13 @@ async fn run_interactive(
         ))
     });
 
+    // Appends each completed turn to the session's JSONL transcript, which
+    // the welcome screen's recent activity, `/stats` and `/rewind` read.
+    let mut transcript = claurst_core::session_storage::TranscriptRecorder::new(
+        claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+        session.id.clone(),
+    );
+
     // Set up terminal
     let mut terminal = setup_terminal(live_config.mouse_capture_enabled())?;
     let mut app = App::new(live_config.clone(), cost_tracker.clone());
@@ -3061,6 +3085,7 @@ async fn run_interactive(
                     &mut cmd_ctx,
                     &mut tool_ctx,
                     &mut app,
+                    &mut transcript,
                 ),
                 Err(e) => {
                     app.push_notification(
@@ -3401,6 +3426,7 @@ async fn run_interactive(
                                     app.replace_messages(Vec::new());
                                     session.messages.clear();
                                     session.updated_at = chrono::Utc::now();
+                                    transcript.reset_branch();
                                     app.status_message = Some("Conversation cleared.".to_string());
                                     transcript_replaced = true;
                                 }
@@ -3424,6 +3450,12 @@ async fn run_interactive(
                                     tool_ctx.session_id = session.id.clone();
                                     cmd_ctx.session_id = session.id.clone();
                                     cmd_ctx.session_title = None;
+                                    transcript.rebind(
+                                        claurst_core::session_storage::transcript_root_for(
+                                            &tool_ctx.working_dir,
+                                        ),
+                                        session.id.clone(),
+                                    );
                                     // Reset per-turn diff/turn bookkeeping, as
                                     // ResumeSession does when swapping sessions.
                                     tool_ctx.file_history = Arc::new(ParkingMutex::new(
@@ -3586,6 +3618,7 @@ async fn run_interactive(
                                         &mut cmd_ctx,
                                         &mut tool_ctx,
                                         &mut app,
+                                        &mut transcript,
                                     );
                                     transcript_replaced = true;
                                 }
@@ -3595,6 +3628,7 @@ async fn run_interactive(
                                         &mut session,
                                         &mut cmd_ctx,
                                         &mut app,
+                                        &mut transcript,
                                     )
                                     .await;
                                 }
@@ -4922,7 +4956,14 @@ async fn run_interactive(
                         // cannot leave different surfaces stale.
                         let title = title.trim().to_string();
                         if !title.is_empty() {
-                            apply_session_rename(title, &mut session, &mut cmd_ctx, &mut app).await;
+                            apply_session_rename(
+                                title,
+                                &mut session,
+                                &mut cmd_ctx,
+                                &mut app,
+                                &mut transcript,
+                            )
+                            .await;
                         }
                     }
                     Ok(TuiBridgeEvent::Error(msg)) => {
@@ -5073,7 +5114,7 @@ async fn run_interactive(
                 &app,
                 &tool_ctx.session_id,
                 claurst_core::session_storage::transcript_path(
-                    &tool_ctx.working_dir,
+                    &claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
                     &tool_ctx.session_id,
                 )
                 .ok()
@@ -5583,6 +5624,19 @@ async fn run_interactive(
                 }
                 // Sync the updated conversation back to our local vector
                 messages = msgs_arc.lock().await.clone();
+                // Before the session record is rebuilt from `messages`: the
+                // recorder stamps a uuid onto any message that lacks one, and
+                // the saved session has to carry the same values.
+                if let Err(e) = transcript
+                    .record_turn(&mut messages, &tool_ctx.working_dir)
+                    .await
+                {
+                    app.notifications.push(
+                        claurst_tui::notifications::NotificationKind::Error,
+                        format!("Could not write the session transcript: {e}"),
+                        None,
+                    );
+                }
                 session.messages = messages.clone();
                 session.updated_at = chrono::Utc::now();
                 session.model =

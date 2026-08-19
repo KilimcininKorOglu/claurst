@@ -773,8 +773,10 @@ impl TranscriptRecorder {
     /// Point the recorder at a different session (`/new`, resume).
     ///
     /// The new session's own file is read on the next write, so a resumed
-    /// conversation does not re-append what it already holds.
-    pub fn rebind(&mut self, session_id: String) {
+    /// conversation does not re-append what it already holds. The root moves
+    /// with it, because resuming a session can also move the working directory.
+    pub fn rebind(&mut self, project_root: PathBuf, session_id: String) {
+        self.project_root = project_root;
         self.session_id = session_id;
         self.known.clear();
         self.last_uuid = None;

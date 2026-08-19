@@ -132,8 +132,7 @@ impl SlashCommand for RevertCommand {
         // target so the reverted turn (and everything after it) is retained on a
         // sibling branch that can be returned to. `branch_before` only falls
         // back to a destructive truncate for legacy/unchained transcripts.
-        let project_root = claurst_core::git_utils::get_repo_root(&ctx.working_dir)
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let project_root = claurst_core::session_storage::transcript_root_for(&ctx.working_dir);
         let path =
             match claurst_core::session_storage::transcript_path(&project_root, &ctx.session_id) {
                 Ok(p) => p,
