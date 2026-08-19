@@ -270,7 +270,8 @@ impl NamedCommand for BranchCommand {
                 let sessions = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
                         .block_on(claurst_core::history::list_sessions())
-                });
+                })
+                .sessions;
 
                 let branches: Vec<_> = sessions
                     .iter()

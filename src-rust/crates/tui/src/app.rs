@@ -1495,8 +1495,9 @@ pub struct App {
     /// Receiver for background session-list results.
     /// In-flight load for the cost-and-stats screen.
     pub stats_rx: Option<tokio::sync::mpsc::Receiver<crate::stats_dialog::AggregatedStats>>,
+    /// The entries, and how many files could not be read into one.
     pub session_list_rx:
-        Option<tokio::sync::mpsc::Receiver<Vec<crate::session_browser::SessionEntry>>>,
+        Option<tokio::sync::mpsc::Receiver<(Vec<crate::session_browser::SessionEntry>, usize)>>,
     /// The most-recent sessions shown in the welcome screen's "Recent activity"
     /// list. Populated once from disk via the background loader below; empty
     /// until it resolves (or when there are genuinely no sessions).
@@ -8141,8 +8142,9 @@ impl App {
     pub fn pump_session_list(&mut self) {
         if let Some(ref mut rx) = self.session_list_rx {
             match rx.try_recv() {
-                Ok(entries) => {
+                Ok((entries, unreadable)) => {
                     self.session_browser.sessions = entries;
+                    self.session_browser.unreadable = unreadable;
                     self.session_browser.selected_idx = 0;
                     self.session_list_rx = None;
                 }
@@ -8158,8 +8160,17 @@ impl App {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             self.session_list_rx = Some(rx);
             tokio::spawn(async move {
-                let sessions = claurst_core::history::list_sessions().await;
-                let entries: Vec<crate::session_browser::SessionEntry> = sessions
+                let listing = claurst_core::history::list_sessions().await;
+                for failure in &listing.unreadable {
+                    tracing::warn!(
+                        path = %failure.path.display(),
+                        error = %failure.error,
+                        "Session file could not be read"
+                    );
+                }
+                let unreadable = listing.unreadable.len();
+                let entries: Vec<crate::session_browser::SessionEntry> = listing
+                    .sessions
                     .into_iter()
                     .map(|s| {
                         let last_updated = claurst_core::format_utils::format_relative_time(
@@ -8175,7 +8186,7 @@ impl App {
                         }
                     })
                     .collect();
-                let _ = tx.send(entries).await;
+                let _ = tx.send((entries, unreadable)).await;
             });
         }
     }
@@ -8246,9 +8257,19 @@ impl App {
             tokio::spawn(async move {
                 // Show at most a handful; list_sessions is already newest-first.
                 const MAX_RECENT: usize = 5;
-                let summaries = claurst_core::session_storage::list_sessions(&root)
-                    .await
-                    .unwrap_or_default();
+                let summaries = match claurst_core::session_storage::list_sessions(&root).await {
+                    Ok(summaries) => summaries,
+                    // An empty panel and an unreadable directory look the same
+                    // on screen, so say which one happened.
+                    Err(e) => {
+                        tracing::warn!(
+                            root = %root.display(),
+                            error = %e,
+                            "Could not read this project's transcripts for the recent-activity list"
+                        );
+                        Vec::new()
+                    }
+                };
                 let recent: Vec<RecentSession> = summaries
                     .into_iter()
                     .take(MAX_RECENT)
@@ -10207,12 +10228,16 @@ mod background_pump_tests {
         app.session_list_rx = Some(rx);
         app.session_browser.selected_idx = 3;
 
-        tx.send(vec![entry("one"), entry("two")])
+        tx.send((vec![entry("one"), entry("two")], 1))
             .await
             .expect("channel open");
         app.pump_session_list();
 
         assert_eq!(app.session_browser.sessions.len(), 2);
+        assert_eq!(
+            app.session_browser.unreadable, 1,
+            "a file that would not parse has to be counted somewhere"
+        );
         assert_eq!(
             app.session_browser.selected_idx, 0,
             "a new list starts at the top rather than wherever the old one sat"
@@ -10223,7 +10248,8 @@ mod background_pump_tests {
     #[tokio::test]
     async fn a_dropped_sender_ends_the_wait_instead_of_holding_it_open() {
         let mut app = app();
-        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<crate::session_browser::SessionEntry>>(1);
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<(Vec<crate::session_browser::SessionEntry>, usize)>(1);
         app.session_list_rx = Some(rx);
         drop(tx);
 

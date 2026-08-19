@@ -2205,7 +2205,13 @@ async fn apply_session_rename(
     session.updated_at = chrono::Utc::now();
     cmd_ctx.session_title = session.title.clone();
     app.session_title = session.title.clone();
-    let _ = claurst_core::history::save_session(session).await;
+    if let Err(e) = claurst_core::history::save_session(session).await {
+        app.push_notification(
+            claurst_tui::NotificationKind::Error,
+            format!("Renamed the session, but could not save it: {e}"),
+            None,
+        );
+    }
     // The session list reads the title off the transcript's tail, so a rename
     // that stopped at the session record would not reach it.
     if let Err(e) = transcript.record_title(&title).await {
@@ -2335,7 +2341,15 @@ async fn resolve_resume(resume_id: Option<&str>) -> ResumeOutcome {
     };
 
     let id = if id == "__last__" {
-        match claurst_core::history::list_sessions().await.first() {
+        let listing = claurst_core::history::list_sessions().await;
+        for failure in &listing.unreadable {
+            warn!(
+                path = %failure.path.display(),
+                error = %failure.error,
+                "Session file could not be read; it cannot be resumed"
+            );
+        }
+        match listing.sessions.first() {
             Some(last) => last.id.clone(),
             None => return ResumeOutcome::NothingToResume,
         }
@@ -3631,7 +3645,15 @@ async fn run_interactive(
                                         Some(destination.display().to_string());
                                     session.working_dir = Some(destination.display().to_string());
                                     session.updated_at = chrono::Utc::now();
-                                    let _ = claurst_core::history::save_session(&session).await;
+                                    if let Err(e) =
+                                        claurst_core::history::save_session(&session).await
+                                    {
+                                        app.push_notification(
+                                            claurst_tui::NotificationKind::Error,
+                                            format!("Could not save the session: {e}"),
+                                            None,
+                                        );
+                                    }
                                     claurst_plugins::run_global_hook(
                                         claurst_plugins::HookEventKind::CwdChanged,
                                         None,
@@ -4921,7 +4943,13 @@ async fn run_interactive(
                         // Persist the session URL into the saved session record.
                         session.remote_session_url = Some(session_url.clone());
                         session.updated_at = chrono::Utc::now();
-                        let _ = claurst_core::history::save_session(&session).await;
+                        if let Err(e) = claurst_core::history::save_session(&session).await {
+                            app.push_notification(
+                                claurst_tui::NotificationKind::Error,
+                                format!("Could not save the session: {e}"),
+                                None,
+                            );
+                        }
 
                         // Wire the BridgeSessionInfo relay so live tool/text events reach
                         // the web UI via /api/bridge/sessions. This runs alongside

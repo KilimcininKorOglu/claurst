@@ -5284,29 +5284,71 @@ pub mod history {
         Ok(serde_json::from_str(&content)?)
     }
 
+    /// A session file that could not be turned into a session.
+    #[derive(Debug, Clone)]
+    pub struct UnreadableSession {
+        pub path: std::path::PathBuf,
+        pub error: String,
+    }
+
+    /// What [`list_sessions`] found, including what it could not read.
+    ///
+    /// The failures are carried rather than dropped: a session that will not
+    /// parse used to vanish from every list with nothing said anywhere, which
+    /// leaves the user looking at an empty browser and a full directory.
+    #[derive(Debug, Clone, Default)]
+    pub struct SessionListing {
+        pub sessions: Vec<ConversationSession>,
+        pub unreadable: Vec<UnreadableSession>,
+    }
+
     /// List all sessions, sorted by most-recently-updated first.
-    pub async fn list_sessions() -> Vec<ConversationSession> {
+    pub async fn list_sessions() -> SessionListing {
         let dir = sessions_dir();
+        let mut listing = SessionListing::default();
         if !dir.exists() {
-            return vec![];
+            return listing;
         }
 
-        let mut sessions = vec![];
-        if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                        if let Ok(session) = serde_json::from_str::<ConversationSession>(&content) {
-                            sessions.push(session);
-                        }
-                    }
+        let mut entries = match tokio::fs::read_dir(&dir).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                listing.unreadable.push(UnreadableSession {
+                    path: dir,
+                    error: e.to_string(),
+                });
+                return listing;
+            }
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(&path).await {
+                Ok(content) => content,
+                Err(e) => {
+                    listing.unreadable.push(UnreadableSession {
+                        path,
+                        error: e.to_string(),
+                    });
+                    continue;
                 }
+            };
+            match serde_json::from_str::<ConversationSession>(&content) {
+                Ok(session) => listing.sessions.push(session),
+                Err(e) => listing.unreadable.push(UnreadableSession {
+                    path,
+                    error: e.to_string(),
+                }),
             }
         }
 
-        sessions.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
-        sessions
+        listing
+            .sessions
+            .sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+        listing
     }
 
     /// Delete a session by ID.
@@ -5390,7 +5432,8 @@ pub mod history {
     pub async fn search_sessions(query: &str) -> Vec<ConversationSession> {
         let lower_query = query.to_lowercase();
         let all = list_sessions().await;
-        all.into_iter()
+        all.sessions
+            .into_iter()
             .filter(|s| {
                 // Check title
                 if let Some(ref title) = s.title {
@@ -8650,6 +8693,71 @@ mod account_schema_tests {
             assert_eq!(route.account, id, "account for {id}");
             assert_eq!(route.model, "foo", "model for {id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod session_listing_tests {
+    //! A session file that will not parse used to disappear from every list
+    //! with nothing said anywhere, which reads as "no such session" rather
+    //! than "this one is broken".
+    use crate::history::{list_sessions, save_session, ConversationSession};
+
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self { saved, dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_broken_file_is_reported_rather_than_skipped() {
+        let _lock = ENV_LOCK.lock().await;
+        let home = HomeGuard::new();
+        save_session(&ConversationSession::new("m".into()))
+            .await
+            .expect("save");
+        std::fs::write(
+            home.dir.path().join("sessions").join("broken.json"),
+            "{ not json",
+        )
+        .expect("write");
+
+        let listing = list_sessions().await;
+
+        assert_eq!(listing.sessions.len(), 1, "the good session still lists");
+        assert_eq!(listing.unreadable.len(), 1, "the broken one is reported");
+        assert!(listing.unreadable[0].path.ends_with("broken.json"));
+        assert!(!listing.unreadable[0].error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_empty_directory_reports_nothing_wrong() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
+
+        let listing = list_sessions().await;
+
+        assert!(listing.sessions.is_empty());
+        assert!(listing.unreadable.is_empty());
     }
 }
 

@@ -875,11 +875,10 @@ impl SlashCommand for ResumeCommand {
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
         if args.is_empty() {
-            let sessions = claurst_core::history::list_sessions().await;
-            if sessions.is_empty() {
+            let sessions = claurst_core::history::list_sessions().await.sessions;
+            let Some(last) = sessions.first() else {
                 return CommandResult::Message("No previous sessions found.".to_string());
-            }
-            let last = &sessions[0];
+            };
             match claurst_core::history::load_session(&last.id).await {
                 Ok(session) => CommandResult::ResumeSession(session),
                 Err(e) => {

@@ -358,7 +358,15 @@ impl AgentServer {
             }
         }
 
-        let stored = claurst_core::history::list_sessions().await;
+        let listing = claurst_core::history::list_sessions().await;
+        for failure in &listing.unreadable {
+            warn!(
+                path = %failure.path.display(),
+                error = %failure.error,
+                "ACP: session file could not be read"
+            );
+        }
+        let stored = listing.sessions;
         let page = crate::listing::page(&stored, req.cwd.as_deref(), req.cursor.as_deref())
             .map_err(|reason| {
                 acp::Error::invalid_params().data(Some(serde_json::json!({

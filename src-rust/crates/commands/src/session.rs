@@ -86,8 +86,9 @@ impl SlashCommand for SessionCommand {
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         match args.trim() {
             "list" => {
-                let sessions = claurst_core::history::list_sessions().await;
-                if sessions.is_empty() {
+                let listing = claurst_core::history::list_sessions().await;
+                let sessions = listing.sessions;
+                if sessions.is_empty() && listing.unreadable.is_empty() {
                     CommandResult::Message("No saved sessions found.".to_string())
                 } else {
                     let mut output = String::from("Recent sessions:\n\n");
@@ -102,6 +103,7 @@ impl SlashCommand for SessionCommand {
                             sess.title.as_deref().unwrap_or("(untitled)")
                         ));
                     }
+                    output.push_str(&unreadable_note(&listing.unreadable));
                     output.push_str("\nUse /resume <id> to resume a session.");
                     CommandResult::Message(output)
                 }
@@ -126,7 +128,8 @@ impl SlashCommand for SessionCommand {
                     ))
                 } else {
                     // Show current session info + recent sessions list.
-                    let sessions = claurst_core::history::list_sessions().await;
+                    let listing = claurst_core::history::list_sessions().await;
+                    let sessions = listing.sessions;
                     let mut output = format!(
                         "Current session\n\
                          ───────────────\n\
@@ -163,6 +166,7 @@ impl SlashCommand for SessionCommand {
                             "\nUse /session list for all sessions, /resume <id> to switch.",
                         );
                     }
+                    output.push_str(&unreadable_note(&listing.unreadable));
 
                     CommandResult::Message(output)
                 }
@@ -173,6 +177,28 @@ impl SlashCommand for SessionCommand {
             )),
         }
     }
+}
+
+/// A line naming the session files that could not be read, or nothing.
+///
+/// Without it a session that will not parse is simply absent from the list,
+/// which reads as "you have no such session" rather than "this one is broken".
+fn unreadable_note(unreadable: &[claurst_core::history::UnreadableSession]) -> String {
+    if unreadable.is_empty() {
+        return String::new();
+    }
+    let mut note = format!(
+        "\n{} session file(s) could not be read:\n",
+        unreadable.len()
+    );
+    for failure in unreadable.iter().take(5) {
+        note.push_str(&format!(
+            "  {} — {}\n",
+            failure.path.display(),
+            failure.error
+        ));
+    }
+    note
 }
 
 // ---- /fork ---------------------------------------------------------------

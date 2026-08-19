@@ -55,6 +55,12 @@ pub struct SessionBrowserState {
     pub show_paths: bool,
     /// Show a detail panel for the selected session under the list.
     pub show_preview: bool,
+    /// How many files in the sessions directory could not be read.
+    ///
+    /// Shown in the title: a session that will not parse is otherwise absent
+    /// from the list with nothing said anywhere, and the user is left looking
+    /// at an empty browser over a full directory.
+    pub unreadable: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +78,7 @@ impl SessionBrowserState {
             rename_input: String::new(),
             show_paths: false,
             show_preview: false,
+            unreadable: 0,
         }
     }
 
@@ -563,15 +570,17 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
 
     // Say where in the list the cursor is whenever the list outgrows the modal,
     // so rows scrolled out of sight do not read as rows that are not there.
-    let title = if state.sessions.len() > row_capacity(state, dialog_area.height) {
-        format!(
-            " Sessions {}/{} ",
-            state.selected_idx + 1,
-            state.sessions.len()
-        )
+    let position = if state.sessions.len() > row_capacity(state, dialog_area.height) {
+        format!(" {}/{}", state.selected_idx + 1, state.sessions.len())
     } else {
-        " Sessions ".to_string()
+        String::new()
     };
+    let unreadable = if state.unreadable > 0 {
+        format!(" ({} unreadable)", state.unreadable)
+    } else {
+        String::new()
+    };
+    let title = format!(" Sessions{position}{unreadable} ");
 
     let block = Block::default()
         .borders(Borders::ALL)
