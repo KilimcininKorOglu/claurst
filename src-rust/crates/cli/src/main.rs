@@ -1066,9 +1066,25 @@ async fn main() -> anyhow::Result<()> {
         cron_cancel.clone(),
     );
 
+    // `-c` is `--resume` with no id: continue the most recent conversation.
+    // Resolved once, before the modes split, so both read the same request.
+    let resume_request = cli
+        .resume
+        .clone()
+        .or_else(|| cli.continue_session.then(|| "__last__".to_string()));
+
     // --print mode (headless)
     let result = if is_headless {
-        run_headless(&cli, client, tools, tool_ctx, query_config, cost_tracker).await
+        run_headless(
+            &cli,
+            client,
+            tools,
+            tool_ctx,
+            query_config,
+            cost_tracker,
+            resume_request,
+        )
+        .await
     } else {
         let auth_store = claurst_core::AuthStore::load();
         let has_saved_credentials = !auth_store.credentials.is_empty()
@@ -1085,7 +1101,7 @@ async fn main() -> anyhow::Result<()> {
             tool_ctx,
             query_config,
             cost_tracker,
-            cli.resume,
+            resume_request,
             bridge_config,
             has_credentials,
             model_registry,
@@ -1774,10 +1790,39 @@ async fn run_headless(
     tool_ctx: ToolContext,
     query_config: claurst_query::QueryConfig,
     cost_tracker: Arc<CostTracker>,
+    resume_request: Option<String>,
 ) -> anyhow::Result<()> {
     use claurst_query::{QueryEvent, QueryOutcome};
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
+
+    let mut tool_ctx = tool_ctx;
+
+    // A conversation resumed here continues the same record the TUI writes, so
+    // the two modes share one history rather than each keeping its own.
+    let mut session = match resolve_resume(resume_request.as_deref()).await {
+        ResumeOutcome::Resumed(session) => {
+            tool_ctx.session_id = session.id.clone();
+            *session
+        }
+        ResumeOutcome::NothingToResume => {
+            eprintln!("Warning: no previous sessions found, starting a new one.");
+            claurst_core::history::ConversationSession::new(query_config.model.clone())
+        }
+        // A script that asked to continue a conversation and silently got a
+        // fresh one is worse off than one that was told.
+        ResumeOutcome::Failed(message) => {
+            eprintln!("Error: {message}");
+            std::process::exit(1);
+        }
+        ResumeOutcome::NotRequested => {
+            let mut session =
+                claurst_core::history::ConversationSession::new(query_config.model.clone());
+            session.id = tool_ctx.session_id.clone();
+            session
+        }
+    };
+    let resumed_messages = session.messages.clone();
 
     // Build initial messages list from input.
     // --input-format stream-json: stdin is newline-delimited JSON, each line is
@@ -1862,6 +1907,14 @@ async fn run_headless(
         std::process::exit(1);
     }
 
+    // The resumed turns go in front of this run's prompt, or the model answers
+    // without the conversation the user asked to continue.
+    if !resumed_messages.is_empty() {
+        let mut history = resumed_messages;
+        history.append(&mut messages);
+        messages = history;
+    }
+
     let is_json_output = matches!(
         cli.output_format,
         CliOutputFormat::Json | CliOutputFormat::StreamJson
@@ -1877,10 +1930,15 @@ async fn run_headless(
     let event_tx_clone = event_tx.clone();
     let cancel_clone = cancel.clone();
 
+    // The final message list comes back out so the session can be saved: a
+    // `--print` conversation used to leave nothing behind at all.
+    let msgs_arc = Arc::new(tokio::sync::Mutex::new(messages));
+    let msgs_arc_clone = msgs_arc.clone();
     let query_handle = tokio::spawn(async move {
-        claurst_query::run_query_loop(
+        let mut msgs = msgs_arc_clone.lock().await.clone();
+        let outcome = claurst_query::run_query_loop(
             client_clone.as_ref(),
-            &mut messages,
+            &mut msgs,
             tools.as_slice(),
             &tool_ctx_clone,
             &qcfg,
@@ -1889,7 +1947,9 @@ async fn run_headless(
             cancel_clone,
             None,
         )
-        .await
+        .await;
+        *msgs_arc_clone.lock().await = msgs;
+        outcome
     });
 
     // Drop the original tx so the channel closes when the task drops its clone
@@ -2018,6 +2078,29 @@ async fn run_headless(
                 }
                 _ => {}
             }
+        }
+    }
+
+    // A `--print` conversation used to leave nothing behind: it was absent from
+    // `/session`, `/resume`, `/search` and every report, however long it ran.
+    {
+        let mut final_messages = msgs_arc.lock().await.clone();
+        let mut transcript = claurst_core::session_storage::TranscriptRecorder::new(
+            claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+            session.id.clone(),
+        );
+        if let Err(e) = transcript
+            .record_turn(&mut final_messages, &tool_ctx.working_dir)
+            .await
+        {
+            eprintln!("Warning: could not write the session transcript: {e}");
+        }
+        session.messages = final_messages;
+        session.updated_at = chrono::Utc::now();
+        session.model = query_config.model.clone();
+        session.working_dir = Some(tool_ctx.working_dir.display().to_string());
+        if let Err(e) = persist_session(&session).await {
+            eprintln!("Warning: could not save the session: {e}");
         }
     }
 
@@ -2188,6 +2271,82 @@ fn apply_session_resume(
     // a byte slice, and nothing guarantees the length of one.
     let short_id: String = session.id.chars().take(8).collect();
     app.status_message = Some(format!("Resumed session {}.", short_id));
+}
+
+/// Write a finished turn's session to the stores that outlive the process.
+///
+/// The record is what `/session` and `/resume` read; the SQLite index is what
+/// `/search` reads. A session that reaches one and not the other is present on
+/// one surface and missing from the next, so both happen here or neither does.
+/// The transcript is written separately, by the recorder that owns the message
+/// uuids.
+async fn persist_session(
+    session: &claurst_core::history::ConversationSession,
+) -> anyhow::Result<()> {
+    claurst_core::history::save_session(session).await?;
+
+    let db_path = claurst_core::config::Settings::config_dir().join("sessions.db");
+    let store = claurst_core::SqliteSessionStore::open(&db_path)?;
+    store.save_session(&session.id, session.title.as_deref(), &session.model)?;
+    for msg in &session.messages {
+        let content_str = match &msg.content {
+            claurst_core::types::MessageContent::Text(t) => t.clone(),
+            claurst_core::types::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| {
+                    if let claurst_core::types::ContentBlock::Text { text } = b {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        let role = match msg.role {
+            claurst_core::types::Role::User => "user",
+            claurst_core::types::Role::Assistant => "assistant",
+        };
+        let msg_id = msg.uuid.as_deref().unwrap_or("unknown");
+        store.save_message(&session.id, msg_id, role, &content_str, None)?;
+    }
+    Ok(())
+}
+
+/// What `--resume` (or `-c`) resolved to.
+///
+/// Both modes go through this, so a flag cannot work at the keyboard and
+/// silently do nothing in `--print`, which is how `--resume` behaved: headless
+/// accepted an id, ignored it, and started a fresh conversation.
+enum ResumeOutcome {
+    /// No resume was asked for.
+    NotRequested,
+    Resumed(Box<claurst_core::history::ConversationSession>),
+    /// The most recent session was asked for and there is none.
+    NothingToResume,
+    /// A named session could not be loaded.
+    Failed(String),
+}
+
+/// Resolve `--resume` / `-c` into the session to continue.
+async fn resolve_resume(resume_id: Option<&str>) -> ResumeOutcome {
+    let Some(id) = resume_id else {
+        return ResumeOutcome::NotRequested;
+    };
+
+    let id = if id == "__last__" {
+        match claurst_core::history::list_sessions().await.first() {
+            Some(last) => last.id.clone(),
+            None => return ResumeOutcome::NothingToResume,
+        }
+    } else {
+        id.to_string()
+    };
+
+    match claurst_core::history::load_session(&id).await {
+        Ok(session) => ResumeOutcome::Resumed(Box::new(session)),
+        Err(e) => ResumeOutcome::Failed(format!("Could not load session {id}: {e}")),
+    }
 }
 
 /// Whether the session can turn a queued remote prompt into a turn right now.
@@ -2656,55 +2815,36 @@ async fn run_interactive(
     let mut model_registry = model_registry;
     let mut tool_ctx = tool_ctx;
     let mut resume_warning: Option<String> = None;
-    let resume_id = if resume_id.as_deref() == Some("__last__") {
-        let sessions = claurst_core::history::list_sessions().await;
-        match sessions.first() {
-            Some(last) => {
-                println!("Resuming most recent session: {}", last.id);
-                Some(last.id.clone())
-            }
-            None => {
-                resume_warning = Some("No previous sessions found, starting new session.".into());
-                None
-            }
-        }
-    } else {
-        resume_id
-    };
-
-    let mut session = if let Some(ref id) = resume_id {
-        match claurst_core::history::load_session(id).await {
-            Ok(session) => {
-                println!("Resumed session: {}", id);
-                if let Some(saved_dir) = session.working_dir.as_ref() {
-                    let saved_path = std::path::PathBuf::from(saved_dir);
-                    if saved_path.exists() {
-                        tool_ctx.working_dir = saved_path;
-                    }
-                }
-                tool_ctx.session_id = session.id.clone();
-                session
-            }
-            Err(e) => {
-                resume_warning = Some(format!(
-                    "Could not load session {}: {}. Starting new session.",
-                    id, e
-                ));
-                let mut session = claurst_core::history::ConversationSession::new(
-                    claurst_api::effective_model_for_config(&config, &model_registry),
-                );
-                session.id = tool_ctx.session_id.clone();
-                session.working_dir = Some(tool_ctx.working_dir.display().to_string());
-                session
-            }
-        }
-    } else {
+    let fresh_session = || {
         let mut session = claurst_core::history::ConversationSession::new(
             claurst_api::effective_model_for_config(&config, &model_registry),
         );
         session.id = tool_ctx.session_id.clone();
         session.working_dir = Some(tool_ctx.working_dir.display().to_string());
         session
+    };
+
+    let mut session = match resolve_resume(resume_id.as_deref()).await {
+        ResumeOutcome::Resumed(session) => {
+            println!("Resumed session: {}", session.id);
+            if let Some(saved_dir) = session.working_dir.as_ref() {
+                let saved_path = std::path::PathBuf::from(saved_dir);
+                if saved_path.exists() {
+                    tool_ctx.working_dir = saved_path;
+                }
+            }
+            tool_ctx.session_id = session.id.clone();
+            *session
+        }
+        ResumeOutcome::NothingToResume => {
+            resume_warning = Some("No previous sessions found, starting new session.".into());
+            fresh_session()
+        }
+        ResumeOutcome::Failed(message) => {
+            resume_warning = Some(format!("{message}. Starting new session."));
+            fresh_session()
+        }
+        ResumeOutcome::NotRequested => fresh_session(),
     };
     let initial_messages = session.messages.clone();
     let mut base_query_config = query_config;
@@ -5659,43 +5799,12 @@ async fn run_interactive(
                     app.status_message = Some("Auto-compact complete.".to_string());
                 }
 
-                // Save session to JSONL (primary storage)
-                let _ = claurst_core::history::save_session(&session).await;
-
-                // Also index into SQLite for /search support
-                {
-                    let db_path = claurst_core::config::Settings::config_dir().join("sessions.db");
-                    if let Ok(store) = claurst_core::SqliteSessionStore::open(&db_path) {
-                        let _ = store.save_session(
-                            &session.id,
-                            session.title.as_deref(),
-                            &session.model,
-                        );
-                        for msg in &session.messages {
-                            let content_str = match &msg.content {
-                                claurst_core::types::MessageContent::Text(t) => t.clone(),
-                                claurst_core::types::MessageContent::Blocks(blocks) => blocks
-                                    .iter()
-                                    .filter_map(|b| {
-                                        if let claurst_core::types::ContentBlock::Text { text } = b
-                                        {
-                                            Some(text.as_str())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" "),
-                            };
-                            let role = match msg.role {
-                                claurst_core::types::Role::User => "user",
-                                claurst_core::types::Role::Assistant => "assistant",
-                            };
-                            let msg_id = msg.uuid.as_deref().unwrap_or("unknown");
-                            let _ =
-                                store.save_message(&session.id, msg_id, role, &content_str, None);
-                        }
-                    }
+                if let Err(e) = persist_session(&session).await {
+                    app.notifications.push(
+                        claurst_tui::notifications::NotificationKind::Error,
+                        format!("Could not save the session: {e}"),
+                        None,
+                    );
                 }
 
                 // --- Goal continuation (issue #230 / MI-3) ---
