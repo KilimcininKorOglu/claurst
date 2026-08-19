@@ -1,7 +1,9 @@
 //! Stats dialog — mirrors src/components/Stats.tsx
 //!
 //! Four-tab overlay: Overview | Daily Tokens | Cost Heatmap | Models
-//! Data source: ~/.claurst/stats.jsonl (append-only per-turn usage log)
+//! Data source: the session transcripts under ~/.claurst/projects/, the same
+//! files `claurst stats` reads. This screen used to read ~/.claurst/stats.jsonl,
+//! which nothing has ever written, so it reported zeros for every session.
 
 use ratatui::{
     buffer::Buffer,
@@ -10,7 +12,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::overlays::{
@@ -21,21 +22,6 @@ use crate::overlays::{
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
-
-/// A single entry in ~/.claurst/stats.jsonl
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StatsEntry {
-    pub timestamp_ms: u64,
-    pub session_id: Option<String>,
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
-    /// Cost in USD cents (f64)
-    pub cost_cents: f64,
-    pub project: Option<String>,
-}
 
 /// Aggregated stats for display.
 #[derive(Debug, Clone, Default)]
@@ -74,38 +60,50 @@ pub struct ModelBreakdown {
 // Data loading
 // ---------------------------------------------------------------------------
 
-/// Load and aggregate stats from ~/.claurst/stats.jsonl
-pub fn load_stats() -> AggregatedStats {
-    let path = claurst_core::config::Settings::config_dir().join("stats.jsonl");
-
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return AggregatedStats::default(),
-    };
-
+/// Read every project's transcripts and aggregate what the turns recorded.
+///
+/// Every project, not just this one: the streak and the heatmap are about the
+/// user's activity, and scoping them to one checkout would reset both on every
+/// `cd`. `claurst stats` is the per-project view.
+pub async fn load_stats() -> AggregatedStats {
     let mut agg = AggregatedStats::default();
     let mut daily: HashMap<String, u64> = HashMap::new();
 
-    for line in content.lines() {
-        let Ok(entry) = serde_json::from_str::<StatsEntry>(line) else {
-            continue;
+    for path in transcript_paths().await {
+        let entries = match claurst_core::session_storage::load_transcript(&path).await {
+            Ok(entries) => entries,
+            // A single unreadable transcript must not empty the whole screen.
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "Skipping unreadable transcript");
+                continue;
+            }
         };
 
-        let total_tokens = entry.input_tokens + entry.output_tokens;
-        agg.total_input_tokens += entry.input_tokens;
-        agg.total_output_tokens += entry.output_tokens;
-        agg.total_cost_cents += entry.cost_cents;
+        for entry in &entries {
+            let claurst_core::session_storage::TranscriptEntry::Assistant(m) = entry else {
+                continue;
+            };
+            let Some(cost) = &m.message.cost else {
+                continue;
+            };
 
-        let model_entry = agg.by_model.entry(entry.model.clone()).or_default();
-        model_entry.input_tokens += entry.input_tokens;
-        model_entry.output_tokens += entry.output_tokens;
-        model_entry.cost_cents += entry.cost_cents;
-        model_entry.turns += 1;
+            let total_tokens = cost.input_tokens + cost.output_tokens;
+            let cost_cents = cost.cost_usd * 100.0;
+            agg.total_input_tokens += cost.input_tokens;
+            agg.total_output_tokens += cost.output_tokens;
+            agg.total_cost_cents += cost_cents;
 
-        // Date from timestamp
-        let date = timestamp_to_date(entry.timestamp_ms);
-        *daily.entry(date.clone()).or_insert(0) += total_tokens;
-        *agg.daily_costs.entry(date).or_insert(0.0) += entry.cost_cents;
+            let model = cost.model.clone().unwrap_or_else(|| "unknown".to_string());
+            let model_entry = agg.by_model.entry(model).or_default();
+            model_entry.input_tokens += cost.input_tokens;
+            model_entry.output_tokens += cost.output_tokens;
+            model_entry.cost_cents += cost_cents;
+            model_entry.turns += 1;
+
+            let date = local_date_of(&m.timestamp);
+            *daily.entry(date.clone()).or_insert(0) += total_tokens;
+            *agg.daily_costs.entry(date).or_insert(0.0) += cost_cents;
+        }
     }
 
     // Build sorted daily_tokens
@@ -118,35 +116,39 @@ pub fn load_stats() -> AggregatedStats {
     agg
 }
 
-fn timestamp_to_date(ts_ms: u64) -> String {
-    // Simple ISO date from Unix timestamp in ms
-    let secs = ts_ms / 1000;
-    let days_since_epoch = secs / 86400;
-    // Rough Gregorian calendar calculation
-    let year = 1970 + (days_since_epoch * 4 + 2) / 1461;
-    let day_of_year = days_since_epoch - (year - 1970) * 365 - (year - 1970 - 1) / 4;
-    let (month, day) = day_of_year_to_month_day(day_of_year as u32, is_leap_year(year as u32));
-    format!("{:04}-{:02}-{:02}", year, month, day)
-}
-
-fn is_leap_year(year: u32) -> bool {
-    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
-}
-
-fn day_of_year_to_month_day(doy: u32, leap: bool) -> (u32, u32) {
-    let months = if leap {
-        [31u32, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31u32, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+/// Every `.jsonl` transcript under `~/.claurst/projects/`.
+async fn transcript_paths() -> Vec<std::path::PathBuf> {
+    let root = claurst_core::session_storage::projects_dir();
+    let mut paths = Vec::new();
+    let Ok(mut projects) = tokio::fs::read_dir(&root).await else {
+        return paths;
     };
-    let mut remaining = doy;
-    for (i, &m) in months.iter().enumerate() {
-        if remaining < m {
-            return (i as u32 + 1, remaining + 1);
+    while let Ok(Some(project)) = projects.next_entry().await {
+        let Ok(mut files) = tokio::fs::read_dir(project.path()).await else {
+            continue;
+        };
+        while let Ok(Some(file)) = files.next_entry().await {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                paths.push(path);
+            }
         }
-        remaining -= m;
     }
-    (12, 31)
+    paths
+}
+
+/// The calendar day an entry's timestamp falls on, in the machine's own zone.
+///
+/// The heatmap and the streak are about days as the user lived them, so a turn
+/// at 01:00 local must not land on the previous day because UTC says so.
+fn local_date_of(timestamp: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +176,9 @@ pub struct StatsDialogState {
     pub current_streak_days: u32,
     /// The longest streak ever recorded.
     pub longest_streak_days: u32,
+    /// Set by [`Self::open`]; the event loop's pump takes it and starts the
+    /// read. Without a pump the screen stays on whatever it last held.
+    pub pending: bool,
 }
 
 impl StatsDialogState {
@@ -187,18 +192,29 @@ impl StatsDialogState {
             model_breakdown: Vec::new(),
             current_streak_days: 0,
             longest_streak_days: 0,
+            pending: false,
         }
     }
 
+    /// Show the screen and ask for a load.
+    ///
+    /// The numbers arrive through [`Self::apply`] once the event loop's pump
+    /// has read the transcripts: they live in many files across every project,
+    /// and reading them on the key that opened the screen would stall the
+    /// terminal.
     pub fn open(&mut self) {
-        let stats = load_stats();
+        self.visible = true;
+        self.scroll = 0;
+        self.pending = true;
+    }
+
+    /// Take a finished load.
+    pub fn apply(&mut self, stats: AggregatedStats) {
         self.model_breakdown = build_model_breakdown(&stats);
         let (current, longest) = compute_streaks(&stats);
         self.current_streak_days = current;
         self.longest_streak_days = longest;
         self.data = Some(stats);
-        self.visible = true;
-        self.scroll = 0;
     }
 
     pub fn close(&mut self) {
@@ -335,30 +351,13 @@ fn consecutive_dates(prev: &str, next: &str) -> bool {
     }
 }
 
-fn date_to_days_since_epoch(date: &str) -> Option<u64> {
-    // Expect "YYYY-MM-DD"
-    if date.len() != 10 {
-        return None;
-    }
-    let year: u64 = date[0..4].parse().ok()?;
-    let month: u64 = date[5..7].parse().ok()?;
-    let day: u64 = date[8..10].parse().ok()?;
-    // Days from 1970-01-01 (approximate, good enough for streak detection)
-    let y = year - 1970;
-    let leap_days = if y > 0 {
-        (y - 1) / 4 - (y - 1) / 100 + (y - 1) / 400 + 1
-    } else {
-        0
-    };
-    let days_in_years = y * 365 + leap_days;
-    let leap = is_leap_year(year as u32);
-    let months = if leap {
-        [0u64, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
-    } else {
-        [0u64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
-    };
-    let month_days = months.get((month as usize).saturating_sub(1))?;
-    Some(days_in_years + month_days + day - 1)
+fn date_to_days_since_epoch(date: &str) -> Option<i32> {
+    // Parsed rather than counted by hand: the previous arithmetic approximated
+    // the leap-year rule, and a streak that breaks on the wrong day is worse
+    // than no streak.
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .map(|d| chrono::Datelike::num_days_from_ce(&d))
 }
 
 // ---------------------------------------------------------------------------
@@ -884,6 +883,89 @@ mod tests {
             state.add_model_usage(model, *input, *output, *cost);
         }
         state
+    }
+
+    /// Point the config root at `dir` for the duration of a test.
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn new(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    // Async-aware: the test holds it across the transcript read.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn the_screen_reads_what_the_turns_recorded() {
+        // It used to read ~/.claurst/stats.jsonl, which nothing writes, so
+        // every session showed zeros however much it had spent.
+        let _lock = ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("tempdir");
+        let _guard = HomeGuard::new(home.path());
+
+        let project = tempfile::tempdir().expect("tempdir");
+        let path =
+            claurst_core::session_storage::transcript_path(project.path(), "sess-1").expect("path");
+        let mut message = claurst_core::types::Message::assistant("hello");
+        message.uuid = Some("uuid-1".to_string());
+        message.cost = Some(claurst_core::types::MessageCost {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cost_usd: 0.25,
+            model: Some("some-model".to_string()),
+        });
+        let entry = claurst_core::session_storage::make_assistant_entry(
+            message, "uuid-1", None, "sess-1", "/tmp",
+        );
+        claurst_core::session_storage::write_transcript_entry(&path, &entry)
+            .await
+            .expect("write");
+
+        let stats = load_stats().await;
+
+        assert_eq!(stats.total_input_tokens, 100);
+        assert_eq!(stats.total_output_tokens, 50);
+        assert!((stats.total_cost_cents - 25.0).abs() < 1e-9);
+        assert_eq!(stats.by_model.len(), 1);
+        assert_eq!(
+            stats.by_model.get("some-model").map(|m| m.turns),
+            Some(1),
+            "the model a turn ran on has to survive to the breakdown"
+        );
+    }
+
+    #[test]
+    fn a_days_boundary_is_read_in_the_local_zone() {
+        // The heatmap and the streak are about days as the user lived them.
+        let utc_evening = "2026-08-20T23:30:00+00:00";
+        let same_instant_east = "2026-08-21T09:30:00+10:00";
+        assert_eq!(local_date_of(utc_evening), local_date_of(same_instant_east));
+    }
+
+    #[test]
+    fn consecutive_days_survive_a_leap_boundary() {
+        // The previous arithmetic approximated the leap rule.
+        assert!(consecutive_dates("2024-02-28", "2024-02-29"));
+        assert!(consecutive_dates("2024-02-29", "2024-03-01"));
+        assert!(!consecutive_dates("2023-02-28", "2023-03-02"));
+        assert!(consecutive_dates("2023-02-28", "2023-03-01"));
     }
 
     fn make_agg_with_dates(dates: &[&str]) -> AggregatedStats {

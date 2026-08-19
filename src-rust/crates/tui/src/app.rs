@@ -1493,6 +1493,8 @@ pub struct App {
     /// those, so the request is handed over rather than acted on here.
     pub pending_resume_session_id: Option<String>,
     /// Receiver for background session-list results.
+    /// In-flight load for the cost-and-stats screen.
+    pub stats_rx: Option<tokio::sync::mpsc::Receiver<crate::stats_dialog::AggregatedStats>>,
     pub session_list_rx:
         Option<tokio::sync::mpsc::Receiver<Vec<crate::session_browser::SessionEntry>>>,
     /// The most-recent sessions shown in the welcome screen's "Recent activity"
@@ -1894,6 +1896,7 @@ impl App {
             model_picker_provider_id: None,
             session_list_pending: false,
             pending_resume_session_id: None,
+            stats_rx: None,
             session_list_rx: None,
             recent_sessions: Vec::new(),
             // Load recent activity once, lazily, on the first run-loop iteration.
@@ -8187,6 +8190,35 @@ impl App {
         };
         self.pending_resume_session_id = Some(session.id.clone());
         self.session_browser.close();
+    }
+
+    /// Load the cost-and-stats screen's numbers when it asks for them.
+    ///
+    /// They come from every project's transcripts, so the read walks a
+    /// directory tree and does not belong on the keystroke that opened the
+    /// screen.
+    pub fn pump_stats(&mut self) {
+        if let Some(ref mut rx) = self.stats_rx {
+            match rx.try_recv() {
+                Ok(stats) => {
+                    self.stats_dialog.apply(stats);
+                    self.stats_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.stats_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            }
+        }
+
+        if self.stats_dialog.pending {
+            self.stats_dialog.pending = false;
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            self.stats_rx = Some(rx);
+            tokio::spawn(async move {
+                let _ = tx.send(crate::stats_dialog::load_stats().await).await;
+            });
+        }
     }
 
     /// Load the welcome screen's recent-activity list once at startup.

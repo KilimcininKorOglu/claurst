@@ -3072,6 +3072,7 @@ async fn run_interactive(
         // welcome screen's recent activity blank.
         app.pump_session_list();
         app.pump_recent_sessions();
+        app.pump_stats();
         app.pump_voice_events();
 
         // The session browser's Enter hands the id over rather than acting on

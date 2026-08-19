@@ -615,6 +615,12 @@ pub mod types {
         pub cache_creation_input_tokens: u64,
         pub cache_read_input_tokens: u64,
         pub cost_usd: f64,
+        /// The model this turn actually ran on, which is not always the one
+        /// the session is configured with: an agent override or a fallback
+        /// switch changes it per turn. Absent on turns recorded before this
+        /// field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub model: Option<String>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]

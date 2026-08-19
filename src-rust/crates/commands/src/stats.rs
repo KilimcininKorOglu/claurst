@@ -1352,6 +1352,7 @@ mod tests {
                     cache_creation_input_tokens: 0,
                     cache_read_input_tokens: 0,
                     cost_usd: cost,
+                    model: None,
                 }),
                 snapshot_patch: None,
                 timestamp: None,

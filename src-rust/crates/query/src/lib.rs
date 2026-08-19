@@ -376,6 +376,7 @@ fn cost_of_turn(model: &str, usage: &UsageInfo) -> claurst_core::types::MessageC
             usage.cache_creation_input_tokens,
             usage.cache_read_input_tokens,
         ),
+        model: Some(model.to_string()),
     }
 }
 
