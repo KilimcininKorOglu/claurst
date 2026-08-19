@@ -54,7 +54,8 @@ values. Keys absent from the project file fall back to the global value.
   "showMessageTimestamps": false,
   "advisorModel": "claude-opus-4-6",
   "companion": { ... },
-  "remoteControl": { ... }
+  "remoteControl": { ... },
+  "acpAgents": { ... }
 }
 ```
 
@@ -154,6 +155,34 @@ There is no separate remote permission policy. `config.permission_mode` decides 
 This block is read from the user settings file only. A project settings file cannot set it, because pointing the bridge at a relay is a decision about the machine, not about the repository.
 
 `CLAURST_BRIDGE_URL` and `CLAURST_BRIDGE_TOKEN` override it when set.
+
+### External ACP agents
+
+Agents that speak the [Agent Client Protocol](https://agentclientprotocol.com/), reachable through the `AcpAgent` tool. Keys are the names the model uses to pick one.
+
+| Key       | Type              | Default  | Description                                                                                  |
+|-----------|-------------------|----------|----------------------------------------------------------------------------------------------|
+| `command` | string            | required | Executable to run.                                                                            |
+| `args`    | string[]          | `[]`     | Arguments passed to it, usually whatever puts the agent in ACP mode.                          |
+| `env`     | object            | `{}`     | Extra environment for the subprocess. Values go through `{env:VARNAME}` substitution.        |
+
+```json
+"acpAgents": {
+  "cursor": {
+    "command": "agent",
+    "args": ["--force", "acp"]
+  },
+  "gemini": {
+    "command": "gemini",
+    "args": ["--experimental-acp"],
+    "env": { "GEMINI_API_KEY": "{env:GEMINI_API_KEY}" }
+  }
+}
+```
+
+The tool is only offered to the model when this block names at least one agent. Everything the sub-agent asks to do is approved through the same permission prompt as a local tool. See [Tools](tools#acpagenttool) for the full behaviour.
+
+This block is read from the user settings file only. An agent definition names an executable the model can invoke, so a repository able to add one would gain arbitrary code execution on your machine.
 
 ---
 

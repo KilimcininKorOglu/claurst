@@ -112,8 +112,7 @@ impl AgentRuntime {
 
         // The same roster a terminal session gets, MCP tools included: both
         // read the same settings, so both must end up with the same tools.
-        let tools =
-            claurst_query::build_tool_roster(mcp_manager.clone(), config.advisor_model.as_deref());
+        let tools = claurst_query::build_tool_roster(mcp_manager.clone(), &config);
 
         // Same catalog the CLI reads, so a session started from an editor
         // resolves the same model as one started from a terminal.

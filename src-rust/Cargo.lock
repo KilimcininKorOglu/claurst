@@ -993,6 +993,7 @@ dependencies = [
 name = "claurst-tools"
 version = "0.1.7"
 dependencies = [
+ "agent-client-protocol-schema",
  "anyhow",
  "async-trait",
  "base64",

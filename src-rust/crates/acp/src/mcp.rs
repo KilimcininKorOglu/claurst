@@ -27,7 +27,7 @@ pub struct SessionMcp {
 /// roster rather than being given an empty one.
 pub async fn connect(
     servers: &[acp::McpServer],
-    advisor_model: Option<&str>,
+    config: &claurst_core::Config,
 ) -> Result<Option<SessionMcp>, acp::Error> {
     if servers.is_empty() {
         return Ok(None);
@@ -63,7 +63,7 @@ pub async fn connect(
 
     let manager = Arc::new(claurst_mcp::McpManager::connect_all(&decision.allowed).await);
     manager.clone().spawn_notification_poll_loop();
-    let tools = claurst_query::build_tool_roster(Some(manager.clone()), advisor_model);
+    let tools = claurst_query::build_tool_roster(Some(manager.clone()), config);
     info!(
         servers = decision.allowed.len(),
         tools = tools.len(),
@@ -217,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_that_named_no_servers_shares_the_agents_roster() {
-        assert!(connect(&[], None)
+        assert!(connect(&[], &claurst_core::Config::default())
             .await
             .expect("no servers is fine")
             .is_none());
@@ -233,6 +233,11 @@ mod tests {
             return;
         };
 
-        assert!(connect(std::slice::from_ref(&server), None).await.is_err());
+        assert!(connect(
+            std::slice::from_ref(&server),
+            &claurst_core::Config::default()
+        )
+        .await
+        .is_err());
     }
 }

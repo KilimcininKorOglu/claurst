@@ -42,6 +42,11 @@ image = { workspace = true, optional = true }
 # PTY support — used by PtyBashTool on Unix
 portable-pty = "0.9"
 
+# Wire types for the ACP bridge in `acp_agent`. Schema only: the transport is
+# a handful of lines of newline-delimited JSON, so the runtime crate would add
+# a server we do not need. Kept at the same version as `claurst-acp`.
+agent-client-protocol-schema = { version = "0.13", default-features = false }
+
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
 # Used by PtyBashTool to poll the PTY master fd so the read loop can stop as soon

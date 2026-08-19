@@ -563,6 +563,45 @@ Dissolve a team and terminate all its member agents.
 
 ---
 
+### AcpAgentTool
+
+**Permission level:** Execute
+
+Delegate a task to an external agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com/). The agent runs as a subprocess in the session's working directory and is driven over stdio.
+
+| Parameter | Type   | Required | Description                                             |
+|-----------|--------|----------|---------------------------------------------------------|
+| `agent`   | string | yes      | Name of a configured agent, from `acpAgents` in settings |
+| `prompt`  | string | yes      | The task to delegate                                     |
+
+The tool is only offered when at least one agent is configured. Define them in `~/.config/claurst/settings.json`:
+
+```json
+{
+  "acpAgents": {
+    "cursor": {
+      "command": "agent",
+      "args": ["--force", "acp"]
+    },
+    "gemini": {
+      "command": "gemini",
+      "args": ["--experimental-acp"],
+      "env": { "GEMINI_API_KEY": "{env:GEMINI_API_KEY}" }
+    }
+  }
+}
+```
+
+`env` values go through `{env:VARNAME}` substitution, so a token can be named rather than written into the settings file.
+
+Every action the sub-agent asks to take arrives as a `session/request_permission` request and is answered through the same permission prompt as a local tool. A denial is sent back as a rejection; if the agent offers no option matching the decision, the request is cancelled rather than answered with an unrelated choice.
+
+The turn is bounded: cancelling the session, or ten minutes elapsing, kills the subprocess and reports the tail of its stderr.
+
+**Security:** an agent definition names an executable that the model can invoke, so `acpAgents` is read only from your own global settings. A project's `.claurst/settings.json` cannot add one.
+
+---
+
 ### RemoteTriggerTool
 
 **Permission level:** Execute

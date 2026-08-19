@@ -669,7 +669,7 @@ async fn main() -> anyhow::Result<()> {
         dump_config.working_directory = Some(cwd.display().to_string());
         dump_config.workspace_roots = roots_for_prompt(&cwd, &config);
         dump_config.enabled_tools = Some(
-            claurst_query::build_tool_roster(None, config.advisor_model.as_deref())
+            claurst_query::build_tool_roster(None, &config)
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),
@@ -953,8 +953,7 @@ async fn main() -> anyhow::Result<()> {
     // Build the full tool list: built-ins from cc-tools plus AgentTool from cc-query
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
-    let tools =
-        claurst_query::build_tool_roster(mcp_manager_arc.clone(), config.advisor_model.as_deref());
+    let tools = claurst_query::build_tool_roster(mcp_manager_arc.clone(), &config);
 
     // Build model registry for dynamic model/provider resolution.
     // The registry is pre-populated with a hardcoded snapshot and enriched
@@ -5606,10 +5605,7 @@ async fn run_interactive(
             let new_mcp_manager = connect_mcp_manager_arc(&decision.allowed).await;
             tool_ctx.mcp_manager = new_mcp_manager.clone();
             app.mcp_manager = new_mcp_manager.clone();
-            tools_arc = claurst_query::build_tool_roster(
-                new_mcp_manager.clone(),
-                tool_ctx.config.advisor_model.as_deref(),
-            );
+            tools_arc = claurst_query::build_tool_roster(new_mcp_manager.clone(), &tool_ctx.config);
             if app.mcp_view.visible {
                 app.refresh_mcp_view();
             }
@@ -6607,7 +6603,7 @@ mod dump_system_prompt_tests {
         let mut dump_config =
             claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
         dump_config.enabled_tools = Some(
-            claurst_query::build_tool_roster(None, config.advisor_model.as_deref())
+            claurst_query::build_tool_roster(None, &config)
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),
