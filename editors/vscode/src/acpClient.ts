@@ -25,7 +25,8 @@ export type ToolCallUpdate = {
   title?: string;
   status?: string;
   kind?: string;
-  /** The text the tool returned, when it returned any. */
+  /** The text the agent attached to this call: what the tool returned once it
+   * ran, or what the call is about to do when it is asking to be approved. */
   output?: string;
   /** Every file this tool rewrote. */
   diffs: ToolDiff[];
@@ -242,13 +243,11 @@ export class AcpClient {
   private async handleIncomingRequest(id: number, method: string, params: any): Promise<void> {
     if (method === 'session/request_permission') {
       const handler = this.sessions.get(params?.sessionId);
-      const toolCall: ToolCallUpdate = {
-        toolCallId: params?.toolCall?.toolCallId,
-        title: params?.toolCall?.title,
-        status: params?.toolCall?.status,
-        kind: params?.toolCall?.kind,
-        diffs: [],
-      };
+      // The agent describes what it is about to do in the same shape it
+      // describes what it did: a diff for a whole-file write, text for
+      // everything else. Rebuilding the call by hand here used to drop all of
+      // it, which asked the user to approve something they could not see.
+      const toolCall = toolCallOf(params?.toolCall ?? {});
       const options: PermissionOption[] = (params?.options ?? []).map((o: any) => ({
         optionId: o.optionId,
         name: o.name,
