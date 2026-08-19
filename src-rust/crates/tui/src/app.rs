@@ -8101,6 +8101,66 @@ impl App {
         }
     }
 
+    /// Take whatever the background recorder has said since the last frame.
+    ///
+    /// The transcript only reaches the prompt through here, so a loop that
+    /// does not call this records audio and then drops the words on the floor.
+    pub fn pump_voice_events(&mut self) {
+        use claurst_core::voice::VoiceEvent;
+
+        // Drained into a vec first: the loop body needs `&mut self` for the
+        // prompt and the notifications, which the receiver borrow would block.
+        let mut events = Vec::new();
+        if let Some(ref mut rx) = self.voice_event_rx {
+            while let Ok(ev) = rx.try_recv() {
+                events.push(ev);
+            }
+        }
+
+        for ev in events {
+            match ev {
+                VoiceEvent::RecordingStarted => {
+                    self.voice_recording = true;
+                    self.status_message =
+                        Some("Recording\u{2026} (Alt+V or Esc to stop)".to_string());
+                }
+                VoiceEvent::RecordingStopped => {
+                    self.voice_recording = false;
+                    self.status_message = Some("Transcribing\u{2026}".to_string());
+                }
+                VoiceEvent::TranscriptReady(text) => {
+                    if !text.is_empty() {
+                        // Append to existing prompt text with a space separator
+                        // so the user can combine voice + typed input.
+                        if !self.prompt_input.text.is_empty()
+                            && !self.prompt_input.text.ends_with(' ')
+                        {
+                            self.prompt_input.paste(" ");
+                        }
+                        self.prompt_input.paste(&text);
+                        self.refresh_prompt_input();
+                        // Cut on a character boundary: a byte slice through a
+                        // multi-byte character panics, and dictation is exactly
+                        // where non-ASCII text arrives.
+                        let preview: String = text.chars().take(60).collect();
+                        self.status_message = Some(format!("Transcribed: {}", preview));
+                    }
+                    // Clear the channel once we have the result.
+                    self.voice_event_rx = None;
+                }
+                VoiceEvent::Error(msg) => {
+                    self.voice_recording = false;
+                    self.voice_event_rx = None;
+                    self.push_notification(
+                        NotificationKind::Warning,
+                        format!("Voice: {}", msg),
+                        Some(8),
+                    );
+                }
+            }
+        }
+    }
+
     // -------------------------------------------------------------------
     // Main run loop
     // -------------------------------------------------------------------
@@ -8121,54 +8181,7 @@ impl App {
             // When the background recording/transcription task emits a
             // TranscriptReady event we insert the text directly into the
             // prompt so the user can review and submit it.
-            {
-                use claurst_core::voice::VoiceEvent;
-                let mut events = Vec::new();
-                if let Some(ref mut rx) = self.voice_event_rx {
-                    while let Ok(ev) = rx.try_recv() {
-                        events.push(ev);
-                    }
-                }
-                for ev in events {
-                    match ev {
-                        VoiceEvent::RecordingStarted => {
-                            self.voice_recording = true;
-                            self.status_message =
-                                Some("Recording\u{2026} (Alt+V or Esc to stop)".to_string());
-                        }
-                        VoiceEvent::RecordingStopped => {
-                            self.voice_recording = false;
-                            self.status_message = Some("Transcribing\u{2026}".to_string());
-                        }
-                        VoiceEvent::TranscriptReady(text) => {
-                            if !text.is_empty() {
-                                // Append to existing prompt text with a space separator
-                                // so the user can combine voice + typed input.
-                                if !self.prompt_input.text.is_empty()
-                                    && !self.prompt_input.text.ends_with(' ')
-                                {
-                                    self.prompt_input.paste(" ");
-                                }
-                                self.prompt_input.paste(&text);
-                                self.refresh_prompt_input();
-                                self.status_message =
-                                    Some(format!("Transcribed: {}", &text[..text.len().min(60)]));
-                            }
-                            // Clear the channel once we have the result.
-                            self.voice_event_rx = None;
-                        }
-                        VoiceEvent::Error(msg) => {
-                            self.voice_recording = false;
-                            self.voice_event_rx = None;
-                            self.push_notification(
-                                NotificationKind::Warning,
-                                format!("Voice: {}", msg),
-                                Some(8),
-                            );
-                        }
-                    }
-                }
-            }
+            self.pump_voice_events();
 
             // Draw the frame, and immediately scan the *just-rendered*
             // buffer for URL runs. ratatui swaps its two buffers at the
@@ -10065,6 +10078,86 @@ mod background_pump_tests {
         app.pump_session_list();
         assert!(app.session_list_rx.is_none());
         assert!(app.session_browser.sessions.is_empty());
+    }
+
+    async fn deliver_voice(app: &mut App, events: Vec<claurst_core::voice::VoiceEvent>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(events.len().max(1));
+        app.voice_event_rx = Some(rx);
+        for ev in events {
+            tx.send(ev).await.expect("channel open");
+        }
+        app.pump_voice_events();
+    }
+
+    #[tokio::test]
+    async fn a_finished_transcript_lands_in_the_prompt() {
+        use claurst_core::voice::VoiceEvent;
+        let mut app = app();
+
+        deliver_voice(&mut app, vec![VoiceEvent::TranscriptReady("hello".into())]).await;
+
+        assert_eq!(app.prompt_input.text, "hello");
+        assert!(
+            app.voice_event_rx.is_none(),
+            "the channel is done once the words arrive"
+        );
+    }
+
+    #[tokio::test]
+    async fn dictation_is_appended_to_what_was_already_typed() {
+        use claurst_core::voice::VoiceEvent;
+        let mut app = app();
+        app.prompt_input.paste("write");
+
+        deliver_voice(&mut app, vec![VoiceEvent::TranscriptReady("a test".into())]).await;
+
+        assert_eq!(app.prompt_input.text, "write a test");
+    }
+
+    #[tokio::test]
+    async fn a_long_non_ascii_transcript_does_not_panic_the_status_line() {
+        // The preview used to cut the string at a byte offset, which lands
+        // mid-character for exactly the alphabets dictation produces.
+        use claurst_core::voice::VoiceEvent;
+        let mut app = app();
+        // Under the paste-placeholder threshold so the prompt keeps the words,
+        // but past 60 *bytes*, which is where the old slice cut. The leading
+        // ASCII letter is what makes byte 60 land inside a character rather
+        // than between two: an all-two-byte string is cut cleanly by accident.
+        let text = format!("a{}", "ş".repeat(60));
+
+        deliver_voice(&mut app, vec![VoiceEvent::TranscriptReady(text.clone())]).await;
+
+        assert_eq!(app.prompt_input.text, text);
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|s| s.starts_with("Transcribed: ")));
+    }
+
+    #[tokio::test]
+    async fn a_recording_that_fails_says_so_and_stops() {
+        use claurst_core::voice::VoiceEvent;
+        let mut app = app();
+        app.voice_recording = true;
+
+        deliver_voice(&mut app, vec![VoiceEvent::Error("no microphone".into())]).await;
+
+        assert!(!app.voice_recording);
+        assert!(app.voice_event_rx.is_none());
+        assert!(!app.notifications.is_empty(), "the failure is surfaced");
+    }
+
+    #[tokio::test]
+    async fn the_recording_flag_follows_the_recorder() {
+        use claurst_core::voice::VoiceEvent;
+        let mut app = app();
+
+        deliver_voice(&mut app, vec![VoiceEvent::RecordingStarted]).await;
+        assert!(app.voice_recording);
+
+        deliver_voice(&mut app, vec![VoiceEvent::RecordingStopped]).await;
+        assert!(!app.voice_recording);
     }
 
     #[tokio::test]

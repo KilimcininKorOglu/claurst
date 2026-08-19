@@ -2920,6 +2920,7 @@ async fn run_interactive(
         // welcome screen's recent activity blank.
         app.pump_session_list();
         app.pump_recent_sessions();
+        app.pump_voice_events();
 
         // Process file injection dialog outcome (if any)
         if let Some((outcome, pending_input, pending_imgs)) =
@@ -3005,6 +3006,18 @@ async fn run_interactive(
                     // On Windows crossterm emits Press + Release for a single key.
                     // Only process Press to avoid double-registering input.
                     if key.kind != crossterm::event::KeyEventKind::Press {
+                        // The one exception: push-to-talk stops when the key
+                        // comes back up, which is a Release and nothing else.
+                        // Kept as narrow as it can be — letting any other
+                        // Release through would process that key twice.
+                        if key.kind == crossterm::event::KeyEventKind::Release
+                            && key.code == KeyCode::Char('v')
+                            && key.modifiers == KeyModifiers::NONE
+                            && app.voice_recording
+                            && app.voice_recorder.is_some()
+                        {
+                            app.handle_voice_ptt_stop();
+                        }
                         continue;
                     }
 
