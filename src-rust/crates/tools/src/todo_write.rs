@@ -139,6 +139,46 @@ struct TodoItem {
     #[serde(default)]
     #[allow(dead_code)]
     priority: Option<String>,
+    /// How confident the model is that this task can be completed correctly,
+    /// 0-100.
+    #[serde(default, deserialize_with = "deserialize_confidence")]
+    confidence: Option<u8>,
+    /// The same estimate recorded at the moment the task was completed.
+    #[serde(default, deserialize_with = "deserialize_confidence")]
+    completion_confidence: Option<u8>,
+}
+
+/// Read a 0-100 confidence percentage out of a JSON value.
+///
+/// Accepts a whole number or a string holding one, and treats `null` and an
+/// empty string as absent. Anything else (a fraction, an out-of-range value,
+/// a bool) is `None` — a score outside the range carries no meaning, and
+/// storing it would leave a number on disk that every reader then ignores.
+///
+/// Shared with the TUI checklist renderer so both sides agree on what counts
+/// as a score.
+pub fn parse_confidence(value: &Value) -> Option<u8> {
+    let score = match value {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(raw) => raw.trim().parse::<f64>().ok()?,
+        _ => return None,
+    };
+    (score.is_finite() && score.fract() == 0.0 && (0.0..=100.0).contains(&score))
+        .then_some(score as u8)
+}
+
+fn deserialize_confidence<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match &value {
+        Value::Null => Ok(None),
+        Value::String(raw) if raw.trim().is_empty() => Ok(None),
+        _ => parse_confidence(&value).map(Some).ok_or_else(|| {
+            serde::de::Error::custom("confidence must be a whole number from 0 to 100")
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +229,11 @@ impl Tool for TodoWriteTool {
     fn description(&self) -> &str {
         "Write and manage a todo/task list. Provide the complete list of todos \
          each time (this replaces the entire list). Use this to track progress \
-         on multi-step tasks."
+         on multi-step tasks. Each item may carry a `confidence` percentage \
+         (0-100, whole numbers only) for how likely it is to be completed \
+         correctly, and a `completion_confidence` recorded when it is marked \
+         completed. A fractional or out-of-range score rejects the whole call \
+         rather than being stored and then ignored."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -211,7 +255,19 @@ impl Tool for TodoWriteTool {
                                 "type": "string",
                                 "enum": ["pending", "in_progress", "completed"]
                             },
-                            "priority": { "type": "string" }
+                            "priority": { "type": "string" },
+                            "confidence": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100,
+                                "description": "Optional whole-number percentage of confidence that this task can be completed correctly. A fractional or out-of-range value rejects the whole call."
+                            },
+                            "completion_confidence": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100,
+                                "description": "Optional whole-number percentage recorded when this task is marked completed. Same range rules as confidence."
+                            }
                         },
                         "required": ["id", "content", "status"]
                     },
@@ -309,6 +365,12 @@ impl Tool for TodoWriteTool {
                 TodoStatus::Completed => "[x]",
             };
             output.push_str(&format!("{} {} ({})\n", icon, item.content, item.id));
+            if let Some(confidence) = item.confidence {
+                output.push_str(&format!("    confidence: {}%\n", confidence));
+            }
+            if let Some(confidence) = item.completion_confidence {
+                output.push_str(&format!("    completion confidence: {}%\n", confidence));
+            }
         }
 
         // --- 6. Persist to disk ----------------------------------------------
@@ -323,6 +385,12 @@ impl Tool for TodoWriteTool {
                 });
                 if let Some(ref p) = t.priority {
                     obj["priority"] = json!(p);
+                }
+                if let Some(confidence) = t.confidence {
+                    obj["confidence"] = json!(confidence);
+                }
+                if let Some(confidence) = t.completion_confidence {
+                    obj["completion_confidence"] = json!(confidence);
                 }
                 obj
             })
@@ -424,6 +492,100 @@ mod tests {
         assert_eq!(loaded[0]["id"].as_str(), Some("1"));
         assert_eq!(loaded[1]["status"].as_str(), Some("completed"));
         // tempdir cleans up automatically.
+    }
+
+    // --- Confidence ----------------------------------------------------------
+
+    #[test]
+    fn confidence_accepts_whole_numbers_and_numeric_strings() {
+        let input: TodoWriteInput = serde_json::from_value(json!({
+            "todos": [
+                { "id": "1", "content": "a", "status": "pending", "confidence": 80 },
+                {
+                    "id": "2",
+                    "content": "b",
+                    "status": "completed",
+                    "confidence": "70",
+                    "completion_confidence": 95.0
+                }
+            ]
+        }))
+        .expect("valid confidence values parse");
+
+        assert_eq!(input.todos[0].confidence, Some(80));
+        assert_eq!(input.todos[0].completion_confidence, None);
+        assert_eq!(input.todos[1].confidence, Some(70));
+        assert_eq!(input.todos[1].completion_confidence, Some(95));
+    }
+
+    #[test]
+    fn absent_null_and_empty_string_all_read_as_no_score() {
+        let input: TodoWriteInput = serde_json::from_value(json!({
+            "todos": [
+                { "id": "1", "content": "a", "status": "pending" },
+                { "id": "2", "content": "b", "status": "pending", "confidence": null },
+                { "id": "3", "content": "c", "status": "pending", "confidence": "  " }
+            ]
+        }))
+        .expect("absent scores are not an error");
+
+        assert!(input.todos.iter().all(|todo| todo.confidence.is_none()));
+    }
+
+    #[test]
+    fn a_score_outside_the_range_rejects_the_call() {
+        // Rejecting loses the whole list and the model retries. Storing it
+        // would leave a number on disk that every later read ignores.
+        for bad in [
+            json!(101),
+            json!(-1),
+            json!(70.5),
+            json!("abc"),
+            json!(true),
+        ] {
+            let result = serde_json::from_value::<TodoWriteInput>(json!({
+                "todos": [{
+                    "id": "1",
+                    "content": "a",
+                    "status": "pending",
+                    "confidence": bad
+                }]
+            }));
+            assert!(result.is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn parse_confidence_agrees_with_the_deserializer() {
+        assert_eq!(parse_confidence(&json!(0)), Some(0));
+        assert_eq!(parse_confidence(&json!(100)), Some(100));
+        assert_eq!(parse_confidence(&json!("42")), Some(42));
+        assert_eq!(parse_confidence(&json!(42.0)), Some(42));
+        assert_eq!(parse_confidence(&json!(42.5)), None);
+        assert_eq!(parse_confidence(&json!(101)), None);
+        assert_eq!(parse_confidence(&json!(null)), None);
+        assert_eq!(parse_confidence(&json!("")), None);
+    }
+
+    #[test]
+    fn confidence_survives_a_round_trip_through_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let todos = vec![json!({
+            "id": "1",
+            "content": "a",
+            "status": "completed",
+            "confidence": 60,
+            "completion_confidence": 95
+        })];
+        save_todos_in(dir.path(), "session-conf", &todos);
+        let loaded = load_todos_in(dir.path(), "session-conf");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(parse_confidence(&loaded[0]["confidence"]), Some(60));
+        assert_eq!(
+            parse_confidence(&loaded[0]["completion_confidence"]),
+            Some(95)
+        );
     }
 
     // --- Status parsing ------------------------------------------------------
