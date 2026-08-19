@@ -146,6 +146,15 @@ struct TodoItem {
     /// The same estimate recorded at the moment the task was completed.
     #[serde(default, deserialize_with = "deserialize_confidence")]
     completion_confidence: Option<u8>,
+    /// Permit this one call to make a transition the rules otherwise forbid:
+    /// reopening a completed task, or moving one back from in_progress to
+    /// pending.
+    ///
+    /// Deliberately not persisted. Writing it to disk would leave the rule
+    /// switched off for every later call on the same item, and the guard only
+    /// means anything if it has to be re-asserted each time.
+    #[serde(default)]
+    force_reopen: bool,
 }
 
 /// Read a 0-100 confidence percentage out of a JSON value.
@@ -192,22 +201,32 @@ where
 ///   pending     → completed     ✓  (direct completion)
 ///   in_progress → completed     ✓
 ///
-/// Forbidden:
+/// Forbidden unless `force_reopen` is set on the item:
 ///   completed   → anything      ✗  (completed tasks cannot be reopened)
 ///   in_progress → pending       ✗  (cannot move backwards)
-fn validate_transition(id: &str, old: &TodoStatus, new: &TodoStatus) -> Result<(), String> {
+fn validate_transition(
+    id: &str,
+    old: &TodoStatus,
+    new: &TodoStatus,
+    force_reopen: bool,
+) -> Result<(), String> {
     if old == new {
+        return Ok(());
+    }
+    if force_reopen {
         return Ok(());
     }
     match (old, new) {
         // Completed tasks are immutable.
         (TodoStatus::Completed, _) => Err(format!(
-            "Task {:?}: cannot change status of a completed task (currently \"completed\" → \"{}\").",
+            "Task {:?}: cannot change status of a completed task (currently \"completed\" → \"{}\"). \
+             Set \"force_reopen\": true on this item if it was marked completed by mistake.",
             id, new
         )),
         // Cannot move in_progress backwards to pending.
         (TodoStatus::InProgress, TodoStatus::Pending) => Err(format!(
-            "Task {:?}: cannot move status backwards (\"in_progress\" → \"pending\").",
+            "Task {:?}: cannot move status backwards (\"in_progress\" → \"pending\"). \
+             Set \"force_reopen\": true on this item if the work genuinely has to restart.",
             id
         )),
         // All other transitions (pending→in_progress, pending→completed,
@@ -233,7 +252,9 @@ impl Tool for TodoWriteTool {
          (0-100, whole numbers only) for how likely it is to be completed \
          correctly, and a `completion_confidence` recorded when it is marked \
          completed. A fractional or out-of-range score rejects the whole call \
-         rather than being stored and then ignored."
+         rather than being stored and then ignored. A completed task cannot be \
+         reopened, and an in_progress one cannot go back to pending, unless \
+         that item sets `force_reopen`."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -267,6 +288,10 @@ impl Tool for TodoWriteTool {
                                 "minimum": 0,
                                 "maximum": 100,
                                 "description": "Optional whole-number percentage recorded when this task is marked completed. Same range rules as confidence."
+                            },
+                            "force_reopen": {
+                                "type": "boolean",
+                                "description": "Permit this call to reopen a completed task or move one back from in_progress to pending. Use only when the item was marked completed by mistake or the work genuinely has to restart. Applies to this call alone and is not remembered."
                             }
                         },
                         "required": ["id", "content", "status"]
@@ -323,7 +348,9 @@ impl Tool for TodoWriteTool {
             match existing.get(item.id.as_str()) {
                 Some(old_status) => {
                     // Existing task — validate the transition.
-                    if let Err(e) = validate_transition(&item.id, old_status, &item.status) {
+                    if let Err(e) =
+                        validate_transition(&item.id, old_status, &item.status, item.force_reopen)
+                    {
                         return ToolResult::error(e);
                     }
                     if old_status != &TodoStatus::Completed && item.status == TodoStatus::Completed
@@ -620,30 +647,95 @@ mod tests {
     #[test]
     fn test_valid_transitions() {
         // pending → in_progress
-        assert!(validate_transition("t1", &TodoStatus::Pending, &TodoStatus::InProgress).is_ok());
-        // pending → completed
-        assert!(validate_transition("t2", &TodoStatus::Pending, &TodoStatus::Completed).is_ok());
-        // in_progress → completed
-        assert!(validate_transition("t3", &TodoStatus::InProgress, &TodoStatus::Completed).is_ok());
-        // no-op transitions are always fine
-        assert!(validate_transition("t4", &TodoStatus::Pending, &TodoStatus::Pending).is_ok());
         assert!(
-            validate_transition("t5", &TodoStatus::InProgress, &TodoStatus::InProgress).is_ok()
+            validate_transition("t1", &TodoStatus::Pending, &TodoStatus::InProgress, false).is_ok()
         );
-        assert!(validate_transition("t6", &TodoStatus::Completed, &TodoStatus::Completed).is_ok());
+        // pending → completed
+        assert!(
+            validate_transition("t2", &TodoStatus::Pending, &TodoStatus::Completed, false).is_ok()
+        );
+        // in_progress → completed
+        assert!(
+            validate_transition("t3", &TodoStatus::InProgress, &TodoStatus::Completed, false)
+                .is_ok()
+        );
+        // no-op transitions are always fine
+        assert!(
+            validate_transition("t4", &TodoStatus::Pending, &TodoStatus::Pending, false).is_ok()
+        );
+        assert!(validate_transition(
+            "t5",
+            &TodoStatus::InProgress,
+            &TodoStatus::InProgress,
+            false
+        )
+        .is_ok());
+        assert!(
+            validate_transition("t6", &TodoStatus::Completed, &TodoStatus::Completed, false)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_invalid_transition_completed_to_anything() {
-        assert!(validate_transition("t1", &TodoStatus::Completed, &TodoStatus::Pending).is_err());
         assert!(
-            validate_transition("t2", &TodoStatus::Completed, &TodoStatus::InProgress).is_err()
+            validate_transition("t1", &TodoStatus::Completed, &TodoStatus::Pending, false).is_err()
+        );
+        assert!(
+            validate_transition("t2", &TodoStatus::Completed, &TodoStatus::InProgress, false)
+                .is_err()
         );
     }
 
     #[test]
     fn test_invalid_transition_in_progress_to_pending() {
-        assert!(validate_transition("t1", &TodoStatus::InProgress, &TodoStatus::Pending).is_err());
+        assert!(
+            validate_transition("t1", &TodoStatus::InProgress, &TodoStatus::Pending, false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn force_reopen_permits_the_two_forbidden_transitions() {
+        assert!(
+            validate_transition("t1", &TodoStatus::Completed, &TodoStatus::Pending, true).is_ok()
+        );
+        assert!(
+            validate_transition("t2", &TodoStatus::Completed, &TodoStatus::InProgress, true)
+                .is_ok()
+        );
+        assert!(
+            validate_transition("t3", &TodoStatus::InProgress, &TodoStatus::Pending, true).is_ok()
+        );
+    }
+
+    #[test]
+    fn the_refusal_names_the_escape_hatch() {
+        // A refusal the model cannot act on just costs a turn.
+        let err = validate_transition("t1", &TodoStatus::Completed, &TodoStatus::Pending, false)
+            .expect_err("reopening a completed task is refused by default");
+        assert!(err.contains("force_reopen"), "{err:?}");
+    }
+
+    #[test]
+    fn force_reopen_defaults_to_false_and_is_never_persisted() {
+        let input: TodoWriteInput = serde_json::from_value(json!({
+            "todos": [
+                { "id": "1", "content": "a", "status": "pending" },
+                { "id": "2", "content": "b", "status": "pending", "force_reopen": true }
+            ]
+        }))
+        .expect("force_reopen is optional");
+        assert!(!input.todos[0].force_reopen);
+        assert!(input.todos[1].force_reopen);
+
+        // The persisted shape is built field by field in `execute`; the flag is
+        // not among them, so a later call has to assert it again.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stored = vec![json!({"id": "2", "content": "b", "status": "pending"})];
+        save_todos_in(dir.path(), "session-force", &stored);
+        let loaded = load_todos_in(dir.path(), "session-force");
+        assert!(loaded[0].get("force_reopen").is_none());
     }
 
     // --- ID uniqueness -------------------------------------------------------
