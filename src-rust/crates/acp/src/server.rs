@@ -399,8 +399,7 @@ impl AgentServer {
             .settings
             .lock()
             .permission_mode
-            .clone()
-            .unwrap_or_else(|| self.runtime.config.permission_mode.clone());
+            .unwrap_or(self.runtime.config.permission_mode);
         crate::session_config::mode_state(&current)
     }
 
@@ -528,7 +527,7 @@ impl AgentServer {
             }))));
         };
 
-        session.settings.lock().permission_mode = Some(mode.clone());
+        session.settings.lock().permission_mode = Some(mode);
         info!(session_id = %req.session_id, mode = mode_id, "ACP: session mode changed");
 
         // Say it out loud as well as answering: a client with more than one

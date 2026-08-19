@@ -100,7 +100,7 @@ impl AgentRuntime {
         ));
 
         let permission_manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
-            config.permission_mode.clone(),
+            config.permission_mode,
             &settings,
         )));
 

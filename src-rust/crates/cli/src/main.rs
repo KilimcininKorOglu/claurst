@@ -757,7 +757,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let permission_manager = Arc::new(std::sync::Mutex::new(PermissionManager::new(
-        config.permission_mode.clone(),
+        config.permission_mode,
         &settings,
     )));
 
@@ -903,7 +903,7 @@ async fn main() -> anyhow::Result<()> {
 
     let tool_ctx = ToolContext {
         working_dir: cwd.clone(),
-        permission_mode: config.permission_mode.clone(),
+        permission_mode: config.permission_mode,
         permission_handler: permission_handler.clone(),
         cost_tracker: cost_tracker.clone(),
         session_id: session_id.clone(),
@@ -2528,6 +2528,15 @@ fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, boo
     (badge, completed)
 }
 
+/// Whether the plan badge belongs on screen for `mode`.
+///
+/// Both config-changing command arms derive the flag from the same place, so a
+/// command that leaves plan mode through either one cannot leave the badge up
+/// with nothing behind it.
+fn plan_badge_for(mode: claurst_core::config::PermissionMode) -> bool {
+    matches!(mode, claurst_core::config::PermissionMode::Plan)
+}
+
 async fn run_interactive(
     config: Config,
     settings: claurst_core::config::Settings,
@@ -3633,10 +3642,7 @@ async fn run_interactive(
                                         .map(|m| m.contains("haiku"))
                                         .unwrap_or(false);
                                     // Sync plan_mode visual indicator.
-                                    app.plan_mode = matches!(
-                                        applied_cfg.permission_mode,
-                                        claurst_core::config::PermissionMode::Plan
-                                    );
+                                    app.plan_mode = plan_badge_for(applied_cfg.permission_mode);
                                     app.reload_companion();
                                     session.model = claurst_api::effective_model_for_config(
                                         &cmd_ctx.config,
@@ -3658,6 +3664,8 @@ async fn run_interactive(
                                         app.fast_mode = false;
                                     }
                                     app.config = applied_cfg.clone();
+                                    // Same sync the `Config` arm above does.
+                                    app.plan_mode = plan_badge_for(applied_cfg.permission_mode);
                                     app.reload_companion();
                                     session.model = claurst_api::effective_model_for_config(
                                         &cmd_ctx.config,
@@ -4211,7 +4219,7 @@ async fn run_interactive(
                     tool_ctx.config = app.config.clone();
                     if let Some(manager) = tool_ctx.permission_manager.as_ref() {
                         if let Ok(mut manager) = manager.lock() {
-                            manager.mode = tool_ctx.config.permission_mode.clone();
+                            manager.mode = tool_ctx.config.permission_mode;
                         }
                     }
                     if !app.model_name.is_empty() {
@@ -7506,5 +7514,34 @@ mod remote_permission_tests {
             decision,
             Some(claurst_core::permissions::PermissionDecision::Allow)
         );
+    }
+}
+
+#[cfg(test)]
+mod plan_badge_tests {
+    use super::*;
+    use claurst_core::config::PermissionMode;
+
+    #[test]
+    fn only_plan_mode_raises_the_badge() {
+        assert!(plan_badge_for(PermissionMode::Plan));
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::BypassPermissions,
+        ] {
+            assert!(!plan_badge_for(mode), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn leaving_plan_mode_for_bypass_drops_the_badge() {
+        // `/yolo` is the first command to reach `permission_mode` through the
+        // `ConfigChangeMessage` arm. Without the sync there, the badge would
+        // stay on screen while nothing was in plan mode any more.
+        let mut plan_mode = plan_badge_for(PermissionMode::Plan);
+        assert!(plan_mode);
+        plan_mode = plan_badge_for(PermissionMode::BypassPermissions);
+        assert!(!plan_mode);
     }
 }

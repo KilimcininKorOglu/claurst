@@ -341,7 +341,7 @@ fn adopt(
             "mode {}",
             crate::session_config::mode_id_for(&after.permission_mode)
         ));
-        overrides.permission_mode = Some(after.permission_mode.clone());
+        overrides.permission_mode = Some(after.permission_mode);
     }
     if after.effort != before.effort {
         if let Some(level) = after

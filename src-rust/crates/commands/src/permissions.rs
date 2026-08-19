@@ -78,9 +78,8 @@ impl SlashCommand for PermissionsCommand {
                     }
                 };
                 let mut new_config = ctx.config.clone();
-                new_config.permission_mode = mode.clone();
-                if let Err(e) = save_settings_mutation(|s| s.config.permission_mode = mode.clone())
-                {
+                new_config.permission_mode = mode;
+                if let Err(e) = save_settings_mutation(|s| s.config.permission_mode = mode) {
                     return CommandResult::Error(format!("Failed to save: {}", e));
                 }
                 CommandResult::ConfigChangeMessage(

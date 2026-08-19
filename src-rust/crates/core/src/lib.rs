@@ -1480,7 +1480,9 @@ pub mod config {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+    // `Copy` because it carries no data: without it every read of
+    // `config.permission_mode` behind a `&mut` needs a clone.
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
     #[serde(rename_all = "camelCase")]
     pub enum PermissionMode {
         #[default]

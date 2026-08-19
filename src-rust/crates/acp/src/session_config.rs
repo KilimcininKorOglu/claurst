@@ -258,7 +258,7 @@ pub fn apply_config_option(
 /// override that stops here never reaches the request.
 pub fn apply_overrides(config: &mut claurst_core::config::Config, overrides: &SessionSettings) {
     if let Some(mode) = &overrides.permission_mode {
-        config.permission_mode = mode.clone();
+        config.permission_mode = *mode;
     }
     if let Some(model) = &overrides.model {
         config.model = Some(model.clone());
@@ -567,7 +567,7 @@ mod tests {
             PermissionMode::AcceptEdits,
             PermissionMode::BypassPermissions,
         ] {
-            assert_eq!(permission_mode_for(mode_id_for(&mode)), Some(mode.clone()));
+            assert_eq!(permission_mode_for(mode_id_for(&mode)), Some(mode));
         }
     }
 

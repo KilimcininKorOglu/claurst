@@ -206,6 +206,8 @@ mod poke;
 pub use poke::*;
 mod turns;
 pub use turns::*;
+mod yolo;
+pub use yolo::*;
 mod speech;
 pub use speech::*;
 mod config_cmd;
@@ -1544,6 +1546,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         // The agentic turn limit
         Box::new(PokeCommand),
         Box::new(TurnsCommand),
+        Box::new(YoloCommand),
         // Session navigation ported from opencode: /new (lazy home) + /move.
         Box::new(NewCommand),
         Box::new(MoveCommand),

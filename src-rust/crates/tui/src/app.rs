@@ -130,6 +130,7 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show or change whether unfinished todos nudge the model",
     ),
     ("turns", "Show or change the agentic turn limit"),
+    ("yolo", "Run every tool without asking for permission"),
     (
         "ultrareview",
         "Run an exhaustive multi-dimensional code review",

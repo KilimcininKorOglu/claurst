@@ -180,9 +180,9 @@ impl SlashCommand for ConfigCommand {
                 };
 
                 let mut new_config = ctx.config.clone();
-                new_config.permission_mode = mode.clone();
+                new_config.permission_mode = mode;
                 if let Err(err) = save_settings_mutation(|settings| {
-                    settings.config.permission_mode = mode.clone();
+                    settings.config.permission_mode = mode;
                 }) {
                     return CommandResult::Error(format!("Failed to save configuration: {}", err));
                 }
