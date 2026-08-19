@@ -4831,6 +4831,7 @@ impl App {
                     KeyCode::Up => self.session_browser.select_prev(),
                     KeyCode::Down => self.session_browser.select_next(),
                     KeyCode::Char('r') => self.session_browser.start_rename(),
+                    KeyCode::Char('a') => self.session_browser.toggle_paths(),
                     _ => {}
                 },
                 SessionBrowserMode::Rename => match key.code {
@@ -8054,6 +8055,7 @@ impl App {
                             last_updated,
                             message_count: s.messages.len(),
                             cost_usd: s.total_cost,
+                            working_dir: s.working_dir,
                         }
                     })
                     .collect();
@@ -10021,6 +10023,7 @@ mod background_pump_tests {
             last_updated: "just now".to_string(),
             message_count: 1,
             cost_usd: 0.0,
+            working_dir: None,
         }
     }
 

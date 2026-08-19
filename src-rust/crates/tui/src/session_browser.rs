@@ -35,6 +35,12 @@ pub struct SessionEntry {
     pub message_count: usize,
     /// Estimated USD cost for the session.
     pub cost_usd: f64,
+    /// Directory the session was working in.
+    ///
+    /// Sessions are stored in one flat directory shared by every project, so
+    /// without this the list gives no way to tell which project a row belongs
+    /// to. `None` for a session saved before the field existed.
+    pub working_dir: Option<String>,
 }
 
 /// State for the session browser overlay.
@@ -45,6 +51,8 @@ pub struct SessionBrowserState {
     pub mode: SessionBrowserMode,
     /// Input buffer used while in `Rename` mode.
     pub rename_input: String,
+    /// Show each session's working directory under its row.
+    pub show_paths: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +68,7 @@ impl SessionBrowserState {
             sessions: Vec::new(),
             mode: SessionBrowserMode::Browse,
             rename_input: String::new(),
+            show_paths: false,
         }
     }
 
@@ -69,6 +78,7 @@ impl SessionBrowserState {
         self.selected_idx = 0;
         self.mode = SessionBrowserMode::Browse;
         self.rename_input.clear();
+        self.show_paths = false;
         self.visible = true;
     }
 
@@ -77,6 +87,14 @@ impl SessionBrowserState {
         self.visible = false;
         self.mode = SessionBrowserMode::Browse;
         self.rename_input.clear();
+        // A toggle left on from a previous visit reads as the browser having
+        // changed shape on its own.
+        self.show_paths = false;
+    }
+
+    /// Show or hide the working directory under each row.
+    pub fn toggle_paths(&mut self) {
+        self.show_paths = !self.show_paths;
     }
 
     /// Move selection up one row, wrapping to the end.
@@ -177,21 +195,23 @@ const ROW_MARGIN: usize = 2;
 /// Columns of blank space between two adjacent columns.
 const COLUMN_GAP: usize = 2;
 
-/// How many session rows fit in a modal of `modal_height`.
+/// How many sessions fit in a modal of `modal_height`.
 ///
 /// The header, the blank line under it, the blank line above the hint bar and
-/// the hint bar itself all take a row first, and the rename field takes one
-/// more than the other modes.
-fn row_capacity(modal_height: u16, mode: &SessionBrowserMode) -> usize {
-    let hint_lines = match mode {
+/// the hint bar itself all take a line first, the rename field takes one more
+/// than the other modes, and a session takes two lines instead of one while
+/// its working directory is showing.
+fn row_capacity(state: &SessionBrowserState, modal_height: u16) -> usize {
+    let hint_lines = match state.mode {
         SessionBrowserMode::Rename => 2,
         SessionBrowserMode::Browse | SessionBrowserMode::Confirm => 1,
     };
     let chrome = 3 + hint_lines;
-    (modal_height as usize)
+    let lines = (modal_height as usize)
         .saturating_sub(2) // top and bottom border
-        .saturating_sub(chrome)
-        .max(1)
+        .saturating_sub(chrome);
+    let lines_per_session = if state.show_paths { 2 } else { 1 };
+    (lines / lines_per_session).max(1)
 }
 
 /// The half-open range of rows to draw so that `selected` stays on screen.
@@ -316,7 +336,7 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
         let (first, last) = visible_window(
             state.selected_idx,
             state.sessions.len(),
-            row_capacity(dialog_area.height, &state.mode),
+            row_capacity(state, dialog_area.height),
         );
 
         for (i, session) in state.sessions.iter().enumerate().take(last).skip(first) {
@@ -367,6 +387,20 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
                 Span::styled("  ", meta_style),
                 Span::styled(cost_cell, meta_style),
             ]));
+
+            // The path goes on a line of its own rather than into a column:
+            // the four columns already fill the modal's width, and a directory
+            // squeezed into what is left would be all ellipsis.
+            if state.show_paths {
+                let path = session.working_dir.as_deref().unwrap_or("(no directory)");
+                lines.push(Line::from(vec![
+                    Span::styled("    ", prefix_style),
+                    Span::styled(
+                        truncate_display(path, inner_w.saturating_sub(4)),
+                        Style::default().fg(Color::DarkGray).bg(row_bg),
+                    ),
+                ]));
+            }
         }
     }
 
@@ -398,6 +432,20 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("=rename  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "a",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    if state.show_paths {
+                        "=hide paths  "
+                    } else {
+                        "=paths  "
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(
                     "Esc",
                     Style::default()
@@ -470,7 +518,7 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
 
     // Say where in the list the cursor is whenever the list outgrows the modal,
     // so rows scrolled out of sight do not read as rows that are not there.
-    let title = if state.sessions.len() > row_capacity(dialog_area.height, &state.mode) {
+    let title = if state.sessions.len() > row_capacity(state, dialog_area.height) {
         format!(
             " Sessions {}/{} ",
             state.selected_idx + 1,
@@ -511,6 +559,7 @@ mod tests {
                 last_updated: "2 hours ago".to_string(),
                 message_count: 34,
                 cost_usd: 0.0124,
+                working_dir: Some("/home/dev/api-gateway".to_string()),
             },
             SessionEntry {
                 id: "sess-002".to_string(),
@@ -518,6 +567,7 @@ mod tests {
                 last_updated: "yesterday".to_string(),
                 message_count: 12,
                 cost_usd: 0.0045,
+                working_dir: Some("/home/dev/claurst".to_string()),
             },
             SessionEntry {
                 id: "sess-003".to_string(),
@@ -525,6 +575,7 @@ mod tests {
                 last_updated: "3 days ago".to_string(),
                 message_count: 57,
                 cost_usd: 0.0289,
+                working_dir: None,
             },
         ]
     }
@@ -734,6 +785,7 @@ mod tests {
                 last_updated: "just now".to_string(),
                 message_count: i,
                 cost_usd: 0.0,
+                working_dir: Some(format!("/home/dev/project-{i}")),
             })
             .collect()
     }
@@ -764,11 +816,22 @@ mod tests {
 
     #[test]
     fn the_capacity_shrinks_for_the_taller_rename_bar() {
-        assert_eq!(row_capacity(20, &SessionBrowserMode::Browse), 14);
-        assert_eq!(row_capacity(20, &SessionBrowserMode::Rename), 13);
+        let mut s = SessionBrowserState::new();
+        assert_eq!(row_capacity(&s, 20), 14);
+        s.mode = SessionBrowserMode::Rename;
+        assert_eq!(row_capacity(&s, 20), 13);
         // A modal with no room at all still reports one row rather than zero,
         // so the selected session is never invisible.
-        assert_eq!(row_capacity(4, &SessionBrowserMode::Browse), 1);
+        s.mode = SessionBrowserMode::Browse;
+        assert_eq!(row_capacity(&s, 4), 1);
+    }
+
+    #[test]
+    fn showing_paths_halves_how_many_sessions_fit() {
+        let mut s = SessionBrowserState::new();
+        assert_eq!(row_capacity(&s, 20), 14);
+        s.show_paths = true;
+        assert_eq!(row_capacity(&s, 20), 7);
     }
 
     #[test]
@@ -805,6 +868,60 @@ mod tests {
         let rows = drawn_rows(&short, 80, 24);
         assert!(rows.iter().any(|row| row.contains("Sessions")));
         assert!(!rows.iter().any(|row| row.contains("/3")), "{rows:#?}");
+    }
+
+    #[test]
+    fn paths_are_hidden_until_asked_for_and_forgotten_on_close() {
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        assert!(!s.show_paths, "the plain list is what opens");
+
+        s.toggle_paths();
+        assert!(s.show_paths);
+
+        s.close();
+        assert!(
+            !s.show_paths,
+            "a toggle left on reads as the browser changing shape by itself"
+        );
+    }
+
+    #[test]
+    fn the_working_directory_is_drawn_under_the_session_it_belongs_to() {
+        // The session store is one flat directory shared by every project, so
+        // without this the list gives no way to tell them apart.
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        let before = drawn_rows(&s, 80, 24);
+        assert!(!before.iter().any(|row| row.contains("api-gateway")));
+
+        s.toggle_paths();
+        let after = drawn_rows(&s, 80, 24);
+        let title_row = after
+            .iter()
+            .position(|row| row.contains("Refactor auth module"))
+            .expect("the session is drawn");
+        assert!(
+            after[title_row + 1].contains("/home/dev/api-gateway"),
+            "the path belongs directly under its own row: {:?}",
+            &after[title_row..title_row + 2]
+        );
+    }
+
+    #[test]
+    fn a_session_with_no_recorded_directory_says_so_rather_than_leaving_a_gap() {
+        // A blank line under one row and a path under the next reads as a
+        // rendering fault, not as a missing field.
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        s.toggle_paths();
+        let rows = drawn_rows(&s, 80, 24);
+
+        let title_row = rows
+            .iter()
+            .position(|row| row.contains("Debug memory leak"))
+            .expect("the session is drawn");
+        assert!(rows[title_row + 1].contains("(no directory)"), "{rows:#?}");
     }
 
     #[test]
