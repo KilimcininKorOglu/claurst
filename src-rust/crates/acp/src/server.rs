@@ -225,8 +225,8 @@ impl AgentServer {
                     )
                     // Stdio is implied by the protocol; http and sse are said
                     // out loud because a session can now be opened against
-                    // either. A header on one is refused rather than dropped,
-                    // which the request answers with.
+                    // either, and the headers a client attaches to one are
+                    // carried through to the transport.
                     .mcp_capabilities(acp::McpCapabilities::new().http(true).sse(true)),
             );
         response = response.agent_info(Some(agent_info));
