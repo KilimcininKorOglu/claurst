@@ -177,6 +177,37 @@ const ROW_MARGIN: usize = 2;
 /// Columns of blank space between two adjacent columns.
 const COLUMN_GAP: usize = 2;
 
+/// How many session rows fit in a modal of `modal_height`.
+///
+/// The header, the blank line under it, the blank line above the hint bar and
+/// the hint bar itself all take a row first, and the rename field takes one
+/// more than the other modes.
+fn row_capacity(modal_height: u16, mode: &SessionBrowserMode) -> usize {
+    let hint_lines = match mode {
+        SessionBrowserMode::Rename => 2,
+        SessionBrowserMode::Browse | SessionBrowserMode::Confirm => 1,
+    };
+    let chrome = 3 + hint_lines;
+    (modal_height as usize)
+        .saturating_sub(2) // top and bottom border
+        .saturating_sub(chrome)
+        .max(1)
+}
+
+/// The half-open range of rows to draw so that `selected` stays on screen.
+///
+/// Derived from the selection each frame rather than kept as scroll state,
+/// which is how the model picker does it too.
+fn visible_window(selected: usize, total: usize, capacity: usize) -> (usize, usize) {
+    if total <= capacity {
+        return (0, total);
+    }
+    let first = selected
+        .saturating_sub(capacity.saturating_sub(1))
+        .min(total - capacity);
+    (first, first + capacity)
+}
+
 /// Format a cost as a dollar string with 4 decimal places.
 fn fmt_cost(usd: f64) -> String {
     if usd < 0.0001 {
@@ -279,7 +310,16 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
         )]));
         lines.push(Line::from(""));
 
-        for (i, session) in state.sessions.iter().enumerate() {
+        // Rows only exist on screen if the modal has room for them. Drawing the
+        // whole list into a fixed-height box loses everything past the bottom
+        // border, and the selection can walk into that invisible part.
+        let (first, last) = visible_window(
+            state.selected_idx,
+            state.sessions.len(),
+            row_capacity(dialog_area.height, &state.mode),
+        );
+
+        for (i, session) in state.sessions.iter().enumerate().take(last).skip(first) {
             let is_selected = i == state.selected_idx;
 
             let title_cell = truncate_display(&session.title, title_w);
@@ -428,9 +468,21 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
         }
     }
 
+    // Say where in the list the cursor is whenever the list outgrows the modal,
+    // so rows scrolled out of sight do not read as rows that are not there.
+    let title = if state.sessions.len() > row_capacity(dialog_area.height, &state.mode) {
+        format!(
+            " Sessions {}/{} ",
+            state.selected_idx + 1,
+            state.sessions.len()
+        )
+    } else {
+        " Sessions ".to_string()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Sessions ")
+        .title(title)
         .title_alignment(Alignment::Center)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -672,6 +724,87 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    fn many_sessions(count: usize) -> Vec<SessionEntry> {
+        (0..count)
+            .map(|i| SessionEntry {
+                id: format!("sess-{i:03}"),
+                title: format!("Session number {i}"),
+                last_updated: "just now".to_string(),
+                message_count: i,
+                cost_usd: 0.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_list_that_fits_is_drawn_whole() {
+        let (first, last) = visible_window(0, 3, 14);
+        assert_eq!((first, last), (0, 3));
+    }
+
+    #[test]
+    fn the_window_follows_the_selection_down_the_list() {
+        // Nothing scrolls until the selection would leave the box.
+        assert_eq!(visible_window(13, 40, 14), (0, 14));
+        assert_eq!(visible_window(14, 40, 14), (1, 15));
+        assert_eq!(visible_window(39, 40, 14), (26, 40));
+    }
+
+    #[test]
+    fn the_window_never_runs_past_the_end_of_the_list() {
+        // Wrapping from the last row back to the first must not leave the
+        // window parked beyond the rows that exist.
+        let (first, last) = visible_window(0, 40, 14);
+        assert_eq!((first, last), (0, 14));
+        let (first, last) = visible_window(39, 40, 14);
+        assert!(last <= 40 && first + 14 == last);
+    }
+
+    #[test]
+    fn the_capacity_shrinks_for_the_taller_rename_bar() {
+        assert_eq!(row_capacity(20, &SessionBrowserMode::Browse), 14);
+        assert_eq!(row_capacity(20, &SessionBrowserMode::Rename), 13);
+        // A modal with no room at all still reports one row rather than zero,
+        // so the selected session is never invisible.
+        assert_eq!(row_capacity(4, &SessionBrowserMode::Browse), 1);
+    }
+
+    #[test]
+    fn the_selected_row_stays_on_screen_in_a_long_list() {
+        let mut s = SessionBrowserState::new();
+        s.open(many_sessions(40));
+        s.selected_idx = 39;
+        let rows = drawn_rows(&s, 80, 24);
+
+        assert!(
+            rows.iter().any(|row| row.contains("Session number 39")),
+            "the selection has to be drawn: {rows:#?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("Session number 0 ")),
+            "and the top of the list scrolls away to make room: {rows:#?}"
+        );
+    }
+
+    #[test]
+    fn a_list_too_long_for_the_modal_says_where_the_cursor_is() {
+        let mut s = SessionBrowserState::new();
+        s.open(many_sessions(40));
+        s.selected_idx = 20;
+        let rows = drawn_rows(&s, 80, 24);
+        assert!(
+            rows.iter().any(|row| row.contains("Sessions 21/40")),
+            "{rows:#?}"
+        );
+
+        // A list that fits keeps the plain title.
+        let mut short = SessionBrowserState::new();
+        short.open(sample_sessions());
+        let rows = drawn_rows(&short, 80, 24);
+        assert!(rows.iter().any(|row| row.contains("Sessions")));
+        assert!(!rows.iter().any(|row| row.contains("/3")), "{rows:#?}");
     }
 
     #[test]
