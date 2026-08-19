@@ -39,6 +39,7 @@ pub mod device_code;
 pub mod auto_mode;
 pub mod crypto_utils;
 pub mod format_utils;
+pub mod process_tree;
 pub mod spinner;
 pub mod status_notices;
 pub mod timeline;

@@ -105,5 +105,10 @@ rusqlite = { workspace = true }
 # Optional: real audio capture for voice input (gated behind the `voice` feature)
 cpal = { version = "0.15", optional = true }
 
+# Killing a process group needs `killpg`; `process_tree` uses the safe wrapper
+# rather than calling libc directly.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
