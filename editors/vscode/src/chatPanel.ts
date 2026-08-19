@@ -77,6 +77,12 @@ export class ChatPanel {
   /** The panel the user is looking at, which the palette commands act on. */
   static active: ChatPanel | undefined;
 
+  /** Settles once the panel has taken its share of the agent and opened its
+   * session, or failed to. A caller that borrowed the agent to get here waits
+   * on this before giving its own share back, or the process is shut down
+   * between the two and started again immediately. */
+  readonly started: Promise<void>;
+
   private readonly panel: vscode.WebviewPanel;
   private client: AcpClient | undefined;
   private sessionId: string | undefined;
@@ -164,7 +170,7 @@ export class ChatPanel {
       null,
       this.disposables,
     );
-    this.startSession().catch((e) => this.reportError(e));
+    this.started = this.startSession().catch((e) => this.reportError(e));
   }
 
   private renderHtml(extensionUri: vscode.Uri): string {

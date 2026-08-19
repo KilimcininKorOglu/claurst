@@ -84,10 +84,14 @@ export function activate(context: vscode.ExtensionContext): void {
             { placeHolder: 'Draw what was said before?' },
           );
           if (how) {
-            ChatPanel.create(context.extensionUri, pool, outputChannel, {
+            const panel = ChatPanel.create(context.extensionUri, pool, outputChannel, {
               kind: how.opening,
               session: picked.session,
             });
+            // Wait for the panel to take its own share before giving this one
+            // back. Releasing first drops the count to zero, which stops the
+            // process the panel is about to ask for and starts another.
+            await panel.started;
           }
         } finally {
           // The listing borrowed the agent; only a panel keeps it running.
