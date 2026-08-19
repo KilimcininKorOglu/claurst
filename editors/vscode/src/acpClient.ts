@@ -172,6 +172,9 @@ export class AcpClient {
      * by default: the agent runs them in a real PTY, and a child process here
      * is on a pipe, so anything that checks `isatty` behaves differently. */
     private readonly hostTerminals = false,
+    /** How long to wait for an answer before giving up on a request. Does not
+     * apply to `session/prompt`; see `request`. */
+    private readonly timeoutMs = 120_000,
   ) {
     this.terminals = new TerminalHost((terminalId, chunk) => {
       const sessionId = this.terminalOwners.get(terminalId);
@@ -466,10 +469,36 @@ export class AcpClient {
     this.child.stdin.write(JSON.stringify(msg) + '\n');
   }
 
-  private request<T = any>(method: string, params: unknown): Promise<T> {
+  /** Send a request and wait for its answer.
+   *
+   * An agent that stops answering used to leave the promise pending forever:
+   * the panel span, the session never opened, and nothing said why. The
+   * deadline turns that into a failure the caller can report.
+   *
+   * `session/prompt` passes `false`, and it is the only one that may. A turn
+   * runs for as long as the model and its tools take, so any deadline here
+   * would abandon work that is still going. The user ends it with Stop. */
+  private request<T = any>(method: string, params: unknown, deadline = true): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      let timer: NodeJS.Timeout | undefined;
+      const settle = {
+        resolve: (value: T) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (e: Error) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      };
+      this.pending.set(id, settle);
+      if (deadline) {
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`the agent did not answer '${method}' within ${this.timeoutMs}ms`));
+        }, this.timeoutMs);
+      }
       this.writeMessage({ jsonrpc: '2.0', id, method, params });
     });
   }
@@ -563,7 +592,7 @@ export class AcpClient {
   }
 
   async prompt(sessionId: string, blocks: PromptBlock[]): Promise<void> {
-    await this.request('session/prompt', { sessionId, prompt: blocks });
+    await this.request('session/prompt', { sessionId, prompt: blocks }, false);
   }
 
   /** Change the model, the account, or the reasoning effort. Returns the whole

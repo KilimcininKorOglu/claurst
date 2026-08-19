@@ -73,6 +73,12 @@
           "type": "boolean",
           "default": false,
           "description": "Run the agent's shell commands in this extension instead of in the agent, so their output appears live in the chat panel. Off by default: the agent runs commands in a real PTY, and this runs them on a pipe, so anything that checks whether it is attached to a terminal (npm, cargo, git, pytest) behaves differently."
+        },
+        "claurst.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "description": "How long to wait for the agent to answer a request before reporting it as failed. Does not apply to a running turn, which lasts as long as the model and its tools take and is ended with Stop."
         }
       }
     }

@@ -38,6 +38,7 @@ export class AgentPool {
     const config = vscode.workspace.getConfiguration('claurst');
     const executablePath = config.get<string>('executablePath', 'claurst');
     const hostTerminals = config.get<boolean>('hostTerminals', false);
+    const timeoutSeconds = config.get<number>('requestTimeoutSeconds', 120);
     const client = new AcpClient(
       executablePath,
       cwd,
@@ -55,6 +56,7 @@ export class AgentPool {
         },
       },
       hostTerminals,
+      Math.max(1, timeoutSeconds) * 1000,
     );
     await client.initialize();
     this.client = client;
