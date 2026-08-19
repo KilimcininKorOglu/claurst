@@ -1858,6 +1858,7 @@ mod tests {
                 command: "echo before".to_string(),
                 tool_filter: Some("Bash".to_string()),
                 blocking: true,
+                timeout_ms: None,
             }],
         );
 

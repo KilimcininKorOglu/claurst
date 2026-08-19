@@ -684,6 +684,12 @@ pub mod config {
         /// If true, a non-zero exit code blocks the operation.
         #[serde(default)]
         pub blocking: bool,
+        /// How long the command may run before it is stopped, in milliseconds.
+        ///
+        /// Unset uses [`crate::constants::HOOK_TIMEOUT_MS`]. Plugin hooks carry
+        /// the same field, so a hook behaves the same wherever it is declared.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub timeout_ms: Option<u64>,
     }
 
     // ---- AgentDefinition -------------------------------------------------
@@ -3719,6 +3725,12 @@ pub mod constants {
     pub const MAX_TURNS_UNLIMITED: u32 = u32::MAX;
     pub const MAX_TOOL_ERRORS: u32 = 3;
 
+    /// How long a settings hook may run before it is stopped.
+    ///
+    /// Matches the ceiling plugin hooks already enforce. Without one, a hook
+    /// that never exits holds the turn open with no way back.
+    pub const HOOK_TIMEOUT_MS: u64 = 30_000;
+
     // API endpoints & headers
     pub const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
     pub const MINIMAX_ANTHROPIC_API_BASE: &str = "https://api.minimax.io/anthropic";
@@ -5515,7 +5527,9 @@ pub mod hooks {
 
             debug!(command = %entry.command, event = ?event, "Running hook");
 
-            let result = tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+            let mut builder =
+                tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" });
+            builder
                 .args(if cfg!(windows) {
                     ["/C", &entry.command]
                 } else {
@@ -5524,8 +5538,9 @@ pub mod hooks {
                 .current_dir(working_dir)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn();
+                .stderr(std::process::Stdio::piped());
+            crate::process_tree::spawn_in_own_group(&mut builder);
+            let result = builder.spawn();
 
             let mut child = match result {
                 Ok(c) => c,
@@ -5535,13 +5550,51 @@ pub mod hooks {
                 }
             };
 
+            // A hook that never exits used to hold the turn open with no way
+            // back, and a cancelled turn left it running.
+            let mut tree_guard = crate::process_tree::ProcessTreeKillGuard::new(child.id());
+
             // Write context JSON to stdin
             if let Some(mut stdin) = child.stdin.take() {
                 use tokio::io::AsyncWriteExt;
                 let _ = stdin.write_all(ctx_json.as_bytes()).await;
             }
 
-            let output = match child.wait_with_output().await {
+            let timeout_ms = entry
+                .timeout_ms
+                .unwrap_or(crate::constants::HOOK_TIMEOUT_MS);
+            let waited = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                child.wait_with_output(),
+            )
+            .await;
+
+            let waited = match waited {
+                Ok(inner) => {
+                    tree_guard.disarm();
+                    inner
+                }
+                Err(_) => {
+                    tree_guard.kill_now();
+                    warn!(
+                        command = %entry.command,
+                        timeout_ms,
+                        "Hook exceeded its time limit and was stopped"
+                    );
+                    // A blocking hook that never answered cannot be read as
+                    // approval, so the operation stops. This mirrors what
+                    // `claurst-plugins` already does with its own hooks.
+                    if entry.blocking {
+                        return HookOutcome::Blocked(format!(
+                            "Hook '{}' exceeded {} ms and was stopped",
+                            entry.command, timeout_ms
+                        ));
+                    }
+                    continue;
+                }
+            };
+
+            let output = match waited {
                 Ok(o) => o,
                 Err(e) => {
                     warn!(command = %entry.command, error = %e, "Hook wait failed");
@@ -5568,6 +5621,133 @@ pub mod hooks {
         }
 
         HookOutcome::Allowed
+    }
+
+    #[cfg(all(test, unix))]
+    mod tests {
+        use super::*;
+
+        /// A sleep duration no other run can be using, so a process left behind
+        /// by an earlier run is never read as this one's.
+        fn unique_marker() -> String {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            // Fractional seconds keep the number one `sleep` accepts.
+            format!("999336.{}", nanos % 1_000_000_000)
+        }
+
+        fn pgrep_matches(marker: &str) -> bool {
+            std::process::Command::new("pgrep")
+                .arg("-f")
+                .arg(marker)
+                .output()
+                .map(|out| !out.stdout.is_empty())
+                .unwrap_or(false)
+        }
+
+        fn context() -> HookContext {
+            HookContext {
+                event: "PreToolUse".to_string(),
+                tool_name: None,
+                tool_input: None,
+                tool_output: None,
+                is_error: None,
+                session_id: None,
+            }
+        }
+
+        fn hooks_for(command: String, blocking: bool) -> HashMap<HookEvent, Vec<HookEntry>> {
+            let mut hooks = HashMap::new();
+            hooks.insert(
+                HookEvent::PreToolUse,
+                vec![HookEntry {
+                    command,
+                    tool_filter: None,
+                    blocking,
+                    timeout_ms: Some(700),
+                }],
+            );
+            hooks
+        }
+
+        #[tokio::test]
+        async fn a_hook_that_never_exits_is_stopped_with_its_children() {
+            // There was no time limit at all: a hook like this held the turn
+            // open for as long as it kept running, and a cancelled turn left it
+            // behind.
+            let marker = unique_marker();
+            let hooks = hooks_for(format!("sleep {marker} & wait"), false);
+
+            let started = std::time::Instant::now();
+            let outcome = run_hooks(
+                &hooks,
+                HookEvent::PreToolUse,
+                &context(),
+                &std::env::temp_dir(),
+            )
+            .await;
+            let elapsed = started.elapsed();
+
+            assert!(matches!(outcome, HookOutcome::Allowed), "{outcome:?}");
+            assert!(
+                elapsed < std::time::Duration::from_secs(5),
+                "the hook was not stopped, it took {elapsed:?}"
+            );
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            assert!(
+                !pgrep_matches(&marker),
+                "the hook's child survived being stopped"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_blocking_hook_that_never_answers_blocks() {
+            // Silence is not approval: a blocking hook exists to say yes or no,
+            // and one that says neither must not be read as yes.
+            let marker = unique_marker();
+            let hooks = hooks_for(format!("sleep {marker} & wait"), true);
+
+            let outcome = run_hooks(
+                &hooks,
+                HookEvent::PreToolUse,
+                &context(),
+                &std::env::temp_dir(),
+            )
+            .await;
+
+            let HookOutcome::Blocked(reason) = outcome else {
+                panic!("expected a block, got {outcome:?}");
+            };
+            assert!(reason.contains("exceeded"), "{reason:?}");
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg(&marker)
+                .output();
+        }
+
+        #[tokio::test]
+        async fn a_hook_that_answers_in_time_still_runs() {
+            let hooks = hooks_for("echo hello".to_string(), false);
+
+            let outcome = run_hooks(
+                &hooks,
+                HookEvent::PreToolUse,
+                &context(),
+                &std::env::temp_dir(),
+            )
+            .await;
+
+            let HookOutcome::Modified(text) = outcome else {
+                panic!("expected the hook's stdout, got {outcome:?}");
+            };
+            assert_eq!(text, "hello");
+        }
     }
 }
 

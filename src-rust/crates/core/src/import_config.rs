@@ -779,6 +779,7 @@ fn parse_hooks(value: &Value) -> Result<HashMap<HookEvent, Vec<HookEntry>>> {
                         Some(matcher.clone())
                     },
                     blocking: false,
+                    timeout_ms: None,
                 });
             }
         }

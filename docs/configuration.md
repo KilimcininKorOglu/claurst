@@ -487,6 +487,11 @@ Hook entry fields:
 | `command`     | string         | Shell command to execute.                                           |
 | `tool_filter` | string \| null | Only run for this tool name (`PreToolUse`/`PostToolUse` only).      |
 | `blocking`    | boolean        | If true, a non-zero exit code blocks the operation. Default: false. |
+| `timeout_ms`  | integer        | How long the command may run before it is stopped. Default: 30000.  |
+
+A hook that reaches its limit is stopped along with anything it started, and
+the run continues. A `blocking` hook that reaches it blocks the operation
+instead: a hook that never answered cannot be read as approval.
 
 ---
 
