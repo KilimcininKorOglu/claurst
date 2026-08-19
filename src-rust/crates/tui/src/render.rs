@@ -1533,6 +1533,64 @@ fn timeline_row_metrics(row: &TimelineRow) -> String {
     parts.join(" ")
 }
 
+/// Average output tokens per second across the finished timeline rows.
+///
+/// Only rows that both finished and reported an output delta are counted, so a
+/// running row does not drag the average down. `None` when nothing has finished
+/// yet or the measured time is zero, which keeps a division by zero out of a
+/// per-frame code path.
+fn timeline_output_rate(rows: &[TimelineRow]) -> Option<f64> {
+    let mut tokens = 0u64;
+    let mut elapsed_ms = 0u64;
+    for row in rows {
+        let (Some(output), Some(duration)) = (row.token_delta_output, row.duration_ms()) else {
+            continue;
+        };
+        tokens = tokens.saturating_add(output);
+        elapsed_ms = elapsed_ms.saturating_add(duration);
+    }
+    if tokens == 0 || elapsed_ms == 0 {
+        return None;
+    }
+    Some(tokens as f64 * 1000.0 / elapsed_ms as f64)
+}
+
+/// The timeline panel's bottom summary: throughput, plus how much the session
+/// has to work with. These do not fit the footer, whose right-hand side is
+/// already nine sections wide on a narrow terminal.
+///
+/// Returns `None` when there is nothing to say, so the panel spends the row on
+/// timeline entries instead.
+fn timeline_summary_line(app: &App, width: u16) -> Option<Line<'static>> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(rate) = timeline_output_rate(&app.timeline.rows) {
+        parts.push(format!("{:.1} tok/s", rate));
+    }
+    if app.skill_count > 0 {
+        parts.push(format!("{} skills", app.skill_count));
+    }
+    let mcp_count = app.config.mcp_servers.len();
+    if mcp_count > 0 {
+        parts.push(format!("{} mcp", mcp_count));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // Drop sections from the right until the line fits, rather than letting
+    // ratatui clip mid-word.
+    while parts.len() > 1 && parts.join(" · ").chars().count() > width as usize {
+        parts.pop();
+    }
+    let text = parts.join(" · ");
+    if text.chars().count() > width as usize {
+        return None;
+    }
+    Some(Line::from(Span::styled(
+        text,
+        Style::default().fg(Color::DarkGray),
+    )))
+}
+
 /// Build the visible rows, newest last, ending on the selected row.
 ///
 /// The panel has no scrollbar: it always shows the window that contains the
@@ -1598,8 +1656,13 @@ fn render_timeline_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Vec::new()
     };
+    // The summary sits on the panel's last row, so it spends from the same
+    // budget as the detail lines. Without this the bottom timeline entry would
+    // be pushed off the panel.
+    let summary = timeline_summary_line(app, inner.width);
     let capacity = (inner.height as usize)
         .saturating_sub(detail_lines.len())
+        .saturating_sub(usize::from(summary.is_some()))
         .max(1);
 
     let window = timeline_window(app.timeline.len(), app.timeline.selected_idx, capacity);
@@ -1619,6 +1682,10 @@ fn render_timeline_panel(frame: &mut Frame, app: &App, area: Rect) {
         if selected {
             lines.extend(detail_lines.iter().cloned());
         }
+    }
+    if let Some(summary) = summary {
+        lines.truncate((inner.height as usize).saturating_sub(1));
+        lines.push(summary);
     }
     lines.truncate(inner.height as usize);
     frame.render_widget(Paragraph::new(lines), inner);
@@ -6004,5 +6071,150 @@ mod footer_todo_progress_tests {
         let app = app_with_todos(r#"{"todos":[{"id":"1","content":"a","status":"pending"}]}"#);
         let footer = footer_row(&app, 40, 24);
         assert_eq!(footer.chars().count(), 40, "{footer:?}");
+    }
+}
+
+#[cfg(test)]
+mod timeline_summary_tests {
+    //! The tok/s average and the skills/MCP counts do not fit the footer, so
+    //! they live on the timeline panel's last row. That row spends from the
+    //! same height budget as the entries above it.
+    use super::*;
+    use crate::app::App;
+    use claurst_core::config::{Config, McpServerConfig};
+    use claurst_core::cost::CostTracker;
+    use claurst_core::timeline::{TimelineKind, TimelineRow, TimelineStatus};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn row(started_at_ms: u64, finished_at_ms: Option<u64>, output: Option<u64>) -> TimelineRow {
+        TimelineRow {
+            id: format!("row-{started_at_ms}"),
+            title: "Read".to_string(),
+            kind: TimelineKind::ToolCall,
+            status: TimelineStatus::Done,
+            started_at_ms,
+            finished_at_ms,
+            token_delta_input: None,
+            token_delta_output: output,
+            cost_delta_usd: None,
+            detail_preview: String::new(),
+            expandable_details: String::new(),
+        }
+    }
+
+    #[test]
+    fn rate_averages_over_finished_rows() {
+        // 300 tokens over 2s and 100 over 1s: 400 tokens in 3s.
+        let rows = vec![
+            row(0, Some(2_000), Some(300)),
+            row(2_000, Some(3_000), Some(100)),
+        ];
+        let rate = timeline_output_rate(&rows).expect("two finished rows carry a rate");
+        assert!((rate - 400.0 / 3.0).abs() < 0.001, "{rate}");
+    }
+
+    #[test]
+    fn unfinished_rows_do_not_drag_the_average_down() {
+        let rows = vec![row(0, Some(1_000), Some(100)), row(1_000, None, None)];
+        let rate = timeline_output_rate(&rows).expect("the finished row carries a rate");
+        assert!((rate - 100.0).abs() < 0.001, "{rate}");
+    }
+
+    #[test]
+    fn no_measurable_work_yields_no_rate() {
+        assert_eq!(timeline_output_rate(&[]), None);
+        assert_eq!(timeline_output_rate(&[row(0, None, None)]), None);
+        // A zero-length row must not divide by zero.
+        assert_eq!(timeline_output_rate(&[row(5, Some(5), Some(100))]), None);
+    }
+
+    fn app_with_summary_inputs() -> App {
+        let config = Config {
+            timeline_enabled: true,
+            mcp_servers: vec![McpServerConfig {
+                name: "docs".to_string(),
+                command: Some("docs-server".to_string()),
+                args: Vec::new(),
+                env: Default::default(),
+                url: None,
+                headers: Default::default(),
+                server_type: "stdio".to_string(),
+                origin: Default::default(),
+            }],
+            ..Default::default()
+        };
+        let mut app = App::new(config, CostTracker::new());
+        app.skill_count = 4;
+        app.timeline.rows = vec![row(0, Some(1_000), Some(120))];
+        app.timeline_visible = true;
+        app
+    }
+
+    #[test]
+    fn summary_names_every_populated_section() {
+        let app = app_with_summary_inputs();
+        let line = timeline_summary_line(&app, 60).expect("all three sections are populated");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(text.contains("120.0 tok/s"), "{text:?}");
+        assert!(text.contains("4 skills"), "{text:?}");
+        assert!(text.contains("1 mcp"), "{text:?}");
+    }
+
+    #[test]
+    fn empty_sections_are_omitted_and_an_empty_summary_is_dropped() {
+        let mut app = app_with_summary_inputs();
+        app.skill_count = 0;
+        let line = timeline_summary_line(&app, 60).expect("rate and mcp remain");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(!text.contains("skills"), "{text:?}");
+
+        let bare = App::new(Config::default(), CostTracker::new());
+        assert!(timeline_summary_line(&bare, 60).is_none());
+    }
+
+    #[test]
+    fn a_narrow_panel_drops_sections_from_the_right() {
+        let app = app_with_summary_inputs();
+        let line = timeline_summary_line(&app, 14).expect("the first section still fits");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(text, "120.0 tok/s");
+    }
+
+    #[test]
+    fn the_summary_reaches_the_drawn_panel_and_keeps_its_height() {
+        let app = app_with_summary_inputs();
+        let mut terminal = match Terminal::new(TestBackend::new(100, 24)) {
+            Ok(terminal) => terminal,
+            Err(err) => panic!("test terminal: {err}"),
+        };
+        if let Err(err) = terminal.draw(|frame| render_app(frame, &app)) {
+            panic!("draw: {err}");
+        }
+        let buffer = terminal.backend().buffer();
+        let screen: Vec<String> = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        assert!(
+            screen.iter().any(|line| line.contains("tok/s")),
+            "summary missing: {screen:?}"
+        );
+        assert_eq!(screen.len(), 24);
     }
 }

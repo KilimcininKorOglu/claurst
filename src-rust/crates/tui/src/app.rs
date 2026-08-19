@@ -1506,6 +1506,11 @@ pub struct App {
     /// contributed and the skills discovery found. Held as owned pairs because
     /// the built-in table is static and these are not.
     pub extra_slash_commands: Vec<(String, String)>,
+    /// How many skills the discovery found. Cached rather than recounted,
+    /// because the timeline panel reads it on every frame and discovery walks
+    /// the filesystem. `extra_slash_commands` cannot answer this: it mixes
+    /// skills with plugin-contributed commands.
+    pub skill_count: usize,
     /// Whether Claurst was launched from the user's home directory.
     /// Shown as a startup notice: "Note: You have launched Claurst in your home directory…"
     pub home_dir_warning: bool,
@@ -1890,6 +1895,7 @@ impl App {
             },
             notification_outbox: Vec::new(),
             extra_slash_commands: Vec::new(),
+            skill_count: 0,
             home_dir_warning: false,
             output_style: "auto".to_string(),
             pr_number: None,
