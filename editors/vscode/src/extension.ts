@@ -37,6 +37,20 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('claurst.sendSelection', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showInformationMessage('Open a file to send a selection from.');
+        return;
+      }
+      // Opening the chat first, so the command works from a cold editor rather
+      // than telling the user to open a panel and try again.
+      const panel = await ChatPanel.show(context.extensionUri, pool, outputChannel);
+      panel?.mentionSelection(editor);
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('claurst.forkSession', () => {
       // Trying a second approach without losing the first: the fork carries
       // the conversation so far, and the original is untouched.

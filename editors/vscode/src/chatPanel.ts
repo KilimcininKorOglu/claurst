@@ -79,6 +79,8 @@ export class ChatPanel {
   private static readonly panels = new Set<ChatPanel>();
   /** The panel the user is looking at, which the palette commands act on. */
   static active: ChatPanel | undefined;
+  /** How many panels are mid-turn, across every conversation. */
+  private static running = 0;
 
   /** Settles once the panel has taken its share of the agent and opened its
    * session, or failed to. A caller that borrowed the agent to get here waits
@@ -283,6 +285,25 @@ export class ChatPanel {
     }
   }
 
+  /** Put a mention of the editor's selection in the input box.
+   *
+   * The path and the line range go with it: without them the agent is reading
+   * a fragment it cannot place, and asking about it costs a turn. */
+  mentionSelection(editor: vscode.TextEditor): void {
+    const { selection, document } = editor;
+    const relative = vscode.workspace.asRelativePath(document.uri);
+    // The line numbers stay outside the mention token. `mentionsIn` reads up
+    // to the next space, so `@file.rs:10-20` would be looked up as a file by
+    // that name, fail to stat, and be dropped without a word.
+    const where = selection.isEmpty
+      ? `line ${selection.active.line + 1}`
+      : `lines ${selection.start.line + 1}-${selection.end.line + 1}`;
+    const excerpt = selection.isEmpty ? '' : document.getText(selection);
+    const fence = excerpt ? `\n\n\`\`\`${document.languageId}\n${excerpt}\n\`\`\`\n` : '';
+    this.panel.reveal(undefined, true);
+    this.postToWebview({ type: 'mention', text: `@${relative} (${where})${fence}` });
+  }
+
   /** What this panel is talking to, for a command that acts on it. */
   get session(): { sessionId: string; cwd: string; title: string } | undefined {
     return this.sessionId
@@ -453,6 +474,7 @@ export class ChatPanel {
   /** Runs a prompt to completion, signalling turnEnded either way so the
    * webview can re-enable input. */
   private async runPrompt(text: string, images: PastedImage[]): Promise<void> {
+    ChatPanel.turnStarted(1);
     try {
       if (this.client && this.sessionId) {
         await this.client.prompt(this.sessionId, await this.buildPrompt(text, images));
@@ -460,8 +482,18 @@ export class ChatPanel {
     } catch (e) {
       this.reportError(e);
     } finally {
+      ChatPanel.turnStarted(-1);
       this.postToWebview({ type: 'turnEnded' });
     }
+  }
+
+  /** Keep `claurst.busy` in step with whether any panel is mid-turn.
+   *
+   * Counted rather than a flag: two panels can be answering at once, and the
+   * first to finish must not tell the keybinding that nothing is running. */
+  private static turnStarted(delta: number): void {
+    ChatPanel.running = Math.max(0, ChatPanel.running + delta);
+    vscode.commands.executeCommand('setContext', 'claurst.busy', ChatPanel.running > 0);
   }
 
   /** Turn what was typed into prompt blocks, resolving any `@file` mention.

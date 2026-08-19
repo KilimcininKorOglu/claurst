@@ -40,6 +40,28 @@
       {
         "command": "claurst.forkSession",
         "title": "Claurst: Fork Session"
+      },
+      {
+        "command": "claurst.sendSelection",
+        "title": "Claurst: Send Selection to Chat"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claurst.openChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "claurst.sendSelection",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "claurst.stopSession",
+        "key": "escape",
+        "when": "claurst.busy"
       }
     ],
     "menus": {
@@ -58,6 +80,16 @@
         },
         {
           "command": "claurst.forkSession"
+        },
+        {
+          "command": "claurst.sendSelection"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "claurst.sendSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@100"
         }
       ]
     },
