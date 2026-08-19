@@ -132,6 +132,7 @@ pub async fn run(
             .map(|mcp| mcp.manager.clone())
             .or_else(|| runtime.mcp_manager.clone()),
         mcp_auth_runner: Some(mcp_auth_runner(notes.clone())),
+        active_agent: runtime.query_config.agent_definition.clone(),
         // Nobody is at this terminal: the client is an editor somewhere else.
         interactive: false,
     };

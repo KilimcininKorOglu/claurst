@@ -238,7 +238,7 @@ changes nothing.
 
 `maxTurns` is also set by `--max-turns` at launch and by `/turns` during a
 session. An agent definition's own `max_turns` wins over it while that agent is
-active.
+active; `/turns` says so rather than reporting a limit that will not apply.
 
 ### System prompt
 

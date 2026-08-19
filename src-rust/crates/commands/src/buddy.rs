@@ -533,6 +533,7 @@ mod tests {
             mcp_manager: None,
             mcp_auth_runner: None,
             interactive: true,
+            active_agent: None,
         }
     }
 
@@ -698,6 +699,7 @@ mod tests {
             mcp_manager: None,
             mcp_auth_runner: None,
             interactive: true,
+            active_agent: None,
         };
         let companion = Companion::new("test-identity", None);
 

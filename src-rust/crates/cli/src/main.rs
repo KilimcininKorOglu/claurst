@@ -474,6 +474,8 @@ async fn main() -> anyhow::Result<()> {
                     // A named subcommand prints and exits; there is no view
                     // for a command to open.
                     interactive: false,
+                    // Named subcommands run before any session, so no agent.
+                    active_agent: None,
                 };
                 // Collect remaining args after the command name
                 let rest: Vec<&str> = raw_args[2..].iter().map(|s| s.as_str()).collect();
@@ -2833,6 +2835,8 @@ async fn run_interactive(
         // Set per command below: a prompt that arrived from a remote client
         // has nobody at this terminal to read a view.
         interactive: true,
+        // Kept in step with `base_query_config` wherever the agent mode changes.
+        active_agent: base_query_config.agent_definition.clone(),
     };
 
     // tools is already Arc<Vec<...>> — share it across spawned tasks without copying.
@@ -4142,14 +4146,21 @@ async fn run_interactive(
                         if let Some(def) = all_agents.get(mode) {
                             base_query_config.agent_name = Some(mode.to_string());
                             base_query_config.agent_definition = Some(def.clone());
-                            if let Some(turns) = def.max_turns {
-                                base_query_config.max_turns = turns;
-                            }
+                            // A command that reports a limit has to know which
+                            // agent would override it.
+                            cmd_ctx.active_agent = Some(def.clone());
+                            // The agent's own `max_turns` is not copied onto
+                            // the query config: `effective_max_turns` in the
+                            // loop already prefers it, and the dispatch site
+                            // re-reads the session limit every turn, so an
+                            // assignment here would be overwritten and then
+                            // ignored.
                             tools_arc = filter_tools_for_agent(all_tools_arc.clone(), &def.access);
                         } else {
                             // "build" with no explicit definition = full access, no agent
                             base_query_config.agent_name = None;
                             base_query_config.agent_definition = None;
+                            cmd_ctx.active_agent = None;
                             tools_arc = all_tools_arc.clone();
                         }
                     }

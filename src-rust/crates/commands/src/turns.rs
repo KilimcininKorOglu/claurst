@@ -3,6 +3,7 @@
 use super::{CommandContext, CommandResult, SlashCommand};
 use async_trait::async_trait;
 use claurst_core::constants::{MAX_TURNS_DEFAULT, MAX_TURNS_UNLIMITED};
+use claurst_core::AgentDefinition;
 
 pub struct TurnsCommand;
 
@@ -53,6 +54,20 @@ fn describe(max_turns: Option<u32>) -> String {
     }
 }
 
+/// The note appended when the active agent's own limit wins over the session's.
+///
+/// Without it, setting a limit under such an agent looks like it took effect
+/// and quietly does nothing until the agent is left.
+fn agent_override_note(active_agent: Option<&AgentDefinition>) -> String {
+    match active_agent.and_then(|agent| agent.max_turns) {
+        Some(limit) => format!(
+            " The active agent stops at {} turns, which wins until you leave it.",
+            limit
+        ),
+        None => String::new(),
+    }
+}
+
 #[async_trait]
 impl SlashCommand for TurnsCommand {
     fn name(&self) -> &str {
@@ -72,13 +87,17 @@ impl SlashCommand for TurnsCommand {
          The limit bounds how many turns one run may take before it stops. It\n\
          persists for the session and is saved as `maxTurns` in settings.\n\
          An agent definition's own `max_turns` still wins while that agent is\n\
-         active."
+         active, and `/turns` says so when one is."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         let (max_turns, note) = match parse_request(args) {
             TurnsRequest::Show => {
-                return CommandResult::Message(describe(ctx.config.max_turns));
+                return CommandResult::Message(format!(
+                    "{}{}",
+                    describe(ctx.config.max_turns),
+                    agent_override_note(ctx.active_agent.as_ref())
+                ));
             }
             TurnsRequest::Invalid(arg) => {
                 return CommandResult::Error(format!(
@@ -97,6 +116,7 @@ impl SlashCommand for TurnsCommand {
             ),
         };
 
+        let note = format!("{}{}", note, agent_override_note(ctx.active_agent.as_ref()));
         let mut config = ctx.config.clone();
         config.max_turns = max_turns;
         CommandResult::ConfigChangeMessage(config, note)
@@ -147,6 +167,33 @@ mod tests {
         );
         // A negative number is not a `u32`; refusing beats wrapping.
         assert_eq!(parse_request("-1"), TurnsRequest::Invalid("-1".to_string()));
+    }
+
+    fn agent_with(max_turns: Option<u32>) -> AgentDefinition {
+        AgentDefinition {
+            max_turns,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_agent_adds_no_note() {
+        assert_eq!(agent_override_note(None), "");
+    }
+
+    #[test]
+    fn an_agent_without_its_own_limit_adds_no_note() {
+        // Most agents define no limit, so the note must stay off by default.
+        assert_eq!(agent_override_note(Some(&agent_with(None))), "");
+    }
+
+    #[test]
+    fn an_agent_with_its_own_limit_says_which_number_wins() {
+        // Setting a limit under such an agent otherwise looks like it took
+        // effect and quietly does nothing.
+        let note = agent_override_note(Some(&agent_with(Some(4))));
+        assert!(note.contains('4'), "{note:?}");
+        assert!(note.contains("wins"), "{note:?}");
     }
 
     #[test]

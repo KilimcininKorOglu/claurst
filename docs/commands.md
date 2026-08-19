@@ -359,7 +359,8 @@ Show or change how many agentic turns one run may take before it stops.
 
 The limit persists for the session and is saved as `maxTurns` in `settings.json`.
 `--max-turns` sets it for one launch; an agent definition's own `max_turns` wins
-over both while that agent is active.
+over both while that agent is active, and `/turns` names that agent's limit when
+one is in force.
 
 `off`, `none`, `unlimited` and `0` all mean no limit. Reaching the limit normally
 spends one final turn asking the model to summarise its progress; the

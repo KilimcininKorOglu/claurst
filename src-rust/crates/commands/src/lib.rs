@@ -44,6 +44,12 @@ pub struct CommandContext {
     /// instead, because a view they cannot see helps nobody and takes the
     /// place of the answer they could have read.
     pub interactive: bool,
+    /// The agent definition in force, when the session is running under one.
+    ///
+    /// An agent's own settings win over the session's for the fields it
+    /// declares, so a command that changes one of those fields has to be able
+    /// to say that its change will not take effect yet.
+    pub active_agent: Option<claurst_core::AgentDefinition>,
 }
 
 /// Result of running a slash command.
@@ -1758,6 +1764,7 @@ mod tests {
             mcp_manager: None,
             mcp_auth_runner: None,
             interactive: true,
+            active_agent: None,
         }
     }
 
