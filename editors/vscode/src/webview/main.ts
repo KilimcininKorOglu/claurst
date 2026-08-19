@@ -92,6 +92,7 @@ type HostMessage =
   const inputEl = document.getElementById('input-box') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
   const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
+  const jumpBtn = document.getElementById('jump-btn') as HTMLButtonElement;
 
   /** The bubble being streamed into, and everything it has been sent so far.
    *
@@ -100,6 +101,8 @@ type HostMessage =
   let currentAgentBubble: HTMLElement | null = null;
   let currentAgentText = '';
   let renderScheduled = false;
+  /** Whether the view follows new output. Set by where the reader scrolled. */
+  let pinned = true;
   const toolCallEls = new Map<string, HTMLElement>();
   /** What each hosted terminal has said, and where it is being drawn. */
   const terminalText = new Map<string, string>();
@@ -116,7 +119,7 @@ type HostMessage =
     bubble.textContent = text;
     row.appendChild(bubble);
     messagesEl.appendChild(row);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToEnd();
     return bubble;
   }
 
@@ -136,7 +139,7 @@ type HostMessage =
     image.src = `data:${safeType};base64,${data}`;
     row.appendChild(image);
     messagesEl.appendChild(row);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToEnd();
   }
 
   /** Stop streaming into the current bubble.
@@ -185,8 +188,23 @@ type HostMessage =
     });
   }
 
+  /** Follow the conversation only while the reader is already at the end.
+   *
+   * Every append used to pin the view to the bottom, so scrolling up during a
+   * turn was undone by the next chunk. A reader who has scrolled away is
+   * reading something; the button tells them there is more below. */
   function scrollToEnd(): void {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (pinned) {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    } else {
+      jumpBtn.classList.remove('hidden');
+    }
+  }
+
+  /** Within a line's height of the bottom counts as being at the bottom: an
+   * exact comparison never holds once a fractional scroll position appears. */
+  function atEnd(): boolean {
+    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 24;
   }
 
   function statusIcon(status: string | undefined): string {
@@ -313,7 +331,7 @@ type HostMessage =
       terminalEls.set(msg.terminalId, pre);
       el.appendChild(pre);
     }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToEnd();
   }
 
   /** Ask the question where the answer will be remembered.
@@ -366,7 +384,7 @@ type HostMessage =
     block.appendChild(row);
 
     messagesEl.appendChild(block);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollToEnd();
   }
 
   function appendTerminalOutput(terminalId: string, chunk: string): void {
@@ -375,7 +393,7 @@ type HostMessage =
     const pre = terminalEls.get(terminalId);
     if (pre) {
       pre.textContent = text;
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scrollToEnd();
     }
   }
 
@@ -480,6 +498,10 @@ type HostMessage =
     if (!text) {
       return;
     }
+    // Asking a question is a request to watch the answer, wherever the reader
+    // had scrolled to before.
+    pinned = true;
+    jumpBtn.classList.add('hidden');
     appendRow(text, 'user');
     inputEl.value = '';
     completionMatches = [];
@@ -489,6 +511,19 @@ type HostMessage =
     setBusy(true);
     vscode.postMessage({ type: 'prompt', text });
   }
+
+  // Where the reader is decides whether new output moves the view. A scroll
+  // back to the bottom re-arms following without a click.
+  messagesEl.addEventListener('scroll', () => {
+    pinned = atEnd();
+    jumpBtn.classList.toggle('hidden', pinned);
+  });
+
+  jumpBtn.addEventListener('click', () => {
+    pinned = true;
+    jumpBtn.classList.add('hidden');
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
 
   sendBtn.addEventListener('click', send);
   stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));

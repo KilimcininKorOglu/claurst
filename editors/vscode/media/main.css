@@ -11,6 +11,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* The jump button is positioned against this rather than the viewport. */
+  position: relative;
 }
 
 #header {
@@ -369,6 +371,24 @@ body {
 
 .plan-entry.completed {
   text-decoration: line-through;
+}
+
+/* Sits over the bottom of the message list rather than in the layout, so
+   showing it does not reflow what is being read. */
+#jump-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 90px;
+  font-size: 0.85em;
+  padding: 3px 12px;
+  border-radius: 999px;
+  opacity: 0.95;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+#jump-btn.hidden {
+  display: none;
 }
 
 #completions {

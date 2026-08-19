@@ -180,6 +180,7 @@ export class ChatPanel {
   <div id="header"></div>
   <div id="plan" class="hidden"></div>
   <div id="messages"></div>
+  <button id="jump-btn" class="hidden" title="Jump to the end of the conversation">New messages ↓</button>
   <div id="completions" class="hidden"></div>
   <div id="input-row">
     <textarea id="input-box" rows="1" placeholder="Ask claurst... (/ for commands, @ for files)"></textarea>
