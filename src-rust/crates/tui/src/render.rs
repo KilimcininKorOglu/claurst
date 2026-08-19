@@ -11,7 +11,9 @@ use crate::custom_provider_dialog::render_custom_provider_dialog;
 use crate::desktop_upsell_startup::render_desktop_upsell_startup;
 use crate::device_auth_dialog::render_device_auth_dialog;
 use crate::dialog_select::render_dialog_select;
-use crate::dialogs::{render_mcp_approval_dialog, render_permission_dialog};
+use crate::dialogs::{
+    render_mcp_approval_dialog, render_permission_dialog, render_project_trust_dialog,
+};
 use crate::diff_viewer::render_diff_dialog;
 use crate::elicitation_dialog::render_elicitation_dialog;
 use crate::export_dialog::render_export_dialog;
@@ -940,6 +942,11 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     // MCP approval dialog
     if app.mcp_approval.visible {
         render_mcp_approval_dialog(&app.mcp_approval, size, frame.buffer_mut());
+    }
+
+    // Project settings trust dialog
+    if app.project_trust.visible {
+        render_project_trust_dialog(&app.project_trust, size, frame.buffer_mut());
     }
 
     // Always show error modals on top of everything (highest priority)
