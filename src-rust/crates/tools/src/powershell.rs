@@ -229,18 +229,25 @@ impl Tool for PowerShellTool {
         let timeout_ms = params.timeout.min(600_000);
         let timeout_dur = Duration::from_millis(timeout_ms);
 
-        let mut child = match Command::new(exe)
+        let mut builder = Command::new(exe);
+        builder
             .args(&args)
             .arg(&params.command)
             .current_dir(&ctx.working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .spawn()
-        {
+            .stdin(Stdio::null());
+        claurst_core::process_tree::spawn_in_own_group(&mut builder);
+        let mut child = match builder.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to spawn PowerShell: {}", e)),
         };
+
+        // The interpreter is only the wrapper. Nothing here killed anything on
+        // drop, and the timeout below reached the interpreter alone, so a
+        // cancelled turn left the script's own children running on every
+        // platform, not just Windows.
+        let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -269,6 +276,7 @@ impl Tool for PowerShellTool {
 
         match result {
             Ok((stdout_lines, stderr_lines, status)) => {
+                tree_guard.disarm();
                 let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
                 let mut output = stdout_lines.join("\n");
                 if !stderr_lines.is_empty() {
@@ -306,6 +314,10 @@ impl Tool for PowerShellTool {
                 }
             }
             Err(_) => {
+                // The tree first, then the wrapper: killing the interpreter
+                // first orphans its children and `taskkill /T` can no longer
+                // find them through it.
+                tree_guard.kill_now();
                 let _ = child.kill().await;
                 ToolResult::error(format!(
                     "PowerShell command timed out after {}ms",
@@ -313,5 +325,139 @@ impl Tool for PowerShellTool {
                 ))
             }
         }
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    /// A sleep duration no other run can be using, so a process left behind by
+    /// an earlier run is never read as this one's.
+    fn unique_marker() -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        // Fractional seconds keep the number one `sleep` accepts.
+        format!("999337.{}", nanos % 1_000_000_000)
+    }
+
+    fn pgrep_matches(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn bypassing_ctx() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            permission_mode: claurst_core::config::PermissionMode::BypassPermissions,
+            permission_handler: std::sync::Arc::new(
+                claurst_core::permissions::AutoPermissionHandler {
+                    mode: claurst_core::config::PermissionMode::BypassPermissions,
+                },
+            ),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            session_id: "powershell-test".to_string(),
+            file_history: std::sync::Arc::new(parking_lot::Mutex::new(
+                claurst_core::file_history::FileHistory::new(),
+            )),
+            current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            non_interactive: true,
+            mcp_manager: None,
+            config: claurst_core::config::Config::default(),
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
+            editor: None,
+        }
+    }
+
+    /// The timeout path used to kill the interpreter and leave the process the
+    /// script actually started running. This is not a Windows-only hole: the
+    /// `pwsh` path had no drop guard either.
+    #[tokio::test]
+    async fn a_timed_out_script_takes_its_children_with_it() {
+        if which::which("pwsh").is_err() {
+            eprintln!("skipped: pwsh is not installed on this machine");
+            return;
+        }
+        let marker = unique_marker();
+
+        let result = PowerShellTool
+            .execute(
+                json!({
+                    "command": format!("Start-Process -NoNewWindow sleep -ArgumentList '{marker}'; Start-Sleep -Seconds 60"),
+                    "timeout": 1_500u64,
+                }),
+                &bypassing_ctx(),
+            )
+            .await;
+
+        assert!(
+            result.is_error,
+            "expected a timeout, got: {}",
+            result.content
+        );
+        assert!(result.content.contains("timed out"), "{}", result.content);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while pgrep_matches(&marker) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            !pgrep_matches(&marker),
+            "the script's child survived the timeout"
+        );
+    }
+    /// The guard must not fire when the command succeeded: a script that
+    /// deliberately leaves something running would otherwise have it killed the
+    /// moment the tool returned.
+    #[tokio::test]
+    async fn a_script_that_finished_keeps_what_it_left_running() {
+        if which::which("pwsh").is_err() {
+            eprintln!("skipped: pwsh is not installed on this machine");
+            return;
+        }
+        let marker = unique_marker();
+        let err_file = std::env::temp_dir().join(format!("claurst-ps-{marker}.err"));
+
+        let result = PowerShellTool
+            .execute(
+                json!({
+                    // The child's output goes elsewhere: it would otherwise
+                    // hold the interpreter's pipes open and the tool would read
+                    // until the timeout instead of returning. The two streams
+                    // must differ, which is why one goes to a file.
+                    "command": format!(
+                        "Start-Process -NoNewWindow sleep -ArgumentList '{marker}' \
+                         -RedirectStandardOutput /dev/null -RedirectStandardError {}; \
+                         Start-Sleep -Milliseconds 300",
+                        err_file.display()
+                    ),
+                    "timeout": 30_000u64,
+                }),
+                &bypassing_ctx(),
+            )
+            .await;
+        assert!(!result.is_error, "{}", result.content);
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let survived = pgrep_matches(&marker);
+        // Clean up before asserting, so a failure does not leave the process.
+        let _ = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg(&marker)
+            .output();
+        let _ = std::fs::remove_file(&err_file);
+        assert!(survived, "a completed command had its leftovers killed");
     }
 }
