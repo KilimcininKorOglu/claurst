@@ -172,6 +172,11 @@ impl Default for SessionBrowserState {
 // Rendering helpers
 // ---------------------------------------------------------------------------
 
+/// Columns of blank left margin before a row's first column.
+const ROW_MARGIN: usize = 2;
+/// Columns of blank space between two adjacent columns.
+const COLUMN_GAP: usize = 2;
+
 /// Format a cost as a dollar string with 4 decimal places.
 fn fmt_cost(usd: f64) -> String {
     if usd < 0.0001 {
@@ -244,12 +249,15 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
             Style::default().fg(Color::DarkGray),
         )]));
     } else {
-        // Column widths (approximate):
-        //   title: ~40 chars  |  date: ~14 chars  |  msgs: 5  |  cost: 9
+        // Column widths:
+        //   title: fills  |  date: 14  |  msgs: 5  |  cost: 9
         let date_w: usize = 14;
         let msgs_w: usize = 5;
         let cost_w: usize = 9;
-        let fixed = date_w + msgs_w + cost_w + 6; // separators & padding
+        // Two columns of left margin plus three two-column separators. Counting
+        // only the separators leaves each row two columns wider than the modal,
+        // which wraps the cost onto a line of its own.
+        let fixed = date_w + msgs_w + cost_w + ROW_MARGIN + 3 * COLUMN_GAP;
         let title_w = inner_w.saturating_sub(fixed).max(10);
 
         // Header row
@@ -644,5 +652,50 @@ mod tests {
             "truncated string should fit within budget"
         );
         assert!(result.ends_with('…'));
+    }
+
+    /// The rows the browser drew, trimmed of the modal's blank surroundings.
+    fn drawn_rows(state: &SessionBrowserState, width: u16, height: u16) -> Vec<String> {
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        render_session_browser(state, area, &mut buf);
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| {
+                        buf.cell((x, y))
+                            .map(|cell| cell.symbol().to_string())
+                            .unwrap_or_default()
+                    })
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_row_fits_on_one_line_instead_of_wrapping_its_cost() {
+        // The column budget counted the separators but not the left margin, so
+        // every row came out two columns wider than the modal and the cost
+        // wrapped onto a line of its own.
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        let rows = drawn_rows(&s, 80, 24);
+
+        let title_rows: Vec<&String> = rows
+            .iter()
+            .filter(|row| row.contains("Refactor auth module"))
+            .collect();
+        assert_eq!(title_rows.len(), 1, "{rows:#?}");
+        assert!(
+            title_rows[0].contains("$0.0124"),
+            "the cost belongs on its own row's line: {:?}",
+            title_rows[0]
+        );
+        assert!(
+            !rows.iter().any(|row| row.trim() == "$0.0124"),
+            "no line carries the cost alone: {rows:#?}"
+        );
     }
 }
