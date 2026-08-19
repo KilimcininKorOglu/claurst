@@ -1341,6 +1341,9 @@ pub struct App {
     pub plugin_hints: Vec<PluginHintBanner>,
     /// Optional session title shown in the status bar.
     pub session_title: Option<String>,
+    /// The running session's id. The branch screen needs it to tell this
+    /// session's branches from every other session on disk.
+    pub session_id: String,
     /// Remote session URL (set when bridge connects; readable by commands).
     pub remote_session_url: Option<String>,
     /// Live MCP manager snapshot source when available.
@@ -1492,6 +1495,16 @@ pub struct App {
     /// turn-diff state as well as the transcript, and the TUI holds none of
     /// those, so the request is handed over rather than acted on here.
     pub pending_resume_session_id: Option<String>,
+    /// A branch the user asked to create: (name, message index). Performed by
+    /// the CLI loop, which owns the session record.
+    pub pending_branch_create: Option<(String, usize)>,
+    /// A branch the user asked to delete, by session id.
+    pub pending_branch_delete: Option<String>,
+    /// Set when the branch screen is asked for; the pump loads the list.
+    pub branch_list_pending: bool,
+    /// In-flight load for the branch screen.
+    pub branch_list_rx:
+        Option<tokio::sync::mpsc::Receiver<Vec<crate::session_branching::BranchInfo>>>,
     /// Receiver for background session-list results.
     /// In-flight load for the cost-and-stats screen.
     pub stats_rx: Option<tokio::sync::mpsc::Receiver<crate::stats_dialog::AggregatedStats>>,
@@ -1835,6 +1848,7 @@ impl App {
             error_modal_scroll_offset: 0,
             plugin_hints: Vec::new(),
             session_title: None,
+            session_id: String::new(),
             remote_session_url: None,
             mcp_manager: None,
             pending_mcp_reconnect: false,
@@ -1897,6 +1911,10 @@ impl App {
             model_picker_provider_id: None,
             session_list_pending: false,
             pending_resume_session_id: None,
+            pending_branch_create: None,
+            pending_branch_delete: None,
+            branch_list_pending: false,
+            branch_list_rx: None,
             stats_rx: None,
             session_list_rx: None,
             recent_sessions: Vec::new(),
@@ -4894,8 +4912,14 @@ impl App {
                     KeyCode::Char('d') => self.session_branching.start_delete_confirm(),
                     KeyCode::Enter => {
                         if let Some(branch) = self.session_branching.selected_branch() {
-                            self.status_message =
-                                Some(format!("Switched to branch: {}", branch.name));
+                            if branch.is_current {
+                                self.status_message = Some("Already on this branch.".to_string());
+                            } else {
+                                // The same road the session browser takes:
+                                // swapping sessions moves state the TUI does
+                                // not hold.
+                                self.pending_resume_session_id = Some(branch.id.clone());
+                            }
                             self.session_branching.close();
                         }
                     }
@@ -4905,8 +4929,7 @@ impl App {
                     KeyCode::Esc => self.session_branching.cancel(),
                     KeyCode::Enter => {
                         if let Some((name, at_msg)) = self.session_branching.confirm_create_new() {
-                            self.status_message =
-                                Some(format!("Created branch: {} at message {}", name, at_msg));
+                            self.pending_branch_create = Some((name, at_msg));
                             self.session_branching.close();
                         }
                     }
@@ -4918,7 +4941,7 @@ impl App {
                     KeyCode::Esc | KeyCode::Char('n') => self.session_branching.cancel(),
                     KeyCode::Enter | KeyCode::Char('y') => {
                         if let Some(branch_id) = self.session_branching.confirm_delete() {
-                            self.status_message = Some(format!("Deleted branch: {}", branch_id));
+                            self.pending_branch_delete = Some(branch_id);
                         }
                     }
                     _ => {}
@@ -6483,6 +6506,13 @@ impl App {
                     PermissionMode::Plan => "Plan mode",
                 };
                 self.status_message = Some(label.to_string());
+                false
+            }
+            "createBranch" => {
+                // The branches are on disk, so the screen opens empty and the
+                // pump fills it, the way the session browser does.
+                self.session_branching.open(Vec::new(), self.messages.len());
+                self.branch_list_pending = true;
                 false
             }
             "toggleTimeline" => {
@@ -8201,6 +8231,61 @@ impl App {
         };
         self.pending_resume_session_id = Some(session.id.clone());
         self.session_browser.close();
+    }
+
+    /// Load the branch screen's list when it asks for one.
+    ///
+    /// Branches are sessions that name this one as their parent, so the list
+    /// comes off disk rather than out of `App`.
+    pub fn pump_branch_list(&mut self) {
+        if let Some(ref mut rx) = self.branch_list_rx {
+            match rx.try_recv() {
+                Ok(branches) => {
+                    self.session_branching.branches = branches;
+                    self.session_branching.selected_idx = 0;
+                    self.branch_list_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.branch_list_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            }
+        }
+
+        if self.branch_list_pending {
+            self.branch_list_pending = false;
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            self.branch_list_rx = Some(rx);
+            let session_id = self.session_id.clone();
+            tokio::spawn(async move {
+                let listing = claurst_core::history::list_sessions().await;
+                // The whole family, not just this session's own children:
+                // standing on a branch, the way back to the trunk has to be on
+                // the list too.
+                let root = listing
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session_id)
+                    .and_then(|s| s.branch_from.clone())
+                    .unwrap_or_else(|| session_id.clone());
+                let branches: Vec<crate::session_branching::BranchInfo> = listing
+                    .sessions
+                    .iter()
+                    .filter(|s| s.id == root || s.branch_from.as_deref() == Some(&root))
+                    .map(|s| crate::session_branching::BranchInfo {
+                        id: s.id.clone(),
+                        name: s.title.clone().unwrap_or_else(|| "(untitled)".to_string()),
+                        branch_at_message: s.branch_at_message.unwrap_or(0),
+                        message_count: s.messages.len(),
+                        created_at: claurst_core::format_utils::format_relative_time(
+                            s.created_at.timestamp_millis().max(0) as u64,
+                        ),
+                        is_current: s.id == session_id,
+                    })
+                    .collect();
+                let _ = tx.send(branches).await;
+            });
+        }
     }
 
     /// Load the cost-and-stats screen's numbers when it asks for them.
@@ -10502,6 +10587,95 @@ mod system_annotation_tests {
         );
         assert_eq!(app.system_annotations.len(), 1);
         assert!(app.system_annotations[0].text.contains("Cargo.toml"));
+    }
+}
+
+#[cfg(test)]
+mod branch_screen_tests {
+    //! The branch screen used to answer every key with a status line and do
+    //! nothing: Enter announced a switch that never happened, `n` announced a
+    //! branch it never created, `d` announced a deletion that only removed the
+    //! row from the list on screen.
+    use super::*;
+    use crate::session_branching::BranchInfo;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn app_on_branch_screen(branches: Vec<BranchInfo>) -> App {
+        let mut app = App::new(Config::default(), claurst_core::cost::CostTracker::new());
+        app.session_id = "current".to_string();
+        app.session_branching.open(branches, 4);
+        app
+    }
+
+    fn branch(id: &str, is_current: bool) -> BranchInfo {
+        BranchInfo {
+            id: id.to_string(),
+            name: format!("branch {id}"),
+            branch_at_message: 2,
+            message_count: 3,
+            created_at: "just now".to_string(),
+            is_current,
+        }
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn asking_for_the_screen_asks_for_the_list() {
+        let mut app = App::new(Config::default(), claurst_core::cost::CostTracker::new());
+        app.handle_keybinding_action("createBranch");
+
+        assert!(app.session_branching.visible);
+        assert!(
+            app.branch_list_pending,
+            "the branches live on disk, so the screen has to ask for them"
+        );
+    }
+
+    #[test]
+    fn entering_a_branch_asks_to_switch_to_it() {
+        let mut app = app_on_branch_screen(vec![branch("current", true), branch("other", false)]);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.pending_resume_session_id.as_deref(), Some("other"));
+        assert!(!app.session_branching.visible);
+    }
+
+    #[test]
+    fn entering_the_branch_already_open_switches_nothing() {
+        let mut app = app_on_branch_screen(vec![branch("current", true)]);
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.pending_resume_session_id.is_none());
+    }
+
+    #[test]
+    fn naming_a_new_branch_asks_for_it_to_be_created() {
+        let mut app = app_on_branch_screen(vec![branch("current", true)]);
+        press(&mut app, KeyCode::Char('n'));
+        for c in "spike".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Enter);
+
+        assert_eq!(
+            app.pending_branch_create,
+            Some(("spike".to_string(), 4)),
+            "the branch point is where the conversation stands"
+        );
+    }
+
+    #[test]
+    fn confirming_a_delete_asks_for_the_session_to_be_deleted() {
+        let mut app = app_on_branch_screen(vec![branch("current", true), branch("other", false)]);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char('d'));
+        press(&mut app, KeyCode::Char('y'));
+
+        assert_eq!(app.pending_branch_delete.as_deref(), Some("other"));
     }
 }
 

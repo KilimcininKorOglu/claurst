@@ -177,17 +177,16 @@ impl SessionBranchingState {
     }
 
     /// Confirm deletion of the selected branch.
-    /// Returns the branch ID if confirmed, None otherwise.
+    ///
+    /// Returns the branch id and leaves the list alone: the deletion happens
+    /// elsewhere and can be refused (the branch in use) or fail, and a row that
+    /// vanished on confirmation would report a deletion that never happened.
     pub fn confirm_delete(&mut self) -> Option<String> {
         if self.mode != BranchBrowserMode::ConfirmDelete {
             return None;
         }
         let branch_id = self.selected_branch()?.id.clone();
-        self.branches.retain(|b| b.id != branch_id);
         self.mode = BranchBrowserMode::Browse;
-        if self.selected_idx >= self.branches.len() && self.selected_idx > 0 {
-            self.selected_idx -= 1;
-        }
         Some(branch_id)
     }
 

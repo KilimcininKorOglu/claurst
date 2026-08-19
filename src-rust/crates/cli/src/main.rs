@@ -2254,6 +2254,7 @@ fn apply_session_resume(
     tool_ctx.current_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     cmd_ctx.session_id = session.id.clone();
     cmd_ctx.session_title = session.title.clone();
+    app.session_id = session.id.clone();
     if let Some(saved_dir) = session.working_dir.as_ref() {
         let saved_path = std::path::PathBuf::from(saved_dir);
         if saved_path.exists() {
@@ -2909,6 +2910,7 @@ async fn run_interactive(
     app.reload_companion();
     // Seed the project-MCP approval queue: untrusted project servers that the
     // user must approve before they are allowed to launch (issue #123).
+    app.session_id = session.id.clone();
     app.mcp_project_root = mcp_project_root;
     app.mcp_pending_project = pending_project_mcp.into_iter().collect();
     // The dialog asks the question; the settings live here, so the answer is
@@ -3227,7 +3229,45 @@ async fn run_interactive(
         app.pump_session_list();
         app.pump_recent_sessions();
         app.pump_stats();
+        app.pump_branch_list();
         app.pump_voice_events();
+
+        // Creating a branch writes a new session record, so the screen asks
+        // and this loop does it, then switches to what it made.
+        if let Some((name, at_message)) = app.pending_branch_create.take() {
+            match claurst_core::history::branch_session(&session.id, at_message, Some(&name)).await
+            {
+                Ok(branched) => {
+                    app.status_message = Some(format!(
+                        "Created branch \"{name}\" at message {at_message}."
+                    ));
+                    app.pending_resume_session_id = Some(branched.id);
+                }
+                Err(e) => app.push_notification(
+                    claurst_tui::NotificationKind::Error,
+                    format!("Could not create the branch: {e}"),
+                    None,
+                ),
+            }
+        }
+
+        if let Some(id) = app.pending_branch_delete.take() {
+            if id == session.id {
+                app.status_message = Some("The current branch cannot be deleted.".to_string());
+            } else {
+                match claurst_core::history::delete_session(&id).await {
+                    Ok(()) => {
+                        app.status_message = Some("Branch deleted.".to_string());
+                        app.branch_list_pending = app.session_branching.visible;
+                    }
+                    Err(e) => app.push_notification(
+                        claurst_tui::NotificationKind::Error,
+                        format!("Could not delete the branch: {e}"),
+                        None,
+                    ),
+                }
+            }
+        }
 
         // The session browser's Enter hands the id over rather than acting on
         // it, because swapping sessions moves state the TUI does not hold.
@@ -3605,6 +3645,7 @@ async fn run_interactive(
                                     tool_ctx.session_id = session.id.clone();
                                     cmd_ctx.session_id = session.id.clone();
                                     cmd_ctx.session_title = None;
+                                    app.session_id = session.id.clone();
                                     transcript.rebind(
                                         claurst_core::session_storage::transcript_root_for(
                                             &tool_ctx.working_dir,
