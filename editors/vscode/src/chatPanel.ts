@@ -14,6 +14,7 @@ import {
   ToolCallUpdate,
 } from './acpClient';
 import { AgentPool } from './agentPool';
+import { mentionsIn } from './protocol';
 import { ChatSurface, PanelSurface, ViewSurface } from './chatSurface';
 import { AgentState } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
@@ -791,17 +792,6 @@ async function openLocation(target: string, line?: number): Promise<void> {
   const at = new vscode.Range(zeroBased, 0, zeroBased, 0);
   editor.selection = new vscode.Selection(at.start, at.start);
   editor.revealRange(at, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-}
-
-/** Every `@path` mention in what the user typed. */
-function mentionsIn(text: string): string[] {
-  const found = new Set<string>();
-  const pattern = /(^|\s)@([^\s]+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    found.add(match[2]);
-  }
-  return [...found];
 }
 
 function toolCallPayload(update: ToolCallUpdate) {
