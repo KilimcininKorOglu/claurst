@@ -8009,6 +8009,99 @@ impl App {
     }
 
     // -------------------------------------------------------------------
+    // Background work the event loop has to pump
+    // -------------------------------------------------------------------
+    //
+    // Each of these starts a background load when a flag asks for one and
+    // hands the result to the widget that needs it. They must be called once
+    // per iteration of whichever loop is driving the terminal, or the flag is
+    // set and nothing ever answers it.
+
+    /// Load the session list for the browser, and take the result when it lands.
+    ///
+    /// `/session`, `/resume` and `/rename` all open the browser and set
+    /// `session_list_pending`; without this the browser stays empty forever.
+    pub fn pump_session_list(&mut self) {
+        if let Some(ref mut rx) = self.session_list_rx {
+            match rx.try_recv() {
+                Ok(entries) => {
+                    self.session_browser.sessions = entries;
+                    self.session_browser.selected_idx = 0;
+                    self.session_list_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.session_list_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            }
+        }
+
+        if self.session_list_pending {
+            self.session_list_pending = false;
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            self.session_list_rx = Some(rx);
+            tokio::spawn(async move {
+                let sessions = claurst_core::history::list_sessions().await;
+                let entries: Vec<crate::session_browser::SessionEntry> = sessions
+                    .into_iter()
+                    .map(|s| {
+                        let last_updated = claurst_core::format_utils::format_relative_time(
+                            s.updated_at.timestamp_millis().max(0) as u64,
+                        );
+                        crate::session_browser::SessionEntry {
+                            id: s.id,
+                            title: s.title.unwrap_or_else(|| "(untitled)".to_string()),
+                            last_updated,
+                            message_count: s.messages.len(),
+                            cost_usd: s.total_cost,
+                        }
+                    })
+                    .collect();
+                let _ = tx.send(entries).await;
+            });
+        }
+    }
+
+    /// Load the welcome screen's recent-activity list once at startup.
+    pub fn pump_recent_sessions(&mut self) {
+        if let Some(ref mut rx) = self.recent_sessions_rx {
+            match rx.try_recv() {
+                Ok(sessions) => {
+                    self.recent_sessions = sessions;
+                    self.recent_sessions_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    self.recent_sessions_rx = None;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            }
+        }
+
+        if self.recent_sessions_pending {
+            self.recent_sessions_pending = false;
+            let root = self.project_root();
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            self.recent_sessions_rx = Some(rx);
+            tokio::spawn(async move {
+                // Show at most a handful; list_sessions is already newest-first.
+                const MAX_RECENT: usize = 5;
+                let summaries = claurst_core::session_storage::list_sessions(&root)
+                    .await
+                    .unwrap_or_default();
+                let recent: Vec<RecentSession> = summaries
+                    .into_iter()
+                    .take(MAX_RECENT)
+                    .map(|s| RecentSession {
+                        label: recent_session_label(s.title, s.last_prompt),
+                        mtime: s.mtime,
+                    })
+                    .collect();
+                let _ = tx.send(recent).await;
+            });
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Main run loop
     // -------------------------------------------------------------------
 
@@ -8021,84 +8114,8 @@ impl App {
         loop {
             self.frame_count = self.frame_count.wrapping_add(1);
 
-            // Drain background session-list results.
-            if let Some(ref mut rx) = self.session_list_rx {
-                match rx.try_recv() {
-                    Ok(entries) => {
-                        self.session_browser.sessions = entries;
-                        self.session_browser.selected_idx = 0;
-                        self.session_list_rx = None;
-                    }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                        self.session_list_rx = None;
-                    }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                }
-            }
-
-            // Spawn async session-list load when requested.
-            if self.session_list_pending {
-                self.session_list_pending = false;
-                let (tx, rx) = tokio::sync::mpsc::channel(1);
-                self.session_list_rx = Some(rx);
-                tokio::spawn(async move {
-                    let sessions = claurst_core::history::list_sessions().await;
-                    let entries: Vec<crate::session_browser::SessionEntry> = sessions
-                        .into_iter()
-                        .map(|s| {
-                            let last_updated = claurst_core::format_utils::format_relative_time(
-                                s.updated_at.timestamp_millis().max(0) as u64,
-                            );
-                            crate::session_browser::SessionEntry {
-                                id: s.id,
-                                title: s.title.unwrap_or_else(|| "(untitled)".to_string()),
-                                last_updated,
-                                message_count: s.messages.len(),
-                                cost_usd: s.total_cost,
-                            }
-                        })
-                        .collect();
-                    let _ = tx.send(entries).await;
-                });
-            }
-
-            // Drain background recent-sessions results into the welcome screen.
-            if let Some(ref mut rx) = self.recent_sessions_rx {
-                match rx.try_recv() {
-                    Ok(sessions) => {
-                        self.recent_sessions = sessions;
-                        self.recent_sessions_rx = None;
-                    }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                        self.recent_sessions_rx = None;
-                    }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
-                }
-            }
-
-            // Spawn the one-shot recent-sessions load when requested (startup).
-            if self.recent_sessions_pending {
-                self.recent_sessions_pending = false;
-                let root = self.project_root();
-                let (tx, rx) = tokio::sync::mpsc::channel(1);
-                self.recent_sessions_rx = Some(rx);
-                tokio::spawn(async move {
-                    // Show at most a handful; list_sessions is already newest-first.
-                    const MAX_RECENT: usize = 5;
-                    let summaries = claurst_core::session_storage::list_sessions(&root)
-                        .await
-                        .unwrap_or_default();
-                    let recent: Vec<RecentSession> = summaries
-                        .into_iter()
-                        .take(MAX_RECENT)
-                        .map(|s| RecentSession {
-                            label: recent_session_label(s.title, s.last_prompt),
-                            mtime: s.mtime,
-                        })
-                        .collect();
-                    let _ = tx.send(recent).await;
-                });
-            }
+            self.pump_session_list();
+            self.pump_recent_sessions();
 
             // Drain voice transcription events (non-blocking).
             // When the background recording/transcription task emits a
@@ -9969,6 +9986,117 @@ mod timeline_noise_tests {
             "a transient status line already has the status row, and a spinner \
              verb would bury the tool calls it sits between"
         );
+    }
+}
+
+#[cfg(test)]
+mod background_pump_tests {
+    //! The widgets set a flag and wait. Whichever loop drives the terminal has
+    //! to pump these, and for a long time none did: the only caller was
+    //! `App::run`, which nothing invokes, so the session browser listed nothing
+    //! and the welcome screen's recent activity stayed blank.
+    use super::*;
+
+    fn app() -> App {
+        App::new(Config::default(), claurst_core::cost::CostTracker::new())
+    }
+
+    fn entry(id: &str) -> crate::session_browser::SessionEntry {
+        crate::session_browser::SessionEntry {
+            id: id.to_string(),
+            title: id.to_string(),
+            last_updated: "just now".to_string(),
+            message_count: 1,
+            cost_usd: 0.0,
+        }
+    }
+
+    #[tokio::test]
+    async fn asking_for_the_session_list_starts_one_load_and_only_one() {
+        let mut app = app();
+        app.session_list_pending = true;
+
+        app.pump_session_list();
+        assert!(!app.session_list_pending, "the request was taken");
+        assert!(app.session_list_rx.is_some(), "a load is in flight");
+
+        // A second pump must not start a second load over the first.
+        app.pump_session_list();
+        assert!(app.session_list_rx.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_delivered_session_list_reaches_the_browser() {
+        let mut app = app();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        app.session_list_rx = Some(rx);
+        app.session_browser.selected_idx = 3;
+
+        tx.send(vec![entry("one"), entry("two")])
+            .await
+            .expect("channel open");
+        app.pump_session_list();
+
+        assert_eq!(app.session_browser.sessions.len(), 2);
+        assert_eq!(
+            app.session_browser.selected_idx, 0,
+            "a new list starts at the top rather than wherever the old one sat"
+        );
+        assert!(app.session_list_rx.is_none(), "the channel is spent");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_sender_ends_the_wait_instead_of_holding_it_open() {
+        let mut app = app();
+        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<crate::session_browser::SessionEntry>>(1);
+        app.session_list_rx = Some(rx);
+        drop(tx);
+
+        app.pump_session_list();
+        assert!(app.session_list_rx.is_none());
+    }
+
+    #[tokio::test]
+    async fn pumping_an_idle_app_does_nothing() {
+        let mut app = app();
+        app.session_list_pending = false;
+        app.session_list_rx = None;
+
+        app.pump_session_list();
+        assert!(app.session_list_rx.is_none());
+        assert!(app.session_browser.sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recent_activity_is_loaded_once_at_startup() {
+        let mut app = app();
+        assert!(
+            app.recent_sessions_pending,
+            "a fresh app asks for the list itself"
+        );
+
+        app.pump_recent_sessions();
+        assert!(!app.recent_sessions_pending);
+        assert!(app.recent_sessions_rx.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_delivered_recent_list_reaches_the_welcome_screen() {
+        let mut app = app();
+        app.recent_sessions_pending = false;
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        app.recent_sessions_rx = Some(rx);
+
+        tx.send(vec![RecentSession {
+            label: "Refactor auth module".to_string(),
+            mtime: std::time::SystemTime::UNIX_EPOCH,
+        }])
+        .await
+        .expect("channel open");
+        app.pump_recent_sessions();
+
+        assert_eq!(app.recent_sessions.len(), 1);
+        assert!(app.recent_sessions_rx.is_none());
     }
 }
 

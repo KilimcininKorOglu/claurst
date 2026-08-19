@@ -2915,6 +2915,12 @@ async fn run_interactive(
         app.tick_mikmik_pose();
         app.notifications.tick();
 
+        // Background loads the widgets ask for. Nothing else answers these
+        // flags, so a missed call leaves the session browser empty and the
+        // welcome screen's recent activity blank.
+        app.pump_session_list();
+        app.pump_recent_sessions();
+
         // Process file injection dialog outcome (if any)
         if let Some((outcome, pending_input, pending_imgs)) =
             app.file_injection_dialog.take_outcome()
