@@ -202,6 +202,8 @@ mod goal;
 pub use goal::*;
 mod todos;
 pub use todos::*;
+mod poke;
+pub use poke::*;
 mod turns;
 pub use turns::*;
 mod speech;
@@ -1540,6 +1542,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         // The session's TodoWrite list
         Box::new(TodosCommand),
         // The agentic turn limit
+        Box::new(PokeCommand),
         Box::new(TurnsCommand),
         // Session navigation ported from opencode: /new (lazy home) + /move.
         Box::new(NewCommand),
