@@ -166,9 +166,61 @@ type HostMessage =
     }
     if (bubble.dataset.cls === 'user') {
       bubble.textContent = currentAgentText;
-    } else {
-      bubble.innerHTML = renderMarkdown(currentAgentText);
+      return;
     }
+    bubble.innerHTML = renderMarkdown(currentAgentText);
+    decorateCodeBlocks(bubble);
+  }
+
+  /** Put a copy and an apply action on every fenced block.
+   *
+   * Code an agent writes is code somebody wants somewhere else, and selecting
+   * it by hand out of a scrolling transcript loses the indentation as often as
+   * not. The buttons are rebuilt with the bubble on each redraw, which is
+   * cheap next to the render itself. */
+  function decorateCodeBlocks(bubble: HTMLElement): void {
+    for (const pre of Array.from(bubble.querySelectorAll('pre'))) {
+      const code = pre.querySelector('code');
+      if (!code) {
+        continue;
+      }
+      // textContent, not innerText: the highlighter wraps the source in spans,
+      // and only textContent gives back exactly what was between the fences.
+      const source = code.textContent ?? '';
+      const actions = document.createElement('div');
+      actions.className = 'code-actions';
+      actions.appendChild(
+        codeButton('Copy', (button) => {
+          navigator.clipboard.writeText(source).then(
+            () => flash(button, 'Copied'),
+            // A refused clipboard is worth saying out loud: the user would
+            // otherwise paste whatever was there before.
+            () => flash(button, 'Copy failed'),
+          );
+        }),
+      );
+      actions.appendChild(
+        codeButton('Apply', () => vscode.postMessage({ type: 'applyCode', text: source })),
+      );
+      pre.appendChild(actions);
+    }
+  }
+
+  function codeButton(label: string, onClick: (button: HTMLButtonElement) => void): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.className = 'code-action';
+    button.textContent = label;
+    button.addEventListener('click', () => onClick(button));
+    return button;
+  }
+
+  /** Say what happened on the button that was pressed, then put it back. */
+  function flash(button: HTMLButtonElement, message: string): void {
+    const original = button.textContent ?? '';
+    button.textContent = message;
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1200);
   }
 
   /** Re-render at most once a frame.

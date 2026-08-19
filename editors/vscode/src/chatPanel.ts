@@ -341,6 +341,11 @@ export class ChatPanel {
       case 'permissionAnswer':
         this.answerPermission(msg.requestId, msg.optionId);
         break;
+      case 'applyCode':
+        if (typeof msg.text === 'string') {
+          applyCode(msg.text).catch((e) => this.reportError(e));
+        }
+        break;
       case 'openLocation':
         if (typeof msg.path === 'string') {
           openLocation(msg.path, typeof msg.line === 'number' ? msg.line : undefined).catch((e) =>
@@ -535,6 +540,25 @@ export class ChatPanel {
       d.dispose();
     }
     this.disposables = [];
+  }
+}
+
+/** Put a code block from the transcript into the editor.
+ *
+ * It replaces the selection, or is inserted at the cursor when there is none.
+ * A workspace edit rather than a direct write, so one Undo takes it back out
+ * again: the user is trying it, not committing to it. */
+async function applyCode(text: string): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    // Silently doing nothing would look like the button is broken.
+    vscode.window.showWarningMessage('Open a file to apply this code to.');
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(editor.document.uri, editor.selection, text);
+  if (!(await vscode.workspace.applyEdit(edit))) {
+    throw new Error('the workspace refused the edit');
   }
 }
 
