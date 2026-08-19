@@ -28,8 +28,36 @@ global settings):
 <project-root>/.claurst/settings.jsonc
 ```
 
-Settings that appear in the project file override the corresponding global
-values. Keys absent from the project file fall back to the global value.
+A project settings file arrives with the checkout, and nobody reads it before
+opening the directory. What it may set is therefore limited. Keys fall into
+three groups.
+
+**Taken from the project file.** Most keys: `model`, `mcpServers` (themselves
+gated, see below), `agents`, `commands`, `modelOverrides`, and the rest. Keys
+absent from the project file fall back to the global value. `theme` and
+`output_format` are the exception among the harmless ones and stay with your
+own settings: a `config` block always parses in full, so a project file that
+never mentioned them was resetting them to their defaults.
+
+**Taken only after you approve them.** `hooks`, `formatter`, `lsp_servers` and
+`skills` each name a command to run or an address to fetch from. On the first
+session in a checkout that declares any of them, Claurst shows them verbatim
+and asks. "Always allow" records a fingerprint of exactly what was shown under
+`~/.claurst/project_trust.json`, never inside the repository; editing an
+approved command changes the fingerprint and asks again. Headless (`--print`)
+never runs them, because there is no way to ask, and says so on stderr.
+Project-defined `mcpServers` follow the same shape through their own prompt.
+
+**Never taken from the project file.** `permission_mode`, `permissionRules`,
+`api_key`, `provider`, `provider_configs`, `providers`, `searxngUrl`, `env`,
+`custom_system_prompt`, `append_system_prompt`, `workspace_paths`,
+`additional_dirs`, `statusLine`, `acpAgents`, `remoteControl`,
+`trustProjectMcpServers`, `skipDangerousModePermissionPrompt` and
+`allowedBashPrefixes`. These decide whether a tool asks before acting, where
+the conversation and the credential are sent, what the model is told before you
+say anything, and which directories are reachable. A repository that could set
+them would not need a hook. Claurst names the ignored keys on startup rather
+than dropping them silently.
 
 ---
 
@@ -448,7 +476,14 @@ under `<project>/.claurst/plugins/`) needs approval before it launches; see
 
 | Key   | Type                     | Default | Description                                                                                                                                                                                                         |
 |-------|--------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `env` | object (string → string) | {}      | Environment variables injected into every tool execution. Useful for setting project-specific tokens without polluting the system environment. Values may reference existing env vars using `{env:VARNAME}` syntax. |
+| `env` | object (string → string) | {}      | Environment variables for tool execution. Values may reference existing env vars using `{env:VARNAME}` syntax. |
+
+Only your own global settings file can set this: `LD_PRELOAD`,
+`DYLD_INSERT_LIBRARIES` and `PATH` all redirect an ordinary-looking command to
+code of the setter's choosing, so a project file is ignored here.
+
+The name overstates what is wired up today. `/remote-env` is the only reader in
+the shipped binary; the tool runner does not consult it.
 
 ### Hooks
 
@@ -492,6 +527,11 @@ Hook entry fields:
 A hook that reaches its limit is stopped along with anything it started, and
 the run continues. A `blocking` hook that reaches it blocks the operation
 instead: a hook that never answered cannot be read as approval.
+
+A hook declared by a project's `.claurst/settings.json` runs only after you
+have seen the command and approved it; see [Per-project
+settings](#per-project-settings). The same applies to `formatter`,
+`lsp_servers` and `skills`.
 
 ---
 
