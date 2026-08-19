@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AgentPool } from './agentPool';
 import { ChatPanel } from './chatPanel';
+import { StatusBar } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -12,6 +13,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const pool = new AgentPool(version, outputChannel);
   context.subscriptions.push({ dispose: () => pool.dispose() });
   context.subscriptions.push(watchConfiguration(pool));
+
+  const statusBar = new StatusBar();
+  context.subscriptions.push(statusBar);
+  ChatPanel.onStateChange = (state) => statusBar.set(state);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.openChat', async () => {

@@ -14,6 +14,7 @@ import {
   ToolCallUpdate,
 } from './acpClient';
 import { AgentPool } from './agentPool';
+import { AgentState } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
 /** The key the mode pill uses. Config option ids come from the agent, so this
@@ -161,6 +162,7 @@ export class ChatPanel {
     this.cwd = cwdOf(opening);
     ChatPanel.panels.add(this);
     ChatPanel.active = this;
+    ChatPanel.reportState();
 
     this.panel.webview.html = this.renderHtml(extensionUri);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -494,6 +496,18 @@ export class ChatPanel {
   private static turnStarted(delta: number): void {
     ChatPanel.running = Math.max(0, ChatPanel.running + delta);
     vscode.commands.executeCommand('setContext', 'claurst.busy', ChatPanel.running > 0);
+    ChatPanel.reportState();
+  }
+
+  /** Say what the agent is doing, for anything watching from outside a panel. */
+  static onStateChange: ((state: AgentState) => void) | undefined;
+
+  private static reportState(): void {
+    if (ChatPanel.running > 0) {
+      ChatPanel.onStateChange?.('busy');
+    } else {
+      ChatPanel.onStateChange?.(ChatPanel.panels.size > 0 ? 'ready' : 'idle');
+    }
   }
 
   /** Turn what was typed into prompt blocks, resolving any `@file` mention.
@@ -589,6 +603,7 @@ export class ChatPanel {
     if (ChatPanel.active === this) {
       ChatPanel.active = ChatPanel.panels.values().next().value;
     }
+    ChatPanel.reportState();
     // Closing the panel is not consent. Anything still waiting on an answer is
     // told nobody chose, which denies the call rather than stalling the turn.
     for (const resolve of this.pendingPermissions.values()) {
