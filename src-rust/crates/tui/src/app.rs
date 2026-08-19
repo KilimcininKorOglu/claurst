@@ -2215,6 +2215,7 @@ impl App {
             &self.config.model_overrides,
         );
         self.model_picker.set_models(models);
+        self.model_picker.set_account_context(provider_id);
         self.model_picker_provider_id = Some(provider_id.to_string());
         // Catalog-backed providers (Anthropic/OpenAI/Google) are a read-only
         // projection of the models.dev catalog — there is no live endpoint to
@@ -2254,6 +2255,7 @@ impl App {
                 .to_string()
         };
 
+        self.load_model_favorites();
         self.model_picker.open_with_title(
             title.unwrap_or_else(|| "Select model".to_string()),
             &current_model,
@@ -2347,6 +2349,7 @@ impl App {
             .cloned()
             .collect();
         self.model_picker.set_connected_ids(connected);
+        self.load_model_favorites();
 
         // The live fetch is per-provider, so it still targets the session's
         // provider. Every other section shows the catalog projection.
@@ -2356,6 +2359,7 @@ impl App {
             .clone()
             .unwrap_or_else(|| "anthropic".to_string());
         self.model_picker_provider_id = Some(active.clone());
+        self.model_picker.set_account_context(active.clone());
         if crate::model_picker::provider_uses_catalog_projection(&active) {
             self.model_picker.loading_models = false;
             self.model_picker_fetch_pending = false;
@@ -2397,6 +2401,47 @@ impl App {
         self.has_credentials = true;
         self.status_message = Some(format!("{} {}.", status_prefix, provider_name));
         self.open_model_picker_for_provider(&provider_id, Some(picker_title));
+    }
+
+    /// Hand the picker the starred models saved on disk.
+    ///
+    /// Called as the picker opens, which is a keystroke rather than a frame, so
+    /// reading the settings file here costs nothing per redraw.
+    fn load_model_favorites(&mut self) {
+        let favorites = Settings::load_sync()
+            .map(|settings| settings.favorite_models)
+            .unwrap_or_default();
+        self.model_picker.set_favorites(favorites);
+    }
+
+    /// Star or unstar the model under the picker's cursor.
+    ///
+    /// The in-memory set only moves once the file has taken the change, so a
+    /// failed write shows as a star that did not appear rather than one that
+    /// silently vanishes on the next launch.
+    fn toggle_selected_model_favorite(&mut self) {
+        let Some(key) = self.model_picker.selected_favorite_key() else {
+            return;
+        };
+        let starred = !self.model_picker.has_favorite(&key);
+
+        let mut settings = Settings::load_sync().unwrap_or_default();
+        if starred {
+            settings.favorite_models.insert(key.clone());
+        } else {
+            settings.favorite_models.remove(&key);
+        }
+        if let Err(e) = settings.save_sync() {
+            self.status_message = Some(format!("Could not save favourites: {}", e));
+            return;
+        }
+
+        self.model_picker.set_favorite(&key, starred);
+        self.status_message = Some(if starred {
+            format!("Starred {}", key)
+        } else {
+            format!("Unstarred {}", key)
+        });
     }
 
     /// Write the account a connect dialog just collected.
@@ -4678,6 +4723,9 @@ impl App {
                 // the letter into the filter box.
                 KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.model_picker.toggle_connected_only()
+                }
+                KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.toggle_selected_model_favorite()
                 }
                 KeyCode::Enter => {
                     if let Some((model_id, effort)) = self.model_picker.confirm() {

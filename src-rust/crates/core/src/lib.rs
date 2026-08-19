@@ -1645,6 +1645,15 @@ pub mod config {
         #[serde(default, rename = "pluginConfig")]
         pub plugin_config:
             std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+        /// Models the user starred in the model picker, which lists them first
+        /// inside their own account's section.
+        ///
+        /// Always qualified `account/model`, because the same model reached
+        /// through two accounts is two different requests, and because the
+        /// picker's single-account and cross-account lists would otherwise
+        /// disagree about what was starred.
+        #[serde(default, rename = "favoriteModels")]
+        pub favorite_models: std::collections::HashSet<String>,
         /// Whether the user has completed the first-launch onboarding flow.
         /// Mirrors TS `hasAcknowledgedSafetyNotice` / `hasCompletedOnboarding`.
         #[serde(default, rename = "hasCompletedOnboarding")]
@@ -2818,6 +2827,11 @@ pub mod config {
                     }
                     merged
                 },
+                favorite_models: {
+                    let mut s = base.favorite_models;
+                    s.extend(over.favorite_models);
+                    s
+                },
                 has_completed_onboarding: over.has_completed_onboarding
                     || base.has_completed_onboarding,
                 last_seen_version: over.last_seen_version.or(base.last_seen_version),
@@ -3140,6 +3154,48 @@ pub mod config {
 
             let merged = Settings::merge(user, Settings::default());
             assert!(merged.remote_control.is_some());
+        }
+    }
+
+    #[cfg(test)]
+    mod favorite_model_tests {
+        use super::*;
+
+        fn with_favorites(keys: &[&str]) -> Settings {
+            Settings {
+                favorite_models: keys.iter().map(|k| k.to_string()).collect(),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn both_sides_of_a_merge_keep_their_stars() {
+            // Stars are a preference, not a security setting, so a project file
+            // adds to the user's list rather than replacing it.
+            let merged = Settings::merge(
+                with_favorites(&["anthropic/sonnet"]),
+                with_favorites(&["openai/gpt-5"]),
+            );
+
+            assert!(merged.favorite_models.contains("anthropic/sonnet"));
+            assert!(merged.favorite_models.contains("openai/gpt-5"));
+        }
+
+        #[test]
+        fn stars_round_trip_under_their_settings_name() {
+            let settings: Settings =
+                serde_json::from_str(r#"{"favoriteModels":["anthropic/sonnet"]}"#)
+                    .expect("favourites parse");
+            assert!(settings.favorite_models.contains("anthropic/sonnet"));
+
+            let written = serde_json::to_string(&settings).expect("favourites serialise");
+            assert!(written.contains("favoriteModels"), "{written}");
+        }
+
+        #[test]
+        fn a_settings_file_that_never_heard_of_stars_still_parses() {
+            let settings: Settings = serde_json::from_str("{}").expect("empty settings");
+            assert!(settings.favorite_models.is_empty());
         }
     }
 

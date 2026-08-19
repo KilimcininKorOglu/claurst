@@ -711,6 +711,14 @@ pub struct ModelPickerState {
     ///
     /// Resolving one goes to disk, so this must never be recomputed per frame.
     connected_ids: std::collections::HashSet<String>,
+    /// Starred models, as qualified `account/model` keys.
+    favorites: std::collections::HashSet<String>,
+    /// The account a row belongs to when it does not name one itself.
+    ///
+    /// A single-account list leaves `ModelEntry::provider_id` unset, so without
+    /// this the same model would be starred under two different keys depending
+    /// on which list it was starred from.
+    account_context: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -742,7 +750,68 @@ impl ModelPickerState {
             confirmed_provider_id: None,
             connected_only: false,
             connected_ids: std::collections::HashSet::new(),
+            favorites: std::collections::HashSet::new(),
+            account_context: String::new(),
         }
+    }
+
+    /// Name the account rows fall back to when they do not carry one.
+    ///
+    /// Set as the picker opens, from the same id the list was built for.
+    pub fn set_account_context(&mut self, account_id: impl Into<String>) {
+        self.account_context = account_id.into();
+    }
+
+    /// Replace the starred set, read once as the picker opens.
+    pub fn set_favorites(&mut self, favorites: std::collections::HashSet<String>) {
+        self.favorites = favorites;
+    }
+
+    /// The qualified `account/model` key a row is starred under.
+    ///
+    /// Built from the bare model id in both list shapes, so a model starred
+    /// from the single-account list is the same entry as one starred from the
+    /// cross-account list.
+    pub fn favorite_key(&self, entry: &ModelEntry) -> String {
+        let account = entry
+            .provider_id
+            .as_deref()
+            .unwrap_or(self.account_context.as_str());
+        let bare = entry
+            .id
+            .strip_prefix(&format!("{account}/"))
+            .unwrap_or(entry.id.as_str());
+        format!("{account}/{bare}")
+    }
+
+    /// The key of the row under the cursor, or `None` on an empty list.
+    pub fn selected_favorite_key(&self) -> Option<String> {
+        let filtered = self.filtered_models();
+        filtered
+            .get(self.selected_idx)
+            .map(|entry| self.favorite_key(entry))
+    }
+
+    /// Whether a row is starred.
+    pub fn is_favorite(&self, entry: &ModelEntry) -> bool {
+        self.favorites.contains(&self.favorite_key(entry))
+    }
+
+    /// Star or unstar `key`, reporting the state it ended in.
+    ///
+    /// Only the in-memory set moves; persisting it is the caller's job, so a
+    /// failed write is never mistaken for a successful star.
+    pub fn set_favorite(&mut self, key: &str, starred: bool) {
+        if starred {
+            self.favorites.insert(key.to_string());
+        } else {
+            self.favorites.remove(key);
+        }
+    }
+
+    /// Whether `key` is currently starred.
+    pub fn has_favorite(&self, key: &str) -> bool {
+        self.favorites.contains(key)
     }
 
     /// Record which accounts a credential resolves for.
@@ -794,7 +863,14 @@ impl ModelPickerState {
         for m in &mut self.models {
             m.is_current = m.id == current_model;
         }
-        self.selected_idx = self.models.iter().position(|m| m.is_current).unwrap_or(0);
+        // Over the visible list, not `models`: starred rows are lifted to the
+        // front of their section, so the two orders differ and an index into
+        // `models` would land the cursor on some other row.
+        self.selected_idx = self
+            .filtered_models()
+            .iter()
+            .position(|m| m.is_current)
+            .unwrap_or(0);
         self.title = title.into();
         self.filter.clear();
         // The first view is always the full list, for the same reason the
@@ -945,7 +1021,8 @@ impl ModelPickerState {
     /// rule about which rows exist belongs in this one place.
     pub fn filtered_models(&self) -> Vec<&ModelEntry> {
         let needle = self.filter.to_lowercase();
-        self.models
+        let mut rows: Vec<&ModelEntry> = self
+            .models
             .iter()
             .filter(|m| {
                 needle.is_empty()
@@ -961,7 +1038,35 @@ impl ModelPickerState {
                         .as_deref()
                         .is_none_or(|id| self.connected_ids.contains(id))
             })
-            .collect()
+            .collect();
+
+        if self.favorites.is_empty() {
+            return rows;
+        }
+
+        // Starred rows rise to the top of their own account's section, not to
+        // the top of the whole list. Lifting them out would make an account
+        // appear twice, and the renderer draws a heading only when the account
+        // changes between two rows, so the second run would be drawn headed by
+        // the account above it.
+        fn group_of(m: &ModelEntry) -> &str {
+            m.provider_id.as_deref().unwrap_or_default()
+        }
+        let mut order: Vec<&str> = Vec::new();
+        for row in &rows {
+            let group = group_of(row);
+            if !order.contains(&group) {
+                order.push(group);
+            }
+        }
+        rows.sort_by_key(|row| {
+            let group = order
+                .iter()
+                .position(|known| *known == group_of(row))
+                .unwrap_or(order.len());
+            (group, !self.is_favorite(row))
+        });
+        rows
     }
 
     /// Replace the model list with dynamically loaded entries.
@@ -1308,6 +1413,15 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
                 Style::default().fg(fg).bg(bg),
             ));
 
+            // Star after the name rather than in the slot above, which the
+            // current-model dot owns: a model can be both, and both matter.
+            if state.is_favorite(model) {
+                spans.push(Span::styled(
+                    " \u{2605}",
+                    Style::default().fg(Color::Yellow).bg(bg),
+                ));
+            }
+
             // Effort indicator — show the effort clamped onto this model's
             // variants ladder so it never displays a tier the model can't do.
             if supports_effort && is_selected {
@@ -1373,6 +1487,15 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
             footer_spans.push(Span::styled(" effort", Style::default().fg(dim)));
         }
     }
+    footer_spans.push(Span::raw("  "));
+    footer_spans.push(Span::styled("^f", Style::default().fg(dim)));
+    footer_spans.push(Span::styled(
+        match filtered.get(state.selected_idx) {
+            Some(model) if state.is_favorite(model) => " unstar",
+            _ => " star",
+        },
+        Style::default().fg(dim),
+    ));
     // Only offered where it does something: a single-account list has one
     // section, so there is nothing to hide.
     if state.is_cross_provider() {
@@ -2521,6 +2644,115 @@ mod cross_provider_tests {
         let mut single = picker(vec![entry("sonnet"), entry("haiku")]);
         single.open("sonnet");
         assert!(!drawn(&single).contains("^o"));
+    }
+
+    fn starred(state: &mut ModelPickerState, keys: &[&str]) {
+        state.set_favorites(keys.iter().map(|k| k.to_string()).collect());
+    }
+
+    #[test]
+    fn the_same_model_is_one_favourite_in_both_list_shapes() {
+        // A single-account list leaves the provider unset on every row, so
+        // without a fallback the two lists would star two different keys and a
+        // model starred from one would look unstarred in the other.
+        let cross = picker(scoped("anthropic", &["sonnet"]));
+        let cross_key = cross.favorite_key(cross.models.first().expect("one row"));
+
+        let mut single = picker(vec![entry("sonnet")]);
+        single.set_account_context("anthropic");
+        let single_key = single.favorite_key(single.models.first().expect("one row"));
+
+        assert_eq!(cross_key, "anthropic/sonnet");
+        assert_eq!(cross_key, single_key);
+    }
+
+    #[test]
+    fn a_starred_row_rises_inside_its_own_section_and_not_out_of_it() {
+        // Lifting it to the top of the whole list would make an account appear
+        // twice, and the renderer heads a run of rows only when the account
+        // changes, so the second run would sit under the wrong heading.
+        let mut models = scoped("anthropic", &["opus", "sonnet", "haiku"]);
+        models.extend(scoped("openai", &["gpt-5", "gpt-5-mini"]));
+        let mut state = picker(models);
+        starred(&mut state, &["anthropic/haiku", "openai/gpt-5-mini"]);
+
+        assert_eq!(
+            visible_ids(&state),
+            vec![
+                "anthropic/haiku",
+                "anthropic/opus",
+                "anthropic/sonnet",
+                "openai/gpt-5-mini",
+                "openai/gpt-5",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_list_with_no_favourites_keeps_the_order_it_had() {
+        let mut models = scoped("anthropic", &["opus", "sonnet"]);
+        models.extend(scoped("openai", &["gpt-5"]));
+        let state = picker(models);
+
+        assert_eq!(
+            visible_ids(&state),
+            vec!["anthropic/opus", "anthropic/sonnet", "openai/gpt-5"]
+        );
+    }
+
+    #[test]
+    fn the_cursor_opens_on_the_current_model_even_when_a_star_moved_it() {
+        let mut state = picker(scoped("anthropic", &["opus", "sonnet", "haiku"]));
+        starred(&mut state, &["anthropic/haiku"]);
+        state.open("anthropic/sonnet");
+
+        let filtered = state.filtered_models();
+        assert_eq!(
+            filtered
+                .get(state.selected_idx)
+                .map(|m| m.id.as_str())
+                .unwrap_or_default(),
+            "anthropic/sonnet"
+        );
+    }
+
+    #[test]
+    fn starring_moves_only_the_in_memory_set() {
+        // The caller writes the file first and calls this once the write took,
+        // so a failed save cannot leave a star that disappears on next launch.
+        let mut state = picker(scoped("anthropic", &["opus", "sonnet"]));
+        state.open("anthropic/opus");
+
+        let key = state
+            .selected_favorite_key()
+            .expect("a row under the cursor");
+        assert_eq!(key, "anthropic/opus");
+        assert!(!state.has_favorite(&key));
+
+        state.set_favorite(&key, true);
+        assert!(state.has_favorite(&key));
+        state.set_favorite(&key, false);
+        assert!(!state.has_favorite(&key));
+    }
+
+    #[test]
+    fn a_star_is_drawn_next_to_the_row_it_belongs_to() {
+        let mut state = picker(scoped("anthropic", &["opus", "sonnet"]));
+        state.open("anthropic/opus");
+        assert!(!drawn(&state).contains('\u{2605}'));
+
+        starred(&mut state, &["anthropic/sonnet"]);
+        assert!(drawn(&state).contains('\u{2605}'));
+    }
+
+    #[test]
+    fn an_empty_list_has_no_row_to_star() {
+        let mut state = picker(scoped("anthropic", &["opus"]));
+        state.open("anthropic/opus");
+        state.push_filter_char('z');
+
+        assert!(state.filtered_models().is_empty());
+        assert_eq!(state.selected_favorite_key(), None);
     }
 
     #[test]

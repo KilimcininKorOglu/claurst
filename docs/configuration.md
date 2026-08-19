@@ -64,6 +64,17 @@ live in the `providers` map. Corrected model metadata for self-hosted or
 unknown models lives in the `modelOverrides` map — see
 [Model metadata overrides](providers.md#overriding-model-metadata).
 
+### Favourite models
+
+| Key              | Type             | Default | Description                                                              |
+|------------------|------------------|---------|--------------------------------------------------------------------------|
+| `favoriteModels` | array of strings | []      | Models starred in the model picker, each as `account/model`. A starred model is drawn with `★` and sorted first inside its own account's section. |
+
+`Ctrl+F` in [`/model`](commands.md#model) writes this list. The key is always
+qualified, because the same model reached through two accounts is two different
+requests. A project settings file adds to the user's list rather than replacing
+it.
+
 ### Plugin selection
 
 | Key               | Type             | Default | Description                                                              |
