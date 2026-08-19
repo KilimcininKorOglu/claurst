@@ -103,9 +103,9 @@ struct Cli {
     #[arg(long = "resume", num_args(0..=1), default_missing_value("__last__"))]
     resume: Option<String>,
 
-    /// Maximum number of agentic turns
-    #[arg(long = "max-turns", default_value_t = 10)]
-    max_turns: u32,
+    /// Maximum number of agentic turns (default 10; `maxTurns` in settings)
+    #[arg(long = "max-turns")]
+    max_turns: Option<u32>,
 
     /// Custom system prompt
     #[arg(
@@ -964,7 +964,11 @@ async fn main() -> anyhow::Result<()> {
     let mut query_config =
         claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
     query_config.model_registry = Some(model_registry.clone());
-    query_config.max_turns = cli.max_turns;
+    // The flag overrides the `maxTurns` setting that `from_config` already
+    // read; unset leaves the setting in place.
+    if let Some(max_turns) = cli.max_turns {
+        query_config.max_turns = max_turns;
+    }
     query_config.system_prompt = Some(system_prompt);
     query_config.append_system_prompt = None;
     query_config.working_directory = Some(cwd.display().to_string());
@@ -3989,6 +3993,12 @@ async fn run_interactive(
                             &model_registry,
                         );
                         qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
+                        // Re-read per turn so `/turns` reaches the next run; an agent's
+                        // own limit still wins inside the loop.
+                        qcfg.max_turns = cmd_ctx
+                            .config
+                            .max_turns
+                            .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT);
                         qcfg.append_system_prompt = cmd_ctx.config.append_system_prompt.clone();
                         qcfg.system_prompt = base_query_config.system_prompt.clone();
                         qcfg.output_style = cmd_ctx.config.effective_output_style();
@@ -4453,6 +4463,12 @@ async fn run_interactive(
                 qcfg.model =
                     claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
                 qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
+                // Re-read per turn so `/turns` reaches the next run; an agent's
+                // own limit still wins inside the loop.
+                qcfg.max_turns = cmd_ctx
+                    .config
+                    .max_turns
+                    .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT);
                 // Auto-compact is a maintenance turn, not a goal turn: never let
                 // it trigger in-loop goal continuation.
                 qcfg.continuation = claurst_query::ContinuationMode::Default;
@@ -4804,6 +4820,12 @@ async fn run_interactive(
                     qcfg.model =
                         claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
                     qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
+                    // Re-read per turn so `/turns` reaches the next run; an agent's
+                    // own limit still wins inside the loop.
+                    qcfg.max_turns = cmd_ctx
+                        .config
+                        .max_turns
+                        .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT);
                     // A prompt from a phone is the same turn as one typed
                     // here, so it runs at the same effort, and the model is
                     // told about the same companion.

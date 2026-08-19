@@ -9,7 +9,7 @@ This document is the complete reference for every slash command available in Cla
 1. [Command System Overview](#command-system-overview)
 2. [Session & Navigation](#session--navigation)
 3. [Model & Provider](#model--provider) — `/model`, `/providers`, `/connect`, `/thinking`, `/effort`, `/advisor`, `/fast`
-4. [Configuration & Settings](#configuration--settings) — `/config`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/timeline`, `/vim`, `/voice`, `/terminal-setup`
+4. [Configuration & Settings](#configuration--settings) — `/config`, `/turns`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/timeline`, `/vim`, `/voice`, `/terminal-setup`
 5. [Code & Git](#code--git) — `/commit`, `/diff`, `/undo`, `/review`, `/security-review`, `/init`, `/search`
 6. [Search & Files](#search--files) — `/files`, `/context`
 7. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
@@ -343,6 +343,27 @@ Common keys:
 | `vim`         | Vim mode enabled (`true`/`false`) |
 | `outputStyle` | Output rendering style            |
 | `autoApprove` | Auto-approve tool calls           |
+
+---
+
+### /turns
+
+Show or change how many agentic turns one run may take before it stops.
+
+```
+/turns              show the limit in force
+/turns 25           stop after 25 turns
+/turns off          no limit
+/turns default      back to the configured default
+```
+
+The limit persists for the session and is saved as `maxTurns` in `settings.json`.
+`--max-turns` sets it for one launch; an agent definition's own `max_turns` wins
+over both while that agent is active.
+
+`off`, `none`, `unlimited` and `0` all mean no limit. Reaching the limit normally
+spends one final turn asking the model to summarise its progress; the
+`degradationSummary` setting turns that off.
 
 ---
 

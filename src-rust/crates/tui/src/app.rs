@@ -125,6 +125,7 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("survey", "Open session feedback survey"),
     ("theme", "Open the theme picker"),
     ("todos", "Show the session's todo list"),
+    ("turns", "Show or change the agentic turn limit"),
     (
         "ultrareview",
         "Run an exhaustive multi-dimensional code review",

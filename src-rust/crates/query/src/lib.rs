@@ -236,6 +236,9 @@ impl QueryConfig {
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
             effort_level: cfg.effective_effort_level(),
+            max_turns: cfg
+                .max_turns
+                .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
             ..Default::default()
@@ -257,6 +260,9 @@ impl QueryConfig {
             working_directory: cfg.project_dir.as_ref().map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
             effort_level: cfg.effective_effort_level(),
+            max_turns: cfg
+                .max_turns
+                .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
             ..Default::default()
@@ -2190,6 +2196,36 @@ mod tests {
         let query = QueryConfig::from_config(&cfg);
         assert!(!query.degradation_summary);
         assert!(!query.auto_poke);
+    }
+
+    #[test]
+    fn a_configured_turn_limit_reaches_the_turn() {
+        let cfg = claurst_core::config::Config {
+            max_turns: Some(25),
+            ..Default::default()
+        };
+        assert_eq!(QueryConfig::from_config(&cfg).max_turns, 25);
+
+        let unset = claurst_core::config::Config::default();
+        assert_eq!(
+            QueryConfig::from_config(&unset).max_turns,
+            claurst_core::constants::MAX_TURNS_DEFAULT
+        );
+    }
+
+    #[test]
+    fn the_unlimited_ceiling_cannot_be_reached_by_a_run() {
+        // `/turns off` stores this value; the loop compares the turn counter
+        // against it, so it has to survive the trip to the turn unchanged. A
+        // value clamped on the way through would reinstate a limit.
+        let cfg = claurst_core::config::Config {
+            max_turns: Some(claurst_core::constants::MAX_TURNS_UNLIMITED),
+            ..Default::default()
+        };
+        assert_eq!(
+            QueryConfig::from_config(&cfg).max_turns,
+            claurst_core::constants::MAX_TURNS_UNLIMITED
+        );
     }
 
     #[test]

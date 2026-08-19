@@ -226,16 +226,19 @@ See [Permission Modes](#permission-modes) for a full description of each value.
 
 ### Turn behaviour
 
-| Key                  | Type    | Default | Description                                                                                                                                                                 |
-|----------------------|---------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Key                  | Type    | Default | Description                                                                                                                                                                    |
+|----------------------|---------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `maxTurns`           | integer | 10      | How many agentic turns one run may take before it stops. `/turns off` writes the largest possible value, which no run can reach.                                               |
 | `degradationSummary` | boolean | true    | Run one final tool-less turn asking the model to summarise its progress when the turn limit is reached. Set to `false` to stop at the limit and take the last message instead. |
 | `autoPoke`           | boolean | true    | Append a reminder about incomplete todos to the system prompt after the second turn. Set to `false` when the todo list is a record rather than a work queue.                   |
 
-Both save one request per run when switched off. Leaving a key unset is the same
-as `true`, so upgrading changes nothing.
+`degradationSummary` and `autoPoke` each save one request per run when switched
+off. Leaving any of the three unset keeps today's behaviour, so upgrading
+changes nothing.
 
-The turn limit itself comes from `--max-turns` or from an agent definition's
-`max_turns`.
+`maxTurns` is also set by `--max-turns` at launch and by `/turns` during a
+session. An agent definition's own `max_turns` wins over it while that agent is
+active.
 
 ### System prompt
 

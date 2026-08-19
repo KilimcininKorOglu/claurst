@@ -1400,6 +1400,13 @@ pub mod config {
             skip_serializing_if = "Option::is_none"
         )]
         pub mouse_capture: Option<bool>,
+        /// How many agentic turns one run may take.
+        ///
+        /// `None` uses [`constants::MAX_TURNS_DEFAULT`].
+        /// [`constants::MAX_TURNS_UNLIMITED`] removes the limit. An agent
+        /// definition's own `max_turns` still wins over this.
+        #[serde(default, rename = "maxTurns", skip_serializing_if = "Option::is_none")]
+        pub max_turns: Option<u32>,
         /// Whether exceeding the turn limit runs one final tool-less turn that
         /// asks the model to summarise its progress.
         ///
@@ -2714,6 +2721,7 @@ pub mod config {
                 managed_agents: over.config.managed_agents.or(base.config.managed_agents),
                 auto_commits: over.config.auto_commits.or(base.config.auto_commits),
                 mouse_capture: over.config.mouse_capture.or(base.config.mouse_capture),
+                max_turns: over.config.max_turns.or(base.config.max_turns),
                 degradation_summary: over
                     .config
                     .degradation_summary
@@ -3644,6 +3652,12 @@ pub mod constants {
     pub const MAX_TOKENS_HARD_LIMIT: u32 = 65_536;
     pub const DEFAULT_COMPACT_THRESHOLD: f32 = 0.9;
     pub const MAX_TURNS_DEFAULT: u32 = 10;
+    /// The turn limit that means "no limit".
+    ///
+    /// The loop compares the turn counter against the limit, so a ceiling no
+    /// run can reach removes it. Named rather than written as `u32::MAX` at
+    /// each site, so the intent is readable where it is compared.
+    pub const MAX_TURNS_UNLIMITED: u32 = u32::MAX;
     pub const MAX_TOOL_ERRORS: u32 = 3;
 
     // API endpoints & headers

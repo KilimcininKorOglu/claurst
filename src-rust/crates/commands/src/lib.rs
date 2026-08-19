@@ -196,6 +196,8 @@ mod goal;
 pub use goal::*;
 mod todos;
 pub use todos::*;
+mod turns;
+pub use turns::*;
 mod speech;
 pub use speech::*;
 mod config_cmd;
@@ -1531,6 +1533,8 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(GoalCommand),
         // The session's TodoWrite list
         Box::new(TodosCommand),
+        // The agentic turn limit
+        Box::new(TurnsCommand),
         // Session navigation ported from opencode: /new (lazy home) + /move.
         Box::new(NewCommand),
         Box::new(MoveCommand),
