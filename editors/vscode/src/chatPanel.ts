@@ -24,6 +24,11 @@ const MODE_PILL = 'mode';
  * named instead, so the agent reads the part it needs. */
 const EMBED_LIMIT_BYTES = 64 * 1024;
 
+/** How many files the `@` picker offers. A cap is needed because the list is
+ * built eagerly; when it bites, the picker says so rather than quietly
+ * pretending the rest of the repository is not there. */
+const FILE_PICK_LIMIT = 5000;
+
 /** How a panel's session comes to exist. */
 export type PanelOpening =
   | { kind: 'new' }
@@ -358,15 +363,23 @@ export class ChatPanel {
     }
   }
 
-  /** Let the user choose a file to mention, and put it in the input box. */
+  /** Let the user choose a file to mention, and put it in the input box.
+   *
+   * `undefined` for the exclude pattern, not a hand-written one: that makes
+   * VS Code apply the user's own `files.exclude` and `search.exclude`, which
+   * is where a project says what it does not want searched. The old literal
+   * pattern replaced those settings with a guess at three directory names. */
   private async pickFile(): Promise<void> {
-    const files = await vscode.workspace.findFiles('**/*', '**/{node_modules,.git,target}/**', 500);
+    const files = await vscode.workspace.findFiles('**/*', undefined, FILE_PICK_LIMIT);
     const items = files.map((uri) => ({
       label: vscode.workspace.asRelativePath(uri),
       uri,
     }));
     const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Which file should Claurst look at?',
+      placeHolder:
+        items.length < FILE_PICK_LIMIT
+          ? 'Which file should Claurst look at?'
+          : `Which file should Claurst look at? (first ${FILE_PICK_LIMIT})`,
       matchOnDescription: true,
     });
     if (picked) {

@@ -110,6 +110,9 @@ type HostMessage =
   let commands: Command[] = [];
   let completionIndex = 0;
   let completionMatches: Command[] = [];
+  /** Whether the list is something to choose from, or just the hint for the
+   * command already being typed. Arrow keys and Tab belong to the first. */
+  let completionMode: 'pick' | 'hint' = 'pick';
 
   function appendRow(text: string, cls: string): HTMLElement {
     const row = document.createElement('div');
@@ -500,19 +503,31 @@ type HostMessage =
     completionsEl.classList.toggle('hidden', completionMatches.length === 0);
     completionMatches.forEach((command, index) => {
       const row = document.createElement('div');
-      row.className = 'completion' + (index === completionIndex ? ' selected' : '');
+      const selected = completionMode === 'pick' && index === completionIndex;
+      row.className = 'completion' + (selected ? ' selected' : '');
       const name = document.createElement('span');
       name.className = 'completion-name';
       name.textContent = '/' + command.name;
+      // What the command takes, which is the only thing worth reading once the
+      // name has been settled.
+      if (command.hint) {
+        const hint = document.createElement('span');
+        hint.className = 'completion-hint';
+        hint.textContent = command.hint;
+        name.appendChild(document.createTextNode(' '));
+        name.appendChild(hint);
+      }
       const description = document.createElement('span');
       description.className = 'completion-description';
       description.textContent = command.description || '';
       row.appendChild(name);
       row.appendChild(description);
-      row.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        applyCompletion(command);
-      });
+      if (completionMode === 'pick') {
+        row.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          applyCompletion(command);
+        });
+      }
       completionsEl.appendChild(row);
     });
   }
@@ -526,18 +541,43 @@ type HostMessage =
 
   function updateCompletions(): void {
     const text = inputEl.value;
-    const match = /^\/([a-zA-Z0-9-]*)$/.exec(text);
-    if (!match) {
-      completionMatches = [];
+    completionIndex = 0;
+
+    const naming = /^\/([a-zA-Z0-9-]*)$/.exec(text);
+    if (naming) {
+      const typed = naming[1].toLowerCase();
+      completionMode = 'pick';
+      completionMatches = commands
+        .filter((command) => command.name.toLowerCase().startsWith(typed))
+        .slice(0, 8);
       renderCompletions();
       return;
     }
-    const typed = match[1].toLowerCase();
-    completionMatches = commands
-      .filter((command) => command.name.toLowerCase().startsWith(typed))
-      .slice(0, 8);
-    completionIndex = 0;
+
+    // Once a space has been typed the command is settled and the list is no
+    // longer something to choose from. What is still worth showing is what
+    // that command takes, which used to disappear the moment it was needed.
+    const running = /^\/([a-zA-Z0-9-]+)\s/.exec(text);
+    const named = running
+      ? commands.find((command) => command.name.toLowerCase() === running[1].toLowerCase())
+      : undefined;
+    completionMode = 'hint';
+    completionMatches = named ? [named] : [];
     renderCompletions();
+  }
+
+  /** Put the chosen path where the `@` was typed.
+   *
+   * Appending it to the end put the file at the end of the sentence however
+   * far back the mention had been started, so a question typed around a
+   * mention came out reordered. */
+  function replaceMention(target: string): void {
+    const caret = inputEl.selectionStart ?? inputEl.value.length;
+    const partial = /(^|\s)@([^\s]*)$/.exec(inputEl.value.slice(0, caret));
+    const start = partial ? caret - partial[2].length : caret;
+    const head = inputEl.value.slice(0, start) + target + ' ';
+    inputEl.value = head + inputEl.value.slice(caret);
+    inputEl.setSelectionRange(head.length, head.length);
   }
 
   function setBusy(busy: boolean): void {
@@ -553,9 +593,11 @@ type HostMessage =
   inputEl.addEventListener('input', () => {
     autoResize();
     updateCompletions();
-    // A bare '@' is a request to pick a file; the extension host is the only
-    // side that can read the workspace.
-    if (inputEl.value.endsWith('@')) {
+    // A freshly typed '@' is a request to pick a file; the extension host is
+    // the only side that can read the workspace. It is measured against the
+    // caret, not the end of the box, so editing an earlier sentence works.
+    const caret = inputEl.selectionStart ?? inputEl.value.length;
+    if (/(^|\s)@$/.test(inputEl.value.slice(0, caret))) {
       vscode.postMessage({ type: 'pickFile' });
     }
   });
@@ -595,7 +637,9 @@ type HostMessage =
   sendBtn.addEventListener('click', send);
   stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
   inputEl.addEventListener('keydown', (e) => {
-    if (completionMatches.length > 0) {
+    // In 'hint' mode the list is a label, not a menu: Enter must send the
+    // command the user finished typing rather than replace it with itself.
+    if (completionMode === 'pick' && completionMatches.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         completionIndex = (completionIndex + 1) % completionMatches.length;
@@ -680,7 +724,7 @@ type HostMessage =
         break;
       }
       case 'mention': {
-        inputEl.value += msg.text + ' ';
+        replaceMention(msg.text);
         autoResize();
         inputEl.focus();
         break;

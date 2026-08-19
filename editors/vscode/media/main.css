@@ -467,6 +467,11 @@ body {
   font-family: var(--vscode-editor-font-family, monospace);
 }
 
+.completion-hint {
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
 .completion-description {
   color: var(--vscode-descriptionForeground);
   overflow: hidden;
