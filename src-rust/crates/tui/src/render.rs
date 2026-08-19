@@ -1,4 +1,4 @@
-// render.rs â€” All ratatui rendering logic.
+// render.rs — All ratatui rendering logic.
 
 use std::cell::RefCell;
 
@@ -712,7 +712,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     if app.help_overlay.visible {
         render_help_overlay(frame, &app.help_overlay, size);
     } else if app.show_help {
-        // Legacy fallback â€” render the simple help overlay
+        // Legacy fallback — render the simple help overlay
         render_simple_help_overlay(frame, size);
     }
 
@@ -1385,7 +1385,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_stateful_widget(scrollbar, msg_area, &mut scrollbar_state);
     }
 
-    // “â†” N new messages” indicator when scrolled up and new messages arrived.
+    // “↔ N new messages” indicator when scrolled up and new messages arrived.
     if app.new_messages_while_scrolled > 0 && msg_area.height > 4 && msg_area.width > 20 {
         let indicator = format!(
             " \u{2193} {} new message{} ",
@@ -2205,7 +2205,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
     items
 }
 
-// â”€â”€ Welcome / startup screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Welcome / startup screen ─────────────────────────────────────────────────
 
 /// Render the two-column orange round-bordered welcome box (matches TS LogoV2).
 fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
@@ -2464,7 +2464,7 @@ fn welcome_banner_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-// â”€â”€ Per-message rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Per-message rendering ─────────────────────────────────────────────────────
 
 /// Build a tool_use_id → tool_name lookup from all messages in the transcript.
 /// This allows ToolResult blocks to dispatch to tool-specific renderers.
@@ -2482,14 +2482,14 @@ fn build_tool_names(
     map
 }
 
-// â”€â”€ System annotation (compact boundary, info notices) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── System annotation (compact boundary, info notices) ───────────────────────
 
 fn render_system_annotation_lines(
     lines: &mut Vec<Line<'static>>,
     ann: &SystemAnnotation,
     width: usize,
 ) {
-    // Compact boundary: show âœ» prefix with dimmed text
+    // Compact boundary: show ✻ prefix with dimmed text
     if ann.style == SystemMessageStyle::Compact {
         lines.push(Line::from(vec![
             Span::styled(
@@ -2513,7 +2513,7 @@ fn render_system_annotation_lines(
         SystemMessageStyle::Compact => unreachable!(),
     };
 
-    // Centred, padded rule: "â”€â”€â”€ text â”€â”€â”€"
+    // Centred, padded rule: "─── text ───"
     let text = ann.text.as_str();
     let inner_width = width.saturating_sub(4);
     let text_len = text.len();
@@ -2535,7 +2535,7 @@ fn render_system_annotation_lines(
     lines.push(Line::from(""));
 }
 
-// â”€â”€ Tool use block â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tool use block ────────────────────────────────────────────────────────────
 
 /// Per-tool marker shown at the head of a tool block (the marker conveys the
 /// tool, the line then shows the primary argument). Falls back to the generic
@@ -4127,7 +4127,7 @@ pub fn render_full_status_line(
             format!(" {} ", data.model),
             Style::default().fg(Color::Cyan),
         ));
-        spans.push(Span::styled(" â”‚ ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
     }
 
     // Context window
@@ -4146,7 +4146,7 @@ pub fn render_full_status_line(
             format!("{}k/{}k ({:.0}%)", used_k, total_k, pct * 100.0),
             Style::default().fg(ctx_color),
         ));
-        spans.push(Span::styled(" â”‚ ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
     }
 
     // Cost
@@ -4155,7 +4155,7 @@ pub fn render_full_status_line(
             format!("${:.2}", data.cost_cents / 100.0),
             Style::default().fg(Color::White),
         ));
-        spans.push(Span::styled(" â”‚ ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
     }
 
     // Compact warning
@@ -4167,7 +4167,7 @@ pub fn render_full_status_line(
                 Color::Yellow
             };
             spans.push(Span::styled(
-                format!("âš  ctx {:.0}% ", pct * 100.0),
+                format!("⚠ ctx {:.0}% ", pct * 100.0),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
         }
@@ -4210,7 +4210,10 @@ pub fn render_full_status_line(
 
     // Bridge connected
     if data.bridge_connected {
-        spans.push(Span::styled("ðŸ”— ", Style::default().fg(Color::Green)));
+        spans.push(Span::styled(
+            "\u{1F517} ",
+            Style::default().fg(Color::Green),
+        ));
     }
 
     // Session ID
@@ -6343,5 +6346,40 @@ mod timeline_summary_tests {
             "summary missing: {screen:?}"
         );
         assert_eq!(screen.len(), 24);
+    }
+}
+
+#[cfg(test)]
+mod bridge_indicator_tests {
+    //! The bridge indicator shipped as mojibake: the UTF-8 bytes of 🔗 read
+    //! back as latin-1. It is written as an escape now so re-reading the file
+    //! under the wrong encoding cannot reintroduce the corruption.
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    fn status_row(bridge_connected: bool) -> String {
+        let data = StatusLineData {
+            model: "test-model".to_string(),
+            bridge_connected,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 120, 1);
+        let mut buffer = Buffer::empty(area);
+        render_full_status_line(&data, area, &mut buffer);
+        (0..area.width).map(|x| buffer[(x, 0)].symbol()).collect()
+    }
+
+    #[test]
+    fn a_connected_bridge_draws_a_link_glyph_not_mojibake() {
+        let row = status_row(true);
+        assert!(row.contains('\u{1F517}'), "{row:?}");
+        for corrupted in ['\u{00F0}', '\u{0178}', '\u{201D}'] {
+            assert!(!row.contains(corrupted), "{corrupted:?} in {row:?}");
+        }
+    }
+
+    #[test]
+    fn a_disconnected_bridge_draws_nothing() {
+        assert!(!status_row(false).contains('\u{1F517}'));
     }
 }
