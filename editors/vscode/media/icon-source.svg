@@ -1,0 +1,13 @@
+<!-- Source for media/icon.png, the marketplace icon. Unlike icon.svg, which is
+     the Activity Bar glyph and is recoloured by the theme, this one carries its
+     own colours: it is shown against the marketplace's background, not the
+     editor's. Regenerate with:
+       rsvg-convert -w 128 -h 128 media/icon-source.svg -o media/icon.png -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="26" fill="#1f2430"/>
+  <g fill="none" stroke="#7aa2f7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 34h76v52H50l-24 18V86h0z"/>
+    <path d="M46 55h36"/>
+    <path d="M46 70h22"/>
+  </g>
+</svg>

@@ -1,0 +1,20 @@
+# Everything the package does not need at runtime. The two bundles under out/
+# and the assets under media/ are the extension; the sources they were built
+# from are not.
+src/**
+test/**
+out/test/**
+out/**/*.map
+esbuild.mjs
+tsconfig.json
+.vscode/**
+.gitignore
+**/*.tsbuildinfo
+*.vsix
+
+# The rendered icon.png ships; the drawing it was rendered from does not.
+media/icon-source.svg
+
+# esbuild bundles the runtime dependencies into out/, so shipping the tree they
+# came from would ship them twice. Package with --no-dependencies.
+node_modules/**

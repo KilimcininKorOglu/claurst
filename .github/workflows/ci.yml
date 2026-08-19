@@ -149,6 +149,6 @@ jobs:
         working-directory: editors/vscode
         run: npm test
 
-      - name: Build
+      - name: Package
         working-directory: editors/vscode
-        run: npm run compile
+        run: npm run package

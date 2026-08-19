@@ -1,9 +1,8 @@
 // Builds the two bundles this extension ships. They cannot share one config:
 // the host runs in Node with `vscode` injected at runtime, and the webview runs
 // in a browser sandbox where neither exists.
+import { readdir, rm } from 'node:fs/promises';
 import * as esbuild from 'esbuild';
-
-import { readdir } from 'node:fs/promises';
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -37,9 +36,9 @@ const targets = [
   },
 ];
 
-// The tests exercise webview modules, which are ESM and TypeScript. Bundling
-// them for Node is what lets `node --test` run them without a loader.
 if (tests) {
+  // The tests exercise webview modules, which are ESM and TypeScript. Bundling
+  // them for Node is what lets `node --test` run them without a loader.
   const entries = await readdir('test', { recursive: true });
   await esbuild.build({
     ...shared,
@@ -53,5 +52,8 @@ if (tests) {
   const contexts = await Promise.all(targets.map((target) => esbuild.context(target)));
   await Promise.all(contexts.map((context) => context.watch()));
 } else {
+  // A packaged extension ships whatever is in out/, so anything an earlier
+  // build left behind would travel with it. Only the two bundles belong.
+  await rm('out', { recursive: true, force: true });
   await Promise.all(targets.map((target) => esbuild.build(target)));
 }
