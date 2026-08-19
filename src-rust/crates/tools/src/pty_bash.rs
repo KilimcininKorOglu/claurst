@@ -165,30 +165,30 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
         let result = tokio::time::timeout(Duration::from_millis(timeout_ms), async {
             // kill_on_drop: when the timeout drops this future the child must die
             // with it, otherwise a timed-out background command leaks (#220).
-            let child = if cfg!(windows) {
-                Command::new("cmd")
-                    .arg("/C")
-                    .arg(&command_clone)
-                    .current_dir(&cwd)
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .stdin(Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()
+            // It reaps the shell itself; the guard below covers what the shell
+            // started, which `kill_on_drop` never reaches.
+            let mut builder = if cfg!(windows) {
+                let mut cmd = Command::new("cmd");
+                cmd.arg("/C").arg(&command_clone);
+                cmd
             } else {
-                Command::new("bash")
-                    .arg("-c")
-                    .arg(&command_clone)
-                    .current_dir(&cwd)
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .stdin(Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()
+                let mut cmd = Command::new("bash");
+                cmd.arg("-c").arg(&command_clone);
+                cmd
             };
+            builder
+                .current_dir(&cwd)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .kill_on_drop(true);
+            claurst_core::process_tree::spawn_in_own_group(&mut builder);
+            let child = builder.spawn();
 
             match child {
                 Ok(mut c) => {
+                    let mut tree_guard =
+                        claurst_core::process_tree::ProcessTreeKillGuard::new(c.id());
                     if let Some(pid) = c.id() {
                         global_registry().set_pid(&task_id_clone, pid);
                     }
@@ -207,7 +207,12 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                                 .append_output(&task_id_clone, &format!("STDERR: {}", line));
                         }
                     }
-                    match c.wait().await {
+                    let waited = c.wait().await;
+                    // The command answered, so nothing is left to kill; a guard
+                    // still armed here would cut down whatever the command
+                    // deliberately left running.
+                    tree_guard.disarm();
+                    match waited {
                         Ok(status) if status.success() => {
                             global_registry().complete(&task_id_clone);
                         }
@@ -572,18 +577,24 @@ async fn run_windows_fallback(
     timeout_dur: Duration,
     timeout_ms: u64,
 ) -> ToolResult {
-    let mut child = match Command::new("cmd")
+    let mut builder = Command::new("cmd");
+    builder
         .arg("/C")
         .arg(command)
         .current_dir(effective_cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()
-    {
+        .stdin(Stdio::null());
+    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+    let mut child = match builder.spawn() {
         Ok(c) => c,
         Err(e) => return ToolResult::error(format!("Failed to spawn command: {}", e)),
     };
+
+    // `cmd.exe` is only the wrapper. Without this, cancelling the turn left
+    // both it and whatever it started running, and the timeout path below
+    // reached the wrapper alone.
+    let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
     let stdout_handle = child.stdout.take();
     let stderr_handle = child.stderr.take();
@@ -613,6 +624,7 @@ async fn run_windows_fallback(
 
     match result {
         Ok((stdout_lines, stderr_lines, status)) => {
+            tree_guard.disarm();
             let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
             let mut output = String::new();
             if !stdout_lines.is_empty() {
@@ -631,6 +643,9 @@ async fn run_windows_fallback(
             truncate_output(output, exit_code)
         }
         Err(_) => {
+            // The tree first, then the wrapper: killing `cmd.exe` first orphans
+            // its children and `taskkill /T` can no longer find them through it.
+            tree_guard.kill_now();
             let _ = child.kill().await;
             ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
         }
@@ -1329,6 +1344,54 @@ mod tests {
             current_call: None,
             editor: None,
         }
+    }
+
+    /// Whether any process still has `marker` on its command line.
+    fn still_running(marker: &str) -> bool {
+        std::process::Command::new("pgrep")
+            .arg("-f")
+            .arg(marker)
+            .output()
+            .map(|out| !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Wait for every process carrying `marker` to go, up to `limit`.
+    ///
+    /// The kill is deliberately fire-and-forget, so a test that asserts at one
+    /// fixed instant is asserting on scheduling rather than on the kill.
+    async fn gone_within(marker: &str, limit: Duration) -> bool {
+        let started = std::time::Instant::now();
+        while started.elapsed() < limit {
+            if !still_running(marker) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        !still_running(marker)
+    }
+
+    /// A timed-out background command used to leave whatever the shell started
+    /// behind: `kill_on_drop` reaches the shell and nothing under it.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_timed_out_background_command_takes_its_children_with_it() {
+        let marker = "313380";
+        let result = run_in_background(
+            format!("sleep {marker} & wait"),
+            std::env::temp_dir(),
+            500, // ms — far shorter than the sleep
+        )
+        .await;
+        assert!(!result.is_error, "{}", result.content);
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(still_running(marker), "the child never started");
+
+        assert!(
+            gone_within(marker, Duration::from_secs(10)).await,
+            "the shell's child outlived the timeout"
+        );
     }
 
     /// #220: a command that exceeds its timeout must have its child KILLED, not
