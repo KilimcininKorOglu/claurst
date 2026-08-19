@@ -53,6 +53,8 @@ pub struct SessionBrowserState {
     pub rename_input: String,
     /// Show each session's working directory under its row.
     pub show_paths: bool,
+    /// Show a detail panel for the selected session under the list.
+    pub show_preview: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,7 @@ impl SessionBrowserState {
             mode: SessionBrowserMode::Browse,
             rename_input: String::new(),
             show_paths: false,
+            show_preview: false,
         }
     }
 
@@ -79,6 +82,7 @@ impl SessionBrowserState {
         self.mode = SessionBrowserMode::Browse;
         self.rename_input.clear();
         self.show_paths = false;
+        self.show_preview = false;
         self.visible = true;
     }
 
@@ -90,11 +94,17 @@ impl SessionBrowserState {
         // A toggle left on from a previous visit reads as the browser having
         // changed shape on its own.
         self.show_paths = false;
+        self.show_preview = false;
     }
 
     /// Show or hide the working directory under each row.
     pub fn toggle_paths(&mut self) {
         self.show_paths = !self.show_paths;
+    }
+
+    /// Show or hide the detail panel for the selected session.
+    pub fn toggle_preview(&mut self) {
+        self.show_preview = !self.show_preview;
     }
 
     /// Move selection up one row, wrapping to the end.
@@ -195,18 +205,22 @@ const ROW_MARGIN: usize = 2;
 /// Columns of blank space between two adjacent columns.
 const COLUMN_GAP: usize = 2;
 
+/// Lines the detail panel takes: a blank separator plus one line per fact.
+const PREVIEW_LINES: usize = 3;
+
 /// How many sessions fit in a modal of `modal_height`.
 ///
 /// The header, the blank line under it, the blank line above the hint bar and
 /// the hint bar itself all take a line first, the rename field takes one more
-/// than the other modes, and a session takes two lines instead of one while
-/// its working directory is showing.
+/// than the other modes, the detail panel takes its own block, and a session
+/// takes two lines instead of one while its working directory is showing.
 fn row_capacity(state: &SessionBrowserState, modal_height: u16) -> usize {
     let hint_lines = match state.mode {
         SessionBrowserMode::Rename => 2,
         SessionBrowserMode::Browse | SessionBrowserMode::Confirm => 1,
     };
-    let chrome = 3 + hint_lines;
+    let preview_lines = if state.show_preview { PREVIEW_LINES } else { 0 };
+    let chrome = 3 + hint_lines + preview_lines;
     let lines = (modal_height as usize)
         .saturating_sub(2) // top and bottom border
         .saturating_sub(chrome);
@@ -404,6 +418,34 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
         }
     }
 
+    // --- Detail panel for the selected session ---------------------------
+    // Only what the table cannot carry. Title, date, message count and cost
+    // are columns already; repeating them here would draw the same facts
+    // twice and cost rows that the list needs.
+    if state.show_preview {
+        if let Some(session) = state.selected_session() {
+            let label_style = Style::default().fg(Color::DarkGray);
+            let value_style = Style::default().fg(Color::Rgb(180, 200, 220));
+            let value_w = inner_w.saturating_sub(10);
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  ID    ", label_style),
+                Span::styled(truncate_display(&session.id, value_w), value_style),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Path  ", label_style),
+                Span::styled(
+                    truncate_display(
+                        session.working_dir.as_deref().unwrap_or("(no directory)"),
+                        value_w,
+                    ),
+                    value_style,
+                ),
+            ]));
+        }
+    }
+
     lines.push(Line::from(""));
 
     // --- Mode-sensitive bottom section -----------------------------------
@@ -417,7 +459,10 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
+                // "move", not "navigate": the bar carries six keys now and the
+                // longer word pushes the last one onto a second line, which
+                // costs the list a row.
+                Span::styled(" move  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     "Enter",
                     Style::default()
@@ -438,14 +483,14 @@ pub fn render_session_browser(state: &SessionBrowserState, area: Rect, buf: &mut
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled("=paths  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
-                    if state.show_paths {
-                        "=hide paths  "
-                    } else {
-                        "=paths  "
-                    },
-                    Style::default().fg(Color::DarkGray),
+                    "p",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
+                Span::styled("=details  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     "Esc",
                     Style::default()
@@ -832,6 +877,90 @@ mod tests {
         assert_eq!(row_capacity(&s, 20), 14);
         s.show_paths = true;
         assert_eq!(row_capacity(&s, 20), 7);
+    }
+
+    #[test]
+    fn the_detail_panel_takes_its_rows_from_the_list() {
+        // Without this the panel would be drawn over the bottom of the list
+        // and the last sessions would disappear behind the border.
+        let mut s = SessionBrowserState::new();
+        assert_eq!(row_capacity(&s, 20), 14);
+        s.show_preview = true;
+        assert_eq!(row_capacity(&s, 20), 14 - PREVIEW_LINES);
+    }
+
+    #[test]
+    fn the_detail_panel_shows_what_the_columns_cannot() {
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        assert!(!drawn_rows(&s, 80, 24)
+            .iter()
+            .any(|r| r.contains("sess-001")));
+
+        s.toggle_preview();
+        let rows = drawn_rows(&s, 80, 24);
+        assert!(
+            rows.iter().any(|r| r.contains("sess-001")),
+            "the id is not a column: {rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|r| r.contains("/home/dev/api-gateway")),
+            "nor is the full path: {rows:#?}"
+        );
+    }
+
+    #[test]
+    fn the_detail_panel_follows_the_selection() {
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        s.toggle_preview();
+        s.select_next();
+
+        let rows = drawn_rows(&s, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("sess-002")), "{rows:#?}");
+        assert!(!rows.iter().any(|r| r.contains("sess-001")));
+    }
+
+    #[test]
+    fn the_hint_bar_still_fits_on_one_line() {
+        // Six keys is as many as the 70-column modal holds. A seventh, or a
+        // longer word, wraps the last hint onto a line the list needed.
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        let rows = drawn_rows(&s, 80, 24);
+
+        let hint_row = rows
+            .iter()
+            .find(|row| row.contains("=rename"))
+            .expect("the hint bar is drawn");
+        assert!(
+            hint_row.contains("Esc=close"),
+            "the last hint has to share the line: {hint_row:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.trim() == "Esc=close"),
+            "and nothing is left on a line of its own: {rows:#?}"
+        );
+    }
+
+    #[test]
+    fn the_detail_panel_is_forgotten_on_close() {
+        let mut s = SessionBrowserState::new();
+        s.open(sample_sessions());
+        s.toggle_preview();
+        s.close();
+        assert!(!s.show_preview);
+    }
+
+    #[test]
+    fn an_empty_list_has_no_session_to_detail() {
+        let mut s = SessionBrowserState::new();
+        s.open(vec![]);
+        s.toggle_preview();
+
+        let rows = drawn_rows(&s, 80, 24);
+        assert!(rows.iter().any(|r| r.contains("No sessions found")));
+        assert!(!rows.iter().any(|r| r.contains("ID")), "{rows:#?}");
     }
 
     #[test]

@@ -4832,6 +4832,7 @@ impl App {
                     KeyCode::Down => self.session_browser.select_next(),
                     KeyCode::Char('r') => self.session_browser.start_rename(),
                     KeyCode::Char('a') => self.session_browser.toggle_paths(),
+                    KeyCode::Char('p') => self.session_browser.toggle_preview(),
                     _ => {}
                 },
                 SessionBrowserMode::Rename => match key.code {
