@@ -219,6 +219,11 @@ The `config` object holds runtime behaviour options.
 
 See [Permission Modes](#permission-modes) for a full description of each value.
 
+`/yolo` writes this key: `on` sets `"bypassPermissions"` and `off` sets
+`"default"`. There is no separate yolo setting, so a settings file cannot say
+two contradictory things about the same state. Shift+Tab cycles the mode for
+the session only and writes nothing.
+
 ### Interface and output
 
 | Key             | Type           | Default     | Description                                                                                                                                                 |
@@ -248,8 +253,14 @@ off. Leaving any of the three unset keeps today's behaviour, so upgrading
 changes nothing.
 
 `maxTurns` is also set by `--max-turns` at launch and by `/turns` during a
-session. An agent definition's own `max_turns` wins over it while that agent is
-active; `/turns` says so rather than reporting a limit that will not apply.
+session. `--max-turns` lasts for one launch; `/turns` writes the key, so the
+limit survives a restart. An agent definition's own `max_turns` wins over it
+while that agent is active; `/turns` says so rather than reporting a limit that
+will not apply.
+
+`autoPoke` is set by `/poke` during a session, which writes the key the same
+way. `/poke default` removes the key rather than writing `true` into it, so the
+file keeps saying nothing about a setting nobody chose.
 
 ### System prompt
 

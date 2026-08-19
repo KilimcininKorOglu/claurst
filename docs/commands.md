@@ -7,21 +7,22 @@ This document is the complete reference for every slash command available in Cla
 ## Table of Contents
 
 1. [Command System Overview](#command-system-overview)
-2. [Session & Navigation](#session--navigation)
-3. [Model & Provider](#model--provider) — `/model`, `/providers`, `/connect`, `/thinking`, `/effort`, `/advisor`, `/fast`
-4. [Configuration & Settings](#configuration--settings) — `/config`, `/turns`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/timeline`, `/vim`, `/voice`, `/terminal-setup`
-5. [Code & Git](#code--git) — `/commit`, `/diff`, `/undo`, `/review`, `/security-review`, `/init`, `/search`
-6. [Search & Files](#search--files) — `/files`, `/context`
-7. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
-8. [Agents & Tasks](#agents--tasks) — `/agents`, `/tasks`, `/todos`, `/goal`, `/managed-agents`, `/agent`
-9. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
-10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
-11. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
-12. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
-13. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
-14. [Export & Sharing](#export--sharing) — `/export`, `/copy`
-15. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
-16. [Command Availability](#command-availability)
+2. [Shell Commands](#shell-commands)
+3. [Session & Navigation](#session--navigation)
+4. [Model & Provider](#model--provider) — `/model`, `/providers`, `/connect`, `/thinking`, `/effort`, `/advisor`, `/fast`
+5. [Configuration & Settings](#configuration--settings) — `/config`, `/turns`, `/poke`, `/yolo`, `/keybindings`, `/permissions`, `/hooks`, `/privacy-settings`, `/mcp`, `/output-style`, `/theme`, `/statusline`, `/timeline`, `/vim`, `/voice`, `/terminal-setup`
+6. [Code & Git](#code--git) — `/commit`, `/diff`, `/undo`, `/review`, `/security-review`, `/init`, `/search`
+7. [Search & Files](#search--files) — `/files`, `/context`
+8. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
+9. [Agents & Tasks](#agents--tasks) — `/agents`, `/tasks`, `/todos`, `/goal`, `/managed-agents`, `/agent`
+10. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
+11. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
+12. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
+13. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
+14. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
+15. [Export & Sharing](#export--sharing) — `/export`, `/copy`
+16. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
+17. [Command Availability](#command-availability)
 
 ---
 
@@ -51,6 +52,44 @@ Commands support aliases — for example `/h`, `/?`, and `/help` all invoke the 
 ```
 
 Arguments are passed as a single string after the command name. Most commands that accept arguments are documented with an `argumentHint` shown in the command palette.
+
+---
+
+## Shell Commands
+
+A line that starts with `!` runs as a shell command instead of going to the
+model.
+
+```
+!ls -la
+!git status
+!!literal      sends "!literal" to the model
+```
+
+The command runs in the same shell the model's Bash tool uses, so `cd` and
+`export` outlive the call and both see the same working directory and
+environment. The 120-second timeout and the 100 KB output limit are the tool's,
+unchanged.
+
+Three things follow from this being a command you typed rather than one the
+model issued:
+
+- **No permission prompt.** The permission rules bound what the model may do.
+  Asking you to confirm a command you just wrote adds nothing. The Critical-risk
+  classifier still applies, so `rm -rf /` is refused on this path too.
+- **The output never reaches the model.** It is drawn in the transcript as a
+  system annotation, which is not part of the conversation, so a shell command
+  costs no tokens and does not enter the context.
+- **Plan mode refuses it.** Plan mode promises to touch nothing, and a shell
+  command is a way of touching something.
+
+While a turn is streaming, Enter on a bang line hands the text back to the
+prompt rather than queueing it: a queued bang would reach the model as a plain
+message once the turn ended.
+
+A non-zero exit code is drawn as a warning; the command itself is shown above
+its output. The call blocks the interface while it runs, so a long command
+leaves the display still until it finishes or the timeout fires.
 
 ---
 
@@ -384,6 +423,48 @@ one is in force.
 `off`, `none`, `unlimited` and `0` all mean no limit. Reaching the limit normally
 spends one final turn asking the model to summarise its progress; the
 `degradationSummary` setting turns that off.
+
+---
+
+### /poke
+
+Show or change whether unfinished todos nudge the model between turns.
+
+```
+/poke            show whether the nudge is on
+/poke on         nudge the model about unfinished todos
+/poke off        stop nudging
+/poke default    back to the configured default (on)
+```
+
+After a turn that leaves todos unfinished, Claurst appends a short reminder
+listing what is left, so the run continues instead of stopping halfway. Turn it
+off for a session where you drive each step yourself. The setting is saved as
+`autoPoke` in `settings.json`; `default` removes the key rather than writing
+the default value into it.
+
+---
+
+### /yolo
+
+Run every tool without asking for permission.
+
+```
+/yolo            switch it the other way
+/yolo on         stop asking for permission
+/yolo off        go back to asking
+/yolo status     show the mode in force
+```
+
+Yolo mode is `permissionMode: "bypassPermissions"` under a shorter name, so
+there is no separate setting for it: `/yolo on`, `--dangerously-skip-permissions`
+and setting `permissionMode` by hand all describe the same state. Every tool
+runs unasked, including ones that write files and run shell commands.
+
+Shift+Tab cycles the mode too, but only for the session. `/yolo` writes it to
+`settings.json`, so it survives a restart. `/yolo off` returns to `default`
+rather than to whatever mode preceded bypass: nothing records that, and
+guessing `acceptEdits` would hand back more than was taken away.
 
 ---
 
