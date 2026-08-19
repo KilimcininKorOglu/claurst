@@ -2337,6 +2337,17 @@ impl App {
             .collect();
         self.model_picker.set_models(models);
 
+        // `reachable_provider_ids` also admits an account that has a `providers`
+        // entry but no credential, which is a section the user cannot pick from.
+        // Resolving a credential reads the auth store, so the answer is taken
+        // once here and never again while the picker is open.
+        let connected: std::collections::HashSet<String> = provider_ids
+            .iter()
+            .filter(|id| self.config.resolve_provider_api_key(id).is_some())
+            .cloned()
+            .collect();
+        self.model_picker.set_connected_ids(connected);
+
         // The live fetch is per-provider, so it still targets the session's
         // provider. Every other section shows the catalog projection.
         let active = self
@@ -4662,6 +4673,11 @@ impl App {
                 }
                 KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.model_picker.select_next()
+                }
+                // Ahead of the `Char(c)` arm below, which would otherwise type
+                // the letter into the filter box.
+                KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.model_picker.toggle_connected_only()
                 }
                 KeyCode::Enter => {
                     if let Some((model_id, effort)) = self.model_picker.confirm() {

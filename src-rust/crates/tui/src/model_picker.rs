@@ -703,6 +703,14 @@ pub struct ModelPickerState {
     /// Provider of the entry chosen by the most recent `confirm`, when the
     /// list spanned several providers.
     confirmed_provider_id: Option<String>,
+    /// Hide accounts that have no credential behind them.
+    ///
+    /// Off when the picker opens, so the first view is always the full list.
+    pub connected_only: bool,
+    /// Accounts a credential resolves for, read once when the picker opens.
+    ///
+    /// Resolving one goes to disk, so this must never be recomputed per frame.
+    connected_ids: std::collections::HashSet<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -732,7 +740,34 @@ impl ModelPickerState {
             models_loaded: false,
             loading_models: false,
             confirmed_provider_id: None,
+            connected_only: false,
+            connected_ids: std::collections::HashSet::new(),
         }
+    }
+
+    /// Record which accounts a credential resolves for.
+    ///
+    /// Called once as the picker opens, from the caller that already walks the
+    /// account list, because each answer costs a read of the auth store.
+    pub fn set_connected_ids(&mut self, ids: std::collections::HashSet<String>) {
+        self.connected_ids = ids;
+    }
+
+    /// Whether an account has a credential behind it.
+    pub fn is_connected(&self, provider_id: &str) -> bool {
+        self.connected_ids.contains(provider_id)
+    }
+
+    /// Toggle the connected-only filter, keeping the selection in range.
+    ///
+    /// A single-provider list is left alone: its one account is the one already
+    /// in use, so there is nothing the filter could usefully hide.
+    pub fn toggle_connected_only(&mut self) {
+        if !self.is_cross_provider() {
+            return;
+        }
+        self.connected_only = !self.connected_only;
+        self.clamp_selection();
     }
 
     /// Open the overlay.
@@ -762,6 +797,10 @@ impl ModelPickerState {
         self.selected_idx = self.models.iter().position(|m| m.is_current).unwrap_or(0);
         self.title = title.into();
         self.filter.clear();
+        // The first view is always the full list, for the same reason the
+        // filter is cleared: a hidden row from a previous visit reads as a
+        // missing model rather than as a filter still in force.
+        self.connected_only = false;
         self.effort_level = effort;
         self.fast_mode = fast_mode;
         self.fast_mode_model = fast_mode.then_some(current_model.to_string());
@@ -901,17 +940,26 @@ impl ModelPickerState {
     }
 
     /// Return models that match the current filter (case-insensitive).
+    ///
+    /// Every navigation and every confirm reads the list through here, so any
+    /// rule about which rows exist belongs in this one place.
     pub fn filtered_models(&self) -> Vec<&ModelEntry> {
-        if self.filter.is_empty() {
-            return self.models.iter().collect();
-        }
         let needle = self.filter.to_lowercase();
         self.models
             .iter()
             .filter(|m| {
-                m.id.to_lowercase().contains(needle.as_str())
+                needle.is_empty()
+                    || m.id.to_lowercase().contains(needle.as_str())
                     || m.display_name.to_lowercase().contains(needle.as_str())
                     || m.description.to_lowercase().contains(needle.as_str())
+            })
+            .filter(|m| {
+                // A row with no provider comes from a single-account list, where
+                // the account is the one already in use.
+                !self.connected_only
+                    || m.provider_id
+                        .as_deref()
+                        .is_none_or(|id| self.connected_ids.contains(id))
             })
             .collect()
     }
@@ -998,9 +1046,12 @@ impl ModelPickerState {
         self.clamp_selection();
     }
 
+    /// Pull the selection back into range after the visible list shrank.
     fn clamp_selection(&mut self) {
         let count = self.filtered_models().len();
-        if count > 0 && self.selected_idx >= count {
+        if count == 0 {
+            self.selected_idx = 0;
+        } else if self.selected_idx >= count {
             self.selected_idx = count - 1;
         }
     }
@@ -1321,6 +1372,20 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
             footer_spans.push(Span::styled("\u{2190}/\u{2192}", Style::default().fg(dim)));
             footer_spans.push(Span::styled(" effort", Style::default().fg(dim)));
         }
+    }
+    // Only offered where it does something: a single-account list has one
+    // section, so there is nothing to hide.
+    if state.is_cross_provider() {
+        footer_spans.push(Span::raw("  "));
+        footer_spans.push(Span::styled("^o", Style::default().fg(dim)));
+        footer_spans.push(Span::styled(
+            if state.connected_only {
+                " all"
+            } else {
+                " connected"
+            },
+            Style::default().fg(dim),
+        ));
     }
     footer_spans.push(Span::raw("  "));
     footer_spans.push(Span::styled(
@@ -2359,5 +2424,117 @@ mod cross_provider_tests {
         assert!(!ids.contains(&"custom-openai/default"));
         assert!(ids.contains(&"custom-openai/my-llm"));
         assert!(ids.contains(&"ollama/qwen3"));
+    }
+
+    fn connected(state: &mut ModelPickerState, ids: &[&str]) {
+        state.set_connected_ids(ids.iter().map(|id| id.to_string()).collect());
+    }
+
+    fn visible_ids(state: &ModelPickerState) -> Vec<String> {
+        state
+            .filtered_models()
+            .iter()
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
+    #[test]
+    fn an_account_with_no_credential_drops_out_of_the_list() {
+        // An account listed in `providers` but never given a key is reachable
+        // enough to be offered and fails the moment a model under it is picked.
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("openai", &["gpt-5"]));
+        let mut state = picker(models);
+        connected(&mut state, &["anthropic"]);
+
+        assert_eq!(visible_ids(&state).len(), 2);
+        state.toggle_connected_only();
+        assert_eq!(visible_ids(&state), vec!["anthropic/sonnet"]);
+        state.toggle_connected_only();
+        assert_eq!(visible_ids(&state).len(), 2);
+    }
+
+    #[test]
+    fn an_oauth_account_counts_as_connected() {
+        // Credentials resolve through `api_key_for_protocol`, which answers for
+        // OAuth logins too, so the caller hands those ids in like any other.
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("github-copilot", &["gpt-5"]));
+        let mut state = picker(models);
+        connected(&mut state, &["anthropic", "github-copilot"]);
+
+        state.toggle_connected_only();
+        assert_eq!(visible_ids(&state).len(), 2);
+    }
+
+    #[test]
+    fn hiding_rows_pulls_the_selection_back_into_range() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("openai", &["gpt-5", "gpt-5-mini"]));
+        let mut state = picker(models);
+        connected(&mut state, &["anthropic"]);
+        state.select_last();
+        assert_eq!(state.selected_idx, 2);
+
+        state.toggle_connected_only();
+        assert_eq!(state.selected_idx, 0);
+        assert_eq!(visible_ids(&state), vec!["anthropic/sonnet"]);
+    }
+
+    #[test]
+    fn a_single_account_list_is_left_alone() {
+        // Its one account is the one already in use, so hiding it would leave
+        // an empty picker and no way to read why.
+        let mut state = picker(vec![entry("sonnet"), entry("haiku")]);
+        connected(&mut state, &[]);
+
+        state.toggle_connected_only();
+        assert!(!state.connected_only);
+        assert_eq!(visible_ids(&state).len(), 2);
+    }
+
+    /// Everything the picker drew, as one string.
+    fn drawn(state: &ModelPickerState) -> String {
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        render_model_picker(state, area, &mut buf);
+        buf.content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn the_connected_hint_is_offered_only_where_it_does_something() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("openai", &["gpt-5"]));
+        let mut state = picker(models);
+        connected(&mut state, &["anthropic"]);
+        state.open("anthropic/sonnet");
+        assert!(drawn(&state).contains("^o connected"));
+
+        // Toggled on, the hint names the way back rather than repeating itself.
+        state.toggle_connected_only();
+        let on = drawn(&state);
+        assert!(on.contains("^o all"), "{on:?}");
+
+        let mut single = picker(vec![entry("sonnet"), entry("haiku")]);
+        single.open("sonnet");
+        assert!(!drawn(&single).contains("^o"));
+    }
+
+    #[test]
+    fn reopening_the_picker_shows_the_full_list_again() {
+        let mut models = scoped("anthropic", &["sonnet"]);
+        models.extend(scoped("openai", &["gpt-5"]));
+        let mut state = picker(models);
+        connected(&mut state, &["anthropic"]);
+        state.toggle_connected_only();
+        assert!(state.connected_only);
+
+        state.close();
+        state.open("anthropic/sonnet");
+        assert!(!state.connected_only);
+        assert_eq!(visible_ids(&state).len(), 2);
     }
 }

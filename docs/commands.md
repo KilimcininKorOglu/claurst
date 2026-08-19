@@ -203,6 +203,8 @@ The picker lists every provider the current configuration can reach, grouped und
 
 Type to filter across the whole list. If nothing matches, pressing Enter uses what you typed as a model id, which is how you reach a model the picker does not know about.
 
+An account earns a section by having an entry in `providers` or a credential, so a provider you configured but never gave a key to is listed and fails the moment you pick from it. `Ctrl+O` hides those sections, leaving only accounts a credential resolves for, and hides nothing in a single-account list. The filter is off again every time the picker opens.
+
 The command takes no arguments; anything after `/model` is ignored.
 
 Local runtimes and custom endpoints report their real model list from a live query when the session is on them. Other sections show the models.dev catalog, so a locally-loaded model may not appear until you switch to that provider.
