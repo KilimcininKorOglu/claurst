@@ -48,6 +48,7 @@ interface ToolCallMessage {
   status?: string;
   kind?: string;
   locations?: ToolCallLocation[];
+  output?: string;
   diffs?: Diff[];
   terminalId?: string;
 }
@@ -217,6 +218,14 @@ type HostMessage =
 
     for (const diff of msg.diffs || []) {
       el.appendChild(renderDiff(diff));
+    }
+    // What the tool returned. Long output is capped by the element rather than
+    // by cutting the text, so scrolling still reaches the end of it.
+    if (msg.output) {
+      const output = document.createElement('div');
+      output.className = 'tool-output';
+      output.textContent = msg.output;
+      el.appendChild(output);
     }
     // A tool call is redrawn from scratch on every update, so the terminal's
     // element is rebuilt too and refilled from what it has said so far.

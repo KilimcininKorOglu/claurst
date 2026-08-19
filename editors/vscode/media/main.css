@@ -147,6 +147,15 @@ body {
   white-space: pre;
 }
 
+.tool-output {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 14em;
+  overflow-y: auto;
+  color: var(--vscode-foreground);
+}
+
 .terminal-output {
   margin: 6px 0 0;
   padding: 6px 8px;
