@@ -7698,3 +7698,27 @@ mod bang_command_tests {
         assert!(text.contains(&marker), "{text:?}");
     }
 }
+
+#[cfg(test)]
+mod permission_mode_flag_tests {
+    use super::*;
+
+    #[test]
+    fn an_absent_flag_leaves_the_saved_mode_alone() {
+        // The flag used to carry a default, so clap answered `Default`
+        // whether or not it was passed and startup wrote that over the
+        // settings file. A mode saved by `/yolo` was then gone by the next
+        // launch.
+        let cli = Cli::parse_from(["claurst"]);
+        assert!(cli.permission_mode.is_none());
+    }
+
+    #[test]
+    fn a_given_flag_still_wins() {
+        let cli = Cli::parse_from(["claurst", "--permission-mode", "plan"]);
+        assert_eq!(
+            cli.permission_mode.map(PermissionMode::from),
+            Some(PermissionMode::Plan)
+        );
+    }
+}
