@@ -1376,7 +1376,9 @@ mod tests {
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_timed_out_background_command_takes_its_children_with_it() {
-        let marker = "313380";
+        // The marker carries this run's pid: a leftover from an earlier run
+        // would otherwise be found by `pgrep` and fail every later run.
+        let marker = format!("313380.{}", std::process::id());
         let result = run_in_background(
             format!("sleep {marker} & wait"),
             std::env::temp_dir(),
@@ -1386,10 +1388,10 @@ mod tests {
         assert!(!result.is_error, "{}", result.content);
 
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(still_running(marker), "the child never started");
+        assert!(still_running(&marker), "the child never started");
 
         assert!(
-            gone_within(marker, Duration::from_secs(10)).await,
+            gone_within(&marker, Duration::from_secs(10)).await,
             "the shell's child outlived the timeout"
         );
     }
