@@ -180,6 +180,23 @@ type HostMessage =
     currentAgentText = '';
   }
 
+  /** Drop the bookkeeping the finished turn needed.
+   *
+   * These maps are how an update finds the element it belongs to and how a
+   * terminal's output is replayed when its call is redrawn. Nothing addresses
+   * either once the turn is over, but they were never emptied, so a long
+   * conversation kept every element and every byte of every command it had
+   * ever run. The transcript itself is untouched.
+   *
+   * Clearing at the end of the turn rather than when a call completes matters:
+   * an update that arrived after its entry had gone would not find its element
+   * and would draw the same call a second time. */
+  function forgetTurnState(): void {
+    toolCallEls.clear();
+    terminalEls.clear();
+    terminalText.clear();
+  }
+
   /** Put what has arrived so far into the bubble.
    *
    * The agent's own words are markdown; the user's are shown exactly as typed,
@@ -816,6 +833,7 @@ type HostMessage =
       }
       case 'turnEnded': {
         endBubble();
+        forgetTurnState();
         setBusy(false);
         break;
       }
