@@ -141,6 +141,22 @@ export interface SessionEvents {
   onTerminalOutput?: (terminalId: string, chunk: string) => void;
 }
 
+/** What the agent said it can do, read from its `initialize` answer.
+ *
+ * Everything defaults to false: an agent that did not claim a capability is
+ * one this must not use, and guessing would send it something it will drop. */
+export type AgentCapabilities = {
+  /** Its name and version, for the panel to show. */
+  name?: string;
+  version?: string;
+  /** Whether a prompt may carry an image block. */
+  image: boolean;
+  /** Whether a prompt may carry a file's contents inline. */
+  embeddedContext: boolean;
+  /** Whether a stored session can be reopened at all. */
+  loadSession: boolean;
+};
+
 export interface AcpClientEvents {
   onStderr?: (line: string) => void;
   onExit?: (code: number | null) => void;
@@ -159,6 +175,11 @@ export class AcpClient {
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private sessions = new Map<string, SessionEvents>();
   private initialized: Promise<void> | undefined;
+  private agentCapabilities: AgentCapabilities = {
+    image: false,
+    embeddedContext: false,
+    loadSession: false,
+  };
   private readonly terminals: TerminalHost;
   /** Which session started each terminal, so its output reaches that panel. */
   private terminalOwners = new Map<string, string>();
@@ -507,6 +528,11 @@ export class AcpClient {
     this.writeMessage({ jsonrpc: '2.0', method, params });
   }
 
+  /** What the agent answered `initialize` with. Empty until it has. */
+  get agent(): AgentCapabilities {
+    return this.agentCapabilities;
+  }
+
   /** Negotiate capabilities once, however many panels ask for it. */
   initialize(): Promise<void> {
     if (!this.initialized) {
@@ -521,7 +547,9 @@ export class AcpClient {
           terminal: this.hostTerminals,
         },
         clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
-      }).then(() => undefined);
+      }).then((result) => {
+        this.agentCapabilities = capabilitiesOf(result);
+      });
     }
     return this.initialized;
   }
@@ -694,6 +722,22 @@ async function writeTextFile(path: string, content: string): Promise<void> {
   if (!(await vscode.workspace.applyEdit(edit))) {
     throw new Error('the workspace refused the edit');
   }
+}
+
+/** Read the agent's answer to `initialize`.
+ *
+ * A capability it did not claim reads as false rather than as unknown: sending
+ * a block the agent cannot carry loses whatever the user attached, and there
+ * is nothing in the answer to distinguish "no" from "old agent". */
+function capabilitiesOf(result: any): AgentCapabilities {
+  const prompt = result?.agentCapabilities?.promptCapabilities;
+  return {
+    name: typeof result?.agentInfo?.name === 'string' ? result.agentInfo.name : undefined,
+    version: typeof result?.agentInfo?.version === 'string' ? result.agentInfo.version : undefined,
+    image: prompt?.image === true,
+    embeddedContext: prompt?.embeddedContext === true,
+    loadSession: result?.agentCapabilities?.loadSession === true,
+  };
 }
 
 function startOf(result: any, sessionId: string): SessionStart {

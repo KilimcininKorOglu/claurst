@@ -254,7 +254,7 @@ export class ChatPanel {
       this.options = session.configOptions;
       this.modes = session.modes;
       this.pushHeader();
-      this.postToWebview({ type: 'status', text: opened });
+      this.postToWebview({ type: 'status', text: `${opened}${agentSuffix(client)}` });
     } catch (e) {
       this.reportError(e);
     }
@@ -449,7 +449,9 @@ export class ChatPanel {
         // way, and inventing a file would be worse.
         continue;
       }
-      if (stat.size > EMBED_LIMIT_BYTES) {
+      // An agent that did not claim embedded context would drop the contents,
+      // so the file is named and it reads what it needs.
+      if (stat.size > EMBED_LIMIT_BYTES || !this.client?.agent.embeddedContext) {
         blocks.push({ type: 'resource_link', uri: uri.toString(), name: mention });
         continue;
       }
@@ -533,6 +535,18 @@ export class ChatPanel {
     }
     this.disposables = [];
   }
+}
+
+/** Name the agent behind a session, when it introduced itself.
+ *
+ * Which build is answering matters when two versions are installed and the
+ * panel behaves differently from the terminal. */
+function agentSuffix(client: AcpClient): string {
+  const { name, version } = client.agent;
+  if (!name) {
+    return '';
+  }
+  return version ? ` (${name} ${version})` : ` (${name})`;
 }
 
 /** Open the file a tool call named, at the line it named.
