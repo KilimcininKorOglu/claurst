@@ -797,15 +797,26 @@ impl ModelPickerState {
         self.favorites.contains(&self.favorite_key(entry))
     }
 
-    /// Star or unstar `key`, reporting the state it ended in.
+    /// Star or unstar `key` and keep the cursor on that row.
     ///
     /// Only the in-memory set moves; persisting it is the caller's job, so a
     /// failed write is never mistaken for a successful star.
+    ///
+    /// Starring reorders the section under the cursor, so without the second
+    /// half the cursor would stay at its old index and end up on whichever row
+    /// slid into it.
     pub fn set_favorite(&mut self, key: &str, starred: bool) {
         if starred {
             self.favorites.insert(key.to_string());
         } else {
             self.favorites.remove(key);
+        }
+        if let Some(idx) = self
+            .filtered_models()
+            .iter()
+            .position(|row| self.favorite_key(row) == key)
+        {
+            self.selected_idx = idx;
         }
     }
 
@@ -2786,6 +2797,28 @@ mod cross_provider_tests {
         assert!(state.has_favorite(&key));
         state.set_favorite(&key, false);
         assert!(!state.has_favorite(&key));
+    }
+
+    #[test]
+    fn the_cursor_follows_the_row_it_just_starred() {
+        // Starring reorders the section, so a cursor left at its old index
+        // would sit on whichever row slid into that position.
+        let mut state = picker(scoped("anthropic", &["opus", "sonnet", "haiku"]));
+        state.open("anthropic/opus");
+        state.select_last();
+        let key = state
+            .selected_favorite_key()
+            .expect("a row under the cursor");
+        assert_eq!(key, "anthropic/haiku");
+
+        state.set_favorite(&key, true);
+        assert_eq!(cursor_id(&state), "anthropic/haiku");
+        assert_eq!(state.selected_idx, 0, "it rose to the top of its section");
+
+        // And back down again when the star is taken away.
+        state.set_favorite(&key, false);
+        assert_eq!(cursor_id(&state), "anthropic/haiku");
+        assert_eq!(state.selected_idx, 2);
     }
 
     #[test]
