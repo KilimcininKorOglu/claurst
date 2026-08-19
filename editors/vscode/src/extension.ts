@@ -1,7 +1,7 @@
-import * as os from 'os';
 import * as vscode from 'vscode';
 import { AgentPool } from './agentPool';
 import { ChatPanel } from './chatPanel';
+import { chooseWorkingFolder } from './workspace';
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel('Claurst');
@@ -13,16 +13,19 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => pool.dispose() });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.openChat', () => {
-      ChatPanel.show(context.extensionUri, pool, outputChannel);
+    vscode.commands.registerCommand('claurst.openChat', async () => {
+      await ChatPanel.show(context.extensionUri, pool, outputChannel);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.newSession', () => {
+    vscode.commands.registerCommand('claurst.newSession', async () => {
       // A second panel, not a replacement: two conversations can run side by
       // side inside the one agent process.
-      ChatPanel.create(context.extensionUri, pool, outputChannel);
+      const cwd = await chooseWorkingFolder();
+      if (cwd) {
+        ChatPanel.create(context.extensionUri, pool, outputChannel, { kind: 'new', cwd });
+      }
     }),
   );
 
@@ -53,7 +56,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('claurst.resumeSession', async () => {
       try {
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+        const cwd = await chooseWorkingFolder();
+        if (!cwd) {
+          return;
+        }
         const client = await pool.acquire(cwd);
         try {
           const sessions = await client.listSessions(cwd);

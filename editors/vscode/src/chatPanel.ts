@@ -1,4 +1,3 @@
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -15,6 +14,7 @@ import {
   ToolCallUpdate,
 } from './acpClient';
 import { AgentPool } from './agentPool';
+import { chooseWorkingFolder } from './workspace';
 
 /** The key the mode pill uses. Config option ids come from the agent, so this
  * one only has to avoid colliding with them. */
@@ -32,9 +32,14 @@ const FILE_PICK_LIMIT = 5000;
 /** An image the user pasted into the input box, as the webview hands it over. */
 type PastedImage = { mimeType: string; data: string };
 
-/** How a panel's session comes to exist. */
+/** How a panel's session comes to exist.
+ *
+ * Every shape carries the folder it works in, directly or through the session
+ * it reopens. It used to be resolved inside the panel, which meant a new
+ * conversation always landed in the first workspace root whatever the user had
+ * in mind. */
 export type PanelOpening =
-  | { kind: 'new' }
+  | { kind: 'new'; cwd: string }
   /** Reopen a stored session and draw the whole conversation back. */
   | { kind: 'load'; session: StoredSession }
   /** Reopen it and keep going, without re-reading it. */
@@ -43,21 +48,19 @@ export type PanelOpening =
   | { kind: 'fork'; sessionId: string; cwd: string; title?: string };
 
 /** The directory a panel opened this way works in. */
-function cwdOf(opening: PanelOpening | undefined): string | undefined {
-  switch (opening?.kind) {
+function cwdOf(opening: PanelOpening): string {
+  switch (opening.kind) {
     case 'load':
     case 'resume':
       return opening.session.cwd;
-    case 'fork':
-      return opening.cwd;
     default:
-      return undefined;
+      return opening.cwd;
   }
 }
 
 /** What to call a panel before the agent names its session. */
-function titleOf(opening: PanelOpening | undefined): string | undefined {
-  switch (opening?.kind) {
+function titleOf(opening: PanelOpening): string | undefined {
+  switch (opening.kind) {
     case 'load':
     case 'resume':
       return opening.session.title;
@@ -103,7 +106,7 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     pool: AgentPool,
     outputChannel: vscode.OutputChannel,
-    opening: PanelOpening = { kind: 'new' },
+    opening: PanelOpening,
   ): ChatPanel {
     const panel = vscode.window.createWebviewPanel(
       'claurstChat',
@@ -121,18 +124,22 @@ export class ChatPanel {
     return new ChatPanel(panel, extensionUri, pool, outputChannel, opening);
   }
 
-  /** Reveal a panel if there is one, otherwise start one. */
-  static show(
+  /** Reveal a panel if there is one, otherwise start one.
+   *
+   * `undefined` when there was nothing to reveal and the user dismissed the
+   * question of which folder to work in. */
+  static async show(
     extensionUri: vscode.Uri,
     pool: AgentPool,
     outputChannel: vscode.OutputChannel,
-  ): ChatPanel {
+  ): Promise<ChatPanel | undefined> {
     const existing = ChatPanel.active ?? ChatPanel.panels.values().next().value;
     if (existing) {
       existing.panel.reveal();
       return existing;
     }
-    return ChatPanel.create(extensionUri, pool, outputChannel);
+    const cwd = await chooseWorkingFolder();
+    return cwd ? ChatPanel.create(extensionUri, pool, outputChannel, { kind: 'new', cwd }) : undefined;
   }
 
   static disposeAll(): void {
@@ -146,11 +153,10 @@ export class ChatPanel {
     extensionUri: vscode.Uri,
     private readonly pool: AgentPool,
     private readonly outputChannel: vscode.OutputChannel,
-    private readonly opening: PanelOpening = { kind: 'new' },
+    private readonly opening: PanelOpening,
   ) {
     this.panel = panel;
-    this.cwd =
-      cwdOf(opening) ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    this.cwd = cwdOf(opening);
     ChatPanel.panels.add(this);
     ChatPanel.active = this;
 
