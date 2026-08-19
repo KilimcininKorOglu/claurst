@@ -116,6 +116,14 @@ impl SlashCommand for TurnsCommand {
             ),
         };
 
+        // The file takes the change before the session does. `ConfigChangeMessage`
+        // only updates the configs held in memory, so without this the command
+        // reports a limit it saved nowhere and the next launch is back at the
+        // default.
+        if let Err(e) = super::save_settings_mutation(|s| s.config.max_turns = max_turns) {
+            return CommandResult::Error(format!("Could not save the turn limit: {}", e));
+        }
+
         let note = format!("{}{}", note, agent_override_note(ctx.active_agent.as_ref()));
         let mut config = ctx.config.clone();
         config.max_turns = max_turns;
@@ -202,5 +210,103 @@ mod tests {
         assert!(describe(None).contains("default"));
         assert_eq!(describe(Some(MAX_TURNS_UNLIMITED)), "Max turns: no limit.");
         assert_eq!(describe(Some(25)), "Max turns: 25.");
+    }
+
+    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// at a time and put it back afterwards.
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn pointing_at(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    fn ctx() -> CommandContext {
+        CommandContext {
+            config: claurst_core::Config::default(),
+            cost_tracker: claurst_core::cost::CostTracker::new(),
+            messages: vec![],
+            working_dir: std::path::PathBuf::from("."),
+            session_id: "test-session".to_string(),
+            session_title: None,
+            effort_level: None,
+            remote_session_url: None,
+            mcp_manager: None,
+            mcp_auth_runner: None,
+            interactive: true,
+            active_agent: None,
+        }
+    }
+
+    /// What the settings file on disk holds for `maxTurns`.
+    fn saved_max_turns() -> Option<u32> {
+        claurst_core::Settings::load_sync()
+            .expect("settings load")
+            .config
+            .max_turns
+    }
+
+    #[tokio::test]
+    async fn a_limit_reaches_the_settings_file_and_not_only_the_session() {
+        // `ConfigChangeMessage` updates the three configs held in memory and
+        // nothing else, so the command used to report a limit it saved nowhere.
+        let _lock = HOME_LOCK.lock().await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let _home = HomeGuard::pointing_at(dir.path());
+
+        let result = TurnsCommand.execute("25", &mut ctx()).await;
+        assert!(matches!(result, CommandResult::ConfigChangeMessage(..)));
+        assert_eq!(saved_max_turns(), Some(25));
+
+        TurnsCommand.execute("off", &mut ctx()).await;
+        assert_eq!(saved_max_turns(), Some(MAX_TURNS_UNLIMITED));
+
+        TurnsCommand.execute("default", &mut ctx()).await;
+        assert_eq!(
+            saved_max_turns(),
+            None,
+            "the default is the absence of the key, not a written copy of it"
+        );
+    }
+
+    #[tokio::test]
+    async fn showing_the_limit_writes_nothing() {
+        let _lock = HOME_LOCK.lock().await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let _home = HomeGuard::pointing_at(dir.path());
+
+        TurnsCommand.execute("25", &mut ctx()).await;
+        let result = TurnsCommand.execute("", &mut ctx()).await;
+
+        assert!(matches!(result, CommandResult::Message(_)));
+        assert_eq!(saved_max_turns(), Some(25), "still what was set before");
+    }
+
+    #[tokio::test]
+    async fn an_argument_that_is_not_a_limit_writes_nothing() {
+        let _lock = HOME_LOCK.lock().await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let _home = HomeGuard::pointing_at(dir.path());
+
+        let result = TurnsCommand.execute("lots", &mut ctx()).await;
+
+        assert!(matches!(result, CommandResult::Error(_)));
+        assert_eq!(saved_max_turns(), None);
     }
 }
