@@ -13,7 +13,7 @@ This document is the complete reference for every slash command available in Cla
 5. [Code & Git](#code--git) — `/commit`, `/diff`, `/undo`, `/review`, `/security-review`, `/init`, `/search`
 6. [Search & Files](#search--files) — `/files`, `/context`
 7. [Memory & Context](#memory--context) — `/memory`, `/usage`, `/cost`, `/stats`, `/status`, `/insights`
-8. [Agents & Tasks](#agents--tasks) — `/agents`, `/tasks`, `/goal`, `/managed-agents`, `/agent`
+8. [Agents & Tasks](#agents--tasks) — `/agents`, `/tasks`, `/todos`, `/goal`, `/managed-agents`, `/agent`
 9. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
 10. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
 11. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
@@ -749,6 +749,21 @@ Manage tracked background tasks. Tasks are shell commands or model invocations r
 /tasks output <task-id>
 /tasks stop <task-id>
 ```
+
+---
+
+### /todos
+
+List the todos the model recorded for this session with the `TodoWrite` tool.
+Each line shows its status, and a confidence percentage when the model supplied
+one.
+
+```
+/todos
+```
+
+The list persists across turns. A reminder about incomplete items is appended to
+the system prompt after the second turn; the `autoPoke` setting turns that off.
 
 ---
 
