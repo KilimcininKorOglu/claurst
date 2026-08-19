@@ -77,6 +77,10 @@ export class ChatPanel {
   private options: ConfigOption[] = [];
   private modes: SessionModes | undefined;
   private cwd: string;
+  /** Questions the webview has not answered yet, by the id it will answer with.
+   * A panel that closes settles them rather than leaving the agent waiting. */
+  private pendingPermissions = new Map<number, (answer: PermissionAnswer) => void>();
+  private nextPermissionId = 1;
   /** Whether this panel is holding the shared agent. Releasing one it never
    * took would shut the process down under another panel. */
   private holdsAgent = false;
@@ -273,20 +277,41 @@ export class ChatPanel {
     this.postToWebview({ type: 'header', pills });
   }
 
-  private async promptForPermission(
+  /** Ask in the panel rather than in a modal picker.
+   *
+   * A quick pick can only list the option names: it covers the conversation,
+   * and it has nowhere to put the diff or the command the agent sent along. The
+   * question belongs in the transcript next to the tool call it is about, and
+   * it stays there afterwards as a record of what was approved. */
+  private promptForPermission(
     toolCall: ToolCallUpdate,
     options: PermissionOption[],
   ): Promise<PermissionAnswer> {
-    const picked = await vscode.window.showQuickPick(
-      options.map((o) => ({ label: o.name, description: o.kind, optionId: o.optionId })),
-      {
-        placeHolder: toolCall.title ?? 'Claurst is requesting permission',
-        ignoreFocusOut: true,
-      },
-    );
-    // Dismissing the picker is not consent. Cancelling ends the turn, which is
-    // what the user asked for by walking away from the question.
-    return picked ? { optionId: picked.optionId } : { cancelled: true };
+    const requestId = this.nextPermissionId++;
+    return new Promise<PermissionAnswer>((resolve) => {
+      this.pendingPermissions.set(requestId, resolve);
+      this.postToWebview({
+        type: 'permission',
+        requestId,
+        title: toolCall.title ?? 'Claurst is requesting permission',
+        description: toolCall.output,
+        diffs: toolCall.diffs,
+        options: options.map((o) => ({ optionId: o.optionId, name: o.name, kind: o.kind })),
+      });
+    });
+  }
+
+  /** Settle one question the webview answered. */
+  private answerPermission(requestId: unknown, optionId: unknown): void {
+    if (typeof requestId !== 'number') {
+      return;
+    }
+    const resolve = this.pendingPermissions.get(requestId);
+    if (!resolve) {
+      return;
+    }
+    this.pendingPermissions.delete(requestId);
+    resolve(typeof optionId === 'string' ? { optionId } : { cancelled: true });
   }
 
   private handleWebviewMessage(msg: any): void {
@@ -306,6 +331,9 @@ export class ChatPanel {
         break;
       case 'pickFile':
         this.pickFile().catch((e) => this.reportError(e));
+        break;
+      case 'permissionAnswer':
+        this.answerPermission(msg.requestId, msg.optionId);
         break;
       default:
         break;
@@ -470,6 +498,12 @@ export class ChatPanel {
     if (ChatPanel.active === this) {
       ChatPanel.active = ChatPanel.panels.values().next().value;
     }
+    // Closing the panel is not consent. Anything still waiting on an answer is
+    // told nobody chose, which denies the call rather than stalling the turn.
+    for (const resolve of this.pendingPermissions.values()) {
+      resolve({ cancelled: true });
+    }
+    this.pendingPermissions.clear();
     if (this.client && this.sessionId) {
       const client = this.client;
       const sessionId = this.sessionId;

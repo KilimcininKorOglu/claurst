@@ -150,6 +150,55 @@ body {
   color: var(--vscode-descriptionForeground);
 }
 
+/* The question sits in the transcript rather than over it, so the diff it is
+   asking about stays readable while it is being answered. */
+.permission {
+  align-self: flex-start;
+  max-width: 90%;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWidget-background));
+}
+
+.permission-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.permission-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  max-height: 20em;
+  overflow-y: auto;
+}
+
+.permission-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.permission-option.reject_once,
+.permission-option.reject_always {
+  background: var(--vscode-inputValidation-errorBackground, #a1260d);
+}
+
+.permission-option.reject_once:hover,
+.permission-option.reject_always:hover {
+  background: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.permission-chosen {
+  margin-top: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.9em;
+}
+
 #plan {
   flex-shrink: 0;
   padding: 6px 12px;

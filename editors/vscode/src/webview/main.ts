@@ -46,9 +46,25 @@ interface ToolCallMessage {
   terminalId?: string;
 }
 
+interface PermissionOption {
+  optionId: string;
+  name: string;
+  kind: string;
+}
+
+interface PermissionMessage {
+  type: 'permission';
+  requestId: number;
+  title: string;
+  description?: string;
+  diffs?: Diff[];
+  options: PermissionOption[];
+}
+
 type HostMessage =
   | { type: 'textChunk'; text: string; kind?: string }
   | ToolCallMessage
+  | PermissionMessage
   | { type: 'terminalOutput'; terminalId: string; chunk: string }
   | { type: 'status'; text: string }
   | { type: 'header'; pills?: Pill[] }
@@ -178,6 +194,55 @@ type HostMessage =
       terminalEls.set(msg.terminalId, pre);
       el.appendChild(pre);
     }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /** Ask the question where the answer will be remembered.
+   *
+   * The block stays in the transcript after it is answered, showing which
+   * option was chosen, so scrolling back says what was approved and when. */
+  function renderPermission(msg: PermissionMessage): void {
+    const block = document.createElement('div');
+    block.className = 'permission';
+
+    const heading = document.createElement('div');
+    heading.className = 'permission-title';
+    heading.textContent = msg.title;
+    block.appendChild(heading);
+
+    if (msg.description) {
+      const body = document.createElement('div');
+      body.className = 'permission-body';
+      body.textContent = msg.description;
+      block.appendChild(body);
+    }
+
+    for (const diff of msg.diffs || []) {
+      block.appendChild(renderDiff(diff));
+    }
+
+    const row = document.createElement('div');
+    row.className = 'permission-options';
+    for (const option of msg.options) {
+      const button = document.createElement('button');
+      button.className = 'permission-option ' + option.kind;
+      button.textContent = option.name;
+      button.addEventListener('click', () => {
+        vscode.postMessage({
+          type: 'permissionAnswer',
+          requestId: msg.requestId,
+          optionId: option.optionId,
+        });
+        const chosen = document.createElement('div');
+        chosen.className = 'permission-chosen';
+        chosen.textContent = option.name;
+        row.replaceWith(chosen);
+      });
+      row.appendChild(button);
+    }
+    block.appendChild(row);
+
+    messagesEl.appendChild(block);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
@@ -355,6 +420,11 @@ type HostMessage =
       case 'toolCallUpdate': {
         currentAgentBubble = null;
         upsertToolCall(msg);
+        break;
+      }
+      case 'permission': {
+        currentAgentBubble = null;
+        renderPermission(msg);
         break;
       }
       case 'terminalOutput': {
