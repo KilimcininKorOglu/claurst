@@ -717,6 +717,221 @@ pub fn make_assistant_entry(
     })
 }
 
+// ---------------------------------------------------------------------------
+// TranscriptRecorder — the writing side
+// ---------------------------------------------------------------------------
+
+/// The directory a session's transcript is filed under.
+///
+/// The git repository root when there is one, else the working directory. One
+/// definition on purpose: a writer that resolved the root differently from a
+/// reader would file the transcript where nobody looks, which is the whole of
+/// issue #382.
+pub fn transcript_root_for(cwd: &Path) -> PathBuf {
+    crate::git_utils::get_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf())
+}
+
+/// Appends a session's turns to its JSONL transcript as they complete.
+///
+/// Holds the uuids it has already written rather than a message count: an
+/// auto-compaction replaces the conversation with a shorter one, which would
+/// leave a count pointing past the end and rewrite turns that are already on
+/// disk.
+pub struct TranscriptRecorder {
+    project_root: PathBuf,
+    session_id: String,
+    /// Message uuids already on disk for this session.
+    known: std::collections::HashSet<String>,
+    /// Entry uuid the next entry chains onto.
+    last_uuid: Option<String>,
+    /// Whether the existing file has been read into `known` yet.
+    seeded: bool,
+    /// Set by [`Self::reset_branch`]; consumed by the next write.
+    pending_reset: bool,
+    /// Whether the active tip has to be re-pointed once new entries land.
+    ///
+    /// A reset leaf says "no active branch". Entries appended after it are not
+    /// the active branch until a later leaf names their tip, so without this
+    /// the conversation the user is looking at reloads as empty.
+    needs_leaf: bool,
+}
+
+impl TranscriptRecorder {
+    /// `project_root` comes from [`transcript_root_for`].
+    pub fn new(project_root: PathBuf, session_id: String) -> Self {
+        Self {
+            project_root,
+            session_id,
+            known: std::collections::HashSet::new(),
+            last_uuid: None,
+            seeded: false,
+            pending_reset: false,
+            needs_leaf: false,
+        }
+    }
+
+    /// Point the recorder at a different session (`/new`, resume).
+    ///
+    /// The new session's own file is read on the next write, so a resumed
+    /// conversation does not re-append what it already holds.
+    pub fn rebind(&mut self, session_id: String) {
+        self.session_id = session_id;
+        self.known.clear();
+        self.last_uuid = None;
+        self.seeded = false;
+        self.pending_reset = false;
+        self.needs_leaf = false;
+    }
+
+    /// Abandon the active branch (`/clear`).
+    ///
+    /// Writes a reset `leaf` before the next turn, so what came before stays on
+    /// disk as a sibling branch instead of being deleted.
+    pub fn reset_branch(&mut self) {
+        self.pending_reset = true;
+    }
+
+    /// The file this recorder writes to.
+    pub fn path(&self) -> crate::Result<PathBuf> {
+        transcript_path(&self.project_root, &self.session_id)
+    }
+
+    /// Append every message that is not on disk yet.
+    ///
+    /// Stamps a uuid on any message that lacks one and writes it back into the
+    /// message, so the entry and the message share one identifier: `/rewind`
+    /// looks an entry up by the message's uuid, and the branch walk follows the
+    /// entry's, and they have to be the same value.
+    pub async fn record_turn(&mut self, messages: &mut [Message], cwd: &Path) -> crate::Result<()> {
+        let path = self.path()?;
+        self.seed(&path).await?;
+
+        if self.pending_reset {
+            set_leaf(&path, None).await?;
+            self.pending_reset = false;
+            self.needs_leaf = true;
+            self.known.clear();
+            self.last_uuid = None;
+        }
+
+        let cwd = cwd.to_string_lossy().to_string();
+        let mut appended = false;
+
+        for message in messages.iter_mut() {
+            let uuid = match message.uuid.clone() {
+                Some(uuid) => uuid,
+                None => {
+                    let uuid = uuid::Uuid::new_v4().to_string();
+                    message.uuid = Some(uuid.clone());
+                    uuid
+                }
+            };
+            if !self.known.insert(uuid.clone()) {
+                continue;
+            }
+            let entry = match message.role {
+                crate::types::Role::User => make_user_entry(
+                    message.clone(),
+                    &uuid,
+                    self.last_uuid.as_deref(),
+                    &self.session_id,
+                    &cwd,
+                ),
+                crate::types::Role::Assistant => make_assistant_entry(
+                    message.clone(),
+                    &uuid,
+                    self.last_uuid.as_deref(),
+                    &self.session_id,
+                    &cwd,
+                ),
+            };
+            write_transcript_entry(&path, &entry).await?;
+            self.last_uuid = Some(uuid);
+            appended = true;
+        }
+
+        if appended {
+            if self.needs_leaf {
+                set_leaf(&path, self.last_uuid.as_deref()).await?;
+                self.needs_leaf = false;
+            }
+            // The session list reads this from the tail rather than parsing the
+            // whole file, so it is re-appended per turn rather than at exit,
+            // which a killed process never reaches.
+            if let Some(prompt) = last_user_text(messages) {
+                let entry = TranscriptEntry::LastPrompt(LastPromptEntry {
+                    session_id: self.session_id.clone(),
+                    last_prompt: prompt,
+                });
+                write_transcript_entry(&path, &entry).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Record a title the user set, so the session list can show it.
+    pub async fn record_title(&mut self, title: &str) -> crate::Result<()> {
+        let entry = TranscriptEntry::CustomTitle(CustomTitleEntry {
+            session_id: self.session_id.clone(),
+            custom_title: title.to_string(),
+        });
+        write_transcript_entry(&self.path()?, &entry).await
+    }
+
+    /// Move the active tip, e.g. after restoring a checkpoint.
+    pub async fn set_active_leaf(&mut self, leaf_uuid: Option<&str>) -> crate::Result<()> {
+        let path = self.path()?;
+        set_leaf(&path, leaf_uuid).await?;
+        self.last_uuid = leaf_uuid.map(|u| u.to_string());
+        Ok(())
+    }
+
+    /// Read what the file already holds, once per session.
+    async fn seed(&mut self, path: &Path) -> crate::Result<()> {
+        if self.seeded {
+            return Ok(());
+        }
+        self.seeded = true;
+        let entries = load_transcript(path).await?;
+        for entry in &entries {
+            if let TranscriptEntry::User(m) | TranscriptEntry::Assistant(m) = entry {
+                if let Some(uuid) = m.message.uuid.as_deref() {
+                    self.known.insert(uuid.to_string());
+                }
+            }
+        }
+        // Chain onto the active tip rather than the last line, so a session
+        // resumed after a rewind continues the branch the rewind selected.
+        self.last_uuid = active_branch_entries(&entries)
+            .last()
+            .and_then(|e| e.uuid())
+            .map(|u| u.to_string());
+        Ok(())
+    }
+}
+
+/// The text of the most recent user message, for the `last-prompt` entry.
+fn last_user_text(messages: &[Message]) -> Option<String> {
+    let message = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::types::Role::User)?;
+    let text = match &message.content {
+        crate::types::MessageContent::Text(text) => text.clone(),
+        crate::types::MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|b| match b {
+                crate::types::ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 /// Reconstruct `Vec<Message>` from a loaded transcript, in conversation order.
 ///
 /// Only `user` and `assistant` entries are returned; metadata entries
@@ -1247,5 +1462,237 @@ mod tests {
             .unwrap();
         let decoded = URL_SAFE_NO_PAD.decode(encoded_dir).unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), root.to_str().unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // TranscriptRecorder
+    // -----------------------------------------------------------------------
+
+    /// A recorder writing into `dir`, with the session named `sess-1`.
+    fn recorder_in(dir: &std::path::Path) -> TranscriptRecorder {
+        TranscriptRecorder::new(dir.to_path_buf(), "sess-1".to_string())
+    }
+
+    fn user(text: &str) -> Message {
+        Message {
+            role: Role::User,
+            content: MessageContent::Text(text.to_string()),
+            uuid: None,
+            cost: None,
+            snapshot_patch: None,
+            timestamp: None,
+        }
+    }
+
+    fn assistant(text: &str) -> Message {
+        Message {
+            role: Role::Assistant,
+            content: MessageContent::Text(text.to_string()),
+            uuid: None,
+            cost: None,
+            snapshot_patch: None,
+            timestamp: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_turn_reaches_the_transcript_chained_to_the_one_before() {
+        let dir = tempdir().unwrap();
+        let mut recorder = recorder_in(dir.path());
+        let mut messages = vec![user("first"), assistant("reply")];
+
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+        messages.push(user("second"));
+        messages.push(assistant("reply two"));
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        let entries = load_transcript(&recorder.path().unwrap()).await.unwrap();
+        let chain: Vec<&TranscriptMessage> = entries
+            .iter()
+            .filter_map(|e| match e {
+                TranscriptEntry::User(m) | TranscriptEntry::Assistant(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(chain.len(), 4, "one entry per message");
+        assert_eq!(chain[0].parent_uuid, None, "the first entry has no parent");
+        for pair in chain.windows(2) {
+            assert_eq!(
+                pair[1].parent_uuid.as_deref(),
+                pair[0].uuid.as_deref(),
+                "each entry names the one before it"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_message_already_on_disk_is_not_written_twice() {
+        let dir = tempdir().unwrap();
+        let mut recorder = recorder_in(dir.path());
+        let mut messages = vec![user("only"), assistant("once")];
+
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        let entries = load_transcript(&recorder.path().unwrap()).await.unwrap();
+        assert_eq!(
+            entries.iter().filter(|e| e.is_chain_participant()).count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn the_stamped_uuid_is_written_back_into_the_message() {
+        // `/rewind` looks an entry up by the message's uuid while the branch
+        // walk follows the entry's, so the two have to be one value.
+        let dir = tempdir().unwrap();
+        let mut recorder = recorder_in(dir.path());
+        let mut messages = vec![user("stamp me")];
+
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        let stamped = messages[0].uuid.clone().expect("the message carries one");
+        let entries = load_transcript(&recorder.path().unwrap()).await.unwrap();
+        match &entries[0] {
+            TranscriptEntry::User(m) => {
+                assert_eq!(m.uuid.as_deref(), Some(stamped.as_str()));
+                assert_eq!(m.message.uuid.as_deref(), Some(stamped.as_str()));
+            }
+            other => panic!("expected a user entry, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn clearing_abandons_the_branch_without_deleting_it() {
+        let dir = tempdir().unwrap();
+        let mut recorder = recorder_in(dir.path());
+        let mut messages = vec![user("before"), assistant("before reply")];
+        recorder
+            .record_turn(&mut messages, dir.path())
+            .await
+            .unwrap();
+
+        recorder.reset_branch();
+        let mut fresh = vec![user("after")];
+        recorder.record_turn(&mut fresh, dir.path()).await.unwrap();
+
+        let entries = load_transcript(&recorder.path().unwrap()).await.unwrap();
+        assert_eq!(
+            entries.iter().filter(|e| e.is_chain_participant()).count(),
+            3,
+            "the abandoned turns stay on disk"
+        );
+        let active = active_branch_messages(&entries);
+        assert_eq!(active.len(), 1, "only the new branch is active");
+    }
+
+    #[tokio::test]
+    async fn a_resumed_recorder_continues_the_file_instead_of_repeating_it() {
+        let dir = tempdir().unwrap();
+        let mut first = recorder_in(dir.path());
+        let mut messages = vec![user("one"), assistant("two")];
+        first.record_turn(&mut messages, dir.path()).await.unwrap();
+
+        let mut second = recorder_in(dir.path());
+        messages.push(user("three"));
+        second.record_turn(&mut messages, dir.path()).await.unwrap();
+
+        let entries = load_transcript(&second.path().unwrap()).await.unwrap();
+        let chain: Vec<&TranscriptMessage> = entries
+            .iter()
+            .filter_map(|e| match e {
+                TranscriptEntry::User(m) | TranscriptEntry::Assistant(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(chain.len(), 3);
+        assert_eq!(
+            chain[2].parent_uuid.as_deref(),
+            chain[1].uuid.as_deref(),
+            "the resumed recorder chained onto what was already there"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_session_list_reads_the_title_and_the_last_prompt() {
+        // Without these two entries every row in the welcome screen's recent
+        // activity reads "(untitled)".
+        let config_dir = tempdir().unwrap();
+        let root = tempdir().unwrap();
+        let path = transcript_dir_in(config_dir.path(), root.path()).join("sess-1.jsonl");
+
+        let recorder = TranscriptRecorder::new(root.path().to_path_buf(), "sess-1".to_string());
+        let mut messages = vec![user("what is the answer"), assistant("42")];
+        // The recorder resolves its own path from the detected config dir, so
+        // the entries are staged through the same helpers it uses.
+        for message in messages.iter_mut() {
+            let uuid = uuid::Uuid::new_v4().to_string();
+            message.uuid = Some(uuid.clone());
+            let entry = if message.role == Role::User {
+                make_user_entry(message.clone(), &uuid, None, "sess-1", "/tmp")
+            } else {
+                make_assistant_entry(message.clone(), &uuid, None, "sess-1", "/tmp")
+            };
+            write_transcript_entry(&path, &entry).await.unwrap();
+        }
+        write_transcript_entry(
+            &path,
+            &TranscriptEntry::LastPrompt(LastPromptEntry {
+                session_id: "sess-1".to_string(),
+                last_prompt: last_user_text(&messages).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+        write_transcript_entry(
+            &path,
+            &TranscriptEntry::CustomTitle(CustomTitleEntry {
+                session_id: recorder.session_id.clone(),
+                custom_title: "the answer".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed = list_sessions_in(config_dir.path(), root.path())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title.as_deref(), Some("the answer"));
+        assert_eq!(listed[0].last_prompt.as_deref(), Some("what is the answer"));
+    }
+
+    #[test]
+    fn the_transcript_root_is_the_repository_when_there_is_one() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("crates").join("core");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+
+        assert_eq!(transcript_root_for(&nested), dir.path());
+    }
+
+    #[test]
+    fn the_transcript_root_falls_back_to_the_directory_itself() {
+        let dir = tempdir().unwrap();
+        // A tempdir under /tmp has no repository above it on any platform CI
+        // runs on; if one appeared, the root would simply be that repository.
+        let resolved = transcript_root_for(dir.path());
+        assert!(resolved == dir.path() || dir.path().starts_with(&resolved));
     }
 }
