@@ -814,6 +814,56 @@ impl ModelPickerState {
         self.favorites.contains(key)
     }
 
+    /// Move the cursor to the first row of the next account's section.
+    ///
+    /// Wraps at the end. A list with one section is left alone, since every
+    /// jump would land back on the row the cursor already sits in.
+    pub fn next_provider_group(&mut self) {
+        self.jump_provider_group(true);
+    }
+
+    /// Move the cursor to the first row of the previous account's section.
+    pub fn prev_provider_group(&mut self) {
+        self.jump_provider_group(false);
+    }
+
+    /// Rows where one account's section starts, over the visible list.
+    ///
+    /// Walks `filtered_models` rather than `models`, so hidden and reordered
+    /// rows move the boundaries with them.
+    fn provider_group_starts(&self) -> Vec<usize> {
+        let mut starts = Vec::new();
+        let mut current: Option<&str> = None;
+        for (idx, row) in self.filtered_models().iter().enumerate() {
+            let group = row.provider_id.as_deref().unwrap_or_default();
+            if current != Some(group) {
+                starts.push(idx);
+                current = Some(group);
+            }
+        }
+        starts
+    }
+
+    fn jump_provider_group(&mut self, forward: bool) {
+        let starts = self.provider_group_starts();
+        if starts.len() < 2 {
+            return;
+        }
+        // The section the cursor is in is the last one starting at or before it.
+        let current = starts
+            .iter()
+            .rposition(|start| *start <= self.selected_idx)
+            .unwrap_or(0);
+        let target = if forward {
+            (current + 1) % starts.len()
+        } else {
+            (current + starts.len() - 1) % starts.len()
+        };
+        if let Some(idx) = starts.get(target) {
+            self.selected_idx = *idx;
+        }
+    }
+
     /// Record which accounts a credential resolves for.
     ///
     /// Called once as the picker opens, from the caller that already walks the
@@ -1497,8 +1547,11 @@ pub fn render_model_picker(state: &ModelPickerState, area: Rect, buf: &mut Buffe
         Style::default().fg(dim),
     ));
     // Only offered where it does something: a single-account list has one
-    // section, so there is nothing to hide.
+    // section, so there is nothing to hide and nowhere to jump.
     if state.is_cross_provider() {
+        footer_spans.push(Span::raw("  "));
+        footer_spans.push(Span::styled("tab", Style::default().fg(dim)));
+        footer_spans.push(Span::styled(" account", Style::default().fg(dim)));
         footer_spans.push(Span::raw("  "));
         footer_spans.push(Span::styled("^o", Style::default().fg(dim)));
         footer_spans.push(Span::styled(
@@ -2753,6 +2806,107 @@ mod cross_provider_tests {
 
         assert!(state.filtered_models().is_empty());
         assert_eq!(state.selected_favorite_key(), None);
+    }
+
+    fn three_accounts() -> ModelPickerState {
+        let mut models = scoped("anthropic", &["opus", "sonnet"]);
+        models.extend(scoped("openai", &["gpt-5"]));
+        models.extend(scoped("ollama", &["qwen3", "llama4"]));
+        picker(models)
+    }
+
+    fn cursor_id(state: &ModelPickerState) -> String {
+        state
+            .filtered_models()
+            .get(state.selected_idx)
+            .map(|m| m.id.clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn tab_lands_on_the_first_row_of_the_next_account() {
+        let mut state = three_accounts();
+        state.open("anthropic/opus");
+
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "openai/gpt-5");
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "ollama/qwen3");
+    }
+
+    #[test]
+    fn tab_wraps_round_to_the_first_account() {
+        let mut state = three_accounts();
+        state.open("anthropic/opus");
+        state.select_last();
+
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "anthropic/opus");
+    }
+
+    #[test]
+    fn shift_tab_walks_back_the_way_tab_came() {
+        let mut state = three_accounts();
+        state.open("anthropic/opus");
+
+        state.next_provider_group();
+        state.next_provider_group();
+        state.prev_provider_group();
+        assert_eq!(cursor_id(&state), "openai/gpt-5");
+        // And back past the first section, round to the last.
+        state.prev_provider_group();
+        state.prev_provider_group();
+        assert_eq!(cursor_id(&state), "ollama/qwen3");
+    }
+
+    #[test]
+    fn jumping_from_the_middle_of_a_section_leaves_that_section() {
+        // The cursor belongs to the last section starting at or before it, so a
+        // jump from row two of anthropic must not land back on row one.
+        let mut state = three_accounts();
+        state.open("anthropic/sonnet");
+        assert_eq!(cursor_id(&state), "anthropic/sonnet");
+
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "openai/gpt-5");
+    }
+
+    #[test]
+    fn a_list_with_one_section_has_nowhere_to_jump() {
+        let mut state = picker(vec![entry("opus"), entry("sonnet")]);
+        state.open("sonnet");
+        let before = state.selected_idx;
+
+        state.next_provider_group();
+        state.prev_provider_group();
+        assert_eq!(state.selected_idx, before);
+    }
+
+    #[test]
+    fn jumping_only_visits_the_sections_still_on_screen() {
+        // Both the filter and the connected-only toggle can empty a section
+        // out; walking `models` instead of the visible list would stop on a
+        // heading that is not drawn.
+        let mut state = three_accounts();
+        connected(&mut state, &["anthropic", "ollama"]);
+        state.open("anthropic/opus");
+        state.toggle_connected_only();
+
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "ollama/qwen3");
+        state.next_provider_group();
+        assert_eq!(cursor_id(&state), "anthropic/opus");
+    }
+
+    #[test]
+    fn the_account_hint_is_offered_only_where_there_is_more_than_one() {
+        let mut state = three_accounts();
+        state.open("anthropic/opus");
+        assert!(drawn(&state).contains("tab account"));
+
+        let mut single = picker(vec![entry("opus")]);
+        single.open("opus");
+        assert!(!drawn(&single).contains("tab account"));
     }
 
     #[test]

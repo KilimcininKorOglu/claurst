@@ -4727,6 +4727,8 @@ impl App {
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.toggle_selected_model_favorite()
                 }
+                KeyCode::Tab => self.model_picker.next_provider_group(),
+                KeyCode::BackTab => self.model_picker.prev_provider_group(),
                 KeyCode::Enter => {
                     if let Some((model_id, effort)) = self.model_picker.confirm() {
                         // If user picked a model other than the fast-mode model
