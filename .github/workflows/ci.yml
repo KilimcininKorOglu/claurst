@@ -120,8 +120,10 @@ jobs:
         run: cargo fmt --all --check
 
   # The VS Code extension is the only TypeScript in the repo, so nothing else
-  # would catch a break in it. Exercising the webview needs a GUI, so this
-  # type-checks both bundles and builds them.
+  # would catch a break in it. Driving the webview needs a GUI, so the tests
+  # cover the parts that hold no DOM: chiefly what the markdown renderer
+  # refuses, which is the only place the panel produces markup it did not build
+  # node by node.
   vscode-extension:
     runs-on: ubuntu-latest
     name: VS Code extension
@@ -142,6 +144,10 @@ jobs:
       - name: Type-check
         working-directory: editors/vscode
         run: npm run check
+
+      - name: Test
+        working-directory: editors/vscode
+        run: npm test
 
       - name: Build
         working-directory: editors/vscode

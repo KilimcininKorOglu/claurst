@@ -86,13 +86,19 @@
   "scripts": {
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "check": "tsc -p ./ && tsc -p src/webview",
+    "check": "tsc -p ./ && tsc -p src/webview && tsc -p test",
+    "test": "node esbuild.mjs --tests && node --test \"out/test/**/*.test.js\"",
     "vscode:prepublish": "npm run check && node esbuild.mjs --production"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.0"
   }
 }

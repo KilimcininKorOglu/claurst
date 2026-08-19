@@ -3,8 +3,11 @@
 // in a browser sandbox where neither exists.
 import * as esbuild from 'esbuild';
 
+import { readdir } from 'node:fs/promises';
+
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+const tests = process.argv.includes('--tests');
 
 /** @type {import('esbuild').BuildOptions} */
 const shared = {
@@ -34,7 +37,19 @@ const targets = [
   },
 ];
 
-if (watch) {
+// The tests exercise webview modules, which are ESM and TypeScript. Bundling
+// them for Node is what lets `node --test` run them without a loader.
+if (tests) {
+  const entries = await readdir('test', { recursive: true });
+  await esbuild.build({
+    ...shared,
+    minify: false,
+    entryPoints: entries.filter((name) => name.endsWith('.test.ts')).map((name) => `test/${name}`),
+    outdir: 'out/test',
+    platform: 'node',
+    format: 'cjs',
+  });
+} else if (watch) {
   const contexts = await Promise.all(targets.map((target) => esbuild.context(target)));
   await Promise.all(contexts.map((context) => context.watch()));
 } else {

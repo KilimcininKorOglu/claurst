@@ -79,6 +79,115 @@ body {
   padding-left: 0;
 }
 
+/* The agent's own turns are markdown, so their whitespace is structure the
+   renderer already expressed. Keeping pre-wrap here would add the source's
+   blank lines on top of the paragraph margins. */
+.bubble.agent,
+.bubble.thought {
+  white-space: normal;
+}
+
+.bubble.agent > :first-child,
+.bubble.thought > :first-child { margin-top: 0; }
+.bubble.agent > :last-child,
+.bubble.thought > :last-child { margin-bottom: 0; }
+
+.bubble p { margin: 0.5em 0; }
+.bubble h1, .bubble h2, .bubble h3,
+.bubble h4, .bubble h5, .bubble h6 {
+  margin: 0.8em 0 0.4em;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.bubble ul, .bubble ol { margin: 0.5em 0; padding-left: 1.5em; }
+.bubble li { margin: 0.15em 0; }
+
+.bubble a { color: var(--vscode-textLink-foreground); }
+.bubble a:hover { color: var(--vscode-textLink-activeForeground); }
+
+.bubble blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+}
+
+.bubble table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.bubble th, .bubble td {
+  border: 1px solid var(--vscode-panel-border);
+  padding: 2px 8px;
+  text-align: left;
+}
+
+.bubble code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+  background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15));
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+}
+
+.bubble pre {
+  margin: 0.6em 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+
+.bubble pre code {
+  background: none;
+  padding: 0;
+  white-space: pre;
+}
+
+/* highlight.js emits class names, not colours. Binding them to the editor's
+   own tokens means one definition follows whatever theme is active. */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal { color: var(--vscode-symbolIcon-keywordForeground, #c586c0); }
+
+.hljs-string,
+.hljs-regexp,
+.hljs-template-variable { color: var(--vscode-debugTokenExpression-string, #ce9178); }
+
+.hljs-number { color: var(--vscode-debugTokenExpression-number, #b5cea8); }
+
+.hljs-comment,
+.hljs-quote { color: var(--vscode-editorLineNumber-foreground, #6a9955); font-style: italic; }
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_ { color: var(--vscode-symbolIcon-classForeground, #4ec9b0); }
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-params { color: var(--vscode-symbolIcon-variableForeground, #9cdcfe); }
+
+.hljs-built_in,
+.hljs-symbol,
+.hljs-meta { color: var(--vscode-symbolIcon-constantForeground, #569cd6); }
+
+.hljs-name,
+.hljs-tag { color: var(--vscode-symbolIcon-fieldForeground, #569cd6); }
+
+.hljs-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44336); }
+.hljs-addition { color: var(--vscode-gitDecoration-addedResourceForeground, #4caf50); }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
 .bubble.system {
   background: transparent;
   color: var(--vscode-descriptionForeground);

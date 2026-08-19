@@ -4,6 +4,7 @@
 // Bundled to out/webview.js by esbuild. It shares no module with the extension
 // host on purpose: the two run in different sandboxes, and anything that
 // reached for `vscode` here would fail at load rather than at the call.
+import { renderMarkdown } from './markdown';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -92,7 +93,13 @@ type HostMessage =
   const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
   const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
 
+  /** The bubble being streamed into, and everything it has been sent so far.
+   *
+   * Markdown cannot be appended a chunk at a time: a fence is only a fence
+   * once its closing line arrives. The raw text is kept and re-rendered. */
   let currentAgentBubble: HTMLElement | null = null;
+  let currentAgentText = '';
+  let renderScheduled = false;
   const toolCallEls = new Map<string, HTMLElement>();
   /** What each hosted terminal has said, and where it is being drawn. */
   const terminalText = new Map<string, string>();
@@ -129,6 +136,56 @@ type HostMessage =
     image.src = `data:${safeType};base64,${data}`;
     row.appendChild(image);
     messagesEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /** Stop streaming into the current bubble.
+   *
+   * Anything that interrupts the agent's prose (a tool call, an image, a
+   * question) closes it, so the next chunk starts a bubble of its own instead
+   * of reopening one the reader has already scrolled past. */
+  function endBubble(): void {
+    if (currentAgentBubble && currentAgentText.length > 0) {
+      drawBubble();
+    }
+    currentAgentBubble = null;
+    currentAgentText = '';
+  }
+
+  /** Put what has arrived so far into the bubble.
+   *
+   * The agent's own words are markdown; the user's are shown exactly as typed,
+   * because they are the record of what was asked. */
+  function drawBubble(): void {
+    const bubble = currentAgentBubble;
+    if (!bubble) {
+      return;
+    }
+    if (bubble.dataset.cls === 'user') {
+      bubble.textContent = currentAgentText;
+    } else {
+      bubble.innerHTML = renderMarkdown(currentAgentText);
+    }
+  }
+
+  /** Re-render at most once a frame.
+   *
+   * A chunk can be a single token, and re-rendering the whole message on each
+   * one turns a long answer quadratic. Coalescing keeps the cost proportional
+   * to how long the answer takes rather than to how finely it is chopped. */
+  function scheduleBubbleDraw(): void {
+    if (renderScheduled) {
+      return;
+    }
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      drawBubble();
+      scrollToEnd();
+    });
+  }
+
+  function scrollToEnd(): void {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
@@ -428,7 +485,7 @@ type HostMessage =
     completionMatches = [];
     renderCompletions();
     autoResize();
-    currentAgentBubble = null;
+    endBubble();
     setBusy(true);
     vscode.postMessage({ type: 'prompt', text });
   }
@@ -475,26 +532,27 @@ type HostMessage =
       case 'textChunk': {
         const cls = msg.kind || 'agent';
         if (!currentAgentBubble || currentAgentBubble.dataset.cls !== cls) {
+          endBubble();
           currentAgentBubble = appendRow('', cls);
           currentAgentBubble.dataset.cls = cls;
         }
-        currentAgentBubble.textContent += msg.text;
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        currentAgentText += msg.text;
+        scheduleBubbleDraw();
         break;
       }
       case 'toolCall':
       case 'toolCallUpdate': {
-        currentAgentBubble = null;
+        endBubble();
         upsertToolCall(msg);
         break;
       }
       case 'image': {
-        currentAgentBubble = null;
+        endBubble();
         appendImage(msg.mimeType, msg.data, msg.kind || 'agent');
         break;
       }
       case 'permission': {
-        currentAgentBubble = null;
+        endBubble();
         renderPermission(msg);
         break;
       }
@@ -503,7 +561,7 @@ type HostMessage =
         break;
       }
       case 'status': {
-        currentAgentBubble = null;
+        endBubble();
         appendRow(msg.text, 'system');
         break;
       }
@@ -526,7 +584,7 @@ type HostMessage =
         break;
       }
       case 'turnEnded': {
-        currentAgentBubble = null;
+        endBubble();
         setBusy(false);
         break;
       }
