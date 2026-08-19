@@ -741,83 +741,114 @@ impl Tool for PtyBashTool {
             return ToolResult::error(e.to_string());
         }
 
-        // Security classifier — block Critical-risk commands unconditionally.
-        if classify_bash_command(&params.command) == BashRiskLevel::Critical {
-            return ToolResult::error(format!(
-                "Command blocked: classified as Critical risk by the bash security classifier.\n\
-                 Refusing to execute: {}",
-                params.command
-            ));
+        run_bash(params, ctx).await
+    }
+}
+
+impl PtyBashTool {
+    /// Run `command` in the session's shell without asking for permission.
+    ///
+    /// The permission rules exist to bound what the model may do. This entry
+    /// point is for a command the user typed themselves, where a prompt would
+    /// only ask them to confirm what they just wrote. Everything else is the
+    /// tool's own path: the same session shell, so `cd` and `export` outlive
+    /// the call, the same timeout, the same output limit, and the same
+    /// Critical-risk classifier.
+    pub async fn run_unprompted(&self, command: &str, ctx: &ToolContext) -> ToolResult {
+        run_bash(
+            BashInput {
+                command: command.to_string(),
+                description: None,
+                timeout: default_timeout(),
+                run_in_background: false,
+            },
+            ctx,
+        )
+        .await
+    }
+}
+
+/// Everything the bash tool does once the caller has settled permission.
+///
+/// The Critical-risk classifier lives here rather than in `execute`, so no
+/// entry point can reach the shell around it.
+async fn run_bash(params: BashInput, ctx: &ToolContext) -> ToolResult {
+    // Security classifier — block Critical-risk commands unconditionally.
+    if classify_bash_command(&params.command) == BashRiskLevel::Critical {
+        return ToolResult::error(format!(
+            "Command blocked: classified as Critical risk by the bash security classifier.\n\
+             Refusing to execute: {}",
+            params.command
+        ));
+    }
+
+    let timeout_ms = params.timeout.min(600_000);
+    let timeout_dur = Duration::from_millis(timeout_ms);
+    let shell_state_arc = session_shell_state(&ctx.session_id);
+
+    // ── Background path ──────────────────────────────────────────────────
+    if params.run_in_background {
+        let cwd = {
+            let state = shell_state_arc.lock();
+            state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
+        };
+        return run_in_background(params.command, cwd, timeout_ms).await;
+    }
+
+    debug!(command = %params.command, "Executing bash command via PTY");
+
+    // ── Windows path (no PTY — use cmd.exe fallback) ─────────────────────
+    #[cfg(windows)]
+    {
+        let effective_cwd = {
+            let state = shell_state_arc.lock();
+            state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
+        };
+        return run_windows_fallback(&params.command, &effective_cwd, timeout_dur, timeout_ms)
+            .await;
+    }
+
+    // ── Unix PTY path ────────────────────────────────────────────────────
+    #[cfg(unix)]
+    {
+        // Build the wrapper script that restores cwd + captures shell state.
+        // Restored env vars are cloned out and later injected into the child's
+        // environment (never its argv) — see `apply_restored_env` (#211).
+        let (script, restored_env, working_dir_str) = {
+            let state = shell_state_arc.lock();
+            let script = build_wrapper_script(&params.command, &state, &ctx.working_dir);
+            let restored_env = state.env_vars.clone();
+            let wd = ctx.working_dir.to_string_lossy().into_owned();
+            (script, restored_env, wd)
+        };
+
+        // A client that hosts the terminal runs the same script, so the
+        // user watches the command in their own editor and `cd`/`export`
+        // still outlive the call.
+        if let Some(editor) = ctx.editor.clone().filter(|e| e.capabilities().terminal) {
+            return run_in_client_terminal(
+                editor,
+                ctx,
+                &script,
+                &restored_env,
+                &params.command,
+                &shell_state_arc,
+                timeout_dur,
+            )
+            .await;
         }
 
-        let timeout_ms = params.timeout.min(600_000);
-        let timeout_dur = Duration::from_millis(timeout_ms);
-        let shell_state_arc = session_shell_state(&ctx.session_id);
+        // run_in_pty owns the timeout so it can KILL the child when it fires
+        // (a bare outer timeout would just drop the future and orphan it) (#220).
+        let outcome = run_in_pty(&script, &working_dir_str, &restored_env, timeout_dur).await;
 
-        // ── Background path ──────────────────────────────────────────────────
-        if params.run_in_background {
-            let cwd = {
-                let state = shell_state_arc.lock();
-                state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
-            };
-            return run_in_background(params.command, cwd, timeout_ms).await;
-        }
-
-        debug!(command = %params.command, "Executing bash command via PTY");
-
-        // ── Windows path (no PTY — use cmd.exe fallback) ─────────────────────
-        #[cfg(windows)]
-        {
-            let effective_cwd = {
-                let state = shell_state_arc.lock();
-                state.cwd.clone().unwrap_or_else(|| ctx.working_dir.clone())
-            };
-            return run_windows_fallback(&params.command, &effective_cwd, timeout_dur, timeout_ms)
-                .await;
-        }
-
-        // ── Unix PTY path ────────────────────────────────────────────────────
-        #[cfg(unix)]
-        {
-            // Build the wrapper script that restores cwd + captures shell state.
-            // Restored env vars are cloned out and later injected into the child's
-            // environment (never its argv) — see `apply_restored_env` (#211).
-            let (script, restored_env, working_dir_str) = {
-                let state = shell_state_arc.lock();
-                let script = build_wrapper_script(&params.command, &state, &ctx.working_dir);
-                let restored_env = state.env_vars.clone();
-                let wd = ctx.working_dir.to_string_lossy().into_owned();
-                (script, restored_env, wd)
-            };
-
-            // A client that hosts the terminal runs the same script, so the
-            // user watches the command in their own editor and `cd`/`export`
-            // still outlive the call.
-            if let Some(editor) = ctx.editor.clone().filter(|e| e.capabilities().terminal) {
-                return run_in_client_terminal(
-                    editor,
-                    ctx,
-                    &script,
-                    &restored_env,
-                    &params.command,
-                    &shell_state_arc,
-                    timeout_dur,
-                )
-                .await;
+        match outcome {
+            PtyOutcome::Completed(raw_output, exit_code) => {
+                finish_run(&raw_output, exit_code, &params.command, &shell_state_arc)
             }
-
-            // run_in_pty owns the timeout so it can KILL the child when it fires
-            // (a bare outer timeout would just drop the future and orphan it) (#220).
-            let outcome = run_in_pty(&script, &working_dir_str, &restored_env, timeout_dur).await;
-
-            match outcome {
-                PtyOutcome::Completed(raw_output, exit_code) => {
-                    finish_run(&raw_output, exit_code, &params.command, &shell_state_arc)
-                }
-                PtyOutcome::Failed(e) => ToolResult::error(format!("PTY execution failed: {}", e)),
-                PtyOutcome::TimedOut => {
-                    ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
-                }
+            PtyOutcome::Failed(e) => ToolResult::error(format!("PTY execution failed: {}", e)),
+            PtyOutcome::TimedOut => {
+                ToolResult::error(format!("Command timed out after {}ms", timeout_ms))
             }
         }
     }
@@ -1393,5 +1424,61 @@ mod tests {
             "execute should return promptly after the direct child exits, took {:?}",
             elapsed
         );
+    }
+    /// Permission handler that refuses everything — for proving which entry
+    /// point asks and which does not.
+    struct DenyAllHandler;
+
+    impl claurst_core::permissions::PermissionHandler for DenyAllHandler {
+        fn check_permission(
+            &self,
+            _request: &claurst_core::permissions::PermissionRequest,
+        ) -> claurst_core::permissions::PermissionDecision {
+            claurst_core::permissions::PermissionDecision::Deny
+        }
+
+        fn request_permission(
+            &self,
+            _request: &claurst_core::permissions::PermissionRequest,
+        ) -> claurst_core::permissions::PermissionDecision {
+            claurst_core::permissions::PermissionDecision::Deny
+        }
+    }
+
+    fn deny_all_context() -> ToolContext {
+        ToolContext {
+            permission_handler: std::sync::Arc::new(DenyAllHandler),
+            ..allow_all_context()
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn the_unprompted_path_runs_a_command_the_gate_would_have_refused() {
+        // The gate is the only difference between the two entry points, so a
+        // handler that refuses everything is what tells them apart.
+        let refused = PtyBashTool
+            .execute(json!({ "command": "echo gated" }), &deny_all_context())
+            .await;
+        assert!(refused.is_error, "{}", refused.content);
+
+        let ran = PtyBashTool
+            .run_unprompted("echo gated", &deny_all_context())
+            .await;
+        assert!(!ran.is_error, "{}", ran.content);
+        assert!(ran.content.contains("gated"), "{}", ran.content);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn the_unprompted_path_still_refuses_a_critical_command() {
+        // Skipping the permission prompt must not skip the classifier, or the
+        // typed-command path would be more permissive than the model's.
+        let result = PtyBashTool
+            .run_unprompted("rm -rf /", &allow_all_context())
+            .await;
+
+        assert!(result.is_error, "{}", result.content);
+        assert!(result.content.contains("Critical"), "{}", result.content);
     }
 }
