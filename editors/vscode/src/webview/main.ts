@@ -80,6 +80,7 @@ type HostMessage =
   | { type: 'header'; pills?: Pill[] }
   | { type: 'plan'; entries?: PlanEntry[] }
   | { type: 'commands'; commands?: Command[] }
+  | { type: 'capabilities'; image: boolean }
   | { type: 'mention'; text: string }
   | { type: 'turnEnded' };
 
@@ -93,6 +94,7 @@ type HostMessage =
   const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
   const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
   const jumpBtn = document.getElementById('jump-btn') as HTMLButtonElement;
+  const attachmentsEl = document.getElementById('attachments') as HTMLElement;
 
   /** The bubble being streamed into, and everything it has been sent so far.
    *
@@ -113,6 +115,11 @@ type HostMessage =
   /** Whether the list is something to choose from, or just the hint for the
    * command already being typed. Arrow keys and Tab belong to the first. */
   let completionMode: 'pick' | 'hint' = 'pick';
+  /** Images pasted into the box, waiting for the prompt that carries them. */
+  const attachments: Array<{ mimeType: string; data: string }> = [];
+  /** Whether the agent said it takes images. Pasting one otherwise would
+   * attach something it is going to drop. */
+  let acceptsImages = false;
 
   function appendRow(text: string, cls: string): HTMLElement {
     const row = document.createElement('div');
@@ -602,23 +609,93 @@ type HostMessage =
     }
   });
 
+  /** Take an image off the clipboard and hold it until the prompt is sent.
+   *
+   * The agent declares it accepts images, so a screenshot of a failing test or
+   * a mock-up can go straight into the question instead of being described. */
+  function handlePaste(event: ClipboardEvent): void {
+    if (!acceptsImages) {
+      return;
+    }
+    const items = Array.from(event.clipboardData?.items ?? []).filter((item) =>
+      item.type.startsWith('image/'),
+    );
+    if (items.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    for (const item of items) {
+      const file = item.getAsFile();
+      if (file) {
+        readAttachment(file);
+      }
+    }
+  }
+
+  function readAttachment(file: File): void {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      const comma = url.indexOf(',');
+      if (comma < 0) {
+        return;
+      }
+      attachments.push({ mimeType: file.type, data: url.slice(comma + 1) });
+      renderAttachments();
+    };
+    // A file that cannot be read must not be silently dropped: the user would
+    // send a question about a screenshot that never went with it.
+    reader.onerror = () => appendRow(`Could not read the pasted image.`, 'system');
+    reader.readAsDataURL(file);
+  }
+
+  /** Show what is going to travel with the next prompt, and let it be removed. */
+  function renderAttachments(): void {
+    attachmentsEl.textContent = '';
+    attachmentsEl.classList.toggle('hidden', attachments.length === 0);
+    attachments.forEach((attachment, index) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'attachment-chip';
+      const thumb = document.createElement('img');
+      thumb.src = `data:${attachment.mimeType};base64,${attachment.data}`;
+      wrapper.appendChild(thumb);
+      const remove = document.createElement('button');
+      remove.className = 'attachment-remove';
+      remove.textContent = '✕';
+      remove.title = 'Remove this image';
+      remove.addEventListener('click', () => {
+        attachments.splice(index, 1);
+        renderAttachments();
+      });
+      wrapper.appendChild(remove);
+      attachmentsEl.appendChild(wrapper);
+    });
+  }
+
   function send(): void {
     const text = inputEl.value.trim();
-    if (!text) {
+    if (!text && attachments.length === 0) {
       return;
     }
     // Asking a question is a request to watch the answer, wherever the reader
     // had scrolled to before.
     pinned = true;
     jumpBtn.classList.add('hidden');
-    appendRow(text, 'user');
+    if (text) {
+      appendRow(text, 'user');
+    }
+    for (const attachment of attachments) {
+      appendImage(attachment.mimeType, attachment.data, 'user');
+    }
+    const images = attachments.splice(0, attachments.length);
+    renderAttachments();
     inputEl.value = '';
     completionMatches = [];
     renderCompletions();
     autoResize();
     endBubble();
     setBusy(true);
-    vscode.postMessage({ type: 'prompt', text });
+    vscode.postMessage({ type: 'prompt', text, images });
   }
 
   // Where the reader is decides whether new output moves the view. A scroll
@@ -634,6 +711,7 @@ type HostMessage =
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
 
+  inputEl.addEventListener('paste', handlePaste);
   sendBtn.addEventListener('click', send);
   stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
   inputEl.addEventListener('keydown', (e) => {
@@ -721,6 +799,13 @@ type HostMessage =
       }
       case 'commands': {
         commands = msg.commands || [];
+        break;
+      }
+      case 'capabilities': {
+        acceptsImages = msg.image;
+        inputEl.placeholder = acceptsImages
+          ? 'Ask claurst... (/ for commands, @ for files, paste an image)'
+          : 'Ask claurst... (/ for commands, @ for files)';
         break;
       }
       case 'mention': {

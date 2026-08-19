@@ -29,6 +29,9 @@ const EMBED_LIMIT_BYTES = 64 * 1024;
  * pretending the rest of the repository is not there. */
 const FILE_PICK_LIMIT = 5000;
 
+/** An image the user pasted into the input box, as the webview hands it over. */
+type PastedImage = { mimeType: string; data: string };
+
 /** How a panel's session comes to exist. */
 export type PanelOpening =
   | { kind: 'new' }
@@ -187,6 +190,7 @@ export class ChatPanel {
   <div id="messages"></div>
   <button id="jump-btn" class="hidden" title="Jump to the end of the conversation">New messages ↓</button>
   <div id="completions" class="hidden"></div>
+  <div id="attachments" class="hidden"></div>
   <div id="input-row">
     <textarea id="input-box" rows="1" placeholder="Ask claurst... (/ for commands, @ for files)"></textarea>
     <button id="send-btn" title="Send (Enter)">Send</button>
@@ -260,6 +264,7 @@ export class ChatPanel {
       this.options = session.configOptions;
       this.modes = session.modes;
       this.pushHeader();
+      this.postToWebview({ type: 'capabilities', image: client.agent.image });
       this.postToWebview({ type: 'status', text: `${opened}${agentSuffix(client)}` });
     } catch (e) {
       this.reportError(e);
@@ -329,7 +334,7 @@ export class ChatPanel {
     switch (msg.type) {
       case 'prompt':
         if (typeof msg.text === 'string') {
-          this.runPrompt(msg.text);
+          this.runPrompt(msg.text, Array.isArray(msg.images) ? msg.images : []);
         }
         break;
       case 'stop':
@@ -435,10 +440,10 @@ export class ChatPanel {
 
   /** Runs a prompt to completion, signalling turnEnded either way so the
    * webview can re-enable input. */
-  private async runPrompt(text: string): Promise<void> {
+  private async runPrompt(text: string, images: PastedImage[]): Promise<void> {
     try {
       if (this.client && this.sessionId) {
-        await this.client.prompt(this.sessionId, await this.buildPrompt(text));
+        await this.client.prompt(this.sessionId, await this.buildPrompt(text, images));
       }
     } catch (e) {
       this.reportError(e);
@@ -452,8 +457,17 @@ export class ChatPanel {
    * A small file travels with the prompt so the agent does not have to spend a
    * turn reading it; a large one is named, and the agent reads the part it
    * needs. */
-  private async buildPrompt(text: string): Promise<PromptBlock[]> {
-    const blocks: PromptBlock[] = [{ type: 'text', text }];
+  private async buildPrompt(text: string, images: PastedImage[] = []): Promise<PromptBlock[]> {
+    const blocks: PromptBlock[] = [];
+    if (text) {
+      blocks.push({ type: 'text', text });
+    }
+    // Ahead of the mentions, so the question and its picture stay together.
+    for (const image of images) {
+      if (typeof image?.mimeType === 'string' && typeof image?.data === 'string') {
+        blocks.push({ type: 'image', mimeType: image.mimeType, data: image.data });
+      }
+    }
     const roots = vscode.workspace.workspaceFolders ?? [];
     for (const mention of mentionsIn(text)) {
       const uri = await this.resolveMention(mention, roots);

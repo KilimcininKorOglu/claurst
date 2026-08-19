@@ -479,6 +479,40 @@ body {
   white-space: nowrap;
 }
 
+#attachments {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px 0;
+  flex-shrink: 0;
+}
+
+#attachments.hidden {
+  display: none;
+}
+
+.attachment-chip {
+  position: relative;
+  line-height: 0;
+}
+
+.attachment-chip img {
+  height: 48px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+}
+
+.attachment-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  font-size: 0.7em;
+  border-radius: 999px;
+}
+
 #input-row {
   display: flex;
   align-items: flex-end;
