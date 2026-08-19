@@ -358,6 +358,27 @@ fn merge_provider_stream_usage(current: &mut UsageInfo, update: &UsageInfo) {
     }
 }
 
+/// What this turn used, priced at the model that ran it.
+///
+/// Stored on the assistant message because that is where `/stats` reads it
+/// from: a session whose messages carry no cost reports zero tokens and zero
+/// dollars however much it actually spent. Priced from `effective_model`
+/// rather than `config.model`, for the same reason `cost_tracker` is.
+fn cost_of_turn(model: &str, usage: &UsageInfo) -> claurst_core::types::MessageCost {
+    claurst_core::types::MessageCost {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cost_usd: claurst_core::cost::ModelPricing::for_model(model).cost_of(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
+        ),
+    }
+}
+
 // Spinner verbs are imported from claurst_core::spinner
 
 /// Resolve the effective effort level for a turn.
@@ -1352,6 +1373,7 @@ async fn run_query_loop_inner(
                         usage.cache_creation_input_tokens,
                         usage.cache_read_input_tokens,
                     );
+                    assistant_msg.cost = Some(cost_of_turn(&effective_model, &usage));
 
                     messages.push(assistant_msg.clone());
 
@@ -1595,6 +1617,9 @@ async fn run_query_loop_inner(
             usage.cache_creation_input_tokens,
             usage.cache_read_input_tokens,
         );
+        // Both arms, or the same session reports its cost differently
+        // depending on which provider served it.
+        assistant_msg.cost = Some(cost_of_turn(&effective_model, &usage));
 
         // Budget guard: abort the loop if the configured USD cap is exceeded.
         if let Some(limit) = config.max_budget_usd {
@@ -2176,6 +2201,26 @@ mod tests {
             QueryConfig::from_config(&cfg).effort_level,
             Some(claurst_core::effort::EffortLevel::XHigh)
         );
+    }
+
+    #[test]
+    fn a_turn_carries_its_own_usage_and_price() {
+        // `/stats` sums these off the stored messages, so a turn that recorded
+        // nothing is a turn that spent nothing as far as every report goes.
+        let usage = claurst_core::types::UsageInfo {
+            input_tokens: 1_000,
+            output_tokens: 500,
+            cache_creation_input_tokens: 20,
+            cache_read_input_tokens: 300,
+        };
+
+        let cost = cost_of_turn("claude-sonnet-4-5", &usage);
+
+        assert_eq!(cost.input_tokens, 1_000);
+        assert_eq!(cost.output_tokens, 500);
+        assert_eq!(cost.cache_creation_input_tokens, 20);
+        assert_eq!(cost.cache_read_input_tokens, 300);
+        assert!(cost.cost_usd > 0.0, "a priced model must cost something");
     }
 
     #[test]
