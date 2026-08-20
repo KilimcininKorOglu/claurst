@@ -31,7 +31,7 @@ mod runner;
 pub use agent_tool::{init_team_swarm_runner, AgentTool};
 pub use command_queue::{drain_command_queue, CommandPriority, CommandQueue, QueuedCommand};
 pub use compact::{
-    auto_compact_if_needed, calculate_messages_to_keep_index, calculate_token_warning_state,
+    attempt_compaction, calculate_messages_to_keep_index, calculate_token_warning_state,
     calculate_token_warning_state_for_window, compact_conversation, context_collapse,
     context_window_for_model, estimate_context_tokens, format_compact_summary, get_compact_prompt,
     reactive_compact, resolve_context_window, should_auto_compact_for_window, should_compact,
@@ -804,24 +804,27 @@ async fn run_query_loop_inner(
         // can strand a `tool_result` whose `tool_use` was summarised away, so
         // the sanitiser standing immediately behind it repairs that in the
         // same pass rather than a turn later.
-        let compact_backend: Box<dyn compact::CompactBackend + '_> = match config
-            .provider_registry
-            .as_ref()
-            .filter(|_| {
-                runner::dispatches_through_provider(&route.account, &tool_ctx.config, client)
-            })
-            .and_then(|registry| {
-                runner::provider_for_turn(registry, &tool_ctx.config, &route.account)
-            }) {
-            Some(provider) => Box::new(compact::ProviderBackend(provider)),
-            None => Box::new(compact::AnthropicBackend(client)),
-        };
+        let turn_backend = runner::backend_for(&route, config, &tool_ctx.config, client);
+
+        // Who writes the summary. The turn's own model unless the user chose a
+        // compact model, which may name an account of its own: a long session
+        // on an expensive account can have its summaries written somewhere
+        // cheap while the conversation stays where it is.
+        let compact_route = tool_ctx.config.resolve_compact_route(&route);
+        let compact_backend = tool_ctx
+            .config
+            .reject_unserved_model(&compact_route)
+            .is_none()
+            .then(|| runner::backend_for(&compact_route, config, &tool_ctx.config, client));
+
         let context_pass = runner::compact_before_request(
             messages,
             config,
             runner::ContextPassInput {
-                backend: compact_backend.as_ref(),
                 route: &route,
+                turn_backend: turn_backend.as_ref(),
+                compact_route: &compact_route,
+                compact_backend: compact_backend.as_deref(),
                 session_id: &tool_ctx.session_id,
             },
             event_tx.as_ref(),

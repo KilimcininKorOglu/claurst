@@ -1240,33 +1240,37 @@ pub async fn compact_conversation(
     compacted
 }
 
-/// Auto-compact `messages` if needed.  Updates `state` in place.
-/// Returns `Some(new_messages)` if compaction ran, `None` otherwise.
+/// Whether the context is full enough to compact, and the circuit breaker is
+/// not open.
 ///
-/// `context_window` is the effective window for the active provider+model
-/// (resolve it via [`resolve_context_window`]); `model` is still used for the
-/// summarisation API call.
-pub async fn auto_compact_if_needed(
-    backend: &dyn CompactBackend,
-    messages: &[Message],
+/// Split from the attempt below so a caller can decide once and then try more
+/// than one summariser. Deciding inside the attempt meant a second try
+/// re-answered the threshold question against a conversation the first try had
+/// not changed, and counted a second failure for the same overflow.
+pub fn should_compact_now(
     input_tokens: u64,
-    model: &WireModel,
     context_window: u64,
     threshold_pct: u8,
     session_id: &str,
-) -> Option<Vec<Message>> {
-    // A copy, so no lock is held across the summarisation call below.
+) -> bool {
     let state = compact_state_for(session_id);
-    if !should_auto_compact_for_window(input_tokens, context_window, threshold_pct, &state) {
-        return None;
-    }
+    should_auto_compact_for_window(input_tokens, context_window, threshold_pct, &state)
+}
 
-    info!(
-        input_tokens,
-        model = %model,
-        compaction_count = state.compaction_count,
-        "Auto-compact triggered"
-    );
+/// One compaction attempt, booked against the session's circuit breaker.
+///
+/// The error is returned rather than swallowed, because a caller with a second
+/// summariser to try has to tell "the threshold was never crossed" from "the
+/// model that was asked could not answer". Collapsing both into `None` is why
+/// a compact model that does not work looked exactly like a conversation that
+/// did not need compacting.
+pub async fn attempt_compaction(
+    backend: &dyn CompactBackend,
+    messages: &[Message],
+    model: &WireModel,
+    session_id: &str,
+) -> Result<Vec<Message>, ClaudeError> {
+    info!(model = %model, count = messages.len(), "Compaction attempt");
 
     match compact_conversation(backend, messages, model, None).await {
         Ok(new_msgs) => {
@@ -1274,14 +1278,14 @@ pub async fn auto_compact_if_needed(
             info!(
                 original_count = messages.len(),
                 new_count = new_msgs.len(),
-                "Auto-compact complete"
+                "Compaction complete"
             );
-            Some(new_msgs)
+            Ok(new_msgs)
         }
         Err(e) => {
-            warn!(error = %e, "Auto-compact failed");
+            warn!(error = %e, model = %model, "Compaction failed");
             update_compact_state(session_id, AutoCompactState::on_failure);
-            None
+            Err(e)
         }
     }
 }

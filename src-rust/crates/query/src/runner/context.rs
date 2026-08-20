@@ -76,6 +76,28 @@ pub fn provider_for_turn(
     provider
 }
 
+/// The endpoint that serves one route, as something compaction can call.
+///
+/// The same pair the dispatch arm asks, so a turn cannot be summarised by one
+/// endpoint and answered by another, and the compact model reaches its own
+/// account rather than the session's.
+pub(crate) fn backend_for<'a>(
+    route: &claurst_core::config::Route,
+    config: &'a QueryConfig,
+    core_config: &claurst_core::Config,
+    client: &'a claurst_api::AnthropicClient,
+) -> Box<dyn CompactBackend + 'a> {
+    match config
+        .provider_registry
+        .as_ref()
+        .filter(|_| dispatches_through_provider(&route.account, core_config, client))
+        .and_then(|registry| provider_for_turn(registry, core_config, &route.account))
+    {
+        Some(provider) => Box::new(compact::ProviderBackend(provider)),
+        None => Box::new(compact::AnthropicBackend(client)),
+    }
+}
+
 /// Book a finished turn's usage: its cost, its price on the message, and the
 /// prompt size the next request boundary will size the context from.
 ///
@@ -143,19 +165,34 @@ pub(crate) struct ContextPass {
 
 /// Everything the pass needs about the turn it is fronting.
 pub(crate) struct ContextPassInput<'a> {
-    /// How the summary gets written, whichever arm dispatches this turn.
-    pub backend: &'a dyn CompactBackend,
     /// Where this turn is going, as `Config::resolve_route` resolved it from
-    /// `effective_model`.
+    /// `effective_model`. The context window and the token warning are both
+    /// sized from this one.
     ///
-    /// The whole `Route` and not a bare model string, because the summary has
-    /// to name the model exactly as the turn does. A composite such as
-    /// `"myaccount/some-model"` reaches the dispatch arm already split, so a
-    /// summariser handed the unsplit string addresses a model the account does
+    /// The whole `Route` and not a bare model string, because a composite such
+    /// as `"myaccount/some-model"` reaches the dispatch arm already split, and
+    /// anything handed the unsplit string addresses a model the account does
     /// not serve.
     pub route: &'a claurst_core::config::Route,
+    /// The turn's own endpoint, and the fallback when the chosen summariser
+    /// cannot be reached.
+    pub turn_backend: &'a dyn CompactBackend,
+    /// Who writes the summary, from `Config::resolve_compact_route`. Equal to
+    /// `route` unless the user chose a compact model.
+    pub compact_route: &'a claurst_core::config::Route,
+    /// The chosen summariser's endpoint, or `None` when its account has no
+    /// usable credential. `None` is not a failure: the turn's own model
+    /// writes the summary instead and the user is told.
+    pub compact_backend: Option<&'a dyn CompactBackend>,
     /// The session, which owns the circuit breaker and the last prompt size.
     pub session_id: &'a str,
+}
+
+impl ContextPassInput<'_> {
+    /// Whether the summary is going somewhere other than the turn.
+    fn uses_a_separate_summariser(&self) -> bool {
+        self.compact_route != self.route
+    }
 }
 
 /// Size the context, warn about it, and compact when it is nearly full.
@@ -237,17 +274,16 @@ pub(crate) async fn compact_before_request(
         return pass;
     }
 
-    if let Some(new_msgs) = compact::auto_compact_if_needed(
-        input.backend,
-        messages,
+    if !compact::should_compact_now(
         context_tokens,
-        &input.route.model,
         context_window,
         config.compact_threshold,
         input.session_id,
-    )
-    .await
-    {
+    ) {
+        return pass;
+    }
+
+    if let Some(new_msgs) = summarise_with_fallback(&input, messages, event_tx).await {
         // A conversation already inside the keep-recent budget comes back
         // unchanged: the threshold was crossed by a prompt whose bulk is the
         // system prompt and the tool schemas, not by the turns. Reporting that
@@ -266,6 +302,68 @@ pub(crate) async fn compact_before_request(
     }
 
     pass
+}
+
+/// Write the summary, on the chosen model where that works and on the turn's
+/// own where it does not.
+///
+/// A compact model that cannot answer must not mean no compaction at all: the
+/// context still has to come down, and a session that stops compacting because
+/// of a mistyped setting fails in a way the user cannot see until the provider
+/// refuses the prompt. So it falls back once, and says so, rather than either
+/// failing quietly or pretending the setting was honoured.
+async fn summarise_with_fallback(
+    input: &ContextPassInput<'_>,
+    messages: &[Message],
+    event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
+) -> Option<Vec<Message>> {
+    let note = |text: String| {
+        if let Some(tx) = event_tx {
+            let _ = tx.send(QueryEvent::Status(text));
+        }
+    };
+
+    if !input.uses_a_separate_summariser() {
+        return compact::attempt_compaction(
+            input.turn_backend,
+            messages,
+            &input.route.model,
+            input.session_id,
+        )
+        .await
+        .ok();
+    }
+
+    let fall_back_to_the_turn = |reason: String| async move {
+        note(format!(
+            "Compact model '{}' on account '{}' is unavailable ({reason});              summarised with '{}' instead.",
+            input.compact_route.model, input.compact_route.account, input.route.model
+        ));
+        compact::attempt_compaction(
+            input.turn_backend,
+            messages,
+            &input.route.model,
+            input.session_id,
+        )
+        .await
+        .ok()
+    };
+
+    let Some(backend) = input.compact_backend else {
+        return fall_back_to_the_turn("no usable credential".to_string()).await;
+    };
+
+    match compact::attempt_compaction(
+        backend,
+        messages,
+        &input.compact_route.model,
+        input.session_id,
+    )
+    .await
+    {
+        Ok(new_msgs) => Some(new_msgs),
+        Err(e) => fall_back_to_the_turn(e.to_string()).await,
+    }
 }
 
 /// The gated reactive path: emergency collapse first, then a normal compact.
@@ -291,7 +389,8 @@ async fn run_reactive(
         }
         (
             "Context-collapse",
-            compact::context_collapse(messages.clone(), input.backend, &input.route.model).await,
+            compact::context_collapse(messages.clone(), input.turn_backend, &input.route.model)
+                .await,
         )
     } else if compact::should_compact(context_tokens, context_window, config.compact_threshold) {
         if let Some(tx) = event_tx {
@@ -301,7 +400,7 @@ async fn run_reactive(
             "Reactive compact",
             compact::reactive_compact(
                 messages.clone(),
-                input.backend,
+                input.turn_backend,
                 &input.route.model,
                 cancel_token.clone(),
                 &[],
@@ -373,6 +472,32 @@ mod tests {
         }
     }
 
+    /// A threshold `a_cuttable_conversation` crosses, so these tests exercise
+    /// which model writes the summary rather than whether one is written.
+    fn at_a_low_threshold() -> QueryConfig {
+        QueryConfig {
+            compact_threshold: 20,
+            ..QueryConfig::default()
+        }
+    }
+
+    /// A pass whose summary is written somewhere other than the turn.
+    fn split_input<'a>(
+        turn_backend: &'a StubBackend,
+        route: &'a claurst_core::config::Route,
+        compact_backend: Option<&'a StubBackend>,
+        compact_route: &'a claurst_core::config::Route,
+        session_id: &'a str,
+    ) -> ContextPassInput<'a> {
+        ContextPassInput {
+            route,
+            turn_backend,
+            compact_route,
+            compact_backend: compact_backend.map(|b| b as &dyn CompactBackend),
+            session_id,
+        }
+    }
+
     /// A conversation past the trigger threshold of a 200k window.
     fn a_full_conversation() -> Vec<Message> {
         vec![
@@ -404,8 +529,10 @@ mod tests {
         session_id: &'a str,
     ) -> ContextPassInput<'a> {
         ContextPassInput {
-            backend,
             route,
+            turn_backend: backend,
+            compact_route: route,
+            compact_backend: None,
             session_id,
         }
     }
@@ -609,11 +736,7 @@ mod tests {
         let pass = compact_before_request(
             &mut messages,
             &QueryConfig::default(),
-            ContextPassInput {
-                backend: &backend,
-                route: &route("claude-opus-4-5"),
-                session_id: session,
-            },
+            input(&backend, &route("claude-opus-4-5"), session),
             None,
             &CancellationToken::new(),
         )
@@ -637,11 +760,7 @@ mod tests {
         let mut messages = a_cuttable_conversation();
         let backend = StubBackend::answering("Short.");
         let route = route("claude-opus-4-5");
-        let input = || ContextPassInput {
-            backend: &backend,
-            route: &route,
-            session_id: session,
-        };
+        let input = || input(&backend, &route, session);
 
         let first = compact_before_request(
             &mut messages,
@@ -730,11 +849,7 @@ mod tests {
         let pass = compact_before_request(
             &mut messages,
             &QueryConfig::default(),
-            ContextPassInput {
-                backend: &backend,
-                route: &route("claude-opus-4-5"),
-                session_id: "context-pass-failure",
-            },
+            input(&backend, &route("claude-opus-4-5"), "context-pass-failure"),
             None,
             &CancellationToken::new(),
         )
@@ -744,5 +859,158 @@ mod tests {
         assert_eq!(messages.len(), before.len());
         assert_eq!(messages[0].get_all_text(), before[0].get_all_text());
         compact::forget_compact_state("context-pass-failure");
+    }
+
+    // ---- the compact model --------------------------------------------------
+
+    #[tokio::test]
+    async fn a_chosen_compact_model_writes_the_summary() {
+        let session = "compact-model-chosen";
+        compact::forget_compact_state(session);
+        let mut messages = a_cuttable_conversation();
+
+        let turn_backend = StubBackend::answering("the turn should not write this");
+        let compact_backend = StubBackend::answering("Short.");
+        let turn = route("big-expensive-model");
+        let compact = claurst_core::config::Config::default()
+            .route_for_account("cheap_account", "small-model");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let pass = compact_before_request(
+            &mut messages,
+            &at_a_low_threshold(),
+            split_input(
+                &turn_backend,
+                &turn,
+                Some(&compact_backend),
+                &compact,
+                session,
+            ),
+            Some(&tx),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert!(pass.compacted, "the conversation should have been cut");
+        assert_eq!(
+            compact_backend.model_seen.lock().as_deref(),
+            Some("small-model")
+        );
+        assert_eq!(
+            turn_backend.model_seen.lock().as_deref(),
+            None,
+            "the turn's model should never have been asked"
+        );
+        drop(tx);
+        let statuses: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                QueryEvent::Status(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            statuses.is_empty(),
+            "nothing went wrong, so nothing to report: {statuses:?}"
+        );
+        compact::forget_compact_state(session);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_compact_model_falls_back_and_says_so() {
+        let session = "compact-model-unreachable";
+        compact::forget_compact_state(session);
+        let mut messages = a_cuttable_conversation();
+
+        let turn_backend = StubBackend::answering("Short.");
+        let turn = route("big-expensive-model");
+        let compact = claurst_core::config::Config::default()
+            .route_for_account("cheap_account", "small-model");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        // `None`: the chosen account has no usable credential.
+        let pass = compact_before_request(
+            &mut messages,
+            &at_a_low_threshold(),
+            split_input(&turn_backend, &turn, None, &compact, session),
+            Some(&tx),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert!(
+            pass.compacted,
+            "a mistyped setting must not stop the context coming down"
+        );
+        assert_eq!(
+            turn_backend.model_seen.lock().as_deref(),
+            Some("big-expensive-model")
+        );
+
+        drop(tx);
+        let told: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                QueryEvent::Status(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            told.iter()
+                .any(|text| text.contains("small-model") && text.contains("big-expensive-model")),
+            "the user was not told which model wrote the summary: {told:?}"
+        );
+        compact::forget_compact_state(session);
+    }
+
+    #[tokio::test]
+    async fn a_compact_model_that_errors_falls_back_to_the_turn() {
+        let session = "compact-model-errors";
+        compact::forget_compact_state(session);
+        let mut messages = a_cuttable_conversation();
+
+        let turn_backend = StubBackend::answering("Short.");
+        let compact_backend = StubBackend::failing();
+        let turn = route("big-expensive-model");
+        let compact = claurst_core::config::Config::default()
+            .route_for_account("cheap_account", "small-model");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let pass = compact_before_request(
+            &mut messages,
+            &at_a_low_threshold(),
+            split_input(
+                &turn_backend,
+                &turn,
+                Some(&compact_backend),
+                &compact,
+                session,
+            ),
+            Some(&tx),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert!(pass.compacted);
+        assert_eq!(
+            compact_backend.model_seen.lock().as_deref(),
+            Some("small-model"),
+            "the chosen model should have been tried first"
+        );
+        assert_eq!(
+            turn_backend.model_seen.lock().as_deref(),
+            Some("big-expensive-model")
+        );
+
+        drop(tx);
+        let told: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                QueryEvent::Status(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            told.iter().any(|text| text.contains("small-model")),
+            "the fallback was silent: {told:?}"
+        );
+        compact::forget_compact_state(session);
     }
 }
