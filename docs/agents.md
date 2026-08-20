@@ -1,12 +1,12 @@
 # Agents and Multi-Agent Features
 
-Claurst has a named-agent system that lets you select a pre-configured persona with its own tool permissions, model, system prompt, and turn budget. For larger tasks it also supports a coordinator mode where a top-level agent orchestrates a pool of parallel worker agents.
+MikMik has a named-agent system that lets you select a pre-configured persona with its own tool permissions, model, system prompt, and turn budget. For larger tasks it also supports a coordinator mode where a top-level agent orchestrates a pool of parallel worker agents.
 
 ---
 
 ## Built-in Named Agents
 
-Three agents ship by default. Their definitions can be overridden per-user in `~/.claurst/settings.json`.
+Three agents ship by default. Their definitions can be overridden per-user in `~/.mikmik/settings.json`.
 
 ### build
 
@@ -57,15 +57,15 @@ Default system prompt prefix:
 Pass `--agent <name>` to activate a named agent for a session:
 
 ```
-claurst --agent build "implement the OAuth2 login flow"
-claurst --agent plan "analyze the database schema and suggest improvements"
-claurst --agent explore "find all usages of the deprecated config API"
+mikmik --agent build "implement the OAuth2 login flow"
+mikmik --agent plan "analyze the database schema and suggest improvements"
+mikmik --agent explore "find all usages of the deprecated config API"
 ```
 
 The `--agent` flag can be combined with `--provider` and `--model`:
 
 ```
-claurst --agent plan --provider openai --model o3 "review this architecture"
+mikmik --agent plan --provider openai --model o3 "review this architecture"
 ```
 
 ---
@@ -84,7 +84,7 @@ Output shows the agent name, description, access level, and max turn limit. Agen
 
 ## Custom Agent Definitions
 
-Define custom agents in `~/.claurst/settings.json` under the `agents` key. Custom definitions override built-in agents of the same name.
+Define custom agents in `~/.mikmik/settings.json` under the `agents` key. Custom definitions override built-in agents of the same name.
 
 ```json
 {
@@ -138,8 +138,8 @@ Define custom agents in `~/.claurst/settings.json` under the `agents` key. Custo
 Use the agent with the `--agent` flag:
 
 ```
-claurst --agent review "check the authentication module for security issues"
-claurst --agent test-writer "write tests for the payment processor"
+mikmik --agent review "check the authentication module for security issues"
+mikmik --agent test-writer "write tests for the payment processor"
 ```
 
 ---
@@ -153,21 +153,21 @@ Coordinator mode enables a single top-level agent to orchestrate multiple parall
 Set the `MIKMIK_COORDINATOR_MODE` environment variable to `1` before launching:
 
 ```bash
-MIKMIK_COORDINATOR_MODE=1 claurst "refactor the entire authentication subsystem"
+MIKMIK_COORDINATOR_MODE=1 mikmik "refactor the entire authentication subsystem"
 ```
 
 Or within a shell session:
 
 ```bash
 export MIKMIK_COORDINATOR_MODE=1
-claurst
+mikmik
 ```
 
 The value `"0"` and `"false"` disable coordinator mode even if the variable is set. Any other non-empty value enables it.
 
 ### How the Coordinator Works
 
-When coordinator mode is active, Claurst injects a coordinator system prompt that instructs the model to orchestrate rather than act directly. The recommended workflow is:
+When coordinator mode is active, MikMik injects a coordinator system prompt that instructs the model to orchestrate rather than act directly. The recommended workflow is:
 
 1. **Research Phase** — Spawn workers in parallel to gather information about the codebase or requirements.
 2. **Synthesis Phase** — Collect worker findings and build a complete understanding before proceeding.
@@ -244,7 +244,7 @@ I need to refactor the authentication module. Let me plan this in parallel:
 **Example coordinator session prompt:**
 
 ```bash
-MIKMIK_COORDINATOR_MODE=1 claurst \
+MIKMIK_COORDINATOR_MODE=1 mikmik \
   "Audit the entire src/payments directory for security issues. \
    Use parallel workers to examine each file, then produce a \
    consolidated security report with severity rankings."
@@ -314,7 +314,7 @@ MIKMIK_COORDINATOR_MODE=1 claurst \
 
 ## Session Continuity and Mode Matching
 
-When resuming a saved session, Claurst detects whether the original session used coordinator mode and automatically sets `MIKMIK_COORDINATOR_MODE` to match. A warning is printed when the environment is changed to prevent mode confusion in long-running workflows.
+When resuming a saved session, MikMik detects whether the original session used coordinator mode and automatically sets `MIKMIK_COORDINATOR_MODE` to match. A warning is printed when the environment is changed to prevent mode confusion in long-running workflows.
 
 ---
 

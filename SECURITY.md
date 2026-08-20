@@ -17,13 +17,13 @@ than a description of the code path.
 
 ## Trust model
 
-Claurst runs commands, edits files and talks to network endpoints on your
+MikMik runs commands, edits files and talks to network endpoints on your
 machine. Most of that is the point of the tool. The parts below are where an
 input that is not yours decides what runs.
 
 ### A repository's settings file
 
-Opening a checkout means its `.claurst/settings.json` is read. It arrives with
+Opening a checkout means its `.mikmik/settings.json` is read. It arrives with
 the clone and nobody has read it, so what it may set is limited to three
 groups. [`docs/configuration.md`](docs/configuration.md#per-project-settings)
 lists the keys in each.
@@ -32,17 +32,17 @@ lists the keys in each.
   overrides. None of it decides what runs or where a credential goes.
 - **Applied after you approve it.** `hooks`, `formatter`, `lsp_servers`,
   `skills` and project-defined `mcpServers`. Each names a command to execute or
-  an address to fetch from, so Claurst prints them as written and asks before
+  an address to fetch from, so MikMik prints them as written and asks before
   any of them takes effect. "Always allow" records a SHA-256 fingerprint of
-  exactly what was shown, under `~/.claurst/project_trust.json` and
-  `~/.claurst/mcp_trust.json`. Neither store is ever written inside a
+  exactly what was shown, under `~/.mikmik/project_trust.json` and
+  `~/.mikmik/mcp_trust.json`. Neither store is ever written inside a
   repository, and editing an approved command changes its fingerprint, so an
   approval cannot be re-pointed at something else. Headless (`--print`) never
   applies them and says so on stderr.
 - **Never applied.** The permission mode and permission rules, the API key,
   provider and provider endpoints, the system prompt, the tool environment,
   workspace and additional directories, the status line, ACP agents, and the
-  flags that would turn off the two gates above. Claurst names the ignored keys
+  flags that would turn off the two gates above. MikMik names the ignored keys
   on startup rather than dropping them silently.
 
 ### Permission modes

@@ -1,8 +1,8 @@
-# Claurst Installation Guide
+# MikMik Installation Guide
 
-Claurst is a Rust reimplementation of the Claude Code CLI. The fastest way
+MikMik is a Rust reimplementation of the Claude Code CLI. The fastest way
 to install it is via the one-liner installers below. They drop the binary
-into `~/.local/bin` (or `%LOCALAPPDATA%\Programs\claurst` on Windows; Git Bash
+into `~/.local/bin` (or `%LOCALAPPDATA%\Programs\mikmik` on Windows; Git Bash
 uses that same Windows location) and add that directory to your `PATH`
 automatically.
 
@@ -23,7 +23,7 @@ possible; on Linux it links against the system glibc.
 
 Every Apple Silicon Mac is `aarch64`, whichever chip it carries: M1 through M5,
 and the A-series parts used in the MacBook Neo. They all take the same
-`claurst-macos-aarch64` archive.
+`mikmik-macos-aarch64` archive.
 
 ---
 
@@ -32,25 +32,25 @@ and the A-series parts used in the MacBook Neo. They all take the same
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
+irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex
 ```
 
 ### Windows (Git Bash / MSYS / Cygwin)
 
 `install.sh` also runs under Git Bash. It downloads the Windows archive
-(`claurst-windows-x86_64.zip`), installs `claurst.exe` into the **same**
-directory `install.ps1` uses (`%LOCALAPPDATA%\Programs\claurst`), and updates
+(`mikmik-windows-x86_64.zip`), installs `mikmik.exe` into the **same**
+directory `install.ps1` uses (`%LOCALAPPDATA%\Programs\mikmik`), and updates
 the Windows user `PATH` rather than a shell config file, so the binary is on
 `PATH` in PowerShell and cmd too:
 
 ```bash
-curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash
 ```
 
 Extraction uses `unzip` when it is installed and falls back to `tar`, which
@@ -60,8 +60,8 @@ Both installers:
 
 1. Detect your platform and architecture.
 2. Download the matching archive from the latest GitHub release.
-3. Extract `claurst` into `~/.local/bin/` on Linux and macOS, or
-   `%LOCALAPPDATA%\Programs\claurst` on Windows (`install.sh` under Git Bash
+3. Extract `mikmik` into `~/.local/bin/` on Linux and macOS, or
+   `%LOCALAPPDATA%\Programs\mikmik` on Windows (`install.sh` under Git Bash
    uses that same Windows location).
 4. Append that directory to your shell config (`.bashrc`, `.zshrc`,
    `.config/fish/config.fish`) on Unix, or to your Windows user `PATH`.
@@ -69,7 +69,7 @@ Both installers:
    unsigned binary.
 
 Open a new terminal afterwards (or `source` the modified shell config) so
-the updated `PATH` takes effect, then run `claurst --version` to verify.
+the updated `PATH` takes effect, then run `mikmik --version` to verify.
 
 ### Installer flags
 
@@ -96,7 +96,7 @@ install from a private fork. Both installers also read `GITHUB_TOKEN` and
 ```bash
 # Linux / macOS / Git Bash
 export GITHUB_TOKEN=ghp_...
-curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash
 
 # Or, running the script locally:
 ./install.sh --token ghp_...
@@ -105,7 +105,7 @@ curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download
 ```powershell
 # Windows
 $env:GITHUB_TOKEN = 'ghp_...'
-irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
+irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex
 
 # Or:
 .\install.ps1 -Token ghp_...
@@ -127,25 +127,25 @@ list.
 
 ## Via npm / bun
 
-If you have Node.js or Bun installed, you can install Claurst as a global
+If you have Node.js or Bun installed, you can install MikMik as a global
 package. The postinstall script automatically downloads the correct pre-built
 native binary for your platform from GitHub Releases — no compilation needed.
 
 ```bash
 # npm
-npm install -g claurst
+npm install -g mikmik
 
 # bun
-bun install -g claurst
+bun install -g mikmik
 ```
 
-After installation, run `claurst` directly from your terminal.
+After installation, run `mikmik` directly from your terminal.
 
-You can also run Claurst without a permanent install:
+You can also run MikMik without a permanent install:
 
 ```bash
-npx claurst          # via npm
-bunx claurst         # via bun
+npx mikmik          # via npm
+bunx mikmik         # via bun
 ```
 
 **Supported platforms via npm:**
@@ -163,48 +163,48 @@ bunx claurst         # via bun
 Once installed, upgrade in place at any time:
 
 ```bash
-claurst upgrade               # to the latest release
-claurst upgrade --version 0.1.0   # pin to a specific version
-claurst upgrade --force       # reinstall the same version
+mikmik upgrade               # to the latest release
+mikmik upgrade --version 0.1.0   # pin to a specific version
+mikmik upgrade --force       # reinstall the same version
 ```
 
 The upgrade command downloads the matching archive from GitHub, extracts the
 new binary, and replaces the running executable atomically. Settings in
-`~/.claurst/` are preserved.
+`~/.mikmik/` are preserved.
 
 ---
 
 ## Manual install from GitHub Releases
 
 If you'd rather not run an install script, grab archives directly from
-[**GitHub Releases**](https://github.com/KilimcininKorOglu/claurst/releases):
+[**GitHub Releases**](https://github.com/KilimcininKorOglu/mikmik/releases):
 
 | Archive                        | Platform                                 |
 |--------------------------------|------------------------------------------|
-| `claurst-windows-x86_64.zip`   | Windows 64-bit                           |
-| `claurst-linux-x86_64.tar.gz`  | Linux x86_64                             |
-| `claurst-linux-aarch64.tar.gz` | Linux ARM64                              |
-| `claurst-macos-x86_64.tar.gz`  | macOS Intel                              |
-| `claurst-macos-aarch64.tar.gz` | macOS Apple Silicon (M1 to M5, A-series) |
+| `mikmik-windows-x86_64.zip`   | Windows 64-bit                           |
+| `mikmik-linux-x86_64.tar.gz`  | Linux x86_64                             |
+| `mikmik-linux-aarch64.tar.gz` | Linux ARM64                              |
+| `mikmik-macos-x86_64.tar.gz`  | macOS Intel                              |
+| `mikmik-macos-aarch64.tar.gz` | macOS Apple Silicon (M1 to M5, A-series) |
 
-Every archive contains a single binary named `claurst` (or `claurst.exe`).
+Every archive contains a single binary named `mikmik` (or `mikmik.exe`).
 Extract it and put it somewhere on your `PATH`. For example on Linux:
 
 ```bash
-curl -L https://github.com/KilimcininKorOglu/claurst/releases/latest/download/claurst-linux-x86_64.tar.gz \
+curl -L https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/mikmik-linux-x86_64.tar.gz \
   | tar -xz
-chmod +x claurst
-sudo mv claurst /usr/local/bin/
+chmod +x mikmik
+sudo mv mikmik /usr/local/bin/
 ```
 
 On macOS, also strip the quarantine flag so Gatekeeper allows the unsigned
 binary:
 
 ```bash
-xattr -rd com.apple.quarantine /usr/local/bin/claurst
+xattr -rd com.apple.quarantine /usr/local/bin/mikmik
 ```
 
-On Windows, extract the zip and add the folder containing `claurst.exe`
+On Windows, extract the zip and add the folder containing `mikmik.exe`
 to your user `PATH` via **Settings → System → Advanced system settings →
 Environment Variables**.
 
@@ -212,7 +212,7 @@ Environment Variables**.
 
 ```bash
 mkdir -p ~/.local/bin
-mv claurst ~/.local/bin/claurst
+mv mikmik ~/.local/bin/mikmik
 ```
 
 Then put that directory on your `PATH`.
@@ -244,20 +244,20 @@ do this for you.
 ## Verifying the Installation
 
 ```bash
-claurst --version
+mikmik --version
 ```
 
 A successful installation prints the version string, for example:
 
 ```
-claurst 0.1.7
+mikmik 0.1.7
 ```
 
 To confirm the binary is the one you installed:
 
 ```bash
-which claurst          # Linux / macOS
-where claurst          # Windows (Command Prompt)
+which mikmik          # Linux / macOS
+where mikmik          # Windows (Command Prompt)
 ```
 
 ---
@@ -275,30 +275,30 @@ source "$HOME/.cargo/env"
 ### Option A: Install via Cargo
 
 ```bash
-cargo install claurst --force
+cargo install mikmik --force
 ```
 
-This downloads, compiles, and installs the binary to `~/.cargo/bin/claurst`.
+This downloads, compiles, and installs the binary to `~/.cargo/bin/mikmik`.
 That directory is added to `PATH` automatically by `rustup`.
 
 ### Option B: Clone and Build
 
 ```bash
-git clone https://github.com/KilimcininKorOglu/claurst.git
-cd claurst/src-rust
+git clone https://github.com/KilimcininKorOglu/mikmik.git
+cd mikmik/src-rust
 
 # Debug build (fast to compile, larger binary, extra runtime checks)
-cargo build --package claurst
+cargo build --package mikmik
 
 # Release build (optimised, smaller, suitable for everyday use)
-cargo build --release --package claurst
+cargo build --release --package mikmik
 ```
 
 The release binary is placed at:
 
 ```
-src-rust/target/release/claurst        # Linux / macOS
-src-rust/target\release\claurst.exe   # Windows
+src-rust/target/release/mikmik        # Linux / macOS
+src-rust/target\release\mikmik.exe   # Windows
 ```
 
 Copy it to a directory on your `PATH` as described above.
@@ -330,8 +330,8 @@ sudo pacman -S alsa-lib openssl
 To enable a feature:
 
 ```bash
-cargo build --release --package claurst --features voice
-cargo build --release --package claurst --features dev_full
+cargo build --release --package mikmik --features voice
+cargo build --release --package mikmik --features dev_full
 ```
 
 ### Cross-compiling for Linux aarch64
@@ -342,7 +342,7 @@ aarch64 Linux builds. To reproduce it locally:
 ```bash
 cargo install cross --git https://github.com/cross-rs/cross
 cd src-rust
-cross build --release --locked --package claurst --target aarch64-unknown-linux-gnu
+cross build --release --locked --package mikmik --target aarch64-unknown-linux-gnu
 ```
 
 `cross` manages the Docker sysroot, OpenSSL, and ALSA headers automatically.
@@ -351,21 +351,21 @@ cross build --release --locked --package claurst --target aarch64-unknown-linux-
 
 ## Shell Completions
 
-Claurst does not currently ship a dedicated `completions` subcommand. All
-flags can be discovered via `claurst --help`. For basic tab completion you can
+MikMik does not currently ship a dedicated `completions` subcommand. All
+flags can be discovered via `mikmik --help`. For basic tab completion you can
 use the generic helper built into your shell:
 
 ```bash
 # bash — add to ~/.bashrc
-complete -C claurst claurst
+complete -C mikmik mikmik
 
 # zsh — add to ~/.zshrc (requires compinit)
-compdef _gnu_generic claurst
+compdef _gnu_generic mikmik
 ```
 
 ```fish
-# fish — add to ~/.config/fish/completions/claurst.fish
-complete -c claurst -a '(claurst --help 2>&1 | string match -r -- "--\S+")'
+# fish — add to ~/.config/fish/completions/mikmik.fish
+complete -c mikmik -a '(mikmik --help 2>&1 | string match -r -- "--\S+")'
 ```
 
 The fish line scrapes the long flags out of `--help` on every completion. It
@@ -379,10 +379,10 @@ Richer completion scripts may be added in a future release.
 ## Upgrading a source install
 
 ```bash
-cargo install claurst --force
+cargo install mikmik --force
 ```
 
-For binary installs (the recommended path), use `claurst upgrade` — see
+For binary installs (the recommended path), use `mikmik upgrade` — see
 the [Upgrading](#upgrading) section above.
 
 ---
@@ -392,26 +392,26 @@ the [Upgrading](#upgrading) section above.
 If you used the install script, remove the binary it installed:
 
 ```bash
-rm -f ~/.local/bin/claurst               # Linux / macOS
+rm -f ~/.local/bin/mikmik               # Linux / macOS
 # Windows (PowerShell):
-Remove-Item -Force "$env:LOCALAPPDATA\Programs\claurst\claurst.exe"
+Remove-Item -Force "$env:LOCALAPPDATA\Programs\mikmik\mikmik.exe"
 # and the directory, once it is empty:
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\claurst" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\mikmik" -ErrorAction SilentlyContinue
 ```
 
 For manual installs:
 
 ```bash
-sudo rm /usr/local/bin/claurst           # if installed system-wide
-rm ~/.local/bin/claurst                  # if installed user-local
+sudo rm /usr/local/bin/mikmik           # if installed system-wide
+rm ~/.local/bin/mikmik                  # if installed user-local
 ```
 
 To also remove all settings and session data:
 
 ```bash
-rm -rf ~/.claurst
+rm -rf ~/.mikmik
 ```
 
-You may also want to remove the `# claurst` PATH line that the installer
+You may also want to remove the `# mikmik` PATH line that the installer
 appended to your shell config (`.bashrc`, `.zshrc`, etc.), or the Windows user
-`PATH` entry for `%LOCALAPPDATA%\Programs\claurst`.
+`PATH` entry for `%LOCALAPPDATA%\Programs\mikmik`.

@@ -1,6 +1,6 @@
 # LLM Providers
 
-Claurst supports a wide range of LLM providers through a unified provider abstraction. Every provider implements the same `LlmProvider` trait, so switching between them requires only a configuration change.
+MikMik supports a wide range of LLM providers through a unified provider abstraction. Every provider implements the same `LlmProvider` trait, so switching between them requires only a configuration change.
 
 > Running a model on your own machine (llama.cpp, LM Studio, Ollama, vLLM)? See
 > the dedicated [Local Models](local-models) guide for recommended server flags,
@@ -13,12 +13,12 @@ Claurst supports a wide range of LLM providers through a unified provider abstra
 Use the `--provider` flag on any invocation to override the active provider:
 
 ```
-claurst --provider openai "refactor this module"
-claurst --provider ollama "explain this function"
-claurst --provider groq --model llama-3.3-70b-versatile "write tests"
+mikmik --provider openai "refactor this module"
+mikmik --provider ollama "explain this function"
+mikmik --provider groq --model llama-3.3-70b-versatile "write tests"
 ```
 
-The provider can also be set persistently in `~/.claurst/settings.json`:
+The provider can also be set persistently in `~/.mikmik/settings.json`:
 
 ```json
 {
@@ -26,7 +26,7 @@ The provider can also be set persistently in `~/.claurst/settings.json`:
 }
 ```
 
-When no provider is specified, Claurst defaults to **Anthropic**.
+When no provider is specified, MikMik defaults to **Anthropic**.
 
 ---
 
@@ -259,7 +259,7 @@ The built-in provider uses the Anthropic-compatible Messages API.
 | `MiniMax-M3`   |      1,000,000 | Text, image, video | Off by default; supports `adaptive` and `disabled` |
 | `MiniMax-M2.7` |        204,800 | Text               | Always on                                          |
 
-The catalog retains the model's complete input-modality metadata. Claurst's built-in attachment flow currently sends text and image blocks.
+The catalog retains the model's complete input-modality metadata. MikMik's built-in attachment flow currently sends text and image blocks.
 
 Pricing is in USD per million tokens:
 
@@ -271,7 +271,7 @@ Pricing is in USD per million tokens:
 | `MiniMax-M3`   | Priority     |    Over 512k | $0.90 |  $3.60 |      $0.18 | Not published |
 | `MiniMax-M2.7` | Standard     | All requests | $0.30 |  $1.20 |      $0.06 |        $0.375 |
 
-| Protocol          | Global base URL                    | China base URL                       | Path added by Claurst |
+| Protocol          | Global base URL                    | China base URL                       | Path added by MikMik |
 |-------------------|------------------------------------|--------------------------------------|-----------------------|
 | Anthropic         | `https://api.minimax.io/anthropic` | `https://api.minimaxi.com/anthropic` | `/v1/messages`        |
 | OpenAI-compatible | `https://api.minimax.io/v1`        | `https://api.minimaxi.com/v1`        | `/chat/completions`   |
@@ -327,7 +327,7 @@ For the OpenAI-compatible protocol, use the custom provider with the correspondi
 
 ### Custom endpoints
 
-Two slots exist for endpoints Claurst does not ship a provider for, one per wire format:
+Two slots exist for endpoints MikMik does not ship a provider for, one per wire format:
 
 | Provider id         | Wire format | Base URL setting                          | Key environment variable   |
 |---------------------|-------------|-------------------------------------------|----------------------------|
@@ -359,7 +359,7 @@ Neither slot has models.dev catalog entries. The picker shows whatever the endpo
 
 Connects to a locally running Ollama instance. No API key required.
 
-**Base URL:** Reads `OLLAMA_HOST` (defaults to `http://localhost:11434`). Claurst appends `/v1` to construct the OpenAI-compatible endpoint. For a remote Ollama server, set `providers.ollama.api_base` to that host: both `http://192.168.1.50:11434` and `http://192.168.1.50:11434/v1` work, because the `/v1` suffix is added when it is missing.
+**Base URL:** Reads `OLLAMA_HOST` (defaults to `http://localhost:11434`). MikMik appends `/v1` to construct the OpenAI-compatible endpoint. For a remote Ollama server, set `providers.ollama.api_base` to that host: both `http://192.168.1.50:11434` and `http://192.168.1.50:11434/v1` work, because the `/v1` suffix is added when it is missing.
 
 **Default model:** `llama3.2`
 
@@ -383,7 +383,7 @@ Connects to a locally running Ollama instance. No API key required.
 Run a model locally first with `ollama pull llama3.2`, then:
 
 ```
-claurst --provider ollama --model llama3.2 "explain this code"
+mikmik --provider ollama --model llama3.2 "explain this code"
 ```
 
 ---
@@ -392,7 +392,7 @@ claurst --provider ollama --model llama3.2 "explain this code"
 
 Connects to a locally running LM Studio server. No API key required.
 
-**Base URL:** Reads `LM_STUDIO_HOST` (defaults to `http://localhost:1234`). Claurst appends `/v1`. A remote server is configured the same way as Ollama's, through `providers.lmstudio.api_base`, with or without the `/v1` suffix.
+**Base URL:** Reads `LM_STUDIO_HOST` (defaults to `http://localhost:1234`). MikMik appends `/v1`. A remote server is configured the same way as Ollama's, through `providers.lmstudio.api_base`, with or without the `/v1` suffix.
 
 **Default model:** `default` (whichever model is loaded in LM Studio)
 
@@ -417,7 +417,7 @@ Connects to a locally running LM Studio server. No API key required.
 
 Connects to a locally running llama.cpp HTTP server. No API key required.
 
-**Base URL:** Reads `LLAMA_CPP_HOST` (defaults to `http://localhost:8080`). Claurst appends `/v1`.
+**Base URL:** Reads `LLAMA_CPP_HOST` (defaults to `http://localhost:8080`). MikMik appends `/v1`.
 
 **Default model:** `default`
 
@@ -449,7 +449,7 @@ entry appears in the `/connect` list only on macOS. No API key required unless
 the server was started with `--api-key`.
 
 **Base URL:** Reads `MLX_LM_HOST` (defaults to `http://localhost:8080`, the port
-`mlx_lm.server` binds without a `--port` flag). Claurst appends `/v1`.
+`mlx_lm.server` binds without a `--port` flag). MikMik appends `/v1`.
 
 **Default model:** taken from the server's own `GET /v1/models`.
 
@@ -476,7 +476,7 @@ mlx_lm.server --model mlx-community/Qwen3.5-9B-MLX-4bit
 
 ```bash
 mlx_lm.server --model <model> --port 9000
-MLX_LM_HOST=http://localhost:9000 claurst --provider mlxlm "hello"
+MLX_LM_HOST=http://localhost:9000 mikmik --provider mlxlm "hello"
 ```
 
 Writing the `providers.mlxlm` block by hand works on any platform, which is how
@@ -584,7 +584,7 @@ OpenAI-compatible API with Mistral-specific protocol quirks (tool call ID format
 
 ### OpenRouter
 
-Unified API gateway to many models. Sends `HTTP-Referer: https://claurst.ai/` and `X-Title: Claurst` headers automatically.
+Unified API gateway to many models. Sends `HTTP-Referer: https://mikmik.ai/` and `X-Title: MikMik` headers automatically.
 
 **Authentication:** `OPENROUTER_API_KEY` environment variable.
 
@@ -736,7 +736,7 @@ Wafer-scale inference hardware.
 
 ## Per-Provider Configuration in settings.json
 
-The `providers` map in `~/.claurst/settings.json` accepts per-provider `ProviderConfig` objects:
+The `providers` map in `~/.mikmik/settings.json` accepts per-provider `ProviderConfig` objects:
 
 ```json
 {
@@ -808,9 +808,9 @@ The above example allows only `gpt-4o` (whitelist minus blacklist).
 
 ## Model Registry
 
-Claurst ships a bundled snapshot of models for Anthropic, OpenAI, and Google. At runtime it optionally refreshes from the public `https://models.dev/api.json` API (cached to `~/.claurst/models_cache.json`, refreshed at most every 5 minutes). Network failures are swallowed silently; the bundled snapshot is always sufficient for normal operation.
+MikMik ships a bundled snapshot of models for Anthropic, OpenAI, and Google. At runtime it optionally refreshes from the public `https://models.dev/api.json` API (cached to `~/.mikmik/models_cache.json`, refreshed at most every 5 minutes). Network failures are swallowed silently; the bundled snapshot is always sufficient for normal operation.
 
-When no model is explicitly set, Claurst scores available models by priority patterns to pick the best default. Well-known model prefixes (`claude-*`, `gpt-*`, `gemini-*`, etc.) are always routed to their canonical provider regardless of gateway entries in the remote cache.
+When no model is explicitly set, MikMik scores available models by priority patterns to pick the best default. Well-known model prefixes (`claude-*`, `gpt-*`, `gemini-*`, etc.) are always routed to their canonical provider regardless of gateway entries in the remote cache.
 
 ### Overriding model metadata
 
@@ -821,7 +821,7 @@ an unrelated catalog entry, or because there is no catalog entry at all. The
 `modelOverrides` map lets you supply or correct that metadata. **User overrides
 take precedence over the models.dev catalog and over the built-in defaults.**
 
-Add it at the top level of `~/.claurst/settings.json` (or inside the `config`
+Add it at the top level of `~/.mikmik/settings.json` (or inside the `config`
 object), keyed by the fully-qualified `"provider/model"` id:
 
 ```json
@@ -856,6 +856,6 @@ Field names accept both camelCase (`contextWindow`) and snake_case
 because the registry is keyed by `provider/model`.
 
 When the keyed model exists in the catalog, the override patches it in place.
-When it does not (a self-hosted alias), Claurst materialises a synthetic entry
+When it does not (a self-hosted alias), MikMik materialises a synthetic entry
 so the corrected values flow everywhere the metadata is read: the `/model`
 picker, the token-usage warnings, and the auto-compact thresholds.

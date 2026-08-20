@@ -1,6 +1,6 @@
-# Claurst Configuration Reference
+# MikMik Configuration Reference
 
-Claurst is configured through a layered system of JSON files, environment
+MikMik is configured through a layered system of JSON files, environment
 variables, and command-line flags. This document describes every option.
 
 ---
@@ -10,22 +10,22 @@ variables, and command-line flags. This document describes every option.
 The global settings file lives at:
 
 ```
-~/.claurst/settings.json
+~/.mikmik/settings.json
 ```
 
-The directory `~/.claurst/` is created automatically on first run if it does
+The directory `~/.mikmik/` is created automatically on first run if it does
 not exist. The file is standard JSON (or JSONC — comments are stripped before
 parsing).
 
 ### Per-project settings
 
-Claurst walks up from the current working directory looking for a project-level
+MikMik walks up from the current working directory looking for a project-level
 settings file. The first file found wins (project settings take precedence over
 global settings):
 
 ```
-<project-root>/.claurst/settings.json
-<project-root>/.claurst/settings.jsonc
+<project-root>/.mikmik/settings.json
+<project-root>/.mikmik/settings.jsonc
 ```
 
 A project settings file arrives with the checkout, and nobody reads it before
@@ -41,9 +41,9 @@ never mentioned them was resetting them to their defaults.
 
 **Taken only after you approve them.** `hooks`, `formatter`, `lsp_servers` and
 `skills` each name a command to run or an address to fetch from. On the first
-session in a checkout that declares any of them, Claurst shows them verbatim
+session in a checkout that declares any of them, MikMik shows them verbatim
 and asks. "Always allow" records a fingerprint of exactly what was shown under
-`~/.claurst/project_trust.json`, never inside the repository; editing an
+`~/.mikmik/project_trust.json`, never inside the repository; editing an
 approved command changes the fingerprint and asks again. Headless (`--print`)
 never runs them, because there is no way to ask, and says so on stderr.
 Project-defined `mcpServers` follow the same shape through their own prompt.
@@ -56,7 +56,7 @@ Project-defined `mcpServers` follow the same shape through their own prompt.
 `allowedBashPrefixes`. These decide whether a tool asks before acting, where
 the conversation and the credential are sent, what the model is told before you
 say anything, and which directories are reachable. A repository that could set
-them would not need a hook. Claurst names the ignored keys on startup rather
+them would not need a hook. MikMik names the ignored keys on startup rather
 than dropping them silently.
 
 ---
@@ -115,7 +115,7 @@ it.
 running session keeps the plugin set it loaded at startup until `/plugin
 reload` rereads the directories and applies the change. A name in
 `disabledPlugins` that matches no
-discovered plugin is ignored. `claurst --bare` skips plugin discovery
+discovered plugin is ignored. `mikmik --bare` skips plugin discovery
 entirely, regardless of both lists.
 
 ### Skills
@@ -128,8 +128,8 @@ entirely, regardless of both lists.
 A skill is a prompt template. Discovery reads two layouts in every searched
 directory: a flat `<name>.md` file, and a `<name>/SKILL.md` package, which
 takes its name from the directory unless the frontmatter sets `name:`. The
-searched directories are `.claurst/skills/` and `.agents/skills/` walking up
-from the working directory, then `<claurst home>/skills/`, then `skills.paths`,
+searched directories are `.mikmik/skills/` and `.agents/skills/` walking up
+from the working directory, then `<mikmik home>/skills/`, then `skills.paths`,
 then `skills.urls`. Each installed plugin's `skills/` directory is added to the
 search at startup. Run a skill by its name as a slash command, and list them
 all with `/skills`.
@@ -257,7 +257,7 @@ the session only and writes nothing.
 | Key             | Type           | Default     | Description                                                                                                                                                 |
 |-----------------|----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `theme`         | string         | `"default"` | Color theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`.                                                                         |
-| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.claurst/output-styles/`. |
+| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.mikmik/output-styles/`. |
 | `output_format` | string         | `"text"`    | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`.                                                                    |
 | `verbose`       | boolean        | false       | Enable debug-level log output.                                                                                                                              |
 
@@ -294,7 +294,7 @@ file keeps saying nothing about a setting nobody chose.
 
 | Key                    | Type           | Default | Description                                                                           |
 |------------------------|----------------|---------|---------------------------------------------------------------------------------------|
-| `custom_system_prompt` | string \| null | null    | Replace the default Claurst system prompt entirely with this text.                    |
+| `custom_system_prompt` | string \| null | null    | Replace the default MikMik system prompt entirely with this text.                    |
 | `append_system_prompt` | string \| null | null    | Append this text to the end of the assembled system prompt (after AGENTS.md content). |
 
 The same two can be set per run from the command line, which overrides the settings file:
@@ -305,7 +305,7 @@ The same two can be set per run from the command line, which overrides the setti
 | `--system-prompt-file <PATH>`     | Replace the base prompt with the file's contents. Fails if unreadable. |
 | `--append-system-prompt <TEXT>`   | Append `TEXT` after the assembled prompt.                            |
 
-`--system-prompt` and `--system-prompt-file` are mutually exclusive. Run `claurst --dump-system-prompt` with the same flags to see exactly what a run would send.
+`--system-prompt` and `--system-prompt-file` are mutually exclusive. Run `mikmik --dump-system-prompt` with the same flags to see exactly what a run would send.
 
 ### Tool access
 
@@ -334,19 +334,19 @@ the address and writes it to `searxngUrl`; turning it off clears the key.
 | Key               | Type    | Default | Description                                                                                                                                                  |
 |-------------------|---------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `timelineEnabled` | boolean | false   | Record every tool call and finished turn, and offer the panel through `/timeline` and `Ctrl+Shift+L`. Off by default; while off nothing is collected at all. |
-| `mouseCapture`    | boolean | true    | Let Claurst handle the mouse: wheel scrolling, right-click menus and drag-select. Turn it off to give the mouse back to the terminal. Applies at next start. |
+| `mouseCapture`    | boolean | true    | Let MikMik handle the mouse: wheel scrolling, right-click menus and drag-select. Turn it off to give the mouse back to the terminal. Applies at next start. |
 
 Both are editable from `/settings`, as **Execution timeline** and **Mouse
 capture**. See [Commands](commands.md#timeline) for what the timeline panel
 shows.
 
-While Claurst captures the mouse, the terminal no longer sees it, so its own
+While MikMik captures the mouse, the terminal no longer sees it, so its own
 selection and its right-click paste stop working. That matters most over SSH,
 where the remote host often has no `wl-copy` or `xclip` for `Ctrl+V` to reach:
 set `mouseCapture` to `false` and paste with the terminal's own shortcut
 instead. `Shift+Insert` works either way.
 
-Copying out needs nothing installed. When no clipboard tool answers, Claurst
+Copying out needs nothing installed. When no clipboard tool answers, MikMik
 hands the text to the terminal emulator with OSC 52, which works over SSH.
 
 ### Status line
@@ -360,7 +360,7 @@ in view.
   "config": {
     "statusLine": {
       "type": "command",
-      "command": "~/.claurst/statusline.sh",
+      "command": "~/.mikmik/statusline.sh",
       "padding": 2,
       "refreshInterval": 5
     }
@@ -377,7 +377,7 @@ in view.
 | `hideVimModeIndicator` | boolean | false   | Suppress the built-in `-- INSERT --` line, for a status line that prints `vim.mode` itself.                        |
 
 **Only your own global settings file can set this.** A project's
-`.claurst/settings.json` is ignored for `statusLine`, in whole: it can neither
+`.mikmik/settings.json` is ignored for `statusLine`, in whole: it can neither
 replace the command nor introduce one. Without that rule, cloning a repository
 would run whatever shell command the repository asked for.
 
@@ -398,7 +398,7 @@ The session arrives as JSON on stdin:
 ```json
 {
   "session_id": "…",
-  "transcript_path": "~/.claurst/projects/…/….jsonl",
+  "transcript_path": "~/.mikmik/projects/…/….jsonl",
   "version": "0.1.7",
   "cwd": "/work/project",
   "workspace": { "current_dir": "/work/project", "project_dir": "/work" },
@@ -444,7 +444,7 @@ items; see [Commands](commands.md).
 
 | Key               | Type             | Default | Description                                                                                                              |
 |-------------------|------------------|---------|--------------------------------------------------------------------------------------------------------------------------|
-| `additional_dirs` | array of strings | []      | Additional filesystem paths Claurst is allowed to read and write. Equivalent to passing `--add-dir` on the command line. Each one becomes a named workspace root the model can address as `&root-name/path`; see [`--add-dir`](advanced.md#--add-dir). |
+| `additional_dirs` | array of strings | []      | Additional filesystem paths MikMik is allowed to read and write. Equivalent to passing `--add-dir` on the command line. Each one becomes a named workspace root the model can address as `&root-name/path`; see [`--add-dir`](advanced.md#--add-dir). |
 
 ### MCP servers
 
@@ -468,8 +468,8 @@ Each `McpServerConfig` object:
 case `command` is the base URL).
 
 Servers declared by an installed plugin join this list at startup. A server
-that came with the project (from `<project>/.claurst/settings.json` or a plugin
-under `<project>/.claurst/plugins/`) needs approval before it launches; see
+that came with the project (from `<project>/.mikmik/settings.json` or a plugin
+under `<project>/.mikmik/plugins/`) needs approval before it launches; see
 [Plugins](plugins.md#mcp_servers).
 
 ### Environment variables injected into tools
@@ -499,7 +499,7 @@ defined as a map from event name to an array of hook entries.
     { "command": "/path/to/my-logger.sh", "tool_filter": "Bash", "blocking": false }
   ],
   "Stop": [
-    { "command": "notify-send 'Claurst done'", "blocking": false }
+    { "command": "notify-send 'MikMik done'", "blocking": false }
   ]
 }
 ```
@@ -528,7 +528,7 @@ A hook that reaches its limit is stopped along with anything it started, and
 the run continues. A `blocking` hook that reaches it blocks the operation
 instead: a hook that never answered cannot be read as approval.
 
-A hook declared by a project's `.claurst/settings.json` runs only after you
+A hook declared by a project's `.mikmik/settings.json` runs only after you
 have seen the command and approved it; see [Per-project
 settings](#per-project-settings). The same applies to `formatter`,
 `lsp_servers` and `skills`.
@@ -556,7 +556,7 @@ where you want maximum throughput.
 
 All permission checks are skipped entirely. Every tool call is allowed
 unconditionally. This mode cannot be used when running as root or via `sudo`
-on Unix systems (Claurst blocks it).
+on Unix systems (MikMik blocks it).
 
 Use with caution: the model can read and modify any file reachable from the
 current working directory without any user confirmation.
@@ -571,30 +571,30 @@ modifications.
 The permission mode can also be overridden per-session on the command line:
 
 ```bash
-claurst --permission-mode acceptEdits "refactor the auth module"
-claurst --dangerously-skip-permissions "..."  # equivalent to bypassPermissions
+mikmik --permission-mode acceptEdits "refactor the auth module"
+mikmik --dangerously-skip-permissions "..."  # equivalent to bypassPermissions
 ```
 
 ---
 
 ## AGENTS.md Memory Files
 
-AGENTS.md files are plain Markdown documents that Claurst injects into the
+AGENTS.md files are plain Markdown documents that MikMik injects into the
 system prompt at startup. They let you give the model persistent context about
 your project, coding standards, or personal preferences without repeating
 yourself in every session.
 
 ### File locations and priority
 
-Claurst loads AGENTS.md files from four locations. They are processed in the
+MikMik loads AGENTS.md files from four locations. They are processed in the
 following order (earlier = higher priority, later content is appended below):
 
 | Scope   | Path                                | Description                                                                                                |
 |---------|-------------------------------------|------------------------------------------------------------------------------------------------------------|
-| Managed | `~/.claurst/rules/*.md`             | Global policy files. All `.md` files in this directory are loaded in alphabetical order.                   |
-| User    | `~/.claurst/AGENTS.md`              | Your personal preferences and instructions, applied to all projects.                                       |
+| Managed | `~/.mikmik/rules/*.md`             | Global policy files. All `.md` files in this directory are loaded in alphabetical order.                   |
+| User    | `~/.mikmik/AGENTS.md`              | Your personal preferences and instructions, applied to all projects.                                       |
 | Project | `<project-root>/AGENTS.md`          | Project-level context: architecture notes, conventions, workflows. Typically committed to version control. |
-| Local   | `<project-root>/.claurst/AGENTS.md` | Local overrides not committed to version control (add `.claurst/` to `.gitignore`).                        |
+| Local   | `<project-root>/.mikmik/AGENTS.md` | Local overrides not committed to version control (add `.mikmik/` to `.gitignore`).                        |
 
 Files from all four locations are concatenated (separated by blank lines) into
 a single system-prompt fragment. If the same instruction appears at multiple
@@ -651,7 +651,7 @@ skipped with a warning comment.
 To skip all AGENTS.md files for a session:
 
 ```bash
-claurst --no-claude-md "your prompt"
+mikmik --no-claude-md "your prompt"
 ```
 
 Or in a session, use the `--bare` flag to disable AGENTS.md, hooks, and
@@ -661,7 +661,7 @@ plugins simultaneously.
 
 ## Providers
 
-Claurst can send requests to multiple LLM providers. Set the active provider
+MikMik can send requests to multiple LLM providers. Set the active provider
 via the `provider` key in settings or the `--provider` CLI flag.
 
 ### Provider IDs
@@ -728,8 +728,8 @@ and `api_base` override the corresponding environment variables.
 
 #### `options`
 
-Every key in `options` is copied verbatim into the request body claurst sends
-for that account. This is how an endpoint claurst does not recognise asks for
+Every key in `options` is copied verbatim into the request body mikmik sends
+for that account. This is how an endpoint mikmik does not recognise asks for
 behaviour it supports:
 
 ```json
@@ -744,11 +744,11 @@ behaviour it supports:
 }
 ```
 
-Claurst also fills some of these fields itself for the vendors it knows, and
+MikMik also fills some of these fields itself for the vendors it knows, and
 those built-in values win. `reasoningEffort` for a GitHub Copilot or Codex
 account, for instance, comes from the effort level `/effort` and the model
 picker set, so writing it in `options` there has no effect. The setting reaches
-the request only for fields claurst does not set for that wire format, which is
+the request only for fields mikmik does not set for that wire format, which is
 all of them for an endpoint it does not recognise.
 
 Which built-in rules apply is decided by `protocol` (the wire format), not by
@@ -781,7 +781,7 @@ the name the account is filed under.
 | `NVIDIA_API_KEY`       | API key for the `nvidia` provider.                                              |
 | `MIKMIK_BRIDGE_URL`   | Relay address for the remote-control bridge. Overrides `remoteControl.url`.     |
 | `MIKMIK_BRIDGE_TOKEN` | Bearer token for the remote-control bridge. Overrides `remoteControl.token`.    |
-| `RUST_LOG`             | Tracing filter (e.g. `debug`, `claurst_core=trace`).                            |
+| `RUST_LOG`             | Tracing filter (e.g. `debug`, `mikmik_core=trace`).                            |
 
 ---
 
@@ -892,7 +892,7 @@ Configure via `/managed-agents configure` or `/managed-agents preset <name>`. Se
 
 ## File Formatters
 
-Formatters run automatically after Claurst writes a file whose extension
+Formatters run automatically after MikMik writes a file whose extension
 matches. They are defined in the `formatter` map:
 
 ```json

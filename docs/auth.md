@@ -1,6 +1,6 @@
-# Claurst Authentication Guide
+# MikMik Authentication Guide
 
-Claurst needs credentials to call the Anthropic API (or another provider's
+MikMik needs credentials to call the Anthropic API (or another provider's
 API). This document covers every supported authentication method, multi-account
 profile switching, how tokens are stored, how to check and clear credentials,
 and how to authenticate with non-Anthropic providers.
@@ -9,14 +9,14 @@ and how to authenticate with non-Anthropic providers.
 
 ## Authentication Methods
 
-Claurst checks for credentials in the following priority order:
+MikMik checks for credentials in the following priority order:
 
 1. `--api-key` flag (highest priority, session-only)
-2. `api_key` field in `~/.claurst/settings.json`
+2. `api_key` field in `~/.mikmik/settings.json`
 3. `ANTHROPIC_API_KEY` environment variable
 4. Tokens for the **active Anthropic profile** under
-   `~/.claurst/accounts/anthropic/<id>/oauth_tokens.json`
-5. Legacy `~/.claurst/oauth_tokens.json` (auto-migrated to a profile on first
+   `~/.mikmik/accounts/anthropic/<id>/oauth_tokens.json`
+5. Legacy `~/.mikmik/oauth_tokens.json` (auto-migrated to a profile on first
    read)
 
 The first non-empty credential found is used. Provider-specific credentials
@@ -24,7 +24,7 @@ The first non-empty credential found is used. Provider-specific credentials
 variables and provider config entries.
 
 Codex (OpenAI ChatGPT subscription) accounts follow a parallel system —
-multiple profiles stored under `~/.claurst/accounts/codex/<id>/`, with the
+multiple profiles stored under `~/.mikmik/accounts/codex/<id>/`, with the
 active profile selected via the account registry.
 
 ---
@@ -68,7 +68,7 @@ $env:ANTHROPIC_API_KEY = "sk-ant-api03-..."
 
 **Option B: Settings file**
 
-Store the key in `~/.claurst/settings.json`. Ensure the file has restricted
+Store the key in `~/.mikmik/settings.json`. Ensure the file has restricted
 permissions on shared systems.
 
 ```json
@@ -84,40 +84,40 @@ permissions on shared systems.
 Pass the key directly for a single run. It is not persisted anywhere.
 
 ```bash
-claurst --api-key "sk-ant-api03-..." "your prompt"
+mikmik --api-key "sk-ant-api03-..." "your prompt"
 ```
 
 ---
 
 ## Method 2: OAuth Login (Browser-based)
 
-Claurst supports an OAuth 2.0 PKCE flow that authenticates through either
+MikMik supports an OAuth 2.0 PKCE flow that authenticates through either
 the Anthropic Console or Claude.ai in your browser.
 
-> **Important:** The OAuth client IDs in Claurst are registered to Anthropic's
+> **Important:** The OAuth client IDs in MikMik are registered to Anthropic's
 > official Claude Code CLI application. Anthropic's authorization server may
-> reject or misattribute OAuth requests originating from Claurst. The API key
-> method is the recommended path for Claurst users.
+> reject or misattribute OAuth requests originating from MikMik. The API key
+> method is the recommended path for MikMik users.
 >
 > If OAuth login is attempted and fails, use Method 1 (API key) instead.
 
 ### Claude.ai flow (default)
 
 ```bash
-claurst auth login
+mikmik auth login
 ```
 
-1. Claurst generates a PKCE code verifier and code challenge.
+1. MikMik generates a PKCE code verifier and code challenge.
 2. A temporary localhost HTTP server starts on a random port to receive the
    callback.
-3. The authorization URL is printed to the terminal and Claurst attempts to
+3. The authorization URL is printed to the terminal and MikMik attempts to
    open it in your default browser.
 4. Complete the authorization in the browser (Claude.ai login page).
 5. The browser redirects to `http://localhost:<port>/callback` with an
    authorization code.
-6. Claurst exchanges the code for tokens via the token endpoint.
-7. Tokens are saved under `~/.claurst/accounts/anthropic/<profile-id>/oauth_tokens.json`
-   and the profile is registered as **active** in `~/.claurst/accounts.json`.
+6. MikMik exchanges the code for tokens via the token endpoint.
+7. Tokens are saved under `~/.mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json`
+   and the profile is registered as **active** in `~/.mikmik/accounts.json`.
 
 This flow produces a Bearer token (`user:inference` scope) used directly for
 API calls.
@@ -125,11 +125,11 @@ API calls.
 ### Console flow (creates an API key)
 
 ```bash
-claurst auth login --console
+mikmik auth login --console
 ```
 
 This uses the Anthropic Console authorization endpoint. After token exchange,
-Claurst calls the Console API to create a new API key, stores it in the
+MikMik calls the Console API to create a new API key, stores it in the
 active profile's `oauth_tokens.json`, and uses it as a standard API key for
 subsequent requests (not as a Bearer token).
 
@@ -137,17 +137,17 @@ subsequent requests (not as a Bearer token).
 
 Add `--label <name>` to give the new profile a human-friendly name (otherwise
 the id is derived from the JWT email's local-part). This becomes the id you
-use when running `claurst auth switch`:
+use when running `mikmik auth switch`:
 
 ```bash
-claurst auth login --label work
-claurst auth login --label personal
-claurst auth switch personal
+mikmik auth login --label work
+mikmik auth login --label personal
+mikmik auth switch personal
 ```
 
 ### Manual fallback
 
-If the browser does not open automatically, Claurst prints the full
+If the browser does not open automatically, MikMik prints the full
 authorization URL. Copy and paste it into a browser. After you authorize,
 paste the authorization code shown in the browser back into the terminal
 when prompted.
@@ -156,7 +156,7 @@ when prompted.
 
 ## Multi-Account Profiles
 
-Claurst stores **multiple named accounts per provider** and lets you switch
+MikMik stores **multiple named accounts per provider** and lets you switch
 between them without re-logging-in. Supported providers today: **Anthropic**
 (Claude.ai / Console) and **Codex** (OpenAI ChatGPT subscription).
 
@@ -166,7 +166,7 @@ Pro/Max/Team plans, or testing against multiple organizations.
 ### On-disk layout
 
 ```
-~/.claurst/
+~/.mikmik/
 ├── accounts.json                              # registry (active + metadata)
 └── accounts/
     ├── anthropic/
@@ -199,41 +199,41 @@ Pro/Max/Team plans, or testing against multiple organizations.
 
 ### CLI
 
-`claurst auth` and `claurst codex` are symmetric — same subcommands for both
+`mikmik auth` and `mikmik codex` are symmetric — same subcommands for both
 providers:
 
 ```bash
 # Add accounts (each login becomes its own profile)
-claurst auth login                       # Claude.ai (default)
-claurst auth login --console             # Console / API-key flow
-claurst auth login --label work          # name the profile
-claurst codex login                      # ChatGPT/Codex OAuth
-claurst codex login --label personal
+mikmik auth login                       # Claude.ai (default)
+mikmik auth login --console             # Console / API-key flow
+mikmik auth login --label work          # name the profile
+mikmik codex login                      # ChatGPT/Codex OAuth
+mikmik codex login --label personal
 
 # Inspect
-claurst auth status                      # show active Anthropic profile
-claurst auth list                        # all Anthropic profiles
-claurst codex list                       # all Codex profiles
-claurst accounts                         # both at once (use --json for JSON)
+mikmik auth status                      # show active Anthropic profile
+mikmik auth list                        # all Anthropic profiles
+mikmik codex list                       # all Codex profiles
+mikmik accounts                         # both at once (use --json for JSON)
 
 # Switch the active account
-claurst auth switch work
-claurst codex switch personal
+mikmik auth switch work
+mikmik codex switch personal
 
 # Remove a stored profile
-claurst auth remove work                 # delete profile + tokens dir
-claurst codex remove personal
+mikmik auth remove work                 # delete profile + tokens dir
+mikmik codex remove personal
 
 # Logout (clears tokens for the active profile)
-claurst auth logout
-claurst codex logout
+mikmik auth logout
+mikmik codex logout
 ```
 
-`claurst auth status` and `claurst codex status` exit `0` when logged in and
+`mikmik auth status` and `mikmik codex status` exit `0` when logged in and
 `1` otherwise, so they can drive scripts:
 
 ```bash
-if claurst codex status > /dev/null; then
+if mikmik codex status > /dev/null; then
   echo "Codex login present"
 fi
 ```
@@ -261,18 +261,18 @@ email and subscription tier when known.
 
 ### Identity detection
 
-When you log in, Claurst decodes the JWT id_token (or access token for Codex)
+When you log in, MikMik decodes the JWT id_token (or access token for Codex)
 to extract your email and provider-side account_id. If a stored profile
 already matches that identity, the existing profile is refreshed instead of
 a duplicate being created — re-logging-in the same account is idempotent.
 
 ### Backward compatibility
 
-If you previously used Claurst (with the older single-file storage), your
+If you previously used MikMik (with the older single-file storage), your
 existing tokens are auto-migrated on first read:
 
-- `~/.claurst/oauth_tokens.json` → `~/.claurst/accounts/anthropic/<derived>/oauth_tokens.json`
-- `~/.claurst/codex_tokens.json` → `~/.claurst/accounts/codex/<derived>/codex_tokens.json`
+- `~/.mikmik/oauth_tokens.json` → `~/.mikmik/accounts/anthropic/<derived>/oauth_tokens.json`
+- `~/.mikmik/codex_tokens.json` → `~/.mikmik/accounts/codex/<derived>/codex_tokens.json`
 
 The legacy files are removed after a successful migration. No manual action
 needed.
@@ -287,11 +287,11 @@ is used internally for GitHub Copilot authentication.
 
 For headless environments without a Copilot subscription, the API key method
 (Method 1) is the recommended approach. Set `ANTHROPIC_API_KEY` in the
-environment before running Claurst in a CI/CD or server context.
+environment before running MikMik in a CI/CD or server context.
 
 ```bash
 # Headless / CI example
-ANTHROPIC_API_KEY="sk-ant-..." claurst --print "summarize the last 10 commits"
+ANTHROPIC_API_KEY="sk-ant-..." mikmik --print "summarize the last 10 commits"
 ```
 
 ---
@@ -303,7 +303,7 @@ ANTHROPIC_API_KEY="sk-ant-..." claurst --print "summarize the last 10 commits"
 Each Anthropic account profile has its own file:
 
 ```
-~/.claurst/accounts/anthropic/<profile-id>/oauth_tokens.json
+~/.mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json
 ```
 
 The file contains the access token, optional refresh token, expiry timestamp,
@@ -320,14 +320,14 @@ granted scopes, and account email. Example structure:
 }
 ```
 
-The active profile pointer lives in `~/.claurst/accounts.json` (see
+The active profile pointer lives in `~/.mikmik/accounts.json` (see
 [Multi-Account Profiles](#multi-account-profiles)). Files are written with
 user-only permissions (`600` on Unix). Do not commit them to version control.
 
 ### Codex tokens (per profile)
 
 ```
-~/.claurst/accounts/codex/<profile-id>/codex_tokens.json
+~/.mikmik/accounts/codex/<profile-id>/codex_tokens.json
 ```
 
 Contains the OpenAI access token, refresh token, account_id, and expiry.
@@ -337,7 +337,7 @@ Contains the OpenAI access token, refresh token, account_id, and expiry.
 API keys for non-Anthropic providers without dedicated OAuth flows are stored in:
 
 ```
-~/.claurst/auth.json
+~/.mikmik/auth.json
 ```
 
 This file is keyed by provider ID and contains either an `api` credential
@@ -357,8 +357,8 @@ This file is keyed by provider ID and contains either an `api` credential
 }
 ```
 
-> **Note:** `~/.claurst/auth.json` is the multi-provider credential cache for
-> simple API-key providers. It is **distinct** from `~/.claurst/accounts.json`,
+> **Note:** `~/.mikmik/auth.json` is the multi-provider credential cache for
+> simple API-key providers. It is **distinct** from `~/.mikmik/accounts.json`,
 > which is the multi-account registry for Anthropic/Codex OAuth profiles.
 
 ---
@@ -366,7 +366,7 @@ This file is keyed by provider ID and contains either an `api` credential
 ## Checking Authentication Status
 
 ```bash
-claurst auth status
+mikmik auth status
 ```
 
 Prints a human-readable summary:
@@ -382,7 +382,7 @@ Logged in.
 For machine-readable output:
 
 ```bash
-claurst auth status --json
+mikmik auth status --json
 ```
 
 Example JSON output:
@@ -401,7 +401,7 @@ The exit code is `0` when logged in, `1` when not logged in. This makes
 `auth status` suitable for scripting:
 
 ```bash
-if claurst auth status > /dev/null 2>&1; then
+if mikmik auth status > /dev/null 2>&1; then
   echo "credentials present"
 fi
 ```
@@ -416,10 +416,10 @@ secondary profile becomes the candidate for next selection.
 
 ```bash
 # Remove the active Anthropic profile
-claurst auth logout
+mikmik auth logout
 
 # Remove the active Codex profile
-claurst codex logout
+mikmik codex logout
 
 # Or from inside the REPL
 /logout
@@ -440,15 +440,15 @@ them from your shell profile manually.
 To delete a specific stored profile without making it active first:
 
 ```bash
-claurst auth remove work
-claurst codex remove personal
+mikmik auth remove work
+mikmik codex remove personal
 ```
 
 ---
 
 ## Token Refresh
 
-When Claurst loads OAuth tokens for the active profile and the access token
+When MikMik loads OAuth tokens for the active profile and the access token
 is expired, it automatically attempts a silent refresh:
 
 1. A `POST` request is sent to the provider's token endpoint with the stored
@@ -458,20 +458,20 @@ is expired, it automatically attempts a silent refresh:
 3. The refreshed token is used for the current session.
 
 If the refresh fails (network error, expired refresh token, revoked grant),
-Claurst falls back to any configured API key. If no API key is available,
-authentication fails and you must run `claurst auth login` (optionally with
+MikMik falls back to any configured API key. If no API key is available,
+authentication fails and you must run `mikmik auth login` (optionally with
 `--label <name>` to reuse a profile id) again.
 
 ---
 
 ## Multiple Providers
 
-Claurst supports simultaneous configuration of credentials for multiple
+MikMik supports simultaneous configuration of credentials for multiple
 providers. Each provider looks for credentials in this order:
 
 1. `api_key` in the provider's entry under `providers` in `settings.json`
 2. The provider-specific environment variable (see table below)
-3. The credential stored in `~/.claurst/auth.json`
+3. The credential stored in `~/.mikmik/auth.json`
 
 ### Provider environment variables
 
@@ -526,13 +526,13 @@ Switch providers at runtime:
 
 ```bash
 # Use OpenAI for this session
-claurst --provider openai --model gpt-4o "your prompt"
+mikmik --provider openai --model gpt-4o "your prompt"
 
 # Use a local Ollama model (no API key needed)
-claurst --provider ollama --model llama3.2 "your prompt"
+mikmik --provider ollama --model llama3.2 "your prompt"
 
 # Or via environment variable
-MIKMIK_PROVIDER=google claurst "your prompt"
+MIKMIK_PROVIDER=google mikmik "your prompt"
 ```
 
 ---
@@ -547,21 +547,21 @@ Providers that run locally require no API key:
 # Install Ollama from https://ollama.ai and pull a model
 ollama pull llama3.2
 
-# Run Claurst against it
-claurst --provider ollama --model llama3.2
+# Run MikMik against it
+mikmik --provider ollama --model llama3.2
 ```
 
 **LM Studio:**
 
 ```bash
 # Start the LM Studio local server (default port 1234)
-claurst --provider lmstudio
+mikmik --provider lmstudio
 ```
 
 **llama.cpp server:**
 
 ```bash
-claurst --provider llamacpp --api-base http://localhost:8080
+mikmik --provider llamacpp --api-base http://localhost:8080
 ```
 
 ---
@@ -570,21 +570,21 @@ claurst --provider llamacpp --api-base http://localhost:8080
 
 - Store API keys in environment variables or a secrets manager rather than in
   `settings.json`, especially on shared or CI systems.
-- Restrict permissions on `~/.claurst/` to your user only:
+- Restrict permissions on `~/.mikmik/` to your user only:
   ```bash
-  chmod 700 ~/.claurst
-  chmod 700 ~/.claurst/accounts
-  chmod 600 ~/.claurst/accounts.json
-  chmod 600 ~/.claurst/auth.json
-  chmod 600 ~/.claurst/settings.json
-  find ~/.claurst/accounts -type f -name '*tokens.json' -exec chmod 600 {} +
+  chmod 700 ~/.mikmik
+  chmod 700 ~/.mikmik/accounts
+  chmod 600 ~/.mikmik/accounts.json
+  chmod 600 ~/.mikmik/auth.json
+  chmod 600 ~/.mikmik/settings.json
+  find ~/.mikmik/accounts -type f -name '*tokens.json' -exec chmod 600 {} +
   ```
-  Claurst already sets `0600` on `accounts.json` automatically on Unix; the
+  MikMik already sets `0600` on `accounts.json` automatically on Unix; the
   command above is the belt-and-braces version that also covers the per-
   profile token files.
-- Do not commit `~/.claurst/` to version control.
-- Add `.claurst/` to your project's `.gitignore` to prevent accidentally
+- Do not commit `~/.mikmik/` to version control.
+- Add `.mikmik/` to your project's `.gitignore` to prevent accidentally
   committing project-level settings files that may contain keys.
 - Rotate API keys periodically from the Anthropic Console.
-- Use `claurst auth logout` on shared machines before logging out of your
+- Use `mikmik auth logout` on shared machines before logging out of your
   user session.

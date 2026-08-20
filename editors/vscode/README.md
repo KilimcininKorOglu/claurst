@@ -1,13 +1,13 @@
-# Claurst for VS Code
+# MikMik for VS Code
 
-Chat with Claurst inside VS Code. The extension spawns `claurst acp` as a child
+Chat with MikMik inside VS Code. The extension spawns `mikmik acp` as a child
 process and speaks the [Agent Client Protocol](https://agentclientprotocol.com)
 to it over stdio, the same protocol Zed and other editors use, so nothing here
 depends on private interfaces.
 
 ## Requirements
 
-A `claurst` binary on `PATH`, or a path set in `claurst.executablePath`.
+A `mikmik` binary on `PATH`, or a path set in `mikmik.executablePath`.
 
 ## Where the chat lives
 
@@ -22,12 +22,12 @@ its transcript replayed.
 
 | Command | Key | What it does |
 |------------------------------|-----------------|----------------------------------------------|
-| `Claurst: Open Chat`         | `Ctrl/Cmd+Shift+A` | Reveals a conversation, or opens one       |
-| `Claurst: New Session`       |                 | Opens another panel with its own conversation |
-| `Claurst: Resume Session`    |                 | Lists earlier sessions and reopens one        |
-| `Claurst: Fork Session`      |                 | Continues this conversation in a second panel |
-| `Claurst: Send Selection`    | `Ctrl/Cmd+Shift+L` | Puts the editor's selection in the question |
-| `Claurst: Stop Current Turn` | `Escape`        | Cancels the turn in the focused panel         |
+| `MikMik: Open Chat`         | `Ctrl/Cmd+Shift+A` | Reveals a conversation, or opens one       |
+| `MikMik: New Session`       |                 | Opens another panel with its own conversation |
+| `MikMik: Resume Session`    |                 | Lists earlier sessions and reopens one        |
+| `MikMik: Fork Session`      |                 | Continues this conversation in a second panel |
+| `MikMik: Send Selection`    | `Ctrl/Cmd+Shift+L` | Puts the editor's selection in the question |
+| `MikMik: Stop Current Turn` | `Escape`        | Cancels the turn in the focused panel         |
 
 Resuming asks whether to draw the earlier conversation or just carry on:
 replaying a long one costs a message per block, so it is a choice rather than
@@ -43,13 +43,13 @@ without losing the first.
 
 ## One process, many conversations
 
-Every panel is a session inside a single `claurst acp` process, so a second
+Every panel is a session inside a single `mikmik acp` process, so a second
 conversation costs a session rather than a process: the MCP servers are
 connected once and the model catalog is read once. The process starts with the
 first panel and stops with the last.
 
 Each conversation is independent. A permission request, a plan and a diff reach
-the panel whose session raised them, and `Claurst: Stop Current Turn` cancels the
+the panel whose session raised them, and `MikMik: Stop Current Turn` cancels the
 one you are looking at.
 
 ## The header pills
@@ -81,7 +81,7 @@ Pasting an image attaches it to the next question, so a screenshot of a failing
 test goes straight in rather than being described. This is offered only when
 the agent's `initialize` says it accepts images.
 
-`Claurst: Send Selection` mentions the file, says which lines, and fences the
+`MikMik: Send Selection` mentions the file, says which lines, and fences the
 selected text.
 
 ## What a turn shows
@@ -118,7 +118,7 @@ workspace filesystem, which also covers a remote workspace.
 
 ## Running commands here instead
 
-`claurst.hostTerminals` moves the agent's shell commands into this extension,
+`mikmik.hostTerminals` moves the agent's shell commands into this extension,
 so their output appears live in the panel under the call that started them.
 
 It is off by default, and the reason is not cosmetic: the agent runs a command
@@ -133,8 +133,8 @@ code and the last lines the process printed, and offers to start another and
 replay the conversation into the same panel. The status bar says whether the
 agent is running and whether it is answering.
 
-`claurst.executablePath`, `claurst.hostTerminals` and
-`claurst.requestTimeoutSeconds` are read when the process starts, so changing
+`mikmik.executablePath`, `mikmik.hostTerminals` and
+`mikmik.requestTimeoutSeconds` are read when the process starts, so changing
 one offers to restart it.
 
 ## Developing

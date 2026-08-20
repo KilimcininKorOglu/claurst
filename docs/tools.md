@@ -1,6 +1,6 @@
-# Claurst Tools Reference
+# MikMik Tools Reference
 
-This document is the complete reference for every tool available to the Claurst agent. Tools are the mechanism by which the model interacts with the outside world — reading files, running commands, searching the web, and coordinating sub-agents.
+This document is the complete reference for every tool available to the MikMik agent. Tools are the mechanism by which the model interacts with the outside world — reading files, running commands, searching the web, and coordinating sub-agents.
 
 ---
 
@@ -28,7 +28,7 @@ This document is the complete reference for every tool available to the Claurst 
 
 ## Tool System Overview
 
-Every tool in Claurst implements a common `Tool` interface. This interface defines:
+Every tool in MikMik implements a common `Tool` interface. This interface defines:
 
 - **Identity** — name, aliases, MCP info
 - **Input schema** — a Zod schema validating the input the model must provide
@@ -81,7 +81,7 @@ The active permission mode controls how `checkPermissions()` behaves:
 
 ### Interactive vs. Auto Mode
 
-**Interactive mode** (default REPL): Claurst presents a confirmation prompt for any tool that lacks a pre-existing approval rule. The user can approve once, approve always (adding a permanent rule), or deny.
+**Interactive mode** (default REPL): MikMik presents a confirmation prompt for any tool that lacks a pre-existing approval rule. The user can approve once, approve always (adding a permanent rule), or deny.
 
 **Auto mode** (`--dangerously-skip-permissions` or `bypassPermissions`): No prompts are shown. All tool calls execute immediately. Use only in trusted, sandboxed environments.
 
@@ -479,7 +479,7 @@ Status values: `pending`, `in_progress`, `completed`. Priority values: `low`, `m
 
 ## MCP Integration Tools
 
-Model Context Protocol (MCP) tools bridge Claurst to external MCP servers.
+Model Context Protocol (MCP) tools bridge MikMik to external MCP servers.
 
 ### ListMcpResourcesTool
 
@@ -574,7 +574,7 @@ Delegate a task to an external agent that speaks the [Agent Client Protocol](htt
 | `agent`   | string | yes      | Name of a configured agent, from `acpAgents` in settings |
 | `prompt`  | string | yes      | The task to delegate                                     |
 
-The tool is only offered when at least one agent is configured. Define them in `~/.config/claurst/settings.json`:
+The tool is only offered when at least one agent is configured. Define them in `~/.config/mikmik/settings.json`:
 
 ```json
 {
@@ -598,7 +598,7 @@ Every action the sub-agent asks to take arrives as a `session/request_permission
 
 The turn is bounded: cancelling the session, or ten minutes elapsing, kills the subprocess and reports the tail of its stderr.
 
-**Security:** an agent definition names an executable that the model can invoke, so `acpAgents` is read only from your own global settings. A project's `.claurst/settings.json` cannot add one.
+**Security:** an agent definition names an executable that the model can invoke, so `acpAgents` is read only from your own global settings. A project's `.mikmik/settings.json` cannot add one.
 
 ---
 
@@ -780,7 +780,7 @@ Maximum sleep duration is 60000 ms (60 seconds) per call.
 
 **Permission level:** Write
 
-Read or write a Claurst setting. Omitting `value` reads the current one; supplying it writes to `settings.json`, where the next session picks it up.
+Read or write a MikMik setting. Omitting `value` reads the current one; supplying it writes to `settings.json`, where the next session picks it up.
 
 | Parameter | Type   | Required | Description                                              |
 |-----------|--------|----------|----------------------------------------------------------|
@@ -910,7 +910,7 @@ Control the desktop GUI — move the mouse, click, type, take screenshots, and i
 | `key`        | string  | no       | Key name for key events (e.g., `Return`, `ctrl+c`)     |
 | `duration`   | integer | no       | Hold duration in ms for mouse drags                    |
 
-This tool has the highest blast radius of any tool in Claurst. It requires explicit permission and should only be enabled in controlled environments. All actions are logged in detail.
+This tool has the highest blast radius of any tool in MikMik. It requires explicit permission and should only be enabled in controlled environments. All actions are logged in detail.
 
 Requires a display server (X11, Wayland, or Windows Desktop). Not available in headless environments.
 

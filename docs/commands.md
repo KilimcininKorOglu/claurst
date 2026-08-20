@@ -1,6 +1,6 @@
-# Claurst Slash Commands Reference
+# MikMik Slash Commands Reference
 
-This document is the complete reference for every slash command available in Claurst, the Rust reimplementation of Claude Code CLI. Commands are invoked by typing `/command-name` at the REPL prompt.
+This document is the complete reference for every slash command available in MikMik, the Rust reimplementation of Claude Code CLI. Commands are invoked by typing `/command-name` at the REPL prompt.
 
 ---
 
@@ -28,7 +28,7 @@ This document is the complete reference for every slash command available in Cla
 
 ## Command System Overview
 
-Commands are registered in a priority-ordered registry. When you type a command name, Claurst resolves it through this chain:
+Commands are registered in a priority-ordered registry. When you type a command name, MikMik resolves it through this chain:
 
 ```
 bundledSkills -> builtinPluginSkills -> skillDirCommands ->
@@ -143,14 +143,14 @@ The destination must belong to the same git repository (typically a linked `git 
 /move --no-changes /path/to/other/worktree
 ```
 
-**Adaptation note:** opencode presents an interactive worktree picker and can create a new worktree on the fly. Claurst takes the destination directory as an argument and re-homes the live session's working directory (claurst has no separate session-per-worktree registry). Uncommitted changes are relocated with `git diff`/`git apply` and the source is reset with `git checkout` (index preserved) plus `git clean` (untracked removed), matching opencode's `move-session` change handling.
+**Adaptation note:** opencode presents an interactive worktree picker and can create a new worktree on the fly. MikMik takes the destination directory as an argument and re-homes the live session's working directory (mikmik has no separate session-per-worktree registry). Uncommitted changes are relocated with `git diff`/`git apply` and the source is reset with `git checkout` (index preserved) plus `git clean` (untracked removed), matching opencode's `move-session` change handling.
 
 ---
 
 ### /exit
 **Aliases:** `quit`
 
-Exit the Claurst REPL. Equivalent to pressing `Ctrl+D`. Unsaved session state is flushed before exit.
+Exit the MikMik REPL. Equivalent to pressing `Ctrl+D`. Unsaved session state is flushed before exit.
 
 ```
 /exit
@@ -371,7 +371,7 @@ Accounts do not pool quota. Each one keeps its own rate limit, so this splits us
 
 A colon inside a model ID is not read as an account: `ollama/llama3:8b` still names a model, because the account separator is only looked for before the `/`.
 
-The setting persists to `~/.claurst/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
+The setting persists to `~/.mikmik/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
 
 Advisor calls are capped at two per turn and their tokens are added to the session cost.
 
@@ -380,7 +380,7 @@ Advisor calls are capped at two per turn and their tokens are added to the sessi
 ### /fast
 **Aliases:** `speed`
 
-Toggle fast mode. In fast mode, Claurst switches to the active provider's smaller, faster model for quick responses. Useful when you want rapid answers and deep reasoning is not required.
+Toggle fast mode. In fast mode, MikMik switches to the active provider's smaller, faster model for quick responses. Useful when you want rapid answers and deep reasoning is not required.
 
 ```
 /fast          — toggle fast mode on/off
@@ -388,7 +388,7 @@ Toggle fast mode. In fast mode, Claurst switches to the active provider's smalle
 /fast off      — disable fast mode
 ```
 
-Setting persists to `~/.claurst/ui-settings.json`.
+Setting persists to `~/.mikmik/ui-settings.json`.
 
 ---
 
@@ -397,7 +397,7 @@ Setting persists to `~/.claurst/ui-settings.json`.
 ### /config
 **Aliases:** `settings`
 
-View or modify Claurst configuration values. Without arguments, renders an interactive settings panel. With arguments, acts as a key-value accessor.
+View or modify MikMik configuration values. Without arguments, renders an interactive settings panel. With arguments, acts as a key-value accessor.
 
 ```
 /config
@@ -451,7 +451,7 @@ Show or change whether unfinished todos nudge the model between turns.
 /poke default    back to the configured default (on)
 ```
 
-After a turn that leaves todos unfinished, Claurst appends a short reminder
+After a turn that leaves todos unfinished, MikMik appends a short reminder
 listing what is left, so the run continues instead of stopping halfway. Turn it
 off for a session where you drive each step yourself. The setting is saved as
 `autoPoke` in `settings.json`; `default` removes the key rather than writing
@@ -484,7 +484,7 @@ guessing `acceptEdits` would hand back more than was taken away.
 
 ### /keybindings
 
-Open the interactive keybinding configurator. Displays all bound actions with their current shortcuts. Select an action to rebind it. Changes are written to `~/.claurst/keybindings.json`.
+Open the interactive keybinding configurator. Displays all bound actions with their current shortcuts. Select an action to rebind it. Changes are written to `~/.mikmik/keybindings.json`.
 
 ```
 /keybindings
@@ -526,7 +526,7 @@ Available events: `pre-tool`, `post-tool`, `session-start`, `session-end`, `mess
 
 ### /privacy-settings
 
-Open Claurst privacy settings. Launches a browser to the Anthropic privacy portal where you can review data usage preferences, conversation retention, and account privacy options.
+Open MikMik privacy settings. Launches a browser to the Anthropic privacy portal where you can review data usage preferences, conversation retention, and account privacy options.
 
 ```
 /privacy-settings
@@ -562,7 +562,7 @@ Select how the model's output is rendered in the terminal. Choices include `auto
 
 ### /theme
 
-Open the interactive theme picker. Preview and select a color theme for the Claurst TUI.
+Open the interactive theme picker. Preview and select a color theme for the MikMik TUI.
 
 ```
 /theme
@@ -637,7 +637,7 @@ Configure voice input/output. Requires a supported audio backend. Subcommands co
 
 ### /terminal-setup
 
-Run the terminal capability detection and setup wizard. Checks for true-color support, font ligatures, Unicode rendering, and configures Claurst accordingly.
+Run the terminal capability detection and setup wizard. Checks for true-color support, font ligatures, Unicode rendering, and configures MikMik accordingly.
 
 ```
 /terminal-setup
@@ -660,7 +660,7 @@ Stage and commit changes to the current git repository. The model drafts a commi
 
 ### /diff
 
-Show file diffs for changes made during the current session. Displays a unified diff of all files Claurst has written or edited since the session started.
+Show file diffs for changes made during the current session. Displays a unified diff of all files MikMik has written or edited since the session started.
 
 ```
 /diff
@@ -671,7 +671,7 @@ Show file diffs for changes made during the current session. Displays a unified 
 
 ### /undo
 
-Undo file changes made during the current session. Restores files to their state before Claurst's last write operation. Can be called multiple times to step further back.
+Undo file changes made during the current session. Restores files to their state before MikMik's last write operation. Can be called multiple times to step further back.
 
 ```
 /undo
@@ -705,7 +705,7 @@ Run a security-focused review pass. The model looks specifically for vulnerabili
 
 ### /init
 
-Initialize Claurst project configuration in the current directory. Creates a `CLAUDE.md` file that acts as persistent project-level context injected at the start of every session.
+Initialize MikMik project configuration in the current directory. Creates a `CLAUDE.md` file that acts as persistent project-level context injected at the start of every session.
 
 ```
 /init
@@ -884,7 +884,7 @@ the system prompt after the second turn; the `autoPoke` setting turns that off.
 
 ### /goal
 
-Set a durable multi-turn autonomous goal. When a goal is active, Claurst continues working across turns until the goal is marked complete, paused, or a 200-turn runaway guard fires. Designed for complex, sustained tasks that would otherwise require repeated manual re-prompting.
+Set a durable multi-turn autonomous goal. When a goal is active, MikMik continues working across turns until the goal is marked complete, paused, or a 200-turn runaway guard fires. Designed for complex, sustained tasks that would otherwise require repeated manual re-prompting.
 
 ```
 /goal <objective>                    — set a new goal and begin working autonomously
@@ -927,7 +927,7 @@ Configure the manager-executor agent architecture, where a manager model delegat
 /managed-agents budget <amount>                       — set total budget in USD (0 to clear)
 ```
 
-Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4o`). Configuration persists to `~/.claurst/settings.json` under `managed_agents`.
+Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4o`). Configuration persists to `~/.mikmik/settings.json` under `managed_agents`.
 
 > **Preview feature.** Behaviour may change across releases.
 
@@ -944,7 +944,7 @@ List all available named agents, or show details for a specific agent. Named age
 /agent <name>      — show full details for a specific named agent
 ```
 
-To activate an agent, start Claurst with `--agent <name>`. See [agents.md](./agents.md) for defining custom agents.
+To activate an agent, start MikMik with `--agent <name>`. See [agents.md](./agents.md) for defining custom agents.
 
 ---
 
@@ -1003,7 +1003,7 @@ Documented above under [Configuration & Settings](#configuration--settings).
 
 ### /skills
 
-List and manage skills. Skills are bundled prompt-commands that extend Claurst's capabilities without writing code. They appear alongside built-in commands in the registry.
+List and manage skills. Skills are bundled prompt-commands that extend MikMik's capabilities without writing code. They appear alongside built-in commands in the registry.
 
 ```
 /skills
@@ -1017,7 +1017,7 @@ List and manage skills. Skills are bundled prompt-commands that extend Claurst's
 
 ### ultracode (top effort + keyword)
 
-Run a disciplined **ultracode** workflow for serious coding tasks. Ultracode is claurst's take on Claude Code's `ultrathink`: a supervised procedure that classifies the task, picks a mode, and — when it genuinely helps — delegates bounded work across claurst's native agent primitives, then integrates and verifies in the parent session.
+Run a disciplined **ultracode** workflow for serious coding tasks. Ultracode is mikmik's take on Claude Code's `ultrathink`: a supervised procedure that classifies the task, picks a mode, and — when it genuinely helps — delegates bounded work across mikmik's native agent primitives, then integrates and verifies in the parent session.
 
 Ultracode is the **highest effort level** — it sits past `max` on the "Smarter" end of the effort ladder and runs the model's top reasoning **plus** the workflow procedure. (It is no longer a `/skill`.) There are two ways to trigger it:
 
@@ -1073,7 +1073,7 @@ reload.
 
 ### /chrome
 
-Browser automation via Chrome DevTools Protocol (CDP). Connects to a running Chrome or Chromium instance and lets Claurst control it — navigate pages, click elements, fill forms, evaluate JavaScript, and take screenshots.
+Browser automation via Chrome DevTools Protocol (CDP). Connects to a running Chrome or Chromium instance and lets MikMik control it — navigate pages, click elements, fill forms, evaluate JavaScript, and take screenshots.
 
 First, launch Chrome with remote debugging enabled:
 
@@ -1099,7 +1099,7 @@ Useful for testing web applications, scraping, or automating browser-based workf
 
 ## Authentication
 
-Claurst supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.claurst/accounts/<provider>/<id>/` and the registry at `~/.claurst/accounts.json` tracks which one is active.
+MikMik supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.mikmik/accounts/<provider>/<id>/` and the registry at `~/.mikmik/accounts.json` tracks which one is active.
 
 See [Authentication Guide](./auth.md#multi-account-profiles) for the full story and on-disk layout.
 
@@ -1247,7 +1247,7 @@ Deactivate any active speech mode (caveman or rocky) and return the model to its
 
 ### /mobile
 
-Display a QR code and download links for the Claude mobile app. Supports a `session` subcommand that generates a QR code linking directly to an active remote Claurst session.
+Display a QR code and download links for the Claude mobile app. Supports a `session` subcommand that generates a QR code linking directly to an active remote MikMik session.
 
 ```
 /mobile             — show QR code for claude.ai/mobile (works for both platforms)
@@ -1273,7 +1273,7 @@ Set the prompt bar color for the current session. Accepts standard color names o
 
 ### /stickers
 
-Opens the Claurst sticker page (`stickermule.com/claudecode`) in your default browser. Falls back to printing the URL if no browser can be launched.
+Opens the MikMik sticker page (`stickermule.com/claudecode`) in your default browser. Falls back to printing the URL if no browser can be launched.
 
 ```
 /stickers
@@ -1320,7 +1320,7 @@ The companion is decoration. Its stats are shown on the card and affect nothing.
 
 ### /doctor
 
-Run the Claurst diagnostics suite. Checks configuration integrity, provider connectivity, tool availability, MCP server health, and reports any issues.
+Run the MikMik diagnostics suite. Checks configuration integrity, provider connectivity, tool availability, MCP server health, and reports any issues.
 
 ```
 /doctor
@@ -1331,7 +1331,7 @@ Run the Claurst diagnostics suite. Checks configuration integrity, provider conn
 ### /version
 **Aliases:** `v`
 
-Display the current Claurst version string and build metadata.
+Display the current MikMik version string and build metadata.
 
 ```
 /version
@@ -1489,7 +1489,7 @@ Display the extended-thinking traces from previous model responses in the curren
 /thinkback          — alias
 ```
 
-Thinking traces appear when the model uses extended thinking mode (see `/thinking`). If no traces are found, Claurst suggests enabling extended thinking.
+Thinking traces appear when the model uses extended thinking mode (see `/thinking`). If no traces are found, MikMik suggests enabling extended thinking.
 
 ---
 

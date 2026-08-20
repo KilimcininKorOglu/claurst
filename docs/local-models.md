@@ -1,6 +1,6 @@
-# Running Claurst against local models
+# Running MikMik against local models
 
-Claurst can drive any server that speaks the **OpenAI-compatible chat
+MikMik can drive any server that speaks the **OpenAI-compatible chat
 completions API** (`POST /v1/chat/completions`). That includes:
 
 - **llama.cpp** (`llama-server`) — provider id `llamacpp`
@@ -24,24 +24,24 @@ agentic loop working locally.
 
 ### llama.cpp (`llama-server`)
 
-Start the server, then point Claurst at it. The built-in `llamacpp` provider
+Start the server, then point MikMik at it. The built-in `llamacpp` provider
 reads `LLAMA_CPP_HOST` (default `http://localhost:8080`) and appends `/v1`:
 
 ```bash
 # Terminal 1 — start the model server
 llama-server -m ./models/your-model.gguf --host 127.0.0.1 --port 8080 --jinja
 
-# Terminal 2 — run Claurst against it
-claurst --provider llamacpp --model your-model "add a health-check endpoint"
+# Terminal 2 — run MikMik against it
+mikmik --provider llamacpp --model your-model "add a health-check endpoint"
 ```
 
 If your server runs elsewhere:
 
 ```bash
-LLAMA_CPP_HOST=http://192.168.1.50:8080 claurst --provider llamacpp --model your-model
+LLAMA_CPP_HOST=http://192.168.1.50:8080 mikmik --provider llamacpp --model your-model
 ```
 
-Or persist it in `~/.claurst/settings.json`:
+Or persist it in `~/.mikmik/settings.json`:
 
 ```json
 {
@@ -66,11 +66,11 @@ and override the base URL:
 
 ```bash
 OPENAI_BASE_URL=http://localhost:8000/v1 \
-  claurst --provider openai --model my-model "..."
+  mikmik --provider openai --model my-model "..."
 ```
 
-Claurst posts to `{base_url}/v1/chat/completions`, so set the base URL to the
-host root (Claurst appends `/v1`) or to a value already ending in `/v1`
+MikMik posts to `{base_url}/v1/chat/completions`, so set the base URL to the
+host root (MikMik appends `/v1`) or to a value already ending in `/v1`
 depending on the provider — match the examples above.
 
 ---
@@ -90,7 +90,7 @@ llama-server -m model.gguf --jinja
 GGUF** instead of a generic fallback. Tool calling only works when that
 template knows how to format the `tools` list and parse the model's
 `tool_calls` back out. Without `--jinja` most models will either ignore the
-tools Claurst sends or emit tool calls as plain text that never get executed —
+tools MikMik sends or emit tool calls as plain text that never get executed —
 which looks like "the model thinks forever but never edits any files."
 
 If a model's built-in template lacks tool support, pass a template that has it
@@ -107,12 +107,12 @@ llama-server -m model.gguf --ctx-size 32768 --parallel 1
   system prompt can blow past it. Give it as much as your VRAM/RAM allows.
 - `--parallel` / `-np` is the number of concurrent slots, and **the context is
   divided evenly among them**. `--ctx-size 32768 --parallel 4` gives each
-  request only **8192** tokens, not 32768. For a single interactive Claurst
+  request only **8192** tokens, not 32768. For a single interactive MikMik
   session use `--parallel 1` (or size `--ctx-size` as `N × per-request-window`).
   Setting a big parallel count with a modest ctx-size is a common cause of "the
   model keeps losing context" and of a tiny effective prompt cache.
 
-Claurst also auto-compacts the conversation as it approaches the window (see
+MikMik also auto-compacts the conversation as it approaches the window (see
 `auto_compact` / `compact_threshold` in [Configuration](configuration)), so
 you generally want the server window comfortably larger than a couple of tool
 round-trips.
@@ -120,11 +120,11 @@ round-trips.
 ### Prompt caching (prefix reuse)
 
 Prompt caching is what makes multi-turn agentic loops affordable: each turn
-Claurst re-sends the whole growing conversation, and the server should reuse
+MikMik re-sends the whole growing conversation, and the server should reuse
 the KV cache for the unchanged prefix instead of recomputing it.
 
 - llama-server reuses the cached prompt prefix **by default** (the `cache_prompt`
-  request field, which Claurst relies on) — you usually don't have to enable
+  request field, which MikMik relies on) — you usually don't have to enable
   anything. The `--cache-prompt` flag some guides mention is accepted but not
   required.
 - `--cache-reuse N` (a.k.a. `-cru`) lets the server reuse cached chunks even
@@ -132,7 +132,7 @@ the KV cache for the unchanged prefix instead of recomputing it.
   changes text in the middle of the conversation; without it, everything after
   the first changed token is recomputed.
 - **Recent builds (llama.cpp >= b4600) report the reused count** as
-  `usage.prompt_tokens_details.cached_tokens`. Claurst reads that field, so
+  `usage.prompt_tokens_details.cached_tokens`. MikMik reads that field, so
   cache hits show up in `/usage` and `/extra-usage`. Older builds don't emit
   it — caching may still be working, the server just isn't reporting numbers
   (see [Cache accounting](#cache-accounting-what-the-numbers-mean) below).
@@ -159,7 +159,7 @@ the prompt prefix, which **invalidates the prompt cache** from that point on.
 `--no-context-shift` disables shifting: instead of dropping tokens the server
 returns an error when the context is full. That keeps the cache prefix stable
 and never silently forgets context, but it means you must keep `--ctx-size`
-large enough and let Claurst's compaction manage history. Recommended for
+large enough and let MikMik's compaction manage history. Recommended for
 agentic use, paired with a generous context and `auto_compact` enabled.
 
 ### Performance flags
@@ -186,7 +186,7 @@ llama-server -m model.gguf \
 
 ## Why tool calling needs a tool-aware chat template
 
-Claurst is agentic: it sends the model a list of `tools` and expects structured
+MikMik is agentic: it sends the model a list of `tools` and expects structured
 `tool_calls` back so it can read files, run shell commands, and edit code. That
 handshake depends on the model's **chat template** encoding tool definitions and
 tool-call syntax. Two things have to line up:
@@ -243,7 +243,7 @@ A few UI details confuse people running local models:
   is stuck at `0k`, no real turns have completed — commonly because prompts
   aren't reaching the model (for example a separate pasted-text bug, fixed on
   its own), not because caching is off.
-- **Cache read/write live in `/usage` and `/extra-usage`.** Claurst populates
+- **Cache read/write live in `/usage` and `/extra-usage`.** MikMik populates
   them from `usage.prompt_tokens_details.cached_tokens` when the server reports
   it. If your server never reports cache info, those lines show **`n/a`** rather
   than a permanent `0`, so you can tell "no cache data reported" apart from "zero
@@ -268,9 +268,9 @@ Details, from grepping this repository:
 - **But nothing in the live agent loop reads it.** `is_coordinator_mode()` (the
   function that would check the env var) has no callers outside the module's own
   unit tests, and the system-prompt builder hardcodes `coordinator_mode: false`.
-  So exporting `MIKMIK_COORDINATOR_MODE=1` before launching Claurst has no
+  So exporting `MIKMIK_COORDINATOR_MODE=1` before launching MikMik has no
   observable effect in this version.
-- **You don't need it anyway.** Claurst is agentic by default — it plans and
+- **You don't need it anyway.** MikMik is agentic by default — it plans and
   calls tools on every run. There is no separate "enable agentic mode" switch to
   flip. If an assistant told you to set `MIKMIK_COORDINATOR_MODE=1` to "turn on
   agentic workflows," that advice was wrong.
@@ -290,5 +290,5 @@ reliable tool calling, so it is generally a poor fit for small local models.
 | Context fills almost immediately                      | `--parallel N` is dividing `--ctx-size` across slots. Use `--parallel 1` or raise `--ctx-size`.         |
 | Cache read shows `n/a` in `/usage`                    | Server isn't reporting `cached_tokens`. Upgrade llama.cpp (>= b4600); caching may still be working.     |
 | `0k/262k` never moves                                 | No completed turns — check that prompts actually reach the model, not a caching problem.                |
-| Errors when context fills (with `--no-context-shift`) | Expected — raise `--ctx-size` and enable Claurst `auto_compact`.                                        |
+| Errors when context fills (with `--no-context-shift`) | Expected — raise `--ctx-size` and enable MikMik `auto_compact`.                                        |
 | Tool calls arrive as plain text                       | Template isn't tool-aware; pass `--chat-template`/`--chat-template-file` or pick another model.         |

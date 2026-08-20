@@ -1,12 +1,12 @@
 # Hooks
 
-Hooks let you run arbitrary shell commands (or HTTP requests, LLM prompts, or agentic verifiers) in response to events that happen inside a Claurst session. They are the primary mechanism for extending and automating Claurst's behavior without modifying the agent itself.
+Hooks let you run arbitrary shell commands (or HTTP requests, LLM prompts, or agentic verifiers) in response to events that happen inside a MikMik session. They are the primary mechanism for extending and automating MikMik's behavior without modifying the agent itself.
 
 ---
 
 ## What hooks are
 
-A hook is a piece of executable logic that Claurst calls at a specific lifecycle event. The simplest kind is a shell command. When the event fires, Claurst:
+A hook is a piece of executable logic that MikMik calls at a specific lifecycle event. The simplest kind is a shell command. When the event fires, MikMik:
 
 1. Serialises a JSON payload describing the event.
 2. Passes that JSON to the hook's stdin.
@@ -19,7 +19,7 @@ Because every hook receives structured JSON and returns a plain exit code, hooks
 
 ## Hook types
 
-Claurst supports four hook implementations:
+MikMik supports four hook implementations:
 
 ### `command` — shell command
 
@@ -88,7 +88,7 @@ Spawns a short-lived agent session to verify a condition. Like `prompt`, it expe
 ```json
 {
   "type": "http",
-  "url": "https://hooks.example.com/claurst",
+  "url": "https://hooks.example.com/mikmik",
   "headers": {
     "Authorization": "Bearer $SLACK_TOKEN"
   },
@@ -190,7 +190,7 @@ Fires when the user submits input.
 
 ### `Notification`
 
-Fires when Claurst sends a notification. The matcher field is compared against `notification_type`.
+Fires when MikMik sends a notification. The matcher field is compared against `notification_type`.
 
 **Notification types:** `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog`, `elicitation_complete`, `elicitation_response`.
 
@@ -454,7 +454,7 @@ The value is a map from event name to an array of matcher objects. Each matcher 
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claurst/hooks/check_bash.py"
+            "command": "python3 ~/.mikmik/hooks/check_bash.py"
           }
         ]
       }
@@ -475,7 +475,7 @@ The value is a map from event name to an array of matcher objects. Each matcher 
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claurst/hooks/notify-slack.sh"
+            "command": "bash ~/.mikmik/hooks/notify-slack.sh"
           }
         ]
       }
@@ -546,7 +546,7 @@ Changes made through `/hooks` are written immediately to the appropriate setting
         "hooks": [
           {
             "type": "command",
-            "command": "jq -c '{ts: now | todate, event: .hook_event_name, tool: .tool_name, input: .tool_input}' >> ~/.claurst/tool.log"
+            "command": "jq -c '{ts: now | todate, event: .hook_event_name, tool: .tool_name, input: .tool_input}' >> ~/.mikmik/tool.log"
           }
         ]
       }
@@ -557,7 +557,7 @@ Changes made through `/hooks` are written immediately to the appropriate setting
 
 ### Block dangerous shell patterns
 
-Create `~/.claurst/hooks/guard.sh`:
+Create `~/.mikmik/hooks/guard.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -592,7 +592,7 @@ Register it:
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claurst/hooks/guard.sh"
+            "command": "bash ~/.mikmik/hooks/guard.sh"
           }
         ]
       }
@@ -607,13 +607,13 @@ An exit code of `2` sends the stderr message directly to the model, which will t
 
 ```bash
 #!/usr/bin/env bash
-# ~/.claurst/hooks/slack-session-end.sh
+# ~/.mikmik/hooks/slack-session-end.sh
 INPUT=$(cat)
 REASON=$(echo "$INPUT" | jq -r '.reason')
 
 curl -s -X POST "$SLACK_WEBHOOK_URL" \
   -H 'Content-Type: application/json' \
-  -d "{\"text\": \"Claurst session ended (reason: ${REASON})\"}"
+  -d "{\"text\": \"MikMik session ended (reason: ${REASON})\"}"
 ```
 
 ```json
@@ -643,7 +643,7 @@ Or using a shell command with environment variable interpolation:
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claurst/hooks/slack-session-end.sh"
+            "command": "bash ~/.mikmik/hooks/slack-session-end.sh"
           }
         ]
       }
@@ -689,7 +689,7 @@ To test a blocking hook without a live session, pipe a sample payload directly:
 
 ```bash
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"},"tool_use_id":"test"}' \
-  | bash ~/.claurst/hooks/guard.sh
+  | bash ~/.mikmik/hooks/guard.sh
 echo "Exit: $?"
 ```
 

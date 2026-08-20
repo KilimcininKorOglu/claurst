@@ -1,11 +1,11 @@
 # Remote Control
 
-Drive a claurst session from your phone or another browser, through a relay you host yourself.
+Drive a mikmik session from your phone or another browser, through a relay you host yourself.
 
 The CLI dials out and long-polls. Your machine needs no inbound port, no port forward and no firewall change. The relay only queues and forwards; it never runs anything.
 
 ```
-phone/web  ──HTTP+SSE──►  relay (Docker)  ◄──long-poll──  claurst (your machine)
+phone/web  ──HTTP+SSE──►  relay (Docker)  ◄──long-poll──  mikmik (your machine)
 ```
 
 ---
@@ -16,7 +16,7 @@ The relay token is a remote command-execution credential. Anything holding it ca
 
 Three consequences, all enforced in code rather than left to you:
 
-- The token must be at least 32 characters. The relay refuses to start below that, and claurst refuses to connect.
+- The token must be at least 32 characters. The relay refuses to start below that, and mikmik refuses to connect.
 - The relay does not terminate TLS. Put a TLS-terminating reverse proxy in front of it, or reach it only over a VPN or LAN. Without TLS the token and your source travel in plaintext.
 - `docker-compose.yml` publishes on `127.0.0.1` for that reason. Changing it to `0.0.0.0` without TLS in front puts the token on the wire.
 
@@ -48,11 +48,11 @@ curl http://127.0.0.1:8350/healthz     # -> ok
 | `RELAY_SESSION_TTL_SECS` | `900`                | Drop a session after this long without a poll       |
 | `RELAY_EVENT_BUFFER`     | `500`                | Events retained per session for replay              |
 | `RELAY_INBOUND_QUEUE`    | `100`                | Messages queued for a session before the oldest goes |
-| `RUST_LOG`               | `claurst_relay=info` | Log filter                                          |
+| `RUST_LOG`               | `mikmik_relay=info` | Log filter                                          |
 
 ---
 
-## 2. Point claurst at it
+## 2. Point mikmik at it
 
 In your user settings file (`~/.config/mikmik/settings.json`, or wherever `MIKMIK_HOME` points):
 
@@ -80,7 +80,7 @@ For a temporary redirect while developing, `MIKMIK_BRIDGE_URL` and `MIKMIK_BRIDG
 /remote-control start
 ```
 
-Restart claurst. The bridge connects on launch. `/remote-control` with no argument shows which relay it resolved, where each value came from, and whether the token is usable.
+Restart mikmik. The bridge connects on launch. `/remote-control` with no argument shows which relay it resolved, where each value came from, and whether the token is usable.
 
 `/remote-control stop` disables it again.
 
