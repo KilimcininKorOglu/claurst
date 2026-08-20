@@ -317,7 +317,7 @@ fn render_provider_setup_page(frame: &mut Frame, area: Rect) {
 }
 
 fn render_welcome_page(frame: &mut Frame, area: Rect) {
-    use crate::overlays::{render_dark_overlay, render_dialog_bg, CLAURST_PANEL_BG};
+    use crate::overlays::{render_dark_overlay, render_dialog_bg, MIKMIK_PANEL_BG};
 
     let pink = Color::Rgb(233, 30, 99);
     let dim = Color::Rgb(90, 90, 90);
@@ -400,12 +400,12 @@ fn render_welcome_page(frame: &mut Frame, area: Rect) {
     ];
 
     Paragraph::new(lines)
-        .bg(CLAURST_PANEL_BG)
+        .bg(MIKMIK_PANEL_BG)
         .render(inner, frame.buffer_mut());
 }
 
 fn render_keybindings_page(frame: &mut Frame, area: Rect) {
-    use crate::overlays::{render_dark_overlay, render_dialog_bg, CLAURST_PANEL_BG};
+    use crate::overlays::{render_dark_overlay, render_dialog_bg, MIKMIK_PANEL_BG};
 
     let pink = Color::Rgb(233, 30, 99);
     let dim = Color::Rgb(90, 90, 90);
@@ -490,7 +490,7 @@ fn render_keybindings_page(frame: &mut Frame, area: Rect) {
     ]));
 
     Paragraph::new(lines)
-        .bg(CLAURST_PANEL_BG)
+        .bg(MIKMIK_PANEL_BG)
         .render(inner, frame.buffer_mut());
 }
 

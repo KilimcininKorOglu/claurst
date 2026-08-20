@@ -39,7 +39,7 @@ use crate::onboarding_dialog::render_onboarding_dialog;
 use crate::overage_upsell::render_overage_upsell;
 use crate::overlays::{
     render_global_search, render_help_overlay, render_history_search_overlay, render_rewind_flow,
-    CLAURST_ACCENT,
+    MIKMIK_ACCENT,
 };
 use crate::plugin_views::render_plugin_hints;
 use crate::prompt_input::{input_height, render_prompt_input, InputMode, TypeaheadSource, VimMode};
@@ -1152,7 +1152,7 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .style(Style::default().fg(Color::White).bg(Color::Rgb(24, 24, 30)))
-            .border_style(Style::default().fg(CLAURST_ACCENT));
+            .border_style(Style::default().fg(MIKMIK_ACCENT));
         menu_block.render(menu_area, frame.buffer_mut());
 
         // Render menu items
@@ -1183,7 +1183,7 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
 
             let bg_color = if is_selected {
                 if *enabled {
-                    CLAURST_ACCENT
+                    MIKMIK_ACCENT
                 } else {
                     Color::Rgb(24, 24, 30)
                 }
@@ -1677,7 +1677,7 @@ fn timeline_window(
 fn render_timeline_panel(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.timeline_focused;
     let border_color = if focused {
-        CLAURST_ACCENT
+        MIKMIK_ACCENT
     } else {
         Color::DarkGray
     };
@@ -1779,7 +1779,7 @@ fn timeline_row_line(
     let title_style = if selected && focused {
         Style::default()
             .fg(Color::Black)
-            .bg(CLAURST_ACCENT)
+            .bg(MIKMIK_ACCENT)
             .add_modifier(Modifier::BOLD)
     } else if selected {
         Style::default().add_modifier(Modifier::BOLD)
@@ -3729,7 +3729,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             }
             parts.push(Span::styled(
                 format!("[{}]", badge),
-                Style::default().fg(CLAURST_ACCENT),
+                Style::default().fg(MIKMIK_ACCENT),
             ));
         }
 

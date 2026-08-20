@@ -6,8 +6,8 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::overlays::{
-    begin_modal_frame, modal_header_line_area, render_modal_title_frame, CLAURST_ACCENT,
-    CLAURST_MUTED, CLAURST_PANEL_BG, CLAURST_TEXT,
+    begin_modal_frame, modal_header_line_area, render_modal_title_frame, MIKMIK_ACCENT,
+    MIKMIK_MUTED, MIKMIK_PANEL_BG, MIKMIK_TEXT,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -50,7 +50,7 @@ pub fn render_import_config_dialog(frame: &mut Frame, state: &ImportConfigDialog
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Preview the content to import from ~/.claude; Enter to confirm, Esc to cancel.",
-                Style::default().fg(CLAURST_MUTED),
+                Style::default().fg(MIKMIK_MUTED),
             )])),
             subtitle_area,
         );
@@ -80,7 +80,7 @@ pub fn render_import_config_dialog(frame: &mut Frame, state: &ImportConfigDialog
         for line in doc.excerpt.lines() {
             lines.push(Line::from(vec![Span::styled(
                 format!("  {}", line),
-                Style::default().fg(CLAURST_TEXT),
+                Style::default().fg(MIKMIK_TEXT),
             )]));
         }
         lines.push(Line::from(""));
@@ -106,22 +106,22 @@ pub fn render_import_config_dialog(frame: &mut Frame, state: &ImportConfigDialog
         for field in &settings.fields {
             let action_style = match field.action {
                 PreviewAction::Import => Style::default()
-                    .fg(CLAURST_ACCENT)
+                    .fg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
                 PreviewAction::Replace => Style::default()
-                    .fg(CLAURST_ACCENT)
+                    .fg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
-                PreviewAction::Keep => Style::default().fg(CLAURST_MUTED),
-                PreviewAction::Skip => Style::default().fg(CLAURST_MUTED),
+                PreviewAction::Keep => Style::default().fg(MIKMIK_MUTED),
+                PreviewAction::Skip => Style::default().fg(MIKMIK_MUTED),
             };
             let mut spans = vec![
                 Span::styled(format!("  [{}] ", field.action.label()), action_style),
-                Span::styled(field.name.clone(), Style::default().fg(CLAURST_TEXT)),
+                Span::styled(field.name.clone(), Style::default().fg(MIKMIK_TEXT)),
             ];
             if let Some(reason) = &field.reason {
                 spans.push(Span::styled(
                     format!(" — {}", reason),
-                    Style::default().fg(CLAURST_MUTED),
+                    Style::default().fg(MIKMIK_MUTED),
                 ));
             }
             lines.push(Line::from(spans));
@@ -131,14 +131,14 @@ pub fn render_import_config_dialog(frame: &mut Frame, state: &ImportConfigDialog
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .style(Style::default().bg(CLAURST_PANEL_BG)),
+            .style(Style::default().bg(MIKMIK_PANEL_BG)),
         layout.body_area,
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             " Enter to import  ·  Esc to cancel",
             Style::default()
-                .fg(CLAURST_MUTED)
+                .fg(MIKMIK_MUTED)
                 .add_modifier(Modifier::ITALIC),
         )])),
         layout.footer_area,
@@ -151,7 +151,7 @@ fn section_title(title: &str) -> Line<'static> {
         Span::styled(
             title.to_string(),
             Style::default()
-                .fg(CLAURST_ACCENT)
+                .fg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
     ])
@@ -159,14 +159,14 @@ fn section_title(title: &str) -> Line<'static> {
 
 fn path_row(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("  {}: ", label), Style::default().fg(CLAURST_MUTED)),
-        Span::styled(value.to_string(), Style::default().fg(CLAURST_TEXT)),
+        Span::styled(format!("  {}: ", label), Style::default().fg(MIKMIK_MUTED)),
+        Span::styled(value.to_string(), Style::default().fg(MIKMIK_TEXT)),
     ])
 }
 
 fn meta_row(text: &str) -> Line<'static> {
     Line::from(vec![Span::styled(
         format!("  {}", text),
-        Style::default().fg(CLAURST_MUTED),
+        Style::default().fg(MIKMIK_MUTED),
     )])
 }

@@ -9,8 +9,8 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::overlays::{
-    begin_modal_frame, modal_header_line_area, render_modal_title_frame, CLAURST_ACCENT,
-    CLAURST_MUTED, CLAURST_PANEL_BG, CLAURST_TEXT,
+    begin_modal_frame, modal_header_line_area, render_modal_title_frame, MIKMIK_ACCENT,
+    MIKMIK_MUTED, MIKMIK_PANEL_BG, MIKMIK_TEXT,
 };
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ pub fn render_export_dialog(frame: &mut Frame, state: &ExportDialogState, area: 
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 " Choose a format to export this session.",
-                Style::default().fg(CLAURST_MUTED),
+                Style::default().fg(MIKMIK_MUTED),
             )])),
             subtitle_area,
         );
@@ -93,21 +93,21 @@ pub fn render_export_dialog(frame: &mut Frame, state: &ExportDialogState, area: 
         Line::from(""),
         Line::from(vec![Span::styled(
             " Saved to ./claude-export-<timestamp>.<ext>",
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         )]),
     ];
 
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .style(Style::default().bg(CLAURST_PANEL_BG)),
+            .style(Style::default().bg(MIKMIK_PANEL_BG)),
         layout.body_area,
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             " tab/←/→ switch  ·  enter export  ·  1/2 choose",
             Style::default()
-                .fg(CLAURST_MUTED)
+                .fg(MIKMIK_MUTED)
                 .add_modifier(Modifier::ITALIC),
         )])),
         layout.footer_area,
@@ -122,15 +122,15 @@ fn export_option_row(
     width: u16,
 ) -> Line<'static> {
     let bg = if selected {
-        CLAURST_ACCENT
+        MIKMIK_ACCENT
     } else {
-        CLAURST_PANEL_BG
+        MIKMIK_PANEL_BG
     };
-    let fg = if selected { Color::White } else { CLAURST_TEXT };
+    let fg = if selected { Color::White } else { MIKMIK_TEXT };
     let desc_fg = if selected {
         Color::Rgb(245, 220, 232)
     } else {
-        CLAURST_MUTED
+        MIKMIK_MUTED
     };
     let mut spans = vec![
         Span::styled(format!(" [{}] ", key), Style::default().fg(desc_fg).bg(bg)),

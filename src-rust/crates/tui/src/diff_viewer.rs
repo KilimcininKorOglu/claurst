@@ -20,8 +20,8 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 
 use crate::overlays::{
-    begin_modal_buf, modal_header_line_area, render_modal_title_buf, CLAURST_ACCENT, CLAURST_MUTED,
-    CLAURST_PANEL_BG, CLAURST_TEXT,
+    begin_modal_buf, modal_header_line_area, render_modal_title_buf, MIKMIK_ACCENT, MIKMIK_MUTED,
+    MIKMIK_PANEL_BG, MIKMIK_TEXT,
 };
 
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
@@ -565,7 +565,7 @@ pub fn render_diff_dialog(state: &mut DiffViewerState, area: Rect, buf: &mut Buf
                     DiffType::TurnDiff => "turn diff",
                 }
             ),
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         )]))
         .render(subtitle_area, buf);
     }
@@ -580,13 +580,13 @@ pub fn render_diff_dialog(state: &mut DiffViewerState, area: Rect, buf: &mut Buf
             Line::from(vec![Span::styled(
                 empty,
                 Style::default()
-                    .fg(CLAURST_TEXT)
+                    .fg(MIKMIK_TEXT)
                     .add_modifier(Modifier::ITALIC),
             )]),
             Line::from(""),
             Line::from(vec![Span::styled(
                 " Use /review for the current git diff, or make an edit and reopen /changes.",
-                Style::default().fg(CLAURST_MUTED),
+                Style::default().fg(MIKMIK_MUTED),
             )]),
         ])
         .render(layout.body_area, buf);
@@ -603,7 +603,7 @@ pub fn render_diff_dialog(state: &mut DiffViewerState, area: Rect, buf: &mut Buf
         .split(layout.body_area);
 
     let divider: Vec<Line<'static>> = (0..layout.body_area.height)
-        .map(|_| Line::from(Span::styled("│", Style::default().fg(CLAURST_MUTED))))
+        .map(|_| Line::from(Span::styled("│", Style::default().fg(MIKMIK_MUTED))))
         .collect();
     Paragraph::new(divider).render(panes[1], buf);
 
@@ -612,7 +612,7 @@ pub fn render_diff_dialog(state: &mut DiffViewerState, area: Rect, buf: &mut Buf
     Paragraph::new(Line::from(vec![Span::styled(
         " tab switch pane  ·  ↑↓ navigate  ·  space collapse  ·  d toggle scope",
         Style::default()
-            .fg(CLAURST_MUTED)
+            .fg(MIKMIK_MUTED)
             .add_modifier(Modifier::ITALIC),
     )]))
     .render(layout.footer_area, buf);
@@ -627,20 +627,16 @@ fn render_file_list(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
         Span::styled(
             " Files",
             Style::default()
-                .fg(if focused {
-                    CLAURST_ACCENT
-                } else {
-                    CLAURST_TEXT
-                })
+                .fg(if focused { MIKMIK_ACCENT } else { MIKMIK_TEXT })
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  {}", state.files.len()),
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         ),
     ]);
     Paragraph::new(header)
-        .style(Style::default().bg(CLAURST_PANEL_BG))
+        .style(Style::default().bg(MIKMIK_PANEL_BG))
         .render(
             Rect {
                 x: area.x,
@@ -677,17 +673,17 @@ fn render_file_list(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
         let is_collapsed = *state.collapsed.get(abs_idx).unwrap_or(&false);
         let collapse_char = if is_collapsed { "\u{25b8}" } else { "\u{25be}" }; // ▸ / ▾
         let (stats, stats_color) = if file.binary {
-            ("binary".to_string(), CLAURST_MUTED)
+            ("binary".to_string(), MIKMIK_MUTED)
         } else if file.is_new_file {
             (format!("new  +{}", file.added), Color::Yellow)
         } else {
-            (format!("+{} -{}", file.added, file.removed), CLAURST_MUTED)
+            (format!("+{} -{}", file.added, file.removed), MIKMIK_MUTED)
         };
 
         let bg = if selected {
-            CLAURST_ACCENT
+            MIKMIK_ACCENT
         } else {
-            CLAURST_PANEL_BG
+            MIKMIK_PANEL_BG
         };
         let base_style = if selected {
             Style::default()
@@ -695,7 +691,7 @@ fn render_file_list(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
                 .fg(Color::White)
                 .bg(bg)
         } else {
-            Style::default().fg(CLAURST_TEXT).bg(bg)
+            Style::default().fg(MIKMIK_TEXT).bg(bg)
         };
 
         let y = inner.y + i as u16;
@@ -743,20 +739,16 @@ fn render_diff_detail(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
         Span::styled(
             format!(" {}", file.path),
             Style::default()
-                .fg(if focused {
-                    CLAURST_ACCENT
-                } else {
-                    CLAURST_TEXT
-                })
+                .fg(if focused { MIKMIK_ACCENT } else { MIKMIK_TEXT })
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  +{} -{}", file.added, file.removed),
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         ),
     ]);
     Paragraph::new(header)
-        .style(Style::default().bg(CLAURST_PANEL_BG))
+        .style(Style::default().bg(MIKMIK_PANEL_BG))
         .render(
             Rect {
                 x: area.x,
@@ -780,7 +772,7 @@ fn render_diff_detail(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
             Line::from(vec![Span::styled(
                 " [collapsed]  press Space to expand",
                 Style::default()
-                    .fg(CLAURST_MUTED)
+                    .fg(MIKMIK_MUTED)
                     .add_modifier(Modifier::ITALIC),
             )]),
         ])
@@ -790,7 +782,7 @@ fn render_diff_detail(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
 
     if file.binary {
         Paragraph::new("Binary file — no diff available")
-            .style(Style::default().fg(CLAURST_MUTED))
+            .style(Style::default().fg(MIKMIK_MUTED))
             .render(inner, buf);
         return;
     }
@@ -854,7 +846,7 @@ fn render_diff_detail(state: &DiffViewerState, area: Rect, buf: &mut Buffer) {
             };
             Paragraph::new(Line::from(Span::styled(
                 ch.to_string(),
-                Style::default().fg(CLAURST_MUTED),
+                Style::default().fg(MIKMIK_MUTED),
             )))
             .render(cell_area, buf);
         }
@@ -909,8 +901,8 @@ fn build_inline_diff_spans(old: &str, new: &str) -> (Vec<Span<'static>>, Vec<Spa
         let s: String = change.to_string();
         match change.tag() {
             ChangeTag::Equal => {
-                old_spans.push(Span::styled(s.clone(), Style::default().fg(CLAURST_TEXT)));
-                new_spans.push(Span::styled(s, Style::default().fg(CLAURST_TEXT)));
+                old_spans.push(Span::styled(s.clone(), Style::default().fg(MIKMIK_TEXT)));
+                new_spans.push(Span::styled(s, Style::default().fg(MIKMIK_TEXT)));
             }
             ChangeTag::Delete => {
                 old_spans.push(Span::styled(

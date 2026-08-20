@@ -16,7 +16,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthChar;
 
-use crate::overlays::{begin_modal_buf, render_modal_title_buf, CLAURST_MUTED, CLAURST_TEXT};
+use crate::overlays::{begin_modal_buf, render_modal_title_buf, MIKMIK_MUTED, MIKMIK_TEXT};
 
 /// Rows scrolled per PageUp/PageDown press.
 const PAGE_ROWS: usize = 10;
@@ -142,7 +142,7 @@ pub fn render_paste_viewer_buf(viewer: &PasteViewer, area: Rect, buf: &mut Buffe
         .take(body.height as usize)
         .enumerate()
     {
-        let line = Line::from(Span::styled(row.clone(), Style::default().fg(CLAURST_TEXT)));
+        let line = Line::from(Span::styled(row.clone(), Style::default().fg(MIKMIK_TEXT)));
         Paragraph::new(line).render(
             Rect {
                 x: body.x + 1,
@@ -156,7 +156,7 @@ pub fn render_paste_viewer_buf(viewer: &PasteViewer, area: Rect, buf: &mut Buffe
 
     let footer = Line::from(Span::styled(
         " ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · Alt+E insert into prompt · Esc close",
-        Style::default().fg(CLAURST_MUTED),
+        Style::default().fg(MIKMIK_MUTED),
     ));
     Paragraph::new(footer).render(layout.footer_area, buf);
 }

@@ -15,8 +15,8 @@ use ratatui::{
 use std::collections::HashMap;
 
 use crate::overlays::{
-    begin_modal_buf, modal_header_line_area, render_modal_title_buf, CLAURST_ACCENT, CLAURST_MUTED,
-    CLAURST_PANEL_BG,
+    begin_modal_buf, modal_header_line_area, render_modal_title_buf, MIKMIK_ACCENT, MIKMIK_MUTED,
+    MIKMIK_PANEL_BG,
 };
 
 // ---------------------------------------------------------------------------
@@ -375,11 +375,11 @@ pub fn render_stats_dialog(state: &StatsDialogState, area: Rect, buf: &mut Buffe
 
     let tab_line = Line::from(vec![
         tab_span("Overview", state.tab == StatsTab::Overview),
-        Span::styled("  ·  ", Style::default().fg(CLAURST_MUTED)),
+        Span::styled("  ·  ", Style::default().fg(MIKMIK_MUTED)),
         tab_span("Daily Tokens", state.tab == StatsTab::DailyTokens),
-        Span::styled("  ·  ", Style::default().fg(CLAURST_MUTED)),
+        Span::styled("  ·  ", Style::default().fg(MIKMIK_MUTED)),
         tab_span("Cost Heatmap", state.tab == StatsTab::CostHeatmap),
-        Span::styled("  ·  ", Style::default().fg(CLAURST_MUTED)),
+        Span::styled("  ·  ", Style::default().fg(MIKMIK_MUTED)),
         tab_span("Models", state.tab == StatsTab::Models),
     ]);
     if let Some(tab_area) = modal_header_line_area(layout.header_area, 1) {
@@ -390,7 +390,7 @@ pub fn render_stats_dialog(state: &StatsDialogState, area: Rect, buf: &mut Buffe
 
     let Some(data) = &state.data else {
         Paragraph::new("Loading\u{2026}")
-            .style(Style::default().fg(CLAURST_MUTED).bg(CLAURST_PANEL_BG))
+            .style(Style::default().fg(MIKMIK_MUTED).bg(MIKMIK_PANEL_BG))
             .render(content_area, buf);
         return;
     };
@@ -404,7 +404,7 @@ pub fn render_stats_dialog(state: &StatsDialogState, area: Rect, buf: &mut Buffe
     Paragraph::new(Line::from(vec![Span::styled(
         " tab/←/→ switch tabs  ·  r cycle range  ·  ↑↓ scroll",
         Style::default()
-            .fg(CLAURST_MUTED)
+            .fg(MIKMIK_MUTED)
             .add_modifier(Modifier::ITALIC),
     )]))
     .render(layout.footer_area, buf);
@@ -415,11 +415,11 @@ fn tab_span(label: &str, active: bool) -> Span<'static> {
         Span::styled(
             label.to_string(),
             Style::default()
-                .fg(CLAURST_ACCENT)
+                .fg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         )
     } else {
-        Span::styled(label.to_string(), Style::default().fg(CLAURST_MUTED))
+        Span::styled(label.to_string(), Style::default().fg(MIKMIK_MUTED))
     }
 }
 

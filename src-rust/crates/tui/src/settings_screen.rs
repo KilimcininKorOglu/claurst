@@ -5,8 +5,8 @@
 // Changes are persisted via Settings::save_sync() or settings.json writes.
 
 use crate::overlays::{
-    centered_rect, modal_search_line, render_dark_overlay, render_dialog_bg, CLAURST_ACCENT,
-    CLAURST_MUTED, CLAURST_PANEL_BG,
+    centered_rect, modal_search_line, render_dark_overlay, render_dialog_bg, MIKMIK_ACCENT,
+    MIKMIK_MUTED, MIKMIK_PANEL_BG,
 };
 use mikmik_core::config::{Config, Settings};
 use mikmik_core::output_styles::find_style;
@@ -876,21 +876,21 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
         Span::styled(
             " Settings",
             Style::default()
-                .fg(CLAURST_ACCENT)
+                .fg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" — Claurst", Style::default().fg(CLAURST_MUTED)),
+        Span::styled(" — Claurst", Style::default().fg(MIKMIK_MUTED)),
         Span::styled(
             format!(
                 "{:>width$}",
                 "Esc close",
                 width = inner.width.saturating_sub(19) as usize
             ),
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         ),
     ]);
     frame.render_widget(
-        Paragraph::new(title).style(Style::default().bg(CLAURST_PANEL_BG)),
+        Paragraph::new(title).style(Style::default().bg(MIKMIK_PANEL_BG)),
         header_area,
     );
 
@@ -899,10 +899,10 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
         &screen.search_query,
         "Type to search settings...",
         Color::DarkGray,
-        CLAURST_ACCENT,
+        MIKMIK_ACCENT,
     );
     frame.render_widget(
-        Paragraph::new(search_line).style(Style::default().bg(CLAURST_PANEL_BG)),
+        Paragraph::new(search_line).style(Style::default().bg(MIKMIK_PANEL_BG)),
         search_area,
     );
 
@@ -977,7 +977,7 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
             Span::styled(
                 " Enter ",
                 Style::default()
-                    .fg(CLAURST_ACCENT)
+                    .fg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("save  "),
@@ -994,14 +994,14 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
             Span::styled(
                 " ↑↓ ",
                 Style::default()
-                    .fg(CLAURST_ACCENT)
+                    .fg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("navigate  "),
             Span::styled(
                 " Enter ",
                 Style::default()
-                    .fg(CLAURST_ACCENT)
+                    .fg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("toggle/edit  "),
@@ -1015,7 +1015,7 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
         ])
     };
     let footer_para = Paragraph::new(vec![footer])
-        .style(Style::default().fg(CLAURST_MUTED).bg(CLAURST_PANEL_BG))
+        .style(Style::default().fg(MIKMIK_MUTED).bg(MIKMIK_PANEL_BG))
         .alignment(Alignment::Center);
     frame.render_widget(footer_para, footer_area);
 }
@@ -1060,7 +1060,7 @@ fn render_settings_list(frame: &mut Frame, screen: &SettingsScreen, area: Rect) 
         let row_style = if is_selected {
             Style::default()
                 .fg(Color::Black)
-                .bg(CLAURST_ACCENT)
+                .bg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()

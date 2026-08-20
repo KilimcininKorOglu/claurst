@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::overlays::{
-    centered_rect, render_dark_overlay_buf, render_dialog_bg_buf, CLAURST_ACCENT, CLAURST_MUTED,
-    CLAURST_PANEL_BG, CLAURST_TEXT,
+    centered_rect, render_dark_overlay_buf, render_dialog_bg_buf, MIKMIK_ACCENT, MIKMIK_MUTED,
+    MIKMIK_PANEL_BG, MIKMIK_TEXT,
 };
 
 // ---------------------------------------------------------------------------
@@ -164,17 +164,17 @@ pub fn render_memory_file_selector(state: &MemoryFileSelectorState, area: Rect, 
         Span::styled(
             " Memory",
             Style::default()
-                .fg(CLAURST_ACCENT)
+                .fg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" — choose a file", Style::default().fg(CLAURST_MUTED)),
+        Span::styled(" — choose a file", Style::default().fg(MIKMIK_MUTED)),
         Span::styled(
             format!(
                 "{:>width$}",
                 "Esc close",
                 width = inner.width.saturating_sub(24) as usize
             ),
-            Style::default().fg(CLAURST_MUTED),
+            Style::default().fg(MIKMIK_MUTED),
         ),
     ]));
     lines.push(Line::from(""));
@@ -187,7 +187,7 @@ pub fn render_memory_file_selector(state: &MemoryFileSelectorState, area: Rect, 
         };
 
         let new_tag = if !file.exists {
-            Span::styled(" (new)", Style::default().fg(CLAURST_MUTED))
+            Span::styled(" (new)", Style::default().fg(MIKMIK_MUTED))
         } else {
             Span::raw("")
         };
@@ -200,14 +200,14 @@ pub fn render_memory_file_selector(state: &MemoryFileSelectorState, area: Rect, 
                 ),
                 Style::default()
                     .fg(Color::Black)
-                    .bg(CLAURST_ACCENT)
+                    .bg(MIKMIK_ACCENT)
                     .add_modifier(Modifier::BOLD),
             )]));
         } else {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {type_label} {}", file.display_path),
-                    Style::default().fg(CLAURST_TEXT),
+                    Style::default().fg(MIKMIK_TEXT),
                 ),
                 new_tag,
             ]));
@@ -217,11 +217,11 @@ pub fn render_memory_file_selector(state: &MemoryFileSelectorState, area: Rect, 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  \u{2191}\u{2193} navigate  Enter select  Esc close",
-        Style::default().fg(CLAURST_MUTED),
+        Style::default().fg(MIKMIK_MUTED),
     )]));
 
     let para = Paragraph::new(lines)
-        .style(Style::default().bg(CLAURST_PANEL_BG).fg(CLAURST_TEXT))
+        .style(Style::default().bg(MIKMIK_PANEL_BG).fg(MIKMIK_TEXT))
         .alignment(Alignment::Left);
 
     use ratatui::widgets::Widget;
