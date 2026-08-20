@@ -382,6 +382,8 @@ impl Tool for AgentTool {
             // session it was spawned from.
             degradation_summary: ctx.config.degradation_summary.unwrap_or(true),
             auto_poke: ctx.config.auto_poke.unwrap_or(true),
+            auto_compact: ctx.config.effective_auto_compact(),
+            compact_threshold: ctx.config.effective_compact_threshold(),
             system_prompt: Some(system_prompt),
             append_system_prompt: None,
             output_style: ctx.config.effective_output_style(),

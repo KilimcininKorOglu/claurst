@@ -713,6 +713,27 @@ pub mod config {
         true
     }
 
+    /// Read `compact_threshold` as a percentage, accepting the fraction it
+    /// used to be.
+    ///
+    /// The field was an `f32` in the range 0.0-1.0 while the settings screen
+    /// described it as "0-100 %", so files exist carrying either shape. A
+    /// plain `u8` rejects `0.9` outright, and because the failure is a parse
+    /// error on the whole document it would take the user's model, provider
+    /// and every other setting down with it. Anything below 1 is read as the
+    /// old fraction and scaled; anything else is rounded.
+    fn deserialize_compact_threshold<'de, D>(deserializer: D) -> Result<u8, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = f64::deserialize(deserializer)?;
+        if !raw.is_finite() || raw <= 0.0 {
+            return Ok(0);
+        }
+        let pct = if raw < 1.0 { raw * 100.0 } else { raw };
+        Ok(pct.round().clamp(0.0, 100.0) as u8)
+    }
+
     fn default_file_autocomplete_limit() -> usize {
         15
     }
@@ -1238,7 +1259,14 @@ pub mod config {
         /// it through [`Config::effective_auto_compact`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub auto_compact: Option<bool>,
-        pub compact_threshold: f32,
+        /// Context fill, as a percentage 0-100, at which auto-compact fires.
+        ///
+        /// A percentage because that is the unit the settings screen offers
+        /// and the unit the footer reports. Zero means "unset" and falls back
+        /// to [`crate::constants::DEFAULT_COMPACT_THRESHOLD`]; read it through
+        /// [`Config::effective_compact_threshold`].
+        #[serde(default, deserialize_with = "deserialize_compact_threshold")]
+        pub compact_threshold: u8,
         pub verbose: bool,
         pub output_format: OutputFormat,
         pub mcp_servers: Vec<McpServerConfig>,
@@ -2133,10 +2161,13 @@ pub mod config {
             self.include_ignored_files.unwrap_or(false)
         }
 
-        /// Resolve the effective compact threshold (0.0 - 1.0).
-        pub fn effective_compact_threshold(&self) -> f32 {
-            if self.compact_threshold > 0.0 {
-                self.compact_threshold
+        /// The context fill percentage at which auto-compact fires.
+        ///
+        /// Clamped to 100: a threshold above the window would mean the
+        /// conversation must overflow before anything is done about it.
+        pub fn effective_compact_threshold(&self) -> u8 {
+            if self.compact_threshold > 0 {
+                self.compact_threshold.min(100)
             } else {
                 crate::constants::DEFAULT_COMPACT_THRESHOLD
             }
@@ -2866,11 +2897,10 @@ pub mod config {
                 theme: base.config.theme,
                 output_style: over.config.output_style.or(base.config.output_style),
                 auto_compact: over.config.auto_compact.or(base.config.auto_compact),
-                compact_threshold: if over.config.compact_threshold != 0.0 {
-                    over.config.compact_threshold
-                } else {
-                    base.config.compact_threshold
-                },
+                // When the context is compacted is the user's call, like
+                // `verbose` below: a repository has no stake in how much room
+                // the user keeps for their own conversation.
+                compact_threshold: base.config.compact_threshold,
                 // How much the session logs is the user's business, like the
                 // interface preferences below.
                 verbose: base.config.verbose,
@@ -3622,6 +3652,85 @@ pub mod config {
             assert!(Config::default().effective_auto_compact());
         }
 
+        /// The threshold is a percentage, which is the unit the settings screen
+        /// asks for and the footer reports. It used to be an `f32` fraction
+        /// behind a field labelled "0-100", so a user typing 95 asked for 9500%
+        /// of the window.
+        #[test]
+        fn the_compact_threshold_is_a_percentage() {
+            assert_eq!(Config::default().effective_compact_threshold(), 90);
+
+            let chosen = Config {
+                compact_threshold: 75,
+                ..Default::default()
+            };
+            assert_eq!(chosen.effective_compact_threshold(), 75);
+        }
+
+        /// A threshold above the window would mean the conversation has to
+        /// overflow before anything is done about it.
+        #[test]
+        fn a_compact_threshold_over_a_hundred_is_clamped() {
+            let absurd = Config {
+                compact_threshold: 250,
+                ..Default::default()
+            };
+            assert_eq!(absurd.effective_compact_threshold(), 100);
+        }
+
+        /// When to compact is a user preference, so a repository does not get
+        /// to move it.
+        #[test]
+        fn only_the_user_sets_the_compact_threshold() {
+            let user = Settings {
+                config: Config {
+                    compact_threshold: 60,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let project: Settings = serde_json::from_str(r#"{"config":{"compact_threshold":99}}"#)
+                .expect("project settings");
+            assert_eq!(
+                project.config.compact_threshold, 99,
+                "the project file really did name the key"
+            );
+
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+            assert_eq!(merged.config.effective_compact_threshold(), 60);
+        }
+
+        /// The field used to be an `f32` fraction, so files carrying `0.9`
+        /// exist. Rejecting it would be a parse error on the whole document,
+        /// which takes the model, the provider and every other setting with it.
+        #[test]
+        fn an_old_fractional_threshold_is_read_as_a_percentage() {
+            let old: Settings =
+                serde_json::from_str(r#"{"config":{"compact_threshold":0.9,"model":"m"}}"#)
+                    .expect("an old settings file still loads");
+
+            assert_eq!(old.config.compact_threshold, 90);
+            assert_eq!(old.config.model.as_deref(), Some("m"));
+        }
+
+        /// A percentage is taken as written, including the whole numbers a
+        /// fraction could never be.
+        #[test]
+        fn a_percentage_threshold_is_taken_as_written() {
+            let parsed = |json: &str| {
+                serde_json::from_str::<Settings>(json)
+                    .expect("settings")
+                    .config
+                    .compact_threshold
+            };
+
+            assert_eq!(parsed(r#"{"config":{"compact_threshold":75}}"#), 75);
+            assert_eq!(parsed(r#"{"config":{"compact_threshold":100}}"#), 100);
+            // Out of range in either direction resolves rather than failing.
+            assert_eq!(parsed(r#"{"config":{"compact_threshold":250}}"#), 100);
+            assert_eq!(parsed(r#"{"config":{"compact_threshold":-5}}"#), 0);
+        }
+
         /// The settings screen writes the top-level key and the query loop
         /// reads the nested one, so `effective_config` has to fold one into the
         /// other or the toggle saves somewhere nothing reads.
@@ -4294,7 +4403,7 @@ pub mod constants {
     // Token limits
     pub const DEFAULT_MAX_TOKENS: u32 = 32_000;
     pub const MAX_TOKENS_HARD_LIMIT: u32 = 65_536;
-    pub const DEFAULT_COMPACT_THRESHOLD: f32 = 0.9;
+    pub const DEFAULT_COMPACT_THRESHOLD: u8 = 90;
     pub const MAX_TURNS_DEFAULT: u32 = 10;
     /// The turn limit that means "no limit".
     ///

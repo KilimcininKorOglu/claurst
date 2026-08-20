@@ -162,6 +162,12 @@ pub(crate) async fn compact_before_request(
     // Reactive compact (T1-1) replaces the proactive path when its gate is set;
     // it fires from usage rather than from a finished turn and adds a 97%
     // emergency collapse. Off by default.
+    // `autoCompact: false` means the user keeps the whole conversation and
+    // accepts the consequence. They still get told how full it is.
+    if !config.auto_compact {
+        return pass;
+    }
+
     if claurst_core::feature_gates::is_feature_enabled("reactive_compact") {
         run_reactive(
             messages,
@@ -183,6 +189,7 @@ pub(crate) async fn compact_before_request(
         context_tokens,
         input.model,
         context_window,
+        config.compact_threshold,
         input.session_id,
     )
     .await
@@ -221,7 +228,7 @@ async fn run_reactive(
             "Context-collapse",
             compact::context_collapse(messages.clone(), input.backend, config).await,
         )
-    } else if compact::should_compact(context_tokens, context_window) {
+    } else if compact::should_compact(context_tokens, context_window, config.compact_threshold) {
         if let Some(tx) = event_tx {
             let _ = tx.send(QueryEvent::Status("Compacting context...".to_string()));
         }
@@ -380,6 +387,83 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert!(backend.model_seen.lock().is_none(), "no call was made");
         compact::forget_compact_state("context-pass-tests");
+    }
+
+    /// `autoCompact: false` keeps the conversation whole. The setting used to
+    /// be written, saved and read by nobody.
+    #[tokio::test]
+    async fn auto_compact_off_leaves_a_full_window_alone() {
+        compact::forget_compact_state("context-pass-tests");
+        let mut messages = a_full_conversation();
+        let backend = StubBackend::answering("never asked for");
+        let config = QueryConfig {
+            auto_compact: false,
+            ..QueryConfig::default()
+        };
+
+        let pass = compact_before_request(
+            &mut messages,
+            &config,
+            input(&backend, "claude-opus-4-5"),
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert!(!pass.compacted);
+        assert_eq!(messages.len(), 3);
+        assert!(backend.model_seen.lock().is_none(), "no call was made");
+        compact::forget_compact_state("context-pass-tests");
+    }
+
+    /// A lower `compactThreshold` compacts a conversation the default would
+    /// have left alone.
+    #[tokio::test]
+    async fn a_lower_threshold_compacts_sooner() {
+        compact::forget_compact_state("context-pass-threshold");
+        // ~50k tokens: a quarter of a 200k window, well under the default 90%.
+        let mut messages = vec![
+            Message::user("x".repeat(100_000)),
+            Message::assistant("y".repeat(100_000)),
+            Message::user("and now the next thing"),
+        ];
+
+        let at_default = compact_before_request(
+            &mut messages.clone(),
+            &QueryConfig::default(),
+            ContextPassInput {
+                backend: &StubBackend::answering("short"),
+                model: "claude-opus-4-5",
+                provider: "anthropic",
+                session_id: "context-pass-threshold",
+                last_context_tokens: 0,
+            },
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(!at_default.compacted, "the default leaves this alone");
+
+        let config = QueryConfig {
+            compact_threshold: 20,
+            ..QueryConfig::default()
+        };
+        let lowered = compact_before_request(
+            &mut messages,
+            &config,
+            ContextPassInput {
+                backend: &StubBackend::answering("short"),
+                model: "claude-opus-4-5",
+                provider: "anthropic",
+                session_id: "context-pass-threshold",
+                last_context_tokens: 0,
+            },
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(lowered.compacted, "a threshold of 20 acts on the same size");
+        compact::forget_compact_state("context-pass-threshold");
     }
 
     /// A summariser that fails leaves the conversation whole (#213).

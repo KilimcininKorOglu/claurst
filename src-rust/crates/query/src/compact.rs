@@ -43,9 +43,6 @@ const AUTOCOMPACT_BUFFER_TOKENS: u64 = 13_000;
 /// Start warning when this many tokens remain in the context window.
 const WARNING_THRESHOLD_BUFFER_TOKENS: u64 = 20_000;
 
-/// Fraction of the context window at which auto-compact triggers.
-const AUTOCOMPACT_TRIGGER_FRACTION: f64 = 0.90;
-
 /// Token budget for the recent tail we preserve verbatim after compaction.
 ///
 /// Instead of keeping a fixed COUNT of recent messages, we keep as many recent
@@ -967,22 +964,20 @@ pub fn calculate_token_warning_state_for_window(
 
 /// Return `true` when auto-compaction should fire.
 ///
-/// Convenience wrapper that derives the window from the model-name heuristic.
-/// Prefer [`should_auto_compact_for_window`] with a resolved window.
-pub fn should_auto_compact(input_tokens: u64, model: &str, state: &AutoCompactState) -> bool {
-    should_auto_compact_for_window(input_tokens, context_window_for_model(model), state)
-}
-
-/// Return `true` when auto-compaction should fire, against an explicit window.
+/// `threshold_pct` is the user's `compactThreshold`, a percentage of the
+/// window. It is a parameter rather than a constant because the setting exists
+/// and used to be read by nobody: the trigger sat at a hardcoded 90% while the
+/// settings screen happily saved whatever the user typed.
 pub fn should_auto_compact_for_window(
     input_tokens: u64,
     window: u64,
+    threshold_pct: u8,
     state: &AutoCompactState,
 ) -> bool {
-    if state.disabled {
+    if state.disabled || window == 0 {
         return false;
     }
-    let threshold = (window as f64 * AUTOCOMPACT_TRIGGER_FRACTION) as u64;
+    let threshold = window.saturating_mul(threshold_pct.min(100) as u64) / 100;
     input_tokens >= threshold
 }
 
@@ -1376,11 +1371,12 @@ pub async fn auto_compact_if_needed(
     input_tokens: u64,
     model: &str,
     context_window: u64,
+    threshold_pct: u8,
     session_id: &str,
 ) -> Option<Vec<Message>> {
     // A copy, so no lock is held across the summarisation call below.
     let state = compact_state_for(session_id);
-    if !should_auto_compact_for_window(input_tokens, context_window, &state) {
+    if !should_auto_compact_for_window(input_tokens, context_window, threshold_pct, &state) {
         return None;
     }
 
@@ -1450,16 +1446,16 @@ pub struct CompactResult {
     pub tokens_freed: u64,
 }
 
-/// Return `true` when reactive compact should fire (≥ 90 % of context window).
+/// Return `true` when reactive compact should fire.
 ///
-/// Threshold is intentionally identical to `AUTOCOMPACT_TRIGGER_FRACTION` so
-/// that exactly one of the two paths (proactive auto-compact vs reactive
-/// compact) fires, chosen by the `CLAUDE_REACTIVE_COMPACT` gate.
-pub fn should_compact(tokens_used: u64, context_limit: u64) -> bool {
+/// Takes the same `threshold_pct` as [`should_auto_compact_for_window`], so
+/// the user's setting means the same thing whichever of the two paths the
+/// `CLAUDE_REACTIVE_COMPACT` gate selects.
+pub fn should_compact(tokens_used: u64, context_limit: u64, threshold_pct: u8) -> bool {
     if context_limit == 0 {
         return false;
     }
-    let threshold = (context_limit as f64 * REACTIVE_COMPACT_THRESHOLD) as u64;
+    let threshold = context_limit.saturating_mul(threshold_pct.min(100) as u64) / 100;
     tokens_used >= threshold
 }
 
@@ -1749,10 +1745,11 @@ pub async fn context_collapse(
     })
 }
 
-// Threshold constants for reactive compact / context-collapse.
-/// Reactive compact fires at 90 % of the context window.
-const REACTIVE_COMPACT_THRESHOLD: f64 = 0.90;
 /// Context collapse (emergency) fires at 97 % of the context window.
+///
+/// A constant and not the user's `compactThreshold`: this is the last thing
+/// standing between the session and a prompt the provider refuses, so it is
+/// not the user's to move.
 const CONTEXT_COLLAPSE_THRESHOLD: f64 = 0.97;
 
 // ---------------------------------------------------------------------------
@@ -2028,7 +2025,10 @@ mod tests {
         assert_eq!(state, TokenWarningState::Critical);
     }
 
-    // ---- should_auto_compact ------------------------------------------------
+    // ---- should_auto_compact_for_window ------------------------------------
+
+    /// The default threshold, as `Config::effective_compact_threshold` gives it.
+    const DEFAULT_PCT: u8 = claurst_core::constants::DEFAULT_COMPACT_THRESHOLD;
 
     #[test]
     fn test_should_not_compact_when_disabled() {
@@ -2036,21 +2036,54 @@ mod tests {
             disabled: true,
             ..Default::default()
         };
-        assert!(!should_auto_compact(195_000, "claude-sonnet-4-6", &state));
+        assert!(!should_auto_compact_for_window(
+            195_000,
+            200_000,
+            DEFAULT_PCT,
+            &state
+        ));
     }
 
     #[test]
     fn test_should_compact_at_90pct() {
         let state = AutoCompactState::default();
         // 90 % of 200k = 180k — should trigger
-        assert!(should_auto_compact(180_000, "claude-sonnet-4-6", &state));
+        assert!(should_auto_compact_for_window(
+            180_000,
+            200_000,
+            DEFAULT_PCT,
+            &state
+        ));
     }
 
     #[test]
     fn test_should_not_compact_below_90pct() {
         let state = AutoCompactState::default();
         // 70 % of 200k = 140k — should NOT trigger
-        assert!(!should_auto_compact(140_000, "claude-sonnet-4-6", &state));
+        assert!(!should_auto_compact_for_window(
+            140_000,
+            200_000,
+            DEFAULT_PCT,
+            &state
+        ));
+    }
+
+    /// The user's `compactThreshold` decides when, which is the whole point of
+    /// making it a parameter: at 50 the same 140k prompt now compacts.
+    #[test]
+    fn the_users_threshold_moves_the_trigger() {
+        let state = AutoCompactState::default();
+        assert!(should_auto_compact_for_window(140_000, 200_000, 50, &state));
+        assert!(!should_auto_compact_for_window(90_000, 200_000, 50, &state));
+    }
+
+    /// A threshold above 100 would mean the context must overflow first.
+    #[test]
+    fn a_threshold_over_a_hundred_is_clamped() {
+        let state = AutoCompactState::default();
+        assert!(should_auto_compact_for_window(
+            200_000, 200_000, 250, &state
+        ));
     }
 
     // ---- Circuit breaker ----------------------------------------------------

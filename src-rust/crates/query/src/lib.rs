@@ -36,9 +36,9 @@ pub use compact::{
     calculate_token_warning_state_for_window, compact_conversation, context_collapse,
     context_window_for_model, estimate_context_tokens, format_compact_summary, get_compact_prompt,
     group_messages_for_compact, micro_compact_if_needed, reactive_compact, resolve_context_window,
-    should_auto_compact, should_auto_compact_for_window, should_compact, should_context_collapse,
-    snip_compact, AutoCompactState, CompactResult, CompactTrigger, MessageGroup,
-    MicroCompactConfig, TokenWarningState,
+    should_auto_compact_for_window, should_compact, should_context_collapse, snip_compact,
+    AutoCompactState, CompactResult, CompactTrigger, MessageGroup, MicroCompactConfig,
+    TokenWarningState,
 };
 pub use continuation::{
     ContinuationDecision, ContinuationMode, ContinuationPolicy, StopPolicy, TurnEndContext,
@@ -106,6 +106,10 @@ pub struct QueryConfig {
     /// Whether the incomplete-todo reminder is appended to the system prompt
     /// after the second turn.
     pub auto_poke: bool,
+    /// Whether the context is compacted automatically when it fills up.
+    pub auto_compact: bool,
+    /// Context fill, as a percentage 0-100, at which auto-compact fires.
+    pub compact_threshold: u8,
     pub system_prompt: Option<String>,
     pub append_system_prompt: Option<String>,
     pub output_style: claurst_core::system_prompt::OutputStyle,
@@ -200,6 +204,8 @@ impl Default for QueryConfig {
             max_turns: claurst_core::constants::MAX_TURNS_DEFAULT,
             degradation_summary: true,
             auto_poke: true,
+            auto_compact: true,
+            compact_threshold: claurst_core::constants::DEFAULT_COMPACT_THRESHOLD,
             system_prompt: None,
             append_system_prompt: None,
             output_style: claurst_core::system_prompt::OutputStyle::Default,
@@ -241,6 +247,8 @@ impl QueryConfig {
                 .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
+            auto_compact: cfg.effective_auto_compact(),
+            compact_threshold: cfg.effective_compact_threshold(),
             ..Default::default()
         }
     }
@@ -265,6 +273,8 @@ impl QueryConfig {
                 .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
+            auto_compact: cfg.effective_auto_compact(),
+            compact_threshold: cfg.effective_compact_threshold(),
             ..Default::default()
         }
     }
@@ -2283,6 +2293,8 @@ mod tests {
             max_turns: 10,
             degradation_summary: true,
             auto_poke: true,
+            auto_compact: true,
+            compact_threshold: claurst_core::constants::DEFAULT_COMPACT_THRESHOLD,
             system_prompt: sys.map(String::from),
             append_system_prompt: append.map(String::from),
             output_style: claurst_core::system_prompt::OutputStyle::Default,

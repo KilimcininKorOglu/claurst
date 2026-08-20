@@ -125,7 +125,7 @@ impl SettingsScreen {
             mouse_capture: true,
             show_cwd: false,
             show_git_branch: false,
-            compact_threshold: "95".to_string(),
+            compact_threshold: "90".to_string(),
             auto_commits: false,
             include_ignored_files: false,
             web_search_fallback: false,
@@ -169,7 +169,13 @@ impl SettingsScreen {
         self.mouse_capture = self.settings_snapshot.config.mouse_capture_enabled();
         self.show_cwd = self.settings_snapshot.show_cwd;
         self.show_git_branch = self.settings_snapshot.show_git_branch;
-        self.compact_threshold = self.settings_snapshot.config.compact_threshold.to_string();
+        // The effective value, not the raw field: an unset threshold is stored
+        // as 0 and showing "0" would read as "compact immediately".
+        self.compact_threshold = self
+            .settings_snapshot
+            .config
+            .effective_compact_threshold()
+            .to_string();
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
         self.include_ignored_files = self
             .settings_snapshot
@@ -340,7 +346,7 @@ impl SettingsScreen {
                     self.searxng_url = trimmed.to_string();
                 }
                 "compact_threshold" => {
-                    if let Ok(n) = value.parse::<f32>() {
+                    if let Ok(n) = value.parse::<u8>() {
                         config.compact_threshold = n;
                         saved.compact_threshold = n;
                         self.compact_threshold = value.clone();
