@@ -2854,8 +2854,11 @@ pub mod config {
                 // redirect a benign-looking command to code the repository
                 // chose. Only the user's own settings may set them.
                 env: base.config.env,
-                enable_all_mcp_servers: over.config.enable_all_mcp_servers
-                    || base.config.enable_all_mcp_servers,
+                // SECURITY: blanket trust for MCP servers is the user's to
+                // grant, matching `trust_project_mcp_servers` below. Nothing
+                // reads this field today, so keep it beside that one rather
+                // than letting a repository set a name that later grows teeth.
+                enable_all_mcp_servers: base.config.enable_all_mcp_servers,
                 // SECURITY: the system prompt is the model's standing
                 // instruction. A repository able to replace or extend it would
                 // be telling the agent what to do before the user says
@@ -2929,16 +2932,19 @@ pub mod config {
                 // arrives with the repository — letting it set this field would
                 // turn cloning a repository into arbitrary code execution.
                 status_line: base.config.status_line,
-                cursor_blink_enabled: over.config.cursor_blink_enabled
-                    || base.config.cursor_blink_enabled,
+                // A repository has no stake in how the caret behaves or what
+                // the file picker lists; these describe the person at the
+                // keyboard, like `theme` above. An `over || base` merge could
+                // only ever turn them on, so the user could not turn them off
+                // again while the checkout was open.
+                cursor_blink_enabled: base.config.cursor_blink_enabled,
                 file_autocomplete_limit: over
                     .config
                     .file_autocomplete_limit
                     .or(base.config.file_autocomplete_limit),
-                file_autocomplete_show_hidden_files: over
+                file_autocomplete_show_hidden_files: base
                     .config
-                    .file_autocomplete_show_hidden_files
-                    || base.config.file_autocomplete_show_hidden_files,
+                    .file_autocomplete_show_hidden_files,
                 file_injection_enabled: over
                     .config
                     .file_injection_enabled
@@ -2951,7 +2957,9 @@ pub mod config {
                     || base.config.include_ignored_files,
                 web_search_fallback: over.config.web_search_fallback
                     || base.config.web_search_fallback,
-                timeline_enabled: over.config.timeline_enabled || base.config.timeline_enabled,
+                // Whether the timeline panel is on is a layout preference, so
+                // it follows `cursor_blink_enabled` above.
+                timeline_enabled: base.config.timeline_enabled,
                 // SECURITY: a search endpoint receives whatever the model
                 // searches for, so pointing it at a host of the repository's
                 // choosing hands that stream away.
@@ -3021,8 +3029,10 @@ pub mod config {
                     s.extend(over.favorite_models);
                     s
                 },
-                has_completed_onboarding: over.has_completed_onboarding
-                    || base.has_completed_onboarding,
+                // Whether this person has been through onboarding is a fact
+                // about them, not about the checkout, so a repository can
+                // neither claim it for them nor take it back.
+                has_completed_onboarding: base.has_completed_onboarding,
                 last_seen_version: over.last_seen_version.or(base.last_seen_version),
                 // SECURITY: same reasoning as the `config` block's copies.
                 provider: base.provider,
@@ -3053,23 +3063,25 @@ pub mod config {
                     SkillsConfig { paths, urls }
                 },
                 managed_agents: over.managed_agents.or(base.managed_agents),
-                auto_copy_on_highlight: over.auto_copy_on_highlight || base.auto_copy_on_highlight,
-                notifications: over.notifications || base.notifications,
-                show_turn_duration: over.show_turn_duration || base.show_turn_duration,
-                show_message_timestamps: over.show_message_timestamps
-                    || base.show_message_timestamps,
+                // Interface preferences: how the terminal behaves for the
+                // person using it, not anything the checkout has a stake in.
+                // Taken from `base` for the same reason as `theme`, and because
+                // an `over || base` merge could only turn them on.
+                auto_copy_on_highlight: base.auto_copy_on_highlight,
+                notifications: base.notifications,
+                show_turn_duration: base.show_turn_duration,
+                show_message_timestamps: base.show_message_timestamps,
                 advisor_model: over.advisor_model.clone().or(base.advisor_model.clone()),
                 companion: over.companion.clone().or(base.companion.clone()),
-                reduce_motion: over.reduce_motion || base.reduce_motion,
-                terminal_progress_bar: over.terminal_progress_bar || base.terminal_progress_bar,
-                show_cwd: over.show_cwd || base.show_cwd,
-                show_git_branch: over.show_git_branch || base.show_git_branch,
+                reduce_motion: base.reduce_motion,
+                terminal_progress_bar: base.terminal_progress_bar,
+                show_cwd: base.show_cwd,
+                show_git_branch: base.show_git_branch,
                 auto_compact: over.auto_compact || base.auto_compact,
                 file_autocomplete_limit: over
                     .file_autocomplete_limit
                     .or(base.file_autocomplete_limit),
-                file_autocomplete_show_hidden_files: over.file_autocomplete_show_hidden_files
-                    || base.file_autocomplete_show_hidden_files,
+                file_autocomplete_show_hidden_files: base.file_autocomplete_show_hidden_files,
                 file_injection_enabled: over.file_injection_enabled.or(base.file_injection_enabled),
                 file_injection_max_size: over
                     .file_injection_max_size
@@ -3371,10 +3383,14 @@ pub mod config {
     }
 
     #[cfg(test)]
-    mod remote_control_merge_tests {
-        //! `remoteControl` must never come from a repository's settings file:
-        //! pointing the bridge at a relay opens a channel for driving the agent
-        //! on the developer's machine.
+    mod base_only_merge_tests {
+        //! Fields a repository's settings file must never decide.
+        //!
+        //! `remoteControl` and `remoteControlAtStartup` because pointing the
+        //! bridge at a relay, or opening it, is a channel for driving the agent
+        //! on the developer's machine. The interface preferences because they
+        //! describe the person at the keyboard, and because the `over || base`
+        //! merge they used to share could only ever turn one on.
         use super::*;
 
         fn configured() -> RemoteControlSettings {
@@ -3440,6 +3456,75 @@ pub mod config {
 
             let merged = Settings::merge_with(user, Settings::default(), ProjectRunnables::Deny);
             assert!(merged.remote_control_at_startup);
+        }
+
+        /// An interface preference describes the person at the keyboard. An
+        /// `over || base` merge let a repository turn each of these on and gave
+        /// the user no way to turn it back off while the checkout was open.
+        #[test]
+        fn a_project_settings_file_cannot_decide_an_interface_preference() {
+            let user = Settings::default();
+            let project = Settings {
+                auto_copy_on_highlight: true,
+                notifications: true,
+                show_turn_duration: true,
+                show_message_timestamps: true,
+                reduce_motion: true,
+                terminal_progress_bar: true,
+                show_cwd: true,
+                show_git_branch: true,
+                file_autocomplete_show_hidden_files: true,
+                has_completed_onboarding: true,
+                config: Config {
+                    cursor_blink_enabled: true,
+                    timeline_enabled: true,
+                    file_autocomplete_show_hidden_files: true,
+                    enable_all_mcp_servers: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+
+            assert!(!merged.auto_copy_on_highlight);
+            assert!(!merged.notifications);
+            assert!(!merged.show_turn_duration);
+            assert!(!merged.show_message_timestamps);
+            assert!(!merged.reduce_motion);
+            assert!(!merged.terminal_progress_bar);
+            assert!(!merged.show_cwd);
+            assert!(!merged.show_git_branch);
+            assert!(!merged.file_autocomplete_show_hidden_files);
+            assert!(!merged.has_completed_onboarding);
+            assert!(!merged.config.cursor_blink_enabled);
+            assert!(!merged.config.timeline_enabled);
+            assert!(!merged.config.file_autocomplete_show_hidden_files);
+            assert!(!merged.config.enable_all_mcp_servers);
+        }
+
+        /// And the user's own answers survive a project file that says nothing.
+        #[test]
+        fn the_users_own_interface_preferences_survive_the_merge() {
+            let user = Settings {
+                reduce_motion: true,
+                show_cwd: true,
+                has_completed_onboarding: true,
+                config: Config {
+                    cursor_blink_enabled: true,
+                    timeline_enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, Settings::default(), ProjectRunnables::Deny);
+
+            assert!(merged.reduce_motion);
+            assert!(merged.show_cwd);
+            assert!(merged.has_completed_onboarding);
+            assert!(merged.config.cursor_blink_enabled);
+            assert!(merged.config.timeline_enabled);
         }
 
         /// The refused list is derived by running the merge, so the key has to
@@ -3738,8 +3823,11 @@ pub mod config {
             assert!(config.timeline_enabled);
         }
 
+        /// Only the user's own settings decide whether the timeline panel is
+        /// on. It used to merge as `over || base`, which let a repository turn
+        /// it on and left the user unable to turn it back off.
         #[test]
-        fn either_side_of_a_merge_can_turn_the_timeline_on() {
+        fn only_the_user_can_turn_the_timeline_on() {
             let mut enabled = Settings::default();
             enabled.config.timeline_enabled = true;
 
@@ -3749,7 +3837,7 @@ pub mod config {
                     .timeline_enabled
             );
             assert!(
-                Settings::merge_with(Settings::default(), enabled, ProjectRunnables::Deny)
+                !Settings::merge_with(Settings::default(), enabled, ProjectRunnables::Deny)
                     .config
                     .timeline_enabled
             );
