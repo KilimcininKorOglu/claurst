@@ -570,7 +570,7 @@ async fn drive_turn<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
             json!({
                 "protocolVersion": 1,
                 "clientCapabilities": {},
-                "clientInfo": { "name": "claurst", "version": env!("CARGO_PKG_VERSION") },
+                "clientInfo": { "name": "mikmik", "version": env!("CARGO_PKG_VERSION") },
             }),
             ctx,
         )

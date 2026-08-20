@@ -390,7 +390,7 @@ pub fn merge_remote_into_local(local: &Value, remote: &Value) -> Value {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Return the canonical claurst home directory.
+/// Return the canonical mikmik home directory.
 fn claude_config_dir() -> PathBuf {
     crate::config::Settings::config_dir()
 }

@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn a_new_session_starts_with_nothing_recorded() {
         let id = acp::SessionId::new("session-1");
-        let cwd = PathBuf::from("/tmp/claurst-test");
+        let cwd = PathBuf::from("/tmp/mikmik-test");
         let state = SessionState::new(id.clone(), cwd.clone());
 
         assert_eq!(state.session_id, id);

@@ -116,7 +116,7 @@ fn parse_args(raw: &[&str]) -> Result<Args, String> {
             "session" => {
                 session_id = positional.get(1).map(|s| s.to_string());
                 if session_id.is_none() {
-                    return Err("Usage: claurst stats session <session-id>".to_string());
+                    return Err("Usage: mikmik stats session <session-id>".to_string());
                 }
                 Subcommand::SessionDetail
             }
@@ -135,7 +135,7 @@ fn parse_args(raw: &[&str]) -> Result<Args, String> {
 }
 
 fn help_text() -> &'static str {
-    "Usage: claurst stats [subcommand] [flags]\n\
+    "Usage: mikmik stats [subcommand] [flags]\n\
      \n\
      Reads persisted JSONL transcripts under ~/.config/mikmik/projects/ and produces\n\
      token, cost, and tool-usage summaries.\n\
@@ -734,8 +734,8 @@ fn render_summary(agg: &Aggregated, ctx: &CommandContext) -> String {
     if agg.sessions.is_empty() {
         return format!(
             "{}\n\n{}\n\nNo sessions found.\n\nLooked under {}.\n\
-             Try `claurst stats --all-projects` to widen the scope.",
-            header("Claurst Session Stats"),
+             Try `mikmik stats --all-projects` to widen the scope.",
+            header("MikMik Session Stats"),
             render_scope_line(agg, ctx),
             projects_dir().display(),
         );
@@ -743,7 +743,7 @@ fn render_summary(agg: &Aggregated, ctx: &CommandContext) -> String {
 
     let totals = agg.totals();
     let mut out = String::new();
-    out.push_str(&header("Claurst Session Stats"));
+    out.push_str(&header("MikMik Session Stats"));
     out.push('\n');
     out.push_str(&render_scope_line(agg, ctx));
     out.push_str("\n\n");
@@ -833,7 +833,7 @@ fn render_summary(agg: &Aggregated, ctx: &CommandContext) -> String {
         }
     }
 
-    out.push_str("\nTry: claurst stats sessions · claurst stats tools · claurst stats daily\n");
+    out.push_str("\nTry: mikmik stats sessions · mikmik stats tools · mikmik stats daily\n");
     out
 }
 
@@ -895,12 +895,12 @@ fn render_sessions(agg: &Aggregated, top: Option<usize>, ctx: &CommandContext) -
     if let Some(n) = top {
         if sessions.len() > n {
             out.push_str(&format!(
-                "\n  … {} more session(s) hidden. Use `claurst stats sessions` (no --top) to see all.\n",
+                "\n  … {} more session(s) hidden. Use `mikmik stats sessions` (no --top) to see all.\n",
                 sessions.len() - n
             ));
         }
     }
-    out.push_str("\nUse `claurst stats session <id>` to drill into a session.\n");
+    out.push_str("\nUse `mikmik stats session <id>` to drill into a session.\n");
     out
 }
 

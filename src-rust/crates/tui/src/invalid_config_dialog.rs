@@ -156,16 +156,16 @@ pub fn render_invalid_config_dialog(
         InvalidConfigKind::Settings => vec![
             "  1. Open ~/.config/mikmik/settings.json in a text editor.",
             "  2. Fix the JSON syntax error shown above.",
-            "  3. Restart Claurst.",
+            "  3. Restart MikMik.",
         ],
         InvalidConfigKind::ClaudeMd => vec![
             "  1. Open the AGENTS.md file shown above in a text editor.",
             "  2. Fix the syntax error.",
-            "  3. Restart Claurst.",
+            "  3. Restart MikMik.",
         ],
         InvalidConfigKind::Generic => vec![
             "  1. Fix the configuration file shown above.",
-            "  2. Restart Claurst.",
+            "  2. Restart MikMik.",
         ],
     };
     for instr in instructions {

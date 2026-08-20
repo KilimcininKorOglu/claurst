@@ -20,7 +20,7 @@ impl SlashCommand for McpCommand {
     fn help(&self) -> &str {
         "Usage: /mcp [list|status|auth <server>|connect <server>|logs <server>|resources|prompts|get-prompt ...]\n\n\
          Manages Model Context Protocol (MCP) servers.\n\
-         MCP servers extend Claurst with external tools, resources, and prompt templates.\n\n\
+         MCP servers extend MikMik with external tools, resources, and prompt templates.\n\n\
          Subcommands:\n\
            /mcp                        — list configured servers with live status\n\
            /mcp list                   — same as above\n\
@@ -141,7 +141,7 @@ impl SlashCommand for McpCommand {
             if ctx.mcp_manager.is_none() {
                 output.push_str(
                     "\nNote: MCP manager is not active in this session.\n\
-                     Restart Claurst to connect to MCP servers.\n\
+                     Restart MikMik to connect to MCP servers.\n\
                      Use /mcp connect <server> to retry a single server.",
                 );
             }
@@ -243,7 +243,7 @@ impl McpCommand {
                  {}\n\n\
                  stdio servers authenticate via environment variables (API keys etc.).\n\
                  Add required variables to the 'env' block in ~/.config/mikmik/settings.json,\n\
-                 then restart Claurst or run /mcp connect {} to reconnect.",
+                 then restart MikMik or run /mcp connect {} to reconnect.",
                 server_name, token_note, env_note, server_name
             ));
         }
@@ -324,7 +324,7 @@ impl McpCommand {
              To authenticate:\n\
              1. Open the server URL in your browser and complete OAuth\n\
              2. The token is saved to ~/.config/mikmik/mcp-tokens/{}.json\n\
-             3. Restart Claurst — the token will be used automatically\n\n\
+             3. Restart MikMik — the token will be used automatically\n\n\
              Token storage: ~/.config/mikmik/mcp-tokens/{}.json",
             server_name, token_note, server_url, server_name, server_name
         ))
@@ -337,7 +337,7 @@ impl McpCommand {
             None => {
                 return CommandResult::Message(
                     "MCP manager is not active. No tool information available.\n\
-                 Restart Claurst to connect to MCP servers."
+                 Restart MikMik to connect to MCP servers."
                         .to_string(),
                 )
             }
@@ -419,7 +419,7 @@ impl McpCommand {
                 // No live manager — give useful instructions.
                 CommandResult::Message(format!(
                     "The MCP manager is not running in this session.\n\
-                     To connect '{}', restart Claurst — servers connect automatically\n\
+                     To connect '{}', restart MikMik — servers connect automatically\n\
                      on startup using the configuration in ~/.config/mikmik/settings.json.\n\
                      \n\
                      If the server requires authentication, run /mcp auth {} first.",
@@ -452,7 +452,7 @@ impl McpCommand {
                              If the server stays disconnected:\n\
                              1. Check authentication: /mcp auth {}\n\
                              2. Verify the command/URL in ~/.config/mikmik/settings.json\n\
-                             3. Restart Claurst to force a full reconnect",
+                             3. Restart MikMik to force a full reconnect",
                             server_name,
                             manager.server_status(server_name).display(),
                             server_name
@@ -563,7 +563,7 @@ impl McpCommand {
             }
         } else {
             lines.push("MCP manager is not active in this session.".to_string());
-            lines.push("Restart Claurst to start the MCP runtime.".to_string());
+            lines.push("Restart MikMik to start the MCP runtime.".to_string());
         }
 
         // Hint about log files.

@@ -174,19 +174,19 @@ pub struct OAuthConfig {
 // ---------------------------------------------------------------------------
 
 // Claude Code OAuth client ID, used in stealth-impersonation mode so that
-// Anthropic's auth server accepts Claude Pro/Max tokens through Claurst.
+// Anthropic's auth server accepts Claude Pro/Max tokens through MikMik.
 // The matching request-time impersonation (user-agent, x-app, anthropic-beta,
 // and the Claude Code system-prompt prefix) is wired up in
 // `mikmik_api::client::AnthropicClient` and is required for these tokens to
 // be honoured by the API.
 //
 // Billing note (verified live 2026-06-03, Claude Pro account, extra-usage
-// disabled): a Pro/Max subscription token used through Claurst's impersonation
+// disabled): a Pro/Max subscription token used through MikMik's impersonation
 // IS served and DRAWS FROM THE INTERACTIVE SUBSCRIPTION QUOTA — `oauth/usage`
 // `five_hour`/`seven_day` utilisation climbed (percentage, 0-100 scale) with
 // extra-usage off and `seven_day_oauth_apps` staying null. A side-by-side run of
 // the official `claude -p` (same token via CLAUDE_CODE_OAUTH_TOKEN) hit the same
-// buckets, i.e. Claurst is billed exactly like the official interactive client.
+// buckets, i.e. MikMik is billed exactly like the official interactive client.
 // This CONTRADICTS the earlier assumption that third-party usage falls back to
 // the "extra usage" pool. The CCH was not even required (requests succeeded
 // without it). Caveats: (1) tested before Anthropic's 2026-06-15 dual-bucket

@@ -2,7 +2,7 @@
 //
 // Port of src/services/settingsSync/index.ts
 //
-// Syncs user settings and AGENTS.md memory files between a local Claurst
+// Syncs user settings and AGENTS.md memory files between a local MikMik
 // installation and claude.ai via:
 //   - Upload (interactive CLI, fire-and-forget at startup)
 //   - Download (CCR / MIKMIK_REMOTE=1, blocking before plugin load)
@@ -434,7 +434,7 @@ async fn write_file_for_sync(path: &PathBuf, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Return the canonical claurst home directory.
+/// Return the canonical mikmik home directory.
 fn claude_config_dir() -> PathBuf {
     crate::config::Settings::config_dir()
 }

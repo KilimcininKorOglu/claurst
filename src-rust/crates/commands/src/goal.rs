@@ -45,8 +45,8 @@ impl SlashCommand for GoalCommand {
          /goal resume                   — resume a paused goal\n\
          /goal clear                    — delete the current goal\n\
          /goal complete                 — request a completion audit\n\n\
-         Goals let Claurst work autonomously across turns toward a single\n\
-         verifiable objective. Claurst will keep iterating until the goal is\n\
+         Goals let MikMik work autonomously across turns toward a single\n\
+         verifiable objective. MikMik will keep iterating until the goal is\n\
          complete, you pause it, or the 200-turn runaway guard fires.\n\n\
          Examples:\n\
          /goal Migrate the project from Express to Fastify, keeping all routes passing\n\
@@ -114,7 +114,7 @@ impl SlashCommand for GoalCommand {
                     return CommandResult::Error(format!("Failed to resume goal: {}", e));
                 }
                 return CommandResult::Message(
-                    "Goal resumed. Claurst will continue on the next message.".to_string(),
+                    "Goal resumed. MikMik will continue on the next message.".to_string(),
                 );
             }
             "clear" => {

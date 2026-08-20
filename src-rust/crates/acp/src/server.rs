@@ -84,7 +84,7 @@ impl AgentServer {
             }
             "authenticate" => {
                 let _req: acp::AuthenticateRequest = parse_params(params)?;
-                // Claurst uses local credentials; clients don't need to authenticate.
+                // MikMik uses local credentials; clients don't need to authenticate.
                 answer(acp::AuthenticateResponse::default())
             }
             "session/new" => {
@@ -196,8 +196,8 @@ impl AgentServer {
         );
         *self.client_capabilities.write() = req.client_capabilities.clone();
 
-        let agent_info = acp::Implementation::new("claurst", env!("CARGO_PKG_VERSION"))
-            .title(Some("Claurst".to_string()));
+        let agent_info = acp::Implementation::new("mikmik", env!("CARGO_PKG_VERSION"))
+            .title(Some("MikMik".to_string()));
 
         let mut response = acp::InitializeResponse::new(acp::ProtocolVersion::V1)
             .agent_capabilities(
@@ -921,12 +921,12 @@ mod tests {
 
     #[test]
     fn a_matching_shape_deserializes() {
-        let parsed: Params = parse_params(Some(serde_json::json!({ "name": "claurst" })))
+        let parsed: Params = parse_params(Some(serde_json::json!({ "name": "mikmik" })))
             .expect("a matching shape parses");
         assert_eq!(
             parsed,
             Params {
-                name: "claurst".to_string()
+                name: "mikmik".to_string()
             }
         );
     }

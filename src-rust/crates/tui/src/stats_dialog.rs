@@ -2,7 +2,7 @@
 //!
 //! Four-tab overlay: Overview | Daily Tokens | Cost Heatmap | Models
 //! Data source: the session transcripts under ~/.config/mikmik/projects/, the same
-//! files `claurst stats` reads. This screen used to read ~/.config/mikmik/stats.jsonl,
+//! files `mikmik stats` reads. This screen used to read ~/.config/mikmik/stats.jsonl,
 //! which nothing has ever written, so it reported zeros for every session.
 
 use ratatui::{
@@ -64,7 +64,7 @@ pub struct ModelBreakdown {
 ///
 /// Every project, not just this one: the streak and the heatmap are about the
 /// user's activity, and scoping them to one checkout would reset both on every
-/// `cd`. `claurst stats` is the per-project view.
+/// `cd`. `mikmik stats` is the per-project view.
 pub async fn load_stats() -> AggregatedStats {
     let mut agg = AggregatedStats::default();
     let mut daily: HashMap<String, u64> = HashMap::new();

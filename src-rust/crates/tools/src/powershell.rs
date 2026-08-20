@@ -428,7 +428,7 @@ mod tests {
             return;
         }
         let marker = unique_marker();
-        let err_file = std::env::temp_dir().join(format!("claurst-ps-{marker}.err"));
+        let err_file = std::env::temp_dir().join(format!("mikmik-ps-{marker}.err"));
 
         let result = PowerShellTool
             .execute(

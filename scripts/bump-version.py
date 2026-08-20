@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Stamp a new Claurst version into every canonical source.
+"""Stamp a new MikMik version into every canonical source.
 
 Usage: scripts/bump-version.py vMAJOR.MINOR.PATCH
 
 Touches:
   - src-rust/Cargo.toml                 workspace.package.version
-  - src-rust/Cargo.lock                 12 claurst* workspace package entries
+  - src-rust/Cargo.lock                 12 mikmik* workspace package entries
   - npm/package.json                    version field
   - editors/vscode/package.json         version field
   - README.md                           shields.io badge (text + alt) + Beta callout
   - docs/index.md                       **Version:** line
-  - docs/installation.md                "claurst X.Y.Z" sample output
+  - docs/installation.md                "mikmik X.Y.Z" sample output
   - src-rust/crates/acp/registry-template/agent.json
                                         version field + 5 release download URLs
 
@@ -56,8 +56,8 @@ def bump_cargo_lock(version: str) -> None:
         if re.search(r"^source = ", block, flags=re.MULTILINE):
             continue  # registry / git dep — leave alone
         name_match = re.search(r'^name = "([^"]+)"', block, flags=re.MULTILINE)
-        if not name_match or not name_match.group(1).startswith("claurst"):
-            continue  # any future non-claurst path dep — also leave alone
+        if not name_match or not name_match.group(1).startswith("mikmik"):
+            continue  # any future non-mikmik path dep — also leave alone
         new_block, n = re.subn(
             r'^version = "[^"]+"$',
             f'version = "{version}"',
@@ -96,7 +96,7 @@ def main() -> None:
         count=1,
     )
 
-    # 2. Cargo.lock — every claurst* workspace package
+    # 2. Cargo.lock — every mikmik* workspace package
     bump_cargo_lock(version)
 
     # 3. npm/package.json
@@ -128,11 +128,11 @@ def main() -> None:
         count=1,
     )
 
-    # 6. docs/installation.md — sample output line ("claurst X.Y.Z")
+    # 6. docs/installation.md — sample output line ("mikmik X.Y.Z")
     replace(
         ROOT / "docs" / "installation.md",
-        r"^claurst \d+\.\d+\.\d+$",
-        f"claurst {version}",
+        r"^mikmik \d+\.\d+\.\d+$",
+        f"mikmik {version}",
         count=1,
     )
 

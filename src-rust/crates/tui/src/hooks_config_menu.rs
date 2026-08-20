@@ -7,7 +7,7 @@
 //   Screen 4 ViewHook      — full detail for a single hook
 //
 // The menu is intentionally read-only; as in the TS original, users edit
-// ~/.config/mikmik/settings.json directly or ask Claurst to change hooks.
+// ~/.config/mikmik/settings.json directly or ask MikMik to change hooks.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};

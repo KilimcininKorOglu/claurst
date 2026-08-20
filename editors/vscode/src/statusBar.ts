@@ -14,7 +14,7 @@ export class StatusBar {
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.item.command = 'claurst.openChat';
+    this.item.command = 'mikmik.openChat';
     this.set('idle');
     this.item.show();
   }
@@ -22,16 +22,16 @@ export class StatusBar {
   set(state: AgentState): void {
     switch (state) {
       case 'busy':
-        this.item.text = '$(sync~spin) Claurst';
-        this.item.tooltip = 'Claurst is working. Click to open the chat.';
+        this.item.text = '$(sync~spin) MikMik';
+        this.item.tooltip = 'MikMik is working. Click to open the chat.';
         return;
       case 'ready':
-        this.item.text = '$(comment-discussion) Claurst';
-        this.item.tooltip = 'Claurst is running. Click to open the chat.';
+        this.item.text = '$(comment-discussion) MikMik';
+        this.item.tooltip = 'MikMik is running. Click to open the chat.';
         return;
       default:
-        this.item.text = '$(circle-outline) Claurst';
-        this.item.tooltip = 'Claurst is not running. Click to start a conversation.';
+        this.item.text = '$(circle-outline) MikMik';
+        this.item.tooltip = 'MikMik is not running. Click to start a conversation.';
     }
   }
 

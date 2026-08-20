@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 // Public helpers
 // ---------------------------------------------------------------------------
 
-/// Return the default user-level plugins directory: `<claurst home>/plugins`.
+/// Return the default user-level plugins directory: `<mikmik home>/plugins`.
 pub fn default_user_plugins_dir() -> Option<PathBuf> {
     Some(mikmik_core::config::Settings::config_dir().join("plugins"))
 }

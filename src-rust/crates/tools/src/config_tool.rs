@@ -1,4 +1,4 @@
-// ConfigTool: get or set Claurst configuration settings at runtime.
+// ConfigTool: get or set MikMik configuration settings at runtime.
 //
 // Reads from and persists to `settings.json` under the resolved config root.
 // Supported settings: model, provider, effort, max_tokens, verbose,
@@ -46,7 +46,7 @@ impl Tool for ConfigTool {
     }
 
     fn description(&self) -> &str {
-        "Get or set Claurst configuration settings. Omit 'value' to read the current value. \
+        "Get or set MikMik configuration settings. Omit 'value' to read the current value. \
          Supported settings: model, provider, effort, max_tokens, verbose, permission_mode, \
          auto_compact. Changes persist to settings.json and apply to the next session."
     }

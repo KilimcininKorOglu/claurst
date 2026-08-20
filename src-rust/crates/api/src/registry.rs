@@ -666,7 +666,7 @@ impl ProviderRegistry {
     /// Build a registry that checks **both** environment variables and the
     /// persistent [`AuthStore`] (`~/.config/mikmik/auth.json`) for credentials.
     ///
-    /// This ensures that API keys stored via `/connect` or `claurst auth` are
+    /// This ensures that API keys stored via `/connect` or `mikmik auth` are
     /// picked up at startup, not just env vars.  Falls back to
     /// `from_environment` for providers that only support env-var config, and
     /// adds any extra providers that have keys in the auth store.

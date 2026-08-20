@@ -16,7 +16,7 @@ refs/
 
 # VSCode / unsolicited devcontainers mounts
 .vscode/
-.claurst/
+.mikmik/
 
 # The extension's own launch config is project files, not personal state:
 # without it F5 has no Extension Development Host to run.

@@ -36,7 +36,7 @@ const FILE_PICK_LIMIT = 5000;
 type PastedImage = { mimeType: string; data: string };
 
 /** Names the panel to VS Code, so it can hand one back after a reload. */
-export const CHAT_VIEW_TYPE = 'claurstChat';
+export const CHAT_VIEW_TYPE = 'mikmikChat';
 
 /** What the webview is allowed to do and load.
  *
@@ -138,7 +138,7 @@ export class ChatPanel {
   ): ChatPanel {
     const panel = vscode.window.createWebviewPanel(
       CHAT_VIEW_TYPE,
-      titleOf(opening) ?? 'Claurst',
+      titleOf(opening) ?? 'MikMik',
       vscode.ViewColumn.Beside,
       webviewOptions(extensionUri),
     );
@@ -172,7 +172,7 @@ export class ChatPanel {
   ): void {
     const saved = state as { sessionId?: unknown; cwd?: unknown; title?: unknown } | undefined;
     if (typeof saved?.sessionId !== 'string' || typeof saved?.cwd !== 'string') {
-      outputChannel.appendLine('[claurst-vscode] a restored panel named no session; closing it');
+      outputChannel.appendLine('[mikmik-vscode] a restored panel named no session; closing it');
       panel.dispose();
       return;
     }
@@ -252,7 +252,7 @@ export class ChatPanel {
        agent chose reach the network from inside the panel. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src data:; script-src 'nonce-${nonce}';" />
   <link href="${styleUri}" rel="stylesheet" />
-  <title>Claurst</title>
+  <title>MikMik</title>
 </head>
 <body>
   <div id="header"></div>
@@ -262,7 +262,7 @@ export class ChatPanel {
   <div id="completions" class="hidden"></div>
   <div id="attachments" class="hidden"></div>
   <div id="input-row">
-    <textarea id="input-box" rows="1" placeholder="Ask claurst... (/ for commands, @ for files)"></textarea>
+    <textarea id="input-box" rows="1" placeholder="Ask mikmik... (/ for commands, @ for files)"></textarea>
     <button id="send-btn" title="Send (Enter)">Send</button>
     <button id="stop-btn" title="Cancel the current turn">Stop</button>
   </div>
@@ -452,7 +452,7 @@ export class ChatPanel {
       this.postToWebview({
         type: 'permission',
         requestId,
-        title: toolCall.title ?? 'Claurst is requesting permission',
+        title: toolCall.title ?? 'MikMik is requesting permission',
         description: toolCall.output,
         diffs: toolCall.diffs,
         locations: toolCall.locations,
@@ -530,8 +530,8 @@ export class ChatPanel {
     const picked = await vscode.window.showQuickPick(items, {
       placeHolder:
         items.length < FILE_PICK_LIMIT
-          ? 'Which file should Claurst look at?'
-          : `Which file should Claurst look at? (first ${FILE_PICK_LIMIT})`,
+          ? 'Which file should MikMik look at?'
+          : `Which file should MikMik look at? (first ${FILE_PICK_LIMIT})`,
       matchOnDescription: true,
     });
     if (picked) {
@@ -553,7 +553,7 @@ export class ChatPanel {
       }
       const picked = await vscode.window.showQuickPick(
         modes.availableModes.map((m) => ({ label: m.name, description: m.description, id: m.id })),
-        { placeHolder: 'How should Claurst answer permission requests?', ignoreFocusOut: true },
+        { placeHolder: 'How should MikMik answer permission requests?', ignoreFocusOut: true },
       );
       if (!picked) {
         return;
@@ -601,13 +601,13 @@ export class ChatPanel {
     }
   }
 
-  /** Keep `claurst.busy` in step with whether any panel is mid-turn.
+  /** Keep `mikmik.busy` in step with whether any panel is mid-turn.
    *
    * Counted rather than a flag: two panels can be answering at once, and the
    * first to finish must not tell the keybinding that nothing is running. */
   private static turnStarted(delta: number): void {
     ChatPanel.running = Math.max(0, ChatPanel.running + delta);
-    vscode.commands.executeCommand('setContext', 'claurst.busy', ChatPanel.running > 0);
+    vscode.commands.executeCommand('setContext', 'mikmik.busy', ChatPanel.running > 0);
     ChatPanel.reportState();
   }
 
@@ -702,7 +702,7 @@ export class ChatPanel {
 
   private reportError(e: unknown): void {
     const message = e instanceof Error ? e.message : String(e);
-    this.outputChannel.appendLine(`[claurst-vscode] ${message}`);
+    this.outputChannel.appendLine(`[mikmik-vscode] ${message}`);
     this.postToWebview({ type: 'status', text: `Error: ${message}` });
   }
 

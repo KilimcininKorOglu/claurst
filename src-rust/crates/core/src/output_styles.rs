@@ -41,7 +41,7 @@ impl OutputStyleDef {
         Self {
             name: "default".to_string(),
             label: "Default".to_string(),
-            description: "Standard Claurst responses.".to_string(),
+            description: "Standard MikMik responses.".to_string(),
             prompt: String::new(),
         }
     }

@@ -85,7 +85,7 @@ fn spinner_char(frame_count: u64) -> char {
     SPINNER[(frame_count as usize) % SPINNER.len()]
 }
 
-/// Returns the colour to use for the streaming spinner: claurst red normally,
+/// Returns the colour to use for the streaming spinner: mikmik red normally,
 /// brightening to a hot red when no stream data has arrived for over 3 seconds.
 fn spinner_color(app: &App) -> Color {
     if let Some(start) = app.stall_start {
@@ -2282,7 +2282,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
         // Too small: fall back to a single line
         let line = Line::from(vec![
             Span::styled(
-                "Claurst ",
+                "MikMik ",
                 Style::default()
                     .fg(CLAUDE_ORANGE)
                     .add_modifier(Modifier::BOLD),
@@ -2302,7 +2302,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
         height: box_height,
     };
 
-    // Outer border with title "Claurst vX.Y"
+    // Outer border with title "MikMik vX.Y"
     let accent = app.accent_color;
     let outer_block = Block::default()
         .borders(Borders::ALL)
@@ -2310,7 +2310,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(accent))
         .title(Line::from(vec![
             Span::styled(
-                " Claurst ",
+                " MikMik ",
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -2398,7 +2398,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
     // --- Right column ---
     let tip_text = mikmik_core::tips::select_tip(0)
         .map(|t| t.content.to_string())
-        .unwrap_or_else(|| "Edit AGENTS.md to add instructions for Claurst".to_string());
+        .unwrap_or_else(|| "Edit AGENTS.md to add instructions for MikMik".to_string());
 
     let mut right_lines: Vec<Line> = Vec::new();
     right_lines.push(Line::from(Span::styled(
@@ -2448,14 +2448,14 @@ fn welcome_banner_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         .filter(|u| !u.is_empty());
     let greeting = match username {
         Some(ref name) => format!("Welcome back, {}!", name),
-        None => "Welcome to Claurst".to_string(),
+        None => "Welcome to MikMik".to_string(),
     };
 
     // Too narrow for a bordered box: fall back to a single title line + notices.
     if width < 24 {
         let mut lines = vec![Line::from(vec![
             Span::styled(
-                "Claurst ",
+                "MikMik ",
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -2471,14 +2471,15 @@ fn welcome_banner_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let box_w = width as usize;
     let inner_w = box_w.saturating_sub(4); // "│ " + content + " │"
 
-    // Top border with an embedded title: ╭─ Claurst vX.Y ─…─╮
-    // Span widths: "╭─"=2, " Claurst "=9, "v{ver} "=ver+2, dashes=fill, "╮"=1.
-    let used = 2 + 9 + (APP_VERSION.len() + 2) + 1;
+    // Top border with an embedded title: ╭─ MikMik vX.Y ─…─╮
+    // Span widths: "╭─"=2, TITLE, "v{ver} "=ver+2, dashes=fill, "╮"=1.
+    const TITLE: &str = " MikMik ";
+    let used = 2 + TITLE.len() + (APP_VERSION.len() + 2) + 1;
     let fill = box_w.saturating_sub(used);
     let top = Line::from(vec![
         Span::styled("\u{256d}\u{2500}", Style::default().fg(accent)),
         Span::styled(
-            " Claurst ",
+            TITLE,
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -2963,7 +2964,7 @@ fn render_todo_block(
 
 /// Width of a companion sprite, plus one column of breathing room.
 ///
-/// Every sprite in `claurst-buddy` pads its rows to exactly 12 columns.
+/// Every sprite in `mikmik-buddy` pads its rows to exactly 12 columns.
 const COMPANION_COLUMN: u16 = 13;
 
 /// Narrowest the prompt may become before the companion is dropped.
@@ -5351,9 +5352,38 @@ mod mikmik_welcome_tests {
                 .unwrap_or_else(|| panic!("not drawn: {needle}"))
         };
 
+        // The product carries the mascot's name now, so the banner title
+        // matches "MikMik" too. The mascot's own label is the row that has
+        // the name and nothing else on it.
+        let row_of_the_label = rows
+            .iter()
+            .position(|row| row.contains("MikMik") && !row.contains(APP_VERSION))
+            .expect("the mascot's name is not drawn");
+
         assert!(row_of("/\\_/\\") < row_of("( o.o )"));
         assert!(row_of("( o.o )") < row_of("> ^ <"));
-        assert!(row_of("> ^ <") < row_of("MikMik"));
+        assert!(row_of("> ^ <") < row_of_the_label);
+    }
+
+    #[test]
+    fn the_banner_reaches_its_right_edge() {
+        // The dash fill is arithmetic over the title's width. It was written
+        // against a nine-character title and the rename made it eight, which
+        // left the closing corner short of the edge.
+        let app = App::new(Config::default(), CostTracker::new());
+        for width in [40u16, 80, 120] {
+            let lines = welcome_banner_lines(&app, width);
+            let top: String = lines[0]
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(
+                UnicodeWidthStr::width(top.as_str()),
+                width as usize,
+                "top border at width {width}: {top:?}"
+            );
+        }
     }
 
     #[test]
@@ -6797,8 +6827,10 @@ mod annotation_only_transcript_tests {
         // The bang path pushes an annotation and no message, so a transcript
         // judged empty by message count alone would hide a command that ran.
         let mut app = App::new(Config::default(), CostTracker::new());
+        // The mascot, not the name: the banner keeps drawing "MikMik" above
+        // the transcript, so only the cat tells the welcome box apart.
         assert!(
-            drawn(&app).contains("MikMik"),
+            drawn(&app).contains("> ^ <"),
             "the welcome box is what an empty transcript draws"
         );
 
@@ -6807,7 +6839,7 @@ mod annotation_only_transcript_tests {
         let after = drawn(&app);
         assert!(after.contains("/some/where"), "{after:?}");
         assert!(
-            !after.contains("MikMik"),
+            !after.contains("> ^ <"),
             "the welcome box must give way to the output"
         );
     }

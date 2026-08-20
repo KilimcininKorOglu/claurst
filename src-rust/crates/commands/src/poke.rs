@@ -71,7 +71,7 @@ impl SlashCommand for PokeCommand {
          /poke on         — nudge the model about unfinished todos\n\
          /poke off        — stop nudging\n\
          /poke default    — go back to the configured default (on)\n\n\
-         After a turn that leaves todos unfinished, claurst appends a short\n\
+         After a turn that leaves todos unfinished, mikmik appends a short\n\
          reminder listing what is left so the run continues instead of\n\
          stopping halfway. Turn it off for a session where you drive each\n\
          step yourself. The setting is saved as `autoPoke` in settings."

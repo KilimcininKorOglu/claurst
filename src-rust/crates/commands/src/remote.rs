@@ -61,7 +61,7 @@ impl SlashCommand for RemoteControlCommand {
                          ──────────────\n\
                          Session URL:  {url}\n\
                          Share this URL or QR code with others to let them connect\n\
-                         to this Claurst session from the claude.ai web UI.\n",
+                         to this MikMik session from the claude.ai web UI.\n",
                         url = url
                     )
                 } else {
@@ -99,7 +99,7 @@ impl SlashCommand for RemoteControlCommand {
                      2. Put its address and token in settings.json under\n\
                         \"remoteControl\" (the token must be 32 characters or more)\n\
                      3. Enable:  /remote-control start\n\
-                     4. Restart Claurst — the bridge connects automatically\n\
+                     4. Restart MikMik — the bridge connects automatically\n\
                      5. Open the relay in a browser and enter the same token\n\
                      \n\
                      MIKMIK_BRIDGE_URL and MIKMIK_BRIDGE_TOKEN override the\n\
@@ -123,7 +123,7 @@ impl SlashCommand for RemoteControlCommand {
                 let (bridge_url, token_status) = resolved_relay(&settings);
                 CommandResult::Message(format!(
                     "Remote control bridge enabled at startup.\n\
-                     Restart Claurst to activate the bridge connection.\n\
+                     Restart MikMik to activate the bridge connection.\n\
                      \n\
                      Relay:  {bridge_url}\n\
                      Token:  {token_status}",
@@ -213,7 +213,7 @@ impl SlashCommand for RemoteEnvCommand {
     }
     fn help(&self) -> &str {
         "Usage: /remote-env [set <KEY> <VALUE> | unset <KEY> | list]\n\n\
-         Manages env vars stored in config that are forwarded to remote Claurst sessions.\n\
+         Manages env vars stored in config that are forwarded to remote MikMik sessions.\n\
          These are persisted to settings under the 'env' key."
     }
 

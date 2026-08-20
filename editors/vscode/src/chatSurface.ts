@@ -67,7 +67,7 @@ export class ViewSurface implements ChatSurface {
   }
 
   get title(): string {
-    return this.view.title ?? 'Claurst';
+    return this.view.title ?? 'MikMik';
   }
 
   set title(value: string) {

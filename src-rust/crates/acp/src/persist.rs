@@ -112,7 +112,7 @@ mod tests {
     fn session_with(messages: Vec<Message>) -> Arc<SessionState> {
         let state = SessionState::new(
             agent_client_protocol_schema::SessionId::new("acp-session-1"),
-            PathBuf::from("/tmp/claurst-persist-test"),
+            PathBuf::from("/tmp/mikmik-persist-test"),
         );
         *state.messages.lock() = messages;
         state
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(stored.title.as_deref(), Some("greeting"));
         assert_eq!(
             stored.working_dir.as_deref(),
-            Some("/tmp/claurst-persist-test")
+            Some("/tmp/mikmik-persist-test")
         );
         assert_eq!(stored.model, "claude-opus-4");
         assert_eq!(stored.created_at, session.created_at);
@@ -199,7 +199,7 @@ mod tests {
 
         let forked = SessionState::forked(
             agent_client_protocol_schema::SessionId::new("acp-session-1"),
-            PathBuf::from("/tmp/claurst-persist-test"),
+            PathBuf::from("/tmp/mikmik-persist-test"),
             &parent,
         );
         save(&forked, "m").await;

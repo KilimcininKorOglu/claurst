@@ -1,4 +1,4 @@
-// claurst-plugins: Plugin runtime for the Claurst CLI.
+// mikmik-plugins: Plugin runtime for the MikMik CLI.
 //
 // This crate handles plugin discovery, manifest parsing, hook registration,
 // and the /plugin + /reload-plugins command definitions.

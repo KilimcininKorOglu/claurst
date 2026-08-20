@@ -1,4 +1,4 @@
-//! Git utilities for Claurst.
+//! Git utilities for MikMik.
 //!
 //! Read-only: every helper here reports on a repository and none of them
 //! writes to one. Anything that changes a user's checkout belongs somewhere

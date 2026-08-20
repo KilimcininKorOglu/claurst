@@ -26,7 +26,7 @@ pub fn todos_path(session_id: &str) -> anyhow::Result<PathBuf> {
     Ok(todos_dir().join(format!("{}.json", session_id)))
 }
 
-/// Directory holding persisted todo lists (`<claurst home>/todos`).
+/// Directory holding persisted todo lists (`<mikmik home>/todos`).
 fn todos_dir() -> PathBuf {
     mikmik_core::config::Settings::config_dir().join("todos")
 }
@@ -481,11 +481,11 @@ mod tests {
         );
         // Route the assertion through the same canonical resolver instead of
         // hardcoding `.mikmik`: the todos file must live under the resolved
-        // claurst home (which may be ~/.config/mikmik, $MIKMIK_HOME, or the XDG dir).
+        // mikmik home (which may be ~/.config/mikmik, $MIKMIK_HOME, or the XDG dir).
         let home = mikmik_core::config::Settings::config_dir();
         assert!(
             path.starts_with(home.join("todos")),
-            "todos_path should be under the claurst home"
+            "todos_path should be under the mikmik home"
         );
         assert!(
             path_str.ends_with(".json"),

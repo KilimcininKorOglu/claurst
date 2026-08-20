@@ -136,7 +136,7 @@ impl SlashCommand for AgentCommand {
         "List available agents or get info about a specific agent"
     }
     fn help(&self) -> &str {
-        "Usage: /agent [name]\n\nWithout arguments, lists all available named agents.\nWith a name, shows details for that agent.\n\nTo use an agent, start Claurst with: --agent <name>"
+        "Usage: /agent [name]\n\nWithout arguments, lists all available named agents.\nWith a name, shows details for that agent.\n\nTo use an agent, start MikMik with: --agent <name>"
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -171,7 +171,7 @@ impl SlashCommand for AgentCommand {
                         .unwrap_or_default(),
                 ));
             }
-            output.push_str("\nUse --agent <name> when starting Claurst to activate an agent.");
+            output.push_str("\nUse --agent <name> when starting MikMik to activate an agent.");
             CommandResult::Message(output)
         } else if let Some(def) = all_agents.get(agent_name) {
             // Show details for the named agent.
@@ -192,7 +192,7 @@ impl SlashCommand for AgentCommand {
             if let Some(ref prompt) = def.prompt {
                 output.push_str(&format!("\nSystem prompt prefix:\n  {}\n", prompt));
             }
-            output.push_str(&format!("\nTo activate: claurst --agent {}", agent_name));
+            output.push_str(&format!("\nTo activate: mikmik --agent {}", agent_name));
             CommandResult::Message(output)
         } else {
             CommandResult::Error(format!(

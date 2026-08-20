@@ -1,8 +1,8 @@
-// upgrade.rs — `claurst upgrade` subcommand.
+// upgrade.rs — `mikmik upgrade` subcommand.
 //
 // Downloads the latest release from GitHub, extracts it, and atomically
 // replaces the running binary.  Mirrors the logic in install.sh / install.ps1
-// so that an `upgrade` from inside Claurst feels identical to a fresh install.
+// so that an `upgrade` from inside MikMik feels identical to a fresh install.
 //
 // Extraction shells out to `tar` (Linux/macOS) or PowerShell `Expand-Archive`
 // (Windows) — both are present on every modern system and saves us pulling
@@ -12,8 +12,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const REPO: &str = "KilimcininKorOglu/claurst";
-const APP: &str = "claurst";
+const REPO: &str = "KilimcininKorOglu/mikmik";
+const APP: &str = "mikmik";
 
 pub async fn run_upgrade(args: &[String]) -> Result<()> {
     // -------- arg parsing --------
@@ -85,9 +85,9 @@ pub async fn run_upgrade(args: &[String]) -> Result<()> {
 
     // -------- locate the new binary --------
     let bin_name = if cfg!(target_os = "windows") {
-        "claurst.exe"
+        "mikmik.exe"
     } else {
-        "claurst"
+        "mikmik"
     };
     let new_binary = extract_dir.join(bin_name);
     if !new_binary.exists() {
@@ -125,18 +125,18 @@ pub async fn run_upgrade(args: &[String]) -> Result<()> {
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
     println!("\nUpgraded to v{}.", target_version);
-    println!("Run `claurst --version` in a new shell to verify.");
+    println!("Run `mikmik --version` in a new shell to verify.");
     Ok(())
 }
 
 fn print_help() {
     println!(
-        "Usage: claurst upgrade [options]\n\n\
+        "Usage: mikmik upgrade [options]\n\n\
          Options:\n\
            -v, --version <v>   Install a specific version (default: latest)\n\
            -f, --force         Reinstall even if already up to date\n\
            -h, --help          Show this help\n\n\
-         Downloads the latest claurst release from GitHub and replaces this\n\
+         Downloads the latest mikmik release from GitHub and replaces this\n\
          binary in place. Your settings and sessions are preserved."
     );
 }
@@ -183,7 +183,7 @@ async fn fetch_latest_version() -> Result<String> {
     let url = format!("https://api.github.com/repos/{}/releases/latest", REPO);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent(format!("claurst-upgrade/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("mikmik-upgrade/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
     let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
@@ -204,7 +204,7 @@ async fn fetch_latest_version() -> Result<String> {
 async fn download_to_file(url: &str, dest: &Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
-        .user_agent(format!("claurst-upgrade/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("mikmik-upgrade/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
     let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
@@ -377,7 +377,7 @@ fn swap_binary(current: &Path, new: &Path) -> Result<()> {
             format!("failed to sideline current exe to {}", sidelined.display())
         })?;
         if let Err(e) = std::fs::copy(new, current) {
-            // Try to roll back the rename so the user isn't left without claurst.
+            // Try to roll back the rename so the user isn't left without mikmik.
             let _ = std::fs::rename(&sidelined, current);
             bail!("failed to install new binary: {}", e);
         }
@@ -443,7 +443,7 @@ fn tempdir_for_upgrade() -> Result<PathBuf> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let dir = base.join(format!("claurst-upgrade-{}-{}", pid, now));
+    let dir = base.join(format!("mikmik-upgrade-{}-{}", pid, now));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -464,7 +464,7 @@ mod tests {
             static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
             let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "claurst-upgrade-test-{}-{}-{}",
+                "mikmik-upgrade-test-{}-{}-{}",
                 std::process::id(),
                 name,
                 id
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn staging_files_are_unique_and_removed_on_drop() {
         let dir = TestDir::new("unique-stage");
-        let current = dir.path().join("claurst");
+        let current = dir.path().join("mikmik");
 
         let (first, first_file) =
             StagedBinary::create_next_to(&current).expect("first staging file");
@@ -516,7 +516,7 @@ mod tests {
     }
 
     // Regression test for the ETXTBSY bug: swap_binary must be able to
-    // replace a binary while it is actively running (mirrors `claurst
+    // replace a binary while it is actively running (mirrors `mikmik
     // upgrade` replacing its own executable). The current test harness is
     // itself a portable native executable, so copying and spawning it avoids
     // assumptions about whether system tools live in /bin or /usr/bin.

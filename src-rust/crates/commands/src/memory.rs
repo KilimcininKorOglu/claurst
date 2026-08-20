@@ -19,8 +19,8 @@ impl SlashCommand for MemoryCommand {
     }
     fn help(&self) -> &str {
         "Usage: /memory [edit|clear] [global]\n\n\
-         Shows the content of AGENTS.md files that provide project context to Claurst.\n\
-         Claurst reads these files automatically at session start.\n\n\
+         Shows the content of AGENTS.md files that provide project context to MikMik.\n\
+         MikMik reads these files automatically at session start.\n\n\
          Subcommands:\n\
            /memory              — show all AGENTS.md files\n\
            /memory edit         — open project AGENTS.md in your editor\n\
@@ -138,7 +138,7 @@ impl SlashCommand for MemoryCommand {
             return match tokio::fs::write(&target, "").await {
                 Ok(_) => CommandResult::Message(format!(
                     "Cleared {} memory file at {}.\n\
-                     Claurst will no longer see this content at session start.",
+                     MikMik will no longer see this content at session start.",
                     label,
                     target.display()
                 )),

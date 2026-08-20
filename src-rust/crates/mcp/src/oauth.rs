@@ -42,7 +42,7 @@ impl McpToken {
 
 /// Directory holding the MCP OAuth token store.
 ///
-/// Defaults to `<claurst home>/mcp-tokens`, but can be redirected with the
+/// Defaults to `<mikmik home>/mcp-tokens`, but can be redirected with the
 /// `MIKMIK_MCP_TOKENS_DIR` environment variable. The override lets tests run
 /// hermetically (and lets packagers/sandboxes relocate the store) without
 /// writing to the real HOME, which is unwritable in sandboxed builds.
@@ -153,7 +153,7 @@ fn fallback_oauth_metadata(server_url: &str) -> McpOAuthMetadata {
 fn build_mcp_auth_url(authorization_endpoint: &str, redirect_uri: &str, verifier: &str) -> String {
     let challenge = pkce_challenge(verifier);
     format!(
-        "{}?client_id=claurst&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256",
+        "{}?client_id=mikmik&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256",
         authorization_endpoint,
         urlencoding::encode(redirect_uri),
         challenge,
@@ -667,7 +667,7 @@ mod tests {
             redirect_uri,
             verifier,
         );
-        assert!(url.contains("client_id=claurst"));
+        assert!(url.contains("client_id=mikmik"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback"));

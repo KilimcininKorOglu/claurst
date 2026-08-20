@@ -15,7 +15,7 @@ use crate::ModelRegistry;
 pub fn model_cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("claurst")
+        .join("mikmik")
 }
 
 /// Resolve the models.dev source URL, honoring env-var overrides.

@@ -1,5 +1,5 @@
 // cc-core: Core types, error handling, configuration, settings, and constants
-// for Claurst.
+// for MikMik.
 //
 // All sub-modules are defined inline below.
 
@@ -132,7 +132,7 @@ pub use skill_discovery::{discover_skills, parse_skill_file, strip_frontmatter, 
 pub mod error {
     use thiserror::Error;
 
-    /// The unified error type for Claurst.
+    /// The unified error type for MikMik.
     #[derive(Error, Debug)]
     pub enum ClaudeError {
         #[error("API error: {0}")]
@@ -1546,7 +1546,7 @@ pub mod config {
         )]
         pub request_timeout_secs: Option<u64>,
         /// Whether app-level mouse capture is enabled. `None` (default) or
-        /// `Some(true)` means claurst captures the mouse for scroll / right-click
+        /// `Some(true)` means mikmik captures the mouse for scroll / right-click
         /// context menu / middle-click paste / drag text-selection. Set
         /// `"mouseCapture": false` to release the mouse to the terminal so native
         /// click-drag selection and copy/paste work without lag (issue #104).
@@ -2476,7 +2476,7 @@ pub mod config {
         }
 
         /// Whether `id` names an account: one the user configured, or one
-        /// claurst ships with.
+        /// mikmik ships with.
         pub fn is_account_id(&self, id: &str) -> bool {
             self.provider_configs.contains_key(id)
                 || crate::provider_id::ProviderId::is_well_known(id)
@@ -2657,8 +2657,8 @@ pub mod config {
     }
 
     impl Settings {
-        /// The canonical per-user claurst home directory — the single source of
-        /// truth for where claurst keeps everything (settings, sessions,
+        /// The canonical per-user mikmik home directory — the single source of
+        /// truth for where mikmik keeps everything (settings, sessions,
         /// accounts, skills, …). Every subdirectory (`config_dir().join("sessions")`,
         /// `.join("accounts")`, …) lives under this one root.
         ///
@@ -2700,7 +2700,7 @@ pub mod config {
         fn parse_file(content: &str, path: &Path) -> anyhow::Result<Self> {
             serde_json::from_str(content).map_err(|error| {
                 anyhow::anyhow!(
-                    "Failed to parse settings file {}: {}. The file was not modified; fix the JSON and restart Claurst.",
+                    "Failed to parse settings file {}: {}. The file was not modified; fix the JSON and restart MikMik.",
                     path.display(),
                     error
                 )
@@ -4781,7 +4781,7 @@ pub mod context {
         async fn find_and_read_claude_md(&self) -> Option<String> {
             let mut claude_mds = vec![];
 
-            // Global <claurst home>/AGENTS.md
+            // Global <mikmik home>/AGENTS.md
             {
                 let global_claude_md = crate::config::Settings::config_dir()
                     .join(crate::constants::CLAUDE_MD_FILENAME);
@@ -6262,7 +6262,7 @@ pub mod cost {
         cache_read: u64,
         /// Recorded when the first usage arrives rather than looked up on
         /// read, because the catalogue that knows a provider's real rates
-        /// lives in `claurst-api`, which this crate cannot reach.
+        /// lives in `mikmik-api`, which this crate cannot reach.
         pricing: ModelPricing,
     }
 
@@ -6567,7 +6567,7 @@ pub mod hooks {
                     );
                     // A blocking hook that never answered cannot be read as
                     // approval, so the operation stops. This mirrors what
-                    // `claurst-plugins` already does with its own hooks.
+                    // `mikmik-plugins` already does with its own hooks.
                     if entry.blocking {
                         return HookOutcome::Blocked(format!(
                             "Hook '{}' exceeded {} ms and was stopped",
@@ -7454,8 +7454,8 @@ mod tests {
     async fn project_mcp_servers_are_tagged_project_origin() {
         use crate::config::{McpServerConfig, McpServerOrigin, Settings};
         let dir = tempfile::tempdir().unwrap();
-        let claurst = dir.path().join(".mikmik");
-        std::fs::create_dir_all(&claurst).unwrap();
+        let mikmik = dir.path().join(".mikmik");
+        std::fs::create_dir_all(&mikmik).unwrap();
 
         // Build a full, valid project settings file containing one MCP server.
         // The server is deliberately created with `origin: User` (the value an
@@ -7477,7 +7477,7 @@ mod tests {
             !json.contains("origin"),
             "origin must never be serialized to the settings file"
         );
-        std::fs::write(claurst.join("settings.json"), json).unwrap();
+        std::fs::write(mikmik.join("settings.json"), json).unwrap();
 
         let merged = Settings::load_hierarchical(dir.path()).await.unwrap();
         let server = merged
@@ -9940,9 +9940,9 @@ mod project_settings_boundary_tests {
     /// A checkout carrying `json` as its project settings file.
     fn project_dir(json: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
-        let claurst = dir.path().join(".mikmik");
-        std::fs::create_dir_all(&claurst).expect("mkdir");
-        std::fs::write(claurst.join("settings.json"), json).expect("write project");
+        let mikmik = dir.path().join(".mikmik");
+        std::fs::create_dir_all(&mikmik).expect("mkdir");
+        std::fs::write(mikmik.join("settings.json"), json).expect("write project");
         dir
     }
 

@@ -64,7 +64,7 @@ impl SlashCommand for ThinkBackCommand {
             return CommandResult::Message(
                 "No thinking traces found in this session.\n\
                  Thinking traces appear when the model uses extended thinking mode.\n\
-                 Try asking Claurst to 'think step by step' or 'think carefully'."
+                 Try asking MikMik to 'think step by step' or 'think carefully'."
                     .to_string(),
             );
         }

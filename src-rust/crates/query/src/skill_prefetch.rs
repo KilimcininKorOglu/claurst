@@ -71,7 +71,7 @@ pub type SharedSkillIndex = Arc<RwLock<SkillIndex>>;
 pub async fn prefetch_skills(project_root: &Path, index: SharedSkillIndex) {
     let mut local = SkillIndex::default();
 
-    // 1. User-defined skills: <claurst home>/skills/*.md + {project_root}/.mikmik/skills/*.md
+    // 1. User-defined skills: <mikmik home>/skills/*.md + {project_root}/.mikmik/skills/*.md
     let search_dirs: Vec<std::path::PathBuf> = vec![
         mikmik_core::config::Settings::config_dir().join("skills"),
         project_root.join(".mikmik").join("skills"),

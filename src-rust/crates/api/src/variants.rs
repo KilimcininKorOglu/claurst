@@ -8,7 +8,7 @@
 //!
 //! opencode's `variants()` returns a map of *variant name → request params*; the
 //! variant names ARE the effort tiers ("none" / "minimal" / "low" / "medium" /
-//! "high" / "xhigh" / "max"). Claurst only needs the ordered set of tiers (it maps
+//! "high" / "xhigh" / "max"). MikMik only needs the ordered set of tiers (it maps
 //! each tier to its own thinking-budget / reasoning-effort in
 //! [`mikmik_core::effort::EffortLevel`]), so this port extracts the ordered
 //! *keys* of that map — weakest to strongest — and maps them onto `EffortLevel`.
@@ -23,9 +23,9 @@
 //!   id for both. `npm` is resolved exactly as opencode does
 //!   (`model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible"`) by
 //!   the registry-aware caller ([`crate::effort_support`]).
-//! - opencode has no `ultracode` tier; the caller appends claurst's always-last
+//! - opencode has no `ultracode` tier; the caller appends mikmik's always-last
 //!   `Ultracode` rung on top of whatever this module returns.
-//! - The minimax-m3 adaptive variant map is `{ none, thinking }`; claurst has no
+//! - The minimax-m3 adaptive variant map is `{ none, thinking }`; mikmik has no
 //!   dedicated "thinking" rung, so `thinking` maps to the nearest rung (`High`).
 //!   See the `// NOTE:` at [`effort_key_to_level`].
 
@@ -273,7 +273,7 @@ fn google_thinking_variant_keys(id: &str) -> Vec<&'static str> {
 // key → EffortLevel
 // ---------------------------------------------------------------------------
 
-/// Map an opencode variant key onto claurst's [`EffortLevel`].
+/// Map an opencode variant key onto mikmik's [`EffortLevel`].
 fn effort_key_to_level(key: &str) -> Option<EffortLevel> {
     Some(match key {
         "none" => EffortLevel::None,
@@ -284,7 +284,7 @@ fn effort_key_to_level(key: &str) -> Option<EffortLevel> {
         "xhigh" => EffortLevel::XHigh,
         "max" => EffortLevel::Max,
         // NOTE: opencode's minimax-m3 adaptive map is `{ none, thinking }`.
-        // Claurst has no dedicated "thinking" rung; map it to the nearest one.
+        // MikMik has no dedicated "thinking" rung; map it to the nearest one.
         "thinking" => EffortLevel::High,
         _ => return None,
     })
@@ -488,7 +488,7 @@ pub(crate) fn variant_effort_keys(
 /// weakest to strongest. Empty when the model has no reasoning variants (a
 /// non-reasoning model, or a provider whose `variants()` returns `{}`).
 ///
-/// `Ultracode` is NOT appended here — that is claurst's always-last workflow
+/// `Ultracode` is NOT appended here — that is mikmik's always-last workflow
 /// overlay, added by [`crate::effort_support::supported_efforts`].
 pub fn variant_efforts(
     npm: &str,

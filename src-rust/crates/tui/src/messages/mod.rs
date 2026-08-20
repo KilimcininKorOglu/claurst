@@ -2842,10 +2842,10 @@ mod tests {
 
     #[test]
     fn test_render_user_memory_input() {
-        let result = render_user_memory_input("project", "Claurst");
+        let result = render_user_memory_input("project", "MikMik");
         assert_eq!(result.len(), 2);
         let first = line_text(&result[0]);
-        assert!(first.contains("# project: Claurst"));
+        assert!(first.contains("# project: MikMik"));
         let second = line_text(&result[1]);
         assert!(second.contains("Got it."));
     }

@@ -1,4 +1,4 @@
-// claurst-tui: Terminal UI using ratatui + crossterm for Claurst.
+// mikmik-tui: Terminal UI using ratatui + crossterm for MikMik.
 //
 // This crate provides the interactive terminal interface including:
 // - Message display with syntax highlighting
@@ -124,7 +124,7 @@ pub mod kitty_image;
 pub mod mcp_view;
 /// Memory file selector overlay (AGENTS.md browser).
 pub mod memory_file_selector;
-/// Memory update notification banner (shown after Claurst updates a AGENTS.md file).
+/// Memory update notification banner (shown after MikMik updates a AGENTS.md file).
 pub mod memory_update_notification;
 /// Message copy utilities for different formatting options (markdown, plaintext, code, JSON).
 pub mod message_copy;
@@ -361,7 +361,7 @@ pub fn setup_terminal(mouse_capture: bool) -> io::Result<Terminal<CrosstermBacke
     let kitty_active = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     KEYBOARD_ENHANCEMENT_ACTIVE.store(kitty_active, Ordering::Relaxed);
 
-    set_terminal_title("\u{1f980} Claurst");
+    set_terminal_title("\u{1f980} MikMik");
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -437,11 +437,11 @@ pub fn set_terminal_progress(active: bool) {
 }
 
 /// Update the terminal title to reflect the current session context.
-/// Format: "🦀 | <topic>" or just "🦀 Claurst" when no topic is set.
+/// Format: "🦀 | <topic>" or just "🦀 MikMik" when no topic is set.
 pub fn update_terminal_title(topic: Option<&str>) {
     match topic {
         Some(t) if !t.is_empty() => set_terminal_title(&format!("\u{1f980} | {}", t)),
-        _ => set_terminal_title("\u{1f980} Claurst"),
+        _ => set_terminal_title("\u{1f980} MikMik"),
     }
 }
 
@@ -1056,7 +1056,7 @@ mod tests {
             .join("");
 
         // The compact banner (title + hint) and the message both render.
-        assert!(rendered.contains("Claurst"));
+        assert!(rendered.contains("MikMik"));
         assert!(rendered.contains("? for shortcuts"));
         assert!(rendered.contains("hello"));
         // The full welcome box's recent-activity panel must NOT be drawn during

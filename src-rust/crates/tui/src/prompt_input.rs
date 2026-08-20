@@ -1776,7 +1776,7 @@ fn home_dir() -> Option<String> {
 /// Handle a paste event.
 ///
 /// Large pastes (≥3 lines or >150 chars) are replaced with a compact
-/// placeholder like `[Pasted text #3 +12 lines]` (the shared claurst-core
+/// placeholder like `[Pasted text #3 +12 lines]` (the shared mikmik-core
 /// reference format) while the real content is stored in `paste_contents`.
 /// The placeholder is expanded back into the full content at submit time
 /// (`take()`), by clicking it, or via the `expandPaste` keybinding.
@@ -3572,7 +3572,7 @@ struct KeywordGradient {
     dither: bool,
 }
 
-/// Claurst-red gradient for `ultracode` (matches the `/effort` selector's red
+/// MikMik-red gradient for `ultracode` (matches the `/effort` selector's red
 /// theme): the signature red fading into a deeper red. Unchanged.
 const ULTRACODE_GRADIENT: KeywordGradient = KeywordGradient {
     start: (233, 30, 99),
@@ -3699,7 +3699,7 @@ pub(crate) fn styled_spans_with_keyword_gradient(
     spans
 }
 
-/// Render the prompt input widget in the same low-chrome style as Claurst:
+/// Render the prompt input widget in the same low-chrome style as MikMik:
 /// multi-line input rows (one per logical line in the text) plus an accent
 /// underline. Suggestions are rendered by the footer, not as a boxed dropdown
 /// here.

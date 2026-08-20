@@ -514,7 +514,7 @@ pub fn list_installed() -> Vec<InstalledPlugin> {
 
 fn plugins_root() -> Result<PathBuf, String> {
     crate::loader::default_user_plugins_dir()
-        .ok_or_else(|| "Could not determine the Claurst home directory.".to_string())
+        .ok_or_else(|| "Could not determine the MikMik home directory.".to_string())
 }
 
 /// A directory to clone into, next to the plugins directory rather than inside

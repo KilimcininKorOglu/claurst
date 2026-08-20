@@ -2,7 +2,7 @@
 name = "mikmik-acp"
 version.workspace = true
 edition.workspace = true
-description = "Agent Client Protocol (ACP) server for Claurst — JSON-RPC 2.0 over stdio"
+description = "Agent Client Protocol (ACP) server for MikMik — JSON-RPC 2.0 over stdio"
 
 [dependencies]
 mikmik-core = { workspace = true }

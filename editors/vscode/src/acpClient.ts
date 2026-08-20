@@ -34,7 +34,7 @@ export interface AcpClientEvents {
   onExit?: (code: number | null) => void;
 }
 
-/** Speaks ACP to a `claurst acp` child process over stdio.
+/** Speaks ACP to a `mikmik acp` child process over stdio.
  *
  * One process serves every panel: sessions are independent inside it, and
  * they share the MCP connections and the model catalog the agent built once
@@ -92,11 +92,11 @@ export class AcpClient {
         reject(new Error(`could not run '${executablePath}': ${e.message}`));
       }
       this.pending.clear();
-      this.events.onStderr?.(`[claurst-vscode] ${e.message}`);
+      this.events.onStderr?.(`[mikmik-vscode] ${e.message}`);
     });
     this.child.on('exit', (code) => {
       for (const { reject } of this.pending.values()) {
-        reject(new Error('claurst acp process exited'));
+        reject(new Error('mikmik acp process exited'));
       }
       this.pending.clear();
       this.events.onExit?.(code);
@@ -112,7 +112,7 @@ export class AcpClient {
     try {
       msg = JSON.parse(trimmed);
     } catch {
-      this.events.onStderr?.(`[claurst-vscode] malformed line from agent: ${trimmed}`);
+      this.events.onStderr?.(`[mikmik-vscode] malformed line from agent: ${trimmed}`);
       return;
     }
 
@@ -140,7 +140,7 @@ export class AcpClient {
     if (hasId && hasMethod) {
       // Agent → client request. Only session/request_permission is expected.
       this.handleIncomingRequest(msg.id, msg.method, msg.params).catch((e) => {
-        this.events.onStderr?.(`[claurst-vscode] failed to handle ${msg.method}: ${e}`);
+        this.events.onStderr?.(`[mikmik-vscode] failed to handle ${msg.method}: ${e}`);
       });
       return;
     }
@@ -418,7 +418,7 @@ export class AcpClient {
           fs: { readTextFile: true, writeTextFile: true },
           terminal: this.hostTerminals,
         },
-        clientInfo: { name: 'claurst-vscode', version: this.clientVersion },
+        clientInfo: { name: 'mikmik-vscode', version: this.clientVersion },
       }).then((result) => {
         this.agentCapabilities = capabilitiesOf(result);
       });

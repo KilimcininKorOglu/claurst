@@ -149,7 +149,7 @@ impl SlashCommand for SecurityReviewCommand {
     }
     fn help(&self) -> &str {
         "Usage: /security-review [path]\n\n\
-         Asks Claurst to perform a security review of the codebase.\n\
+         Asks MikMik to perform a security review of the codebase.\n\
          Analyzes for common vulnerabilities: injection attacks, auth issues,\n\
          secrets exposure, unsafe deserialization, path traversal, etc."
     }
@@ -194,12 +194,12 @@ impl SlashCommand for TerminalSetupCommand {
         "terminal-setup"
     }
     fn description(&self) -> &str {
-        "Help configure your terminal for optimal Claurst use"
+        "Help configure your terminal for optimal MikMik use"
     }
     fn help(&self) -> &str {
         "Usage: /terminal-setup\n\n\
          Diagnoses your terminal environment and gives recommendations for\n\
-         optimal Claurst display (font, color support, Unicode, etc.)."
+         optimal MikMik display (font, color support, Unicode, etc.)."
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -272,7 +272,7 @@ impl SlashCommand for TerminalSetupCommand {
             "Terminal Setup Diagnostic\n\
              ─────────────────────────\n\
              {checks}\n\n\
-             Recommendations for optimal Claurst experience:\n\
+             Recommendations for optimal MikMik experience:\n\
              ─────────────────────────────────────────────────\n\
              1. Font: Use a Nerd Font for box-drawing characters and icons\n\
                 {nerd_hint}\n\

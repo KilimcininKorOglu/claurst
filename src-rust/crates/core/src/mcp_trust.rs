@@ -96,10 +96,10 @@ pub fn project_root_for(cwd: &Path) -> Option<PathBuf> {
     let global = Settings::config_dir();
     let mut dir = cwd;
     loop {
-        let claurst = dir.join(".mikmik");
-        if claurst != global {
+        let mikmik = dir.join(".mikmik");
+        if mikmik != global {
             for name in ["settings.json", "settings.jsonc"] {
-                if claurst.join(name).exists() {
+                if mikmik.join(name).exists() {
                     return Some(dir.to_path_buf());
                 }
             }
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn persisted_approval_roundtrips() {
         let root =
-            std::env::temp_dir().join(format!("claurst-mcp-trust-test-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("mikmik-mcp-trust-test-{}", uuid::Uuid::new_v4()));
         let server = project_server("p", "evil");
         let mut store = McpTrustStore::default();
         assert!(!store.is_approved(&root, &server));

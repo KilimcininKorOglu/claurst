@@ -5,7 +5,7 @@ import { AcpClient } from './acpClient';
  * and its message; the output channel keeps the rest. */
 const STDERR_KEPT = 20;
 
-/** Keeps one `claurst acp` process for the whole window.
+/** Keeps one `mikmik acp` process for the whole window.
  *
  * Every panel is a session inside it rather than a process of its own, so the
  * MCP servers are connected once and the model catalog is read once, however
@@ -59,8 +59,8 @@ export class AgentPool {
   private async start(cwd: string): Promise<AcpClient> {
     // A new process reports its own failures; the last one's are history.
     this.recentStderr = [];
-    const config = vscode.workspace.getConfiguration('claurst');
-    const executablePath = config.get<string>('executablePath', 'claurst');
+    const config = vscode.workspace.getConfiguration('mikmik');
+    const executablePath = config.get<string>('executablePath', 'mikmik');
     const hostTerminals = config.get<boolean>('hostTerminals', false);
     const timeoutSeconds = config.get<number>('requestTimeoutSeconds', 120);
     const client = new AcpClient(
@@ -77,7 +77,7 @@ export class AgentPool {
         },
         onExit: (code) => {
           this.outputChannel.appendLine(
-            `[claurst-vscode] agent process exited (code ${code ?? 'unknown'})`,
+            `[mikmik-vscode] agent process exited (code ${code ?? 'unknown'})`,
           );
           // A process that died takes every session with it; the next panel
           // starts a fresh one rather than talking to a corpse.

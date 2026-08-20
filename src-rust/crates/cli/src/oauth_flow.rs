@@ -1,9 +1,9 @@
-// OAuth 2.0 PKCE login flow for the Claurst CLI.
+// OAuth 2.0 PKCE login flow for the MikMik CLI.
 //
 // Uses the Claude Code client ID and impersonates Claude Code at request time
 // (see `mikmik_core::oauth_config` for the impersonation constants and
 // `mikmik_api::AnthropicClient::apply_oauth_stealth` for how they're applied).
-// Claude Pro/Max tokens used through Claurst draw from the account's "extra
+// Claude Pro/Max tokens used through MikMik draw from the account's "extra
 // usage" pool, not subscription quota — users should be aware of this before
 // switching from API-key auth.
 //
@@ -134,7 +134,7 @@ pub async fn run_oauth_login_flow_with_label(
 /// are persisted exactly as the CLI flow does (`save_and_register`), so the
 /// runtime picks up the new credentials (Claude Pro/Max Bearer for the
 /// claude.ai flow). Headless users who cannot complete the browser redirect
-/// can still fall back to `claurst auth login`.
+/// can still fall back to `mikmik auth login`.
 pub async fn run_oauth_login_flow_tui(
     event_tx: mpsc::Sender<DeviceAuthEvent>,
     login_with_claude_ai: bool,

@@ -1,13 +1,13 @@
 {
-  "name": "claurst-vscode",
-  "displayName": "Claurst",
-  "description": "Chat with Claurst, an AI coding agent, without leaving VS Code.",
+  "name": "mikmik-vscode",
+  "displayName": "MikMik",
+  "description": "Chat with MikMik, an AI coding agent, without leaving VS Code.",
   "version": "0.1.7",
   "publisher": "kilimcininkoroglu",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KilimcininKorOglu/claurst.git",
+    "url": "git+https://github.com/KilimcininKorOglu/mikmik.git",
     "directory": "editors/vscode"
   },
   "engines": {
@@ -23,82 +23,82 @@
     "agent",
     "chat",
     "acp",
-    "claurst"
+    "mikmik"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onWebviewPanel:claurstChat"
+    "onWebviewPanel:mikmikChat"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "claurst.openChat",
-        "title": "Claurst: Open Chat",
+        "command": "mikmik.openChat",
+        "title": "MikMik: Open Chat",
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "claurst.newSession",
-        "title": "Claurst: New Session"
+        "command": "mikmik.newSession",
+        "title": "MikMik: New Session"
       },
       {
-        "command": "claurst.stopSession",
-        "title": "Claurst: Stop Current Turn"
+        "command": "mikmik.stopSession",
+        "title": "MikMik: Stop Current Turn"
       },
       {
-        "command": "claurst.resumeSession",
-        "title": "Claurst: Resume Session"
+        "command": "mikmik.resumeSession",
+        "title": "MikMik: Resume Session"
       },
       {
-        "command": "claurst.forkSession",
-        "title": "Claurst: Fork Session"
+        "command": "mikmik.forkSession",
+        "title": "MikMik: Fork Session"
       },
       {
-        "command": "claurst.sendSelection",
-        "title": "Claurst: Send Selection to Chat"
+        "command": "mikmik.sendSelection",
+        "title": "MikMik: Send Selection to Chat"
       }
     ],
     "keybindings": [
       {
-        "command": "claurst.openChat",
+        "command": "mikmik.openChat",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a"
       },
       {
-        "command": "claurst.sendSelection",
+        "command": "mikmik.sendSelection",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
         "when": "editorTextFocus"
       },
       {
-        "command": "claurst.stopSession",
+        "command": "mikmik.stopSession",
         "key": "escape",
-        "when": "claurst.busy"
+        "when": "mikmik.busy"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "claurst.openChat"
+          "command": "mikmik.openChat"
         },
         {
-          "command": "claurst.newSession"
+          "command": "mikmik.newSession"
         },
         {
-          "command": "claurst.stopSession"
+          "command": "mikmik.stopSession"
         },
         {
-          "command": "claurst.resumeSession"
+          "command": "mikmik.resumeSession"
         },
         {
-          "command": "claurst.forkSession"
+          "command": "mikmik.forkSession"
         },
         {
-          "command": "claurst.sendSelection"
+          "command": "mikmik.sendSelection"
         }
       ],
       "editor/context": [
         {
-          "command": "claurst.sendSelection",
+          "command": "mikmik.sendSelection",
           "when": "editorHasSelection",
           "group": "navigation@100"
         }
@@ -107,35 +107,35 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "claurst",
-          "title": "Claurst",
+          "id": "mikmik",
+          "title": "MikMik",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "claurst": [
+      "mikmik": [
         {
           "type": "webview",
-          "id": "claurst.chatView",
+          "id": "mikmik.chatView",
           "name": "Chat"
         }
       ]
     },
     "configuration": {
-      "title": "Claurst",
+      "title": "MikMik",
       "properties": {
-        "claurst.executablePath": {
+        "mikmik.executablePath": {
           "type": "string",
-          "default": "claurst",
-          "description": "Path to the claurst executable. Defaults to resolving 'claurst' from PATH."
+          "default": "mikmik",
+          "description": "Path to the mikmik executable. Defaults to resolving 'mikmik' from PATH."
         },
-        "claurst.hostTerminals": {
+        "mikmik.hostTerminals": {
           "type": "boolean",
           "default": false,
           "description": "Run the agent's shell commands in this extension instead of in the agent, so their output appears live in the chat panel. Off by default: the agent runs commands in a real PTY, and this runs them on a pipe, so anything that checks whether it is attached to a terminal (npm, cargo, git, pytest) behaves differently."
         },
-        "claurst.requestTimeoutSeconds": {
+        "mikmik.requestTimeoutSeconds": {
           "type": "number",
           "default": 120,
           "minimum": 1,

@@ -1,11 +1,11 @@
 // desktop_upsell_startup.rs — DesktopUpsellStartup surface.
 //
 // Shown at startup on supported platforms (macOS / Windows x64) when the user
-// hasn't yet tried the Claurst Code Desktop app.  Mirrors the behavior of
+// hasn't yet tried the MikMik Code Desktop app.  Mirrors the behavior of
 // src/components/DesktopUpsell/DesktopUpsellStartup.tsx:
 //
 //   - Shown at most 3 times per user (seen_count guard).
-//   - Three choices: "Open in Claurst Code Desktop" (Try), "Not now", "Don't ask again".
+//   - Three choices: "Open in MikMik Code Desktop" (Try), "Not now", "Don't ask again".
 //   - "Try" acknowledges and closes (CLI cannot actually launch the desktop app,
 //     so we treat it the same as "Not now" but could be extended).
 //   - "Don't ask again" sets the dismissed flag permanently.
@@ -21,7 +21,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 // Platform guard
 // ---------------------------------------------------------------------------
 
-/// Returns true when Claurst Desktop is a supported platform option.
+/// Returns true when MikMik Desktop is a supported platform option.
 pub fn is_desktop_supported_platform() -> bool {
     cfg!(target_os = "macos") || (cfg!(target_os = "windows") && cfg!(target_arch = "x86_64"))
 }
@@ -42,7 +42,7 @@ pub enum DesktopUpsellSelection {
 impl DesktopUpsellSelection {
     fn label(self) -> &'static str {
         match self {
-            Self::Try => "Open in Claurst Code Desktop",
+            Self::Try => "Open in MikMik Code Desktop",
             Self::NotNow => "Not now",
             Self::Never => "Don't ask again",
         }
@@ -159,7 +159,7 @@ pub fn render_desktop_upsell_startup(
 
     Block::default()
         .title(Span::styled(
-            " Claurst Code Desktop ",
+            " MikMik Code Desktop ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
@@ -179,7 +179,7 @@ pub fn render_desktop_upsell_startup(
     let mut lines: Vec<Line> = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
-            "Same Claurst features with visual diffs, live app",
+            "Same MikMik features with visual diffs, live app",
             Style::default().fg(Color::White),
         )]),
         Line::from(vec![Span::styled(
@@ -314,7 +314,7 @@ mod tests {
             .map(|c| c.symbol())
             .collect::<Vec<_>>()
             .join("");
-        assert!(rendered.contains("Claurst Code Desktop") || rendered.contains("visual diffs"));
+        assert!(rendered.contains("MikMik Code Desktop") || rendered.contains("visual diffs"));
     }
 
     #[test]

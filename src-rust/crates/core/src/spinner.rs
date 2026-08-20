@@ -213,7 +213,7 @@ pub const SPINNER_VERBS: &[&str] = &[
 /// Past-tense verbs shown in the status row after a turn completes.
 ///
 /// A mix of the neutral originals and a big pile of cat wordplay, in honour of
-/// MikMik (claurst's cat mascot) — so "Pounced for 2m 5s" and friends pad by
+/// MikMik (mikmik's cat mascot) — so "Pounced for 2m 5s" and friends pad by
 /// when a turn finishes.
 pub const TURN_COMPLETION_VERBS: &[&str] = &[
     // Neutral.

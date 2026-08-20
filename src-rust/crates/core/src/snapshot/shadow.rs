@@ -33,7 +33,7 @@ impl ShadowSnapshot {
     /// Create a `ShadowSnapshot` for `working_dir`, or return `None` when
     /// git is not on PATH or the directory is not inside a git repository.
     pub fn for_session(working_dir: &Path) -> Option<Self> {
-        let data_root = dirs::data_dir()?.join("claurst").join("snapshot");
+        let data_root = dirs::data_dir()?.join("mikmik").join("snapshot");
         Self::for_session_in(working_dir, &data_root)
     }
 

@@ -221,7 +221,7 @@ pub fn discover_skills(
         }
     }
 
-    // ---- 2. Global skills: <claurst home>/skills/ ---------------------------
+    // ---- 2. Global skills: <mikmik home>/skills/ ---------------------------
     add(scan_dir(
         &crate::config::Settings::config_dir().join("skills"),
     ));
@@ -258,11 +258,11 @@ pub fn discover_skills(
 
 /// Clone or reuse a cached git repo and return skills found in it.
 ///
-/// Cache location: `<system-cache>/claurst/skills/<repo-name>/`
+/// Cache location: `<system-cache>/mikmik/skills/<repo-name>/`
 /// On first access the repo is cloned with `--depth=1`.
 /// Subsequent calls use the already-cloned cache directory as-is.
 fn fetch_git_skills(url: &str) -> Option<Vec<DiscoveredSkill>> {
-    let cache_dir = dirs::cache_dir()?.join("claurst").join("skills");
+    let cache_dir = dirs::cache_dir()?.join("mikmik").join("skills");
 
     // Use the last path segment of the URL as the local directory name.
     let repo_name = url.split('/').next_back()?.trim_end_matches(".git");

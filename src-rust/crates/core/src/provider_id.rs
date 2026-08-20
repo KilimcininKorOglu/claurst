@@ -89,7 +89,7 @@ impl ProviderId {
     pub const NEURALWATT: &'static str = "neuralwatt";
     pub const FREE: &'static str = "free";
 
-    /// Every provider id claurst ships with, including the spelling aliases
+    /// Every provider id mikmik ships with, including the spelling aliases
     /// users type (`lmstudio` for `lm-studio`, `zhipu` for `zhipuai`, …).
     ///
     /// Used to decide whether the first segment of a `"<account>/<model>"`
@@ -165,7 +165,7 @@ impl ProviderId {
         "vultr-ai",
     ];
 
-    /// Whether `id` names a provider claurst ships with.
+    /// Whether `id` names a provider mikmik ships with.
     pub fn is_well_known(id: &str) -> bool {
         Self::WELL_KNOWN.contains(&id)
     }

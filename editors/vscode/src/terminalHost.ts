@@ -2,7 +2,7 @@ import * as cp from 'child_process';
 
 /** Commands the agent asked this extension to run.
  *
- * Only used when the user turns `claurst.hostTerminals` on. The agent's own
+ * Only used when the user turns `mikmik.hostTerminals` on. The agent's own
  * path runs a command in a real PTY, which is what makes tools that check
  * `isatty` behave the way they do in a terminal; a child process here is on a
  * pipe, so that behaviour is lost. What is gained is that the command is the

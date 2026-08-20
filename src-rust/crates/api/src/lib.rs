@@ -1,4 +1,4 @@
-// claurst-api: Anthropic API client with streaming SSE support for Claurst
+// mikmik-api: Anthropic API client with streaming SSE support for MikMik
 // Rust port.
 //
 // Handles:
@@ -659,7 +659,7 @@ pub mod client {
         /// Make an OAuth request look like Claude Code: prepend the
         /// `x-anthropic-billing-header` block (`system[0]`) then the
         /// `"You are Claude Code…"` identity block (`system[1]`), and strip
-        /// Claurst's own attribution so the official identity is the only one the
+        /// MikMik's own attribution so the official identity is the only one the
         /// server sees. No-op for API-key auth.
         fn apply_oauth_stealth(&self, request: &mut CreateMessageRequest) {
             if !self.config.use_bearer_auth {
@@ -678,11 +678,11 @@ pub mod client {
             let identity_block =
                 text_block(mikmik_core::oauth_config::CLAUDE_CODE_SYSTEM_PROMPT_PREFIX.to_string());
 
-            // Drop a leading "You are Claurst…" / "You are a Claude agent…" line:
+            // Drop a leading "You are MikMik…" / "You are a Claude agent…" line:
             // the injected official identity must be the only one the server sees.
             let strip_attr = |text: &str| -> String {
                 let t = text.trim_start();
-                if t.starts_with("You are Claurst") || t.starts_with("You are a Claude agent") {
+                if t.starts_with("You are MikMik") || t.starts_with("You are a Claude agent") {
                     if let Some(i) = t.find("\n\n") {
                         return t[i + 2..].to_string();
                     }
@@ -804,7 +804,7 @@ pub mod client {
                         model
                     )
                 } else {
-                    "Set ANTHROPIC_API_KEY, run `claurst auth login`, \
+                    "Set ANTHROPIC_API_KEY, run `mikmik auth login`, \
                      or use --provider to select a different provider (e.g. --provider openai)."
                         .to_string()
                 };
@@ -923,7 +923,7 @@ pub mod client {
                 } else if model.starts_with("llama") {
                     format!("Model '{}' looks like a Llama model. Use `--provider groq` or `--provider ollama` for local.", model)
                 } else {
-                    "Set ANTHROPIC_API_KEY, run `claurst auth login`, \
+                    "Set ANTHROPIC_API_KEY, run `mikmik auth login`, \
                      or use --provider to select a different provider (e.g. --provider openai)."
                         .to_string()
                 };
@@ -1823,7 +1823,7 @@ mod available_model_tests {
 
     #[test]
     fn the_endpoint_s_own_limits_are_read() {
-        // The gateway reports these; claurst used to drop them and then state
+        // The gateway reports these; mikmik used to drop them and then state
         // a 200K default as though it had been measured.
         let body = r#"{"data":[
             {"id":"claude-opus-5","context_window":1000000,"max_tokens":128000}

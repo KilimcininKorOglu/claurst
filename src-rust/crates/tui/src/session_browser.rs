@@ -621,7 +621,7 @@ mod tests {
                 last_updated: "yesterday".to_string(),
                 message_count: 12,
                 cost_usd: 0.0045,
-                working_dir: Some("/home/dev/claurst".to_string()),
+                working_dir: Some("/home/dev/mikmik".to_string()),
             },
             SessionEntry {
                 id: "sess-003".to_string(),

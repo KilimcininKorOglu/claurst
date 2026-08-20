@@ -3,7 +3,7 @@
 //! configuration options for the model, the account and the reasoning effort.
 //!
 //! Both mechanisms are part of the stable schema, so a client renders them
-//! natively instead of having to know anything about Claurst.
+//! natively instead of having to know anything about MikMik.
 
 use agent_client_protocol_schema as acp;
 use mikmik_core::PermissionMode;

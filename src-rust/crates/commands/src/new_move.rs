@@ -16,13 +16,13 @@
 // Architectural adaptation vs opencode:
 //   * opencode models a first-class Project (one git repo) with many worktrees
 //     tracked in a control plane, and a session carries a `location.directory`.
-//     claurst has no project/worktree registry — a session simply carries a
+//     mikmik has no project/worktree registry — a session simply carries a
 //     `working_dir`. We therefore identify "the same project" by the git *common
 //     directory* (`git rev-parse --git-common-dir`), which is shared by every
 //     linked worktree of a repo, and take the destination as a `/move <dir>`
 //     argument instead of an interactive worktree picker.
 //   * opencode injects a synthetic `<system-reminder>` prompt after a move so the
-//     model learns the cwd changed. claurst re-derives the working directory into
+//     model learns the cwd changed. mikmik re-derives the working directory into
 //     every turn's system prompt (crates/query working_directory +
 //     crates/cli qcfg.working_directory), so re-homing the working_dir already
 //     informs the model on its next turn; we surface the move as a status line

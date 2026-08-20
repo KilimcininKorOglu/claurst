@@ -6,8 +6,8 @@
 //! which keeps it testable and lets the TUI and a remote client show the same
 //! row with the same timing.
 //!
-//! It lives in `claurst-core` rather than `claurst-tui` because
-//! `claurst-bridge` names [`TimelineRow`] on the wire and cannot depend on the
+//! It lives in `mikmik-core` rather than `mikmik-tui` because
+//! `mikmik-bridge` names [`TimelineRow`] on the wire and cannot depend on the
 //! TUI crate.
 
 use serde::{Deserialize, Serialize};

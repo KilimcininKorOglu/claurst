@@ -879,7 +879,7 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
                 .fg(MIKMIK_ACCENT)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" — Claurst", Style::default().fg(MIKMIK_MUTED)),
+        Span::styled(" — MikMik", Style::default().fg(MIKMIK_MUTED)),
         Span::styled(
             format!(
                 "{:>width$}",

@@ -160,7 +160,7 @@ fn render_provider_setup_page(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("     › ", Style::default().fg(pink)),
             Span::styled(
-                "claurst auth login",
+                "mikmik auth login",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -274,7 +274,7 @@ fn render_provider_setup_page(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("     › ", Style::default().fg(pink)),
             Span::styled(
-                "claurst --provider ollama",
+                "mikmik --provider ollama",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -288,7 +288,7 @@ fn render_provider_setup_page(frame: &mut Frame, area: Rect) {
                 Style::default().fg(Color::Rgb(120, 120, 120)),
             ),
             Span::styled(
-                "claurst --help",
+                "mikmik --help",
                 Style::default().fg(Color::Rgb(150, 150, 150)),
             ),
         ]),
@@ -299,7 +299,7 @@ fn render_provider_setup_page(frame: &mut Frame, area: Rect) {
             Span::styled("/providers", Style::default().fg(Color::Rgb(150, 150, 150))),
         ]),
         Line::from(vec![Span::styled(
-            "  → 20+ more providers: claurst --help",
+            "  → 20+ more providers: mikmik --help",
             Style::default().fg(Color::DarkGray),
         )]),
         Line::from(""),
@@ -343,7 +343,7 @@ fn render_welcome_page(frame: &mut Frame, area: Rect) {
     let lines: Vec<Line<'static>> = vec![
         Line::from(vec![
             Span::styled(
-                " Welcome to Claurst",
+                " Welcome to MikMik",
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -359,7 +359,7 @@ fn render_welcome_page(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "  Claurst is an AI-powered coding assistant in your terminal.",
+            "  MikMik is an AI-powered coding assistant in your terminal.",
             Style::default().fg(text),
         )),
         Line::from(""),
@@ -372,11 +372,11 @@ fn render_welcome_page(frame: &mut Frame, area: Rect) {
             Style::default().fg(text),
         )),
         Line::from(Span::styled(
-            "  Claurst can read, edit, and create files in your project.",
+            "  MikMik can read, edit, and create files in your project.",
             Style::default().fg(text),
         )),
         Line::from(Span::styled(
-            "  Claurst can run bash commands, search the web, and more.",
+            "  MikMik can run bash commands, search the web, and more.",
             Style::default().fg(text),
         )),
         Line::from(""),
@@ -560,7 +560,7 @@ mod tests {
             .iter()
             .map(|c| c.symbol().chars().next().unwrap_or(' '))
             .collect();
-        assert!(content.contains("Welcome") || content.contains("Claurst"));
+        assert!(content.contains("Welcome") || content.contains("MikMik"));
     }
 
     #[test]

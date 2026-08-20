@@ -1545,15 +1545,15 @@ async fn run_query_loop_inner(
                     // available.  Return a clear error instead of silently falling
                     // through to the Anthropic client.
                     let hint = match provider_id_str.as_str() {
-                        "google" => "Set GOOGLE_API_KEY or run `claurst auth login --provider google`.",
-                        "openai" => "Set OPENAI_API_KEY or run `claurst auth login --provider openai`.",
+                        "google" => "Set GOOGLE_API_KEY or run `mikmik auth login --provider google`.",
+                        "openai" => "Set OPENAI_API_KEY or run `mikmik auth login --provider openai`.",
                         "groq" => "Set GROQ_API_KEY.",
                         "mistral" => "Set MISTRAL_API_KEY.",
                         "deepseek" => "Set DEEPSEEK_API_KEY.",
                         "xai" => "Set XAI_API_KEY.",
                         "github-copilot" => "Reconnect GitHub Copilot via /connect, or set GITHUB_TOKEN.",
                         "cohere" => "Set COHERE_API_KEY.",
-                        _ => "Set the appropriate API key environment variable or use `claurst auth login`.",
+                        _ => "Set the appropriate API key environment variable or use `mikmik auth login`.",
                     };
                     error!(
                         provider = %provider_id_str,
@@ -2410,12 +2410,12 @@ mod tests {
     #[test]
     fn test_system_prompt_default_when_empty() {
         // The default prompt (no custom system prompt set) should include the
-        // Claurst attribution and standard sections.
+        // MikMik attribution and standard sections.
         let cfg = make_config(None, None);
         let prompt = build_system_prompt(&cfg);
         if let SystemPrompt::Text(text) = prompt {
             assert!(
-                text.contains("Claurst") || text.contains("Claude agent"),
+                text.contains("MikMik") || text.contains("Claude agent"),
                 "Default prompt should contain attribution: {}",
                 text
             );
@@ -2440,7 +2440,7 @@ mod tests {
                 "Custom prompt text should appear in the output"
             );
             assert!(
-                text.contains("Claurst") || text.contains("Claude agent"),
+                text.contains("MikMik") || text.contains("Claude agent"),
                 "Default attribution should still be present"
             );
         } else {

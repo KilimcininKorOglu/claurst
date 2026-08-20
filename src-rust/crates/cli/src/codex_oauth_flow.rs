@@ -1,4 +1,4 @@
-//! OpenAI Codex OAuth 2.0 PKCE flow for Claurst.
+//! OpenAI Codex OAuth 2.0 PKCE flow for MikMik.
 //!
 //! Implements authorization code flow with PKCE to obtain OpenAI access
 //! tokens for Codex model access.
@@ -52,7 +52,7 @@ pub fn generate_state() -> String {
 /// Build the OpenAI authorization URL for Codex OAuth.
 pub fn build_auth_url(code_challenge: &str, state: &str) -> String {
     format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=claurst",
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=mikmik",
         CODEX_AUTHORIZE_URL,
         CODEX_CLIENT_ID,
         urlencoding::encode(CODEX_REDIRECT_URI),
@@ -166,7 +166,7 @@ async fn wait_for_callback(listener: TcpListener) -> anyhow::Result<(String, Str
     // Send HTML response to browser before processing
     let html = if error.is_empty() {
         "<html><body style='background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui'>\
-         <div style='text-align:center'><h1>Authorization Successful</h1><p>You can close this window and return to Claurst.</p></div>\
+         <div style='text-align:center'><h1>Authorization Successful</h1><p>You can close this window and return to MikMik.</p></div>\
          <script>setTimeout(()=>window.close(),2000)</script></body></html>"
     } else {
         "<html><body style='background:#131010;color:#f1ecec;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui'>\

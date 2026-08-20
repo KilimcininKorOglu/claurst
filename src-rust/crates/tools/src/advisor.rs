@@ -2,7 +2,7 @@
 //
 // Claude Code runs its advisor server-side and surfaces it as a tool-use block.
 // The wire format for that is not documented in `spec/`, so this is the
-// client-side equivalent: claurst calls the configured advisor model itself and
+// client-side equivalent: mikmik calls the configured advisor model itself and
 // hands the answer back as an ordinary tool result.
 //
 // The tool is only registered when `advisorModel` is configured, so a session

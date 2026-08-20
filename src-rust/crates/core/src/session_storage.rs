@@ -1,4 +1,4 @@
-// session_storage.rs — JSONL transcript persistence for Claurst.
+// session_storage.rs — JSONL transcript persistence for MikMik.
 //
 // File layout:  ~/.config/mikmik/projects/{base64url(project_root)}/{session_id}.jsonl
 //
@@ -136,7 +136,7 @@ pub struct TranscriptMessage {
     #[serde(default = "default_user_type")]
     pub user_type: String,
 
-    /// Version of the Claurst binary, mirrors `MACRO.VERSION`.
+    /// Version of the MikMik binary, mirrors `MACRO.VERSION`.
     #[serde(default)]
     pub version: String,
 

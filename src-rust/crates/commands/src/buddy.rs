@@ -1,7 +1,7 @@
 // `/buddy` — the companion that sits beside the input box.
 //
 // The companion has two halves. Its bones (species, rarity, eye, hat, shiny,
-// stats) come from `claurst-buddy`, rolled deterministically from the user's
+// stats) come from `mikmik-buddy`, rolled deterministically from the user's
 // identity, so they are the same on every run and cannot be edited into
 // something rarer by hand. Its soul (name and personality) is written once by
 // a model on the first hatch and then kept in `companion.json`.

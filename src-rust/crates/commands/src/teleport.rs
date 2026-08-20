@@ -118,7 +118,7 @@ impl SlashCommand for TeleportCommand {
                     if let Some(p) = explicit {
                         p
                     } else {
-                        // Default: <claurst home>/teleport_<session_id>.json
+                        // Default: <mikmik home>/teleport_<session_id>.json
                         let base = mikmik_core::config::Settings::config_dir();
                         let _ = std::fs::create_dir_all(&base);
                         base.join(format!("teleport_{}.json", ctx.session_id))

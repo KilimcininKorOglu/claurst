@@ -10,7 +10,7 @@
 //   endpoint with `grant_type=refresh_token` before making the request.
 //
 // Model list: static — the Codex endpoint does not expose a /models route,
-//   so we use the `CODEX_MODELS` constant from `claurst-core`.
+//   so we use the `CODEX_MODELS` constant from `mikmik-core`.
 
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -260,7 +260,7 @@ impl CodexProvider {
     ) -> reqwest::RequestBuilder {
         let builder = builder
             .bearer_auth(token)
-            .header("User-Agent", concat!("claurst/", env!("CARGO_PKG_VERSION")));
+            .header("User-Agent", concat!("mikmik/", env!("CARGO_PKG_VERSION")));
 
         if let Some(id) = account_id {
             builder.header("ChatGPT-Account-Id", id)

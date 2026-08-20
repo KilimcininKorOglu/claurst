@@ -256,7 +256,7 @@ impl SlashCommand for PrivacySettingsCommand {
         "privacy-settings"
     }
     fn description(&self) -> &str {
-        "Open Claurst privacy settings"
+        "Open MikMik privacy settings"
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {

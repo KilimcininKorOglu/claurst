@@ -276,13 +276,13 @@ a status table. When all agents have reported, print a final summary."#,
     // -----------------------------------------------------------------------
     BundledSkill {
         name: "update-config",
-        description: "Configure Claurst settings (hooks, permissions, env vars, behaviours) via settings.json.",
+        description: "Configure MikMik settings (hooks, permissions, env vars, behaviours) via settings.json.",
         aliases: &["config-update", "settings"],
         when_to_use: Some("When the user wants to configure automated behaviours, permissions, or settings."),
         argument_hint: Some("<what to configure>"),
         prompt_template: r#"# Update Config Skill
 
-Modify Claurst configuration by updating settings.json files.
+Modify MikMik configuration by updating settings.json files.
 
 ## Settings File Locations
 

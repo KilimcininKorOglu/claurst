@@ -126,7 +126,7 @@ impl OutputStyle {
 // System prompt prefix variants
 // ---------------------------------------------------------------------------
 
-/// Which entrypoint context Claurst is running in.
+/// Which entrypoint context MikMik is running in.
 /// Determines the opening attribution line of the system prompt.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SystemPromptPrefix {
@@ -148,7 +148,7 @@ pub enum SystemPromptPrefix {
 impl SystemPromptPrefix {
     /// Detect from environment variables, mirroring `getCLISyspromptPrefix`.
     pub fn detect(is_non_interactive: bool, has_append_system_prompt: bool) -> Self {
-        // Vertex: always uses the default "Claurst" prefix.
+        // Vertex: always uses the default "MikMik" prefix.
         if std::env::var("ANTHROPIC_VERTEX_PROJECT_ID").is_ok()
             || std::env::var("CLOUD_ML_PROJECT_ID").is_ok()
         {
@@ -178,10 +178,10 @@ impl SystemPromptPrefix {
     pub fn attribution_text(self) -> &'static str {
         match self {
             Self::Cli | Self::Vertex | Self::Bedrock | Self::Remote => {
-                "You are Claurst, Anthropic's official CLI for Claude."
+                "You are MikMik, Anthropic's official CLI for Claude."
             }
             Self::SdkPreset => {
-                "You are Claurst, Anthropic's official CLI for Claude, \
+                "You are MikMik, Anthropic's official CLI for Claude, \
                 running within the Claude Agent SDK."
             }
             Self::Sdk => "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
@@ -664,7 +664,7 @@ mod tests {
     fn test_default_prompt_contains_attribution() {
         let prompt = build_system_prompt(&default_opts());
         assert!(
-            prompt.contains("Claurst"),
+            prompt.contains("MikMik"),
             "Default prompt must contain attribution"
         );
     }

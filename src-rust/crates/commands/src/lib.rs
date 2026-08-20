@@ -1,4 +1,4 @@
-// claurst-commands: Slash command system for Claurst.
+// mikmik-commands: Slash command system for MikMik.
 //
 // This crate implements the /command framework that allows users to type
 // commands like /help, /compact, /clear, /model, /config, /cost, etc.
@@ -592,7 +592,7 @@ impl SlashCommand for HelpCommand {
             ));
         }
 
-        let mut output = String::from("Claurst — Slash Commands\n");
+        let mut output = String::from("MikMik — Slash Commands\n");
         output.push_str("════════════════════════════\n");
 
         for cat in &category_order {
@@ -768,7 +768,7 @@ impl SlashCommand for ExitCommand {
         vec!["quit", "q"]
     }
     fn description(&self) -> &str {
-        "Exit Claurst"
+        "Exit MikMik"
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
@@ -840,7 +840,7 @@ impl SlashCommand for VersionCommand {
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        CommandResult::Message(format!("Claurst v{}", mikmik_core::constants::APP_VERSION))
+        CommandResult::Message(format!("MikMik v{}", mikmik_core::constants::APP_VERSION))
     }
 }
 
@@ -934,7 +934,7 @@ impl SlashCommand for StatusCommand {
             .unwrap_or_else(|_| "n/a".to_string());
 
         CommandResult::Message(format!(
-            "Claurst Status\n\
+            "MikMik Status\n\
              ══════════════════\n\
              Auth:           {auth_status}\n\
              Model:          {model}\n\
@@ -1300,7 +1300,7 @@ impl SlashCommand for ThinkingCommand {
         } else {
             CommandResult::Message(format!(
                 "Extended thinking is available with {}.\n\
-                 You can request thinking by asking Claurst to 'think step by step' or \
+                 You can request thinking by asking MikMik to 'think step by step' or \
                  'think carefully before answering'.",
                 model
             ))
@@ -1396,7 +1396,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
             slash_name: "add-dir",
             target_name: "add-dir",
             slash_aliases: &[],
-            slash_description: "Add a directory to Claurst's allowed workspace paths",
+            slash_description: "Add a directory to MikMik's allowed workspace paths",
             slash_help: "Usage: /add-dir <path>",
         }),
         Box::new(NamedCommandAdapter {
@@ -1424,7 +1424,7 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
             slash_name: "passes",
             target_name: "passes",
             slash_aliases: &[],
-            slash_description: "Share a free week of Claurst with friends",
+            slash_description: "Share a free week of MikMik with friends",
             slash_help: "Usage: /passes",
         }),
         Box::new(NamedCommandAdapter {
@@ -1445,28 +1445,28 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
             slash_name: "desktop",
             target_name: "desktop",
             slash_aliases: &[],
-            slash_description: "Open the Claurst desktop app",
+            slash_description: "Open the MikMik desktop app",
             slash_help: "Usage: /desktop",
         }),
         Box::new(NamedCommandAdapter {
             slash_name: "mobile",
             target_name: "mobile",
             slash_aliases: &[],
-            slash_description: "Set up Claurst on mobile",
+            slash_description: "Set up MikMik on mobile",
             slash_help: "Usage: /mobile",
         }),
         Box::new(NamedCommandAdapter {
             slash_name: "install-github-app",
             target_name: "install-github-app",
             slash_aliases: &[],
-            slash_description: "Set up Claurst GitHub Actions for a repository",
+            slash_description: "Set up MikMik GitHub Actions for a repository",
             slash_help: "Usage: /install-github-app",
         }),
         Box::new(NamedCommandAdapter {
             slash_name: "web-setup",
             target_name: "remote-setup",
             slash_aliases: &["remote-setup"],
-            slash_description: "Configure a remote Claurst environment",
+            slash_description: "Configure a remote MikMik environment",
             slash_help: "Usage: /web-setup",
         }),
         Box::new(NamedCommandAdapter {
@@ -1727,7 +1727,7 @@ pub async fn execute_command(input: &str, ctx: &mut CommandContext) -> Option<Co
 pub mod named_commands;
 
 // ---------------------------------------------------------------------------
-// Stats analytics (persisted transcript aggregation) — backs `claurst stats`.
+// Stats analytics (persisted transcript aggregation) — backs `mikmik stats`.
 // The current-session `/stats` slash command lives above; this module reads
 // JSONL transcripts on disk.
 // ---------------------------------------------------------------------------
@@ -2429,7 +2429,7 @@ mod tests {
         assert!(matches!(result, CommandResult::Message(_)));
         if let CommandResult::Message(msg) = result {
             assert!(
-                msg.contains("claude") || msg.contains("Claurst") || msg.contains('.'),
+                msg.contains("claude") || msg.contains("MikMik") || msg.contains('.'),
                 "Version message should contain version number, got: {}",
                 msg
             );

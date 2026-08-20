@@ -47,7 +47,7 @@ pub fn unique_account_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     }
 }
 
-/// The canonical claurst home directory.
+/// The canonical mikmik home directory.
 pub fn mikmik_dir() -> PathBuf {
     crate::config::Settings::config_dir()
 }

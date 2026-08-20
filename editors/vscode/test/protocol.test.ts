@@ -126,7 +126,7 @@ test('a capability the agent did not claim reads as false', () => {
 
 test('the agent capabilities and name are read when they are there', () => {
   const caps = capabilitiesOf({
-    agentInfo: { name: 'claurst', version: '0.1.7' },
+    agentInfo: { name: 'mikmik', version: '0.1.7' },
     agentCapabilities: {
       loadSession: true,
       promptCapabilities: { image: true, embeddedContext: true },
@@ -134,7 +134,7 @@ test('the agent capabilities and name are read when they are there', () => {
   });
 
   assert.deepEqual(caps, {
-    name: 'claurst',
+    name: 'mikmik',
     version: '0.1.7',
     image: true,
     embeddedContext: true,

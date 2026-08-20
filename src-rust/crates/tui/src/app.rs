@@ -67,7 +67,7 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("diff", "Inspect the current git diff"),
     ("doctor", "Run diagnostics"),
     ("effort", "Set effort level (low/medium/high/max)"),
-    ("exit", "Quit Claurst"),
+    ("exit", "Quit MikMik"),
     ("export", "Export conversation"),
     ("fast", "Toggle fast mode"),
     ("fork", "Fork session into a new branch"),
@@ -86,8 +86,8 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("keybindings", "Show keybinding configuration"),
     ("links", "Open URLs from this session in your browser"),
-    ("login", "Log in to Claurst"),
-    ("logout", "Log out of Claurst"),
+    ("login", "Log in to MikMik"),
+    ("logout", "Log out of MikMik"),
     (
         "managed-agents",
         "Configure manager-executor managed agent system",
@@ -109,7 +109,7 @@ const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("caveman", "Caveman persona output style — save big token"),
     ("rocky", "Rocky persona output style — amaze amaze amaze"),
     ("normal", "Reset persona / output style to default"),
-    ("quit", "Exit Claurst"),
+    ("quit", "Exit MikMik"),
     ("refresh", "Clear saved provider auth and model caches"),
     ("rename", "Rename this session"),
     ("resume", "Resume a previous session"),
@@ -1304,7 +1304,7 @@ pub struct App {
     ///
     /// Not the same creature as `mikmik_current_pose` above: that is the
     /// welcome-screen mascot, this one is per-user and comes from
-    /// `claurst-buddy`.
+    /// `mikmik-buddy`.
     pub companion: Option<mikmik_buddy::Companion>,
     /// What the companion is saying right now, shown above the prompt box.
     ///
@@ -1560,8 +1560,8 @@ pub struct App {
     /// the filesystem. `extra_slash_commands` cannot answer this: it mixes
     /// skills with plugin-contributed commands.
     pub skill_count: usize,
-    /// Whether Claurst was launched from the user's home directory.
-    /// Shown as a startup notice: "Note: You have launched Claurst in your home directory…"
+    /// Whether MikMik was launched from the user's home directory.
+    /// Shown as a startup notice: "Note: You have launched MikMik in your home directory…"
     pub home_dir_warning: bool,
     /// Output style: "auto" | "stream" | "verbose".
     pub output_style: String,
@@ -1785,7 +1785,7 @@ impl App {
             // Try to load cached models.dev data from disk.
             let cache_path = dirs::cache_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("claurst")
+                .join("mikmik")
                 .join("models.json");
             reg.load_cache(&cache_path);
             reg.apply_model_overrides(&config.model_overrides);
@@ -2260,7 +2260,7 @@ impl App {
     fn load_model_registry_cache(&mut self) {
         let cache_path = dirs::cache_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("claurst")
+            .join("mikmik")
             .join("models.json");
         if cache_path.exists() {
             self.model_registry.load_cache(&cache_path);
@@ -3100,11 +3100,11 @@ impl App {
                     PermissionMode::Default
                 };
                 self.status_message = Some(if self.plan_mode {
-                    "Plan mode ON — Claurst will plan before acting.".to_string()
+                    "Plan mode ON — MikMik will plan before acting.".to_string()
                 } else {
                     "Plan mode OFF.".to_string()
                 });
-                // Allow CLI path to also run (sends UserMessage to Claurst).
+                // Allow CLI path to also run (sends UserMessage to MikMik).
                 false
             }
             "compact" => {

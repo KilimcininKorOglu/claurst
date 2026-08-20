@@ -448,7 +448,7 @@ async fn log_in(
 ) -> Outcome {
     let Some(runner) = runtime.login_runner.clone() else {
         return Outcome::failed(
-            "This agent was started without a way to log in. Run `claurst auth login` in a \
+            "This agent was started without a way to log in. Run `mikmik auth login` in a \
              terminal instead.",
         );
     };

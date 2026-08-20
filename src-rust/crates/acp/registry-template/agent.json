@@ -1,10 +1,10 @@
 {
-  "id": "claurst",
-  "name": "Claurst",
+  "id": "mikmik",
+  "name": "MikMik",
   "version": "0.1.7",
   "description": "Open-source, multi-provider terminal coding agent built in Rust. Multi-provider routing (Anthropic, OpenAI, Google, Groq, Ollama, OpenAI-compatible, …), full MCP support, plugin system, Rustle companion, chat forking, memory consolidation. No telemetry.",
-  "repository": "https://github.com/KilimcininKorOglu/claurst",
-  "website": "https://kilimcininkoroglu.github.io/claurst",
+  "repository": "https://github.com/KilimcininKorOglu/mikmik",
+  "website": "https://kilimcininkoroglu.github.io/mikmik",
   "authors": [
     "Kuber Mehta"
   ],
@@ -12,28 +12,28 @@
   "distribution": {
     "binary": {
       "darwin-aarch64": {
-        "archive": "https://github.com/KilimcininKorOglu/claurst/releases/download/v0.1.7/claurst-macos-aarch64.tar.gz",
-        "cmd": "./claurst",
+        "archive": "https://github.com/KilimcininKorOglu/mikmik/releases/download/v0.1.7/mikmik-macos-aarch64.tar.gz",
+        "cmd": "./mikmik",
         "args": ["acp"]
       },
       "darwin-x86_64": {
-        "archive": "https://github.com/KilimcininKorOglu/claurst/releases/download/v0.1.7/claurst-macos-x86_64.tar.gz",
-        "cmd": "./claurst",
+        "archive": "https://github.com/KilimcininKorOglu/mikmik/releases/download/v0.1.7/mikmik-macos-x86_64.tar.gz",
+        "cmd": "./mikmik",
         "args": ["acp"]
       },
       "linux-aarch64": {
-        "archive": "https://github.com/KilimcininKorOglu/claurst/releases/download/v0.1.7/claurst-linux-aarch64.tar.gz",
-        "cmd": "./claurst",
+        "archive": "https://github.com/KilimcininKorOglu/mikmik/releases/download/v0.1.7/mikmik-linux-aarch64.tar.gz",
+        "cmd": "./mikmik",
         "args": ["acp"]
       },
       "linux-x86_64": {
-        "archive": "https://github.com/KilimcininKorOglu/claurst/releases/download/v0.1.7/claurst-linux-x86_64.tar.gz",
-        "cmd": "./claurst",
+        "archive": "https://github.com/KilimcininKorOglu/mikmik/releases/download/v0.1.7/mikmik-linux-x86_64.tar.gz",
+        "cmd": "./mikmik",
         "args": ["acp"]
       },
       "windows-x86_64": {
-        "archive": "https://github.com/KilimcininKorOglu/claurst/releases/download/v0.1.7/claurst-windows-x86_64.zip",
-        "cmd": "./claurst.exe",
+        "archive": "https://github.com/KilimcininKorOglu/mikmik/releases/download/v0.1.7/mikmik-windows-x86_64.zip",
+        "cmd": "./mikmik.exe",
         "args": ["acp"]
       }
     }

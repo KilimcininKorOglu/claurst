@@ -22,7 +22,7 @@ export async function chooseWorkingFolder(): Promise<string | undefined> {
     return roots[0].uri.fsPath;
   }
   const picked = await vscode.window.showWorkspaceFolderPick({
-    placeHolder: 'Which folder should Claurst work in?',
+    placeHolder: 'Which folder should MikMik work in?',
   });
   return picked?.uri.fsPath;
 }

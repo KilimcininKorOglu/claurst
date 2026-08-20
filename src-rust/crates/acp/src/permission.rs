@@ -1,4 +1,4 @@
-//! Bridge between Claurst's synchronous `PermissionHandler` trait and the
+//! Bridge between MikMik's synchronous `PermissionHandler` trait and the
 //! asynchronous `session/request_permission` JSON-RPC round-trip used by ACP.
 //!
 //! The handler itself simply returns `Ask { reason }` for every permission

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 // EffortLevel enum
 // ---------------------------------------------------------------------------
 
-/// The named effort levels supported by Claurst.
+/// The named effort levels supported by MikMik.
 ///
 /// Ordered from least to most effort (the enum's *declaration order* is the
 /// canonical ascending order — see the derived [`Ord`]). `None` and `Minimal`
@@ -298,7 +298,7 @@ result -- do not manufacture ceremony for small tasks.
 
 ## Contract
 
-- Ultracode is a claurst operating procedure, not a separate runtime. System,
+- Ultracode is a mikmik operating procedure, not a separate runtime. System,
   developer, and user rules always win over this text.
 - Do NOT commit, push, publish, deploy, or delete anything unless the user
   explicitly asks. Ask one clear approval question before any destructive or
@@ -336,10 +336,10 @@ this session, integrate, then verify. Write scratch notes under
 
 ### Delegated (default for non-trivial ultracode work)
 When the work has bounded, non-overlapping, independent packets and delegation is
-allowed, use claurst's native delegation primitives. Keep the blocking critical
+allowed, use mikmik's native delegation primitives. Keep the blocking critical
 path in the parent; delegate only useful sidecar work.
 
-## 3. Delegated mode -- claurst native primitives
+## 3. Delegated mode -- mikmik native primitives
 
 - **`Agent`** -- spawn a subagent for one bounded packet (read-only exploration,
   test writing, triage, or a disjoint write scope). Use `isolation: "worktree"`
@@ -384,7 +384,7 @@ run, and remaining risk.
 
 ## Composing with /goal (multi-turn)
 
-Ultracode is compatible with claurst's continuation/goal mode: a large task can
+Ultracode is compatible with mikmik's continuation/goal mode: a large task can
 span multiple turns. For a long, autonomous objective, combine ultracode with
 `/goal <objective>` -- the goal loop keeps working across turns while ultracode
 governs *how* each turn plans, delegates, integrates, and verifies. Ultracode

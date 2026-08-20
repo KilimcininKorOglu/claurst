@@ -1,4 +1,4 @@
-//! Build script for Claurst CLI
+//! Build script for MikMik CLI
 //!
 //! Embeds build-time metadata (version, timestamp, git info) into the binary
 //! for display and debugging purposes.
@@ -15,7 +15,7 @@ fn main() {
     println!("cargo:rustc-env=GIT_COMMIT={}", commit);
 
     // Package/distribution metadata
-    println!("cargo:rustc-env=PACKAGE_URL=claurst-source-snapshot");
+    println!("cargo:rustc-env=PACKAGE_URL=mikmik-source-snapshot");
     println!("cargo:rustc-env=FEEDBACK_CHANNEL=github");
     println!("cargo:rustc-env=ISSUES_EXPLAINER=This build does not include Anthropic internal issue routing.");
 

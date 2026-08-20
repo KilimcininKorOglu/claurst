@@ -30,16 +30,24 @@ impl IdeKind {
         }
     }
 
-    /// Install command for the Claurst extension (if known for this IDE).
+    /// Install command for the MikMik extension (if known for this IDE).
     pub fn extension_install_command(&self) -> Option<String> {
         match self {
-            Self::VSCode => Some("code --install-extension claurst.claurst".to_string()),
-            Self::VSCodeInsiders => {
-                Some("code-insiders --install-extension claurst.claurst".to_string())
+            Self::VSCode => {
+                Some("code --install-extension kilimcininkoroglu.mikmik-vscode".to_string())
             }
-            Self::Cursor => Some("cursor --install-extension claurst.claurst".to_string()),
-            Self::Windsurf => Some("windsurf --install-extension claurst.claurst".to_string()),
-            Self::VSCodium => Some("codium --install-extension claurst.claurst".to_string()),
+            Self::VSCodeInsiders => Some(
+                "code-insiders --install-extension kilimcininkoroglu.mikmik-vscode".to_string(),
+            ),
+            Self::Cursor => {
+                Some("cursor --install-extension kilimcininkoroglu.mikmik-vscode".to_string())
+            }
+            Self::Windsurf => {
+                Some("windsurf --install-extension kilimcininkoroglu.mikmik-vscode".to_string())
+            }
+            Self::VSCodium => {
+                Some("codium --install-extension kilimcininkoroglu.mikmik-vscode".to_string())
+            }
             _ => None,
         }
     }

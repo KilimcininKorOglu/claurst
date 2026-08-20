@@ -6,7 +6,7 @@ import { StatusBar } from './statusBar';
 import { chooseWorkingFolder } from './workspace';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const outputChannel = vscode.window.createOutputChannel('Claurst');
+  const outputChannel = vscode.window.createOutputChannel('MikMik');
   context.subscriptions.push(outputChannel);
   // The agent is told which client it is talking to; the manifest is the one
   // place that version lives, so nothing else has to be kept in step with it.
@@ -40,13 +40,13 @@ export function activate(context: vscode.ExtensionContext): void {
   ChatPanel.onStateChange = (state) => statusBar.set(state);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.openChat', async () => {
+    vscode.commands.registerCommand('mikmik.openChat', async () => {
       await ChatPanel.show(context.extensionUri, pool, outputChannel);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.newSession', async () => {
+    vscode.commands.registerCommand('mikmik.newSession', async () => {
       // A second panel, not a replacement: two conversations can run side by
       // side inside the one agent process.
       const cwd = await chooseWorkingFolder();
@@ -57,13 +57,13 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.stopSession', () => {
+    vscode.commands.registerCommand('mikmik.stopSession', () => {
       ChatPanel.active?.cancelCurrentTurn();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.sendSelection', async () => {
+    vscode.commands.registerCommand('mikmik.sendSelection', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         vscode.window.showInformationMessage('Open a file to send a selection from.');
@@ -77,12 +77,12 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.forkSession', () => {
+    vscode.commands.registerCommand('mikmik.forkSession', () => {
       // Trying a second approach without losing the first: the fork carries
       // the conversation so far, and the original is untouched.
       const source = ChatPanel.active?.session;
       if (!source) {
-        vscode.window.showInformationMessage('No Claurst conversation to fork.');
+        vscode.window.showInformationMessage('No MikMik conversation to fork.');
         return;
       }
       ChatPanel.create(context.extensionUri, pool, outputChannel, {
@@ -95,7 +95,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claurst.resumeSession', async () => {
+    vscode.commands.registerCommand('mikmik.resumeSession', async () => {
       try {
         const cwd = await chooseWorkingFolder();
         if (!cwd) {
@@ -114,7 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
               description: session.updatedAt,
               session,
             })),
-            { placeHolder: 'Which conversation should Claurst pick up?' },
+            { placeHolder: 'Which conversation should MikMik pick up?' },
           );
           if (!picked) {
             return;
@@ -146,7 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Claurst: ${message}`);
+        vscode.window.showErrorMessage(`MikMik: ${message}`);
       }
     }),
   );
@@ -159,9 +159,9 @@ export function activate(context: vscode.ExtensionContext): void {
  * restart is made where the change was made. */
 function watchConfiguration(pool: AgentPool): vscode.Disposable {
   const startupSettings = [
-    'claurst.executablePath',
-    'claurst.hostTerminals',
-    'claurst.requestTimeoutSeconds',
+    'mikmik.executablePath',
+    'mikmik.hostTerminals',
+    'mikmik.requestTimeoutSeconds',
   ];
   return vscode.workspace.onDidChangeConfiguration(async (event) => {
     if (!startupSettings.some((setting) => event.affectsConfiguration(setting))) {
@@ -169,7 +169,7 @@ function watchConfiguration(pool: AgentPool): vscode.Disposable {
     }
     const restart = 'Restart agent';
     const answer = await vscode.window.showInformationMessage(
-      'Claurst: this setting applies when the agent starts. Restart it now?',
+      'MikMik: this setting applies when the agent starts. Restart it now?',
       restart,
     );
     if (answer !== restart) {

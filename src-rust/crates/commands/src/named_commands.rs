@@ -1,4 +1,4 @@
-//! Named commands (e.g. `claurst agents`, `claurst ide`, `claurst branch`, …).
+//! Named commands (e.g. `mikmik agents`, `mikmik ide`, `mikmik branch`, …).
 //!
 //! These complement slash commands with more complex top-level flows.
 //! A named command is invoked when the *first* CLI argument matches one
@@ -23,15 +23,15 @@ use crate::{CommandContext, CommandResult};
 // Trait
 // ---------------------------------------------------------------------------
 
-/// A top-level named command (`claurst <name> [args…]`).
+/// A top-level named command (`mikmik <name> [args…]`).
 pub trait NamedCommand: Send + Sync {
     /// Primary command name, e.g. `"agents"`.
     fn name(&self) -> &str;
 
-    /// One-line description used in `claurst --help`.
+    /// One-line description used in `mikmik --help`.
     fn description(&self) -> &str;
 
-    /// Usage hint shown in `claurst <name> --help`.
+    /// Usage hint shown in `mikmik <name> --help`.
     fn usage(&self) -> &str;
 
     /// Execute the command.  `args` is the slice of arguments *after* the
@@ -53,7 +53,7 @@ impl NamedCommand for AgentsCommand {
         "Manage and configure sub-agents"
     }
     fn usage(&self) -> &str {
-        "claurst agents [list|create|edit|delete] [name]"
+        "mikmik agents [list|create|edit|delete] [name]"
     }
 
     fn execute_named(&self, args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -67,7 +67,7 @@ impl NamedCommand for AgentsCommand {
                     return CommandResult::Message(
                         "Available Agents (0)\n\n\
                          No custom agents defined. Create one with /new-agent\n\
-                         or run: claurst agents create <name>"
+                         or run: mikmik agents create <name>"
                             .to_string(),
                     );
                 }
@@ -84,7 +84,7 @@ impl NamedCommand for AgentsCommand {
                         ));
                     }
                 }
-                out.push_str("\nUse 'claurst agents create <name>' to add a new agent.");
+                out.push_str("\nUse 'mikmik agents create <name>' to add a new agent.");
                 CommandResult::Message(out)
             }
             "create" => {
@@ -104,9 +104,7 @@ impl NamedCommand for AgentsCommand {
                 let name = match args.get(1).copied() {
                     Some(n) => n,
                     None => {
-                        return CommandResult::Error(
-                            "Usage: claurst agents edit <name>".to_string(),
-                        )
+                        return CommandResult::Error("Usage: mikmik agents edit <name>".to_string())
                     }
                 };
                 CommandResult::Message(format!(
@@ -118,7 +116,7 @@ impl NamedCommand for AgentsCommand {
                     Some(n) => n,
                     None => {
                         return CommandResult::Error(
-                            "Usage: claurst agents delete <name>".to_string(),
+                            "Usage: mikmik agents delete <name>".to_string(),
                         )
                     }
                 };
@@ -142,16 +140,16 @@ impl NamedCommand for AddDirCommand {
         "add-dir"
     }
     fn description(&self) -> &str {
-        "Add a directory to Claurst's allowed workspace paths"
+        "Add a directory to MikMik's allowed workspace paths"
     }
     fn usage(&self) -> &str {
-        "claurst add-dir <path>"
+        "mikmik add-dir <path>"
     }
 
     fn execute_named(&self, args: &[&str], _ctx: &CommandContext) -> CommandResult {
         let raw = match args.first() {
             Some(p) => *p,
-            None => return CommandResult::Error("Usage: claurst add-dir <path>".to_string()),
+            None => return CommandResult::Error("Usage: mikmik add-dir <path>".to_string()),
         };
 
         let path = std::path::Path::new(raw);
@@ -215,7 +213,7 @@ impl NamedCommand for BranchCommand {
         "Create a branch of the current conversation at this point"
     }
     fn usage(&self) -> &str {
-        "claurst branch [create|list|switch] [name|id]"
+        "mikmik branch [create|list|switch] [name|id]"
     }
 
     fn execute_named(&self, args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -254,7 +252,7 @@ impl NamedCommand for BranchCommand {
                         let title = new_session.title.as_deref().unwrap_or("(untitled)");
                         CommandResult::Message(format!(
                             "Created branch: \"{title}\"\nNew session ID: {}\n\
-                             To resume original: claurst -r{}\n\
+                             To resume original: mikmik -r{}\n\
                              To switch to branch: /branch switch {}",
                             new_session.id,
                             ctx.session_id,
@@ -298,7 +296,7 @@ impl NamedCommand for BranchCommand {
                             b.title.as_deref().unwrap_or("(untitled)")
                         ));
                     }
-                    out.push_str("\nUse: claurst branch switch <id>");
+                    out.push_str("\nUse: mikmik branch switch <id>");
                     CommandResult::Message(out)
                 }
             }
@@ -307,7 +305,7 @@ impl NamedCommand for BranchCommand {
                     Some(i) if !i.is_empty() => i.to_string(),
                     _ => {
                         return CommandResult::Error(
-                            "Usage: claurst branch switch <session-id>".to_string(),
+                            "Usage: mikmik branch switch <session-id>".to_string(),
                         )
                     }
                 };
@@ -322,7 +320,7 @@ impl NamedCommand for BranchCommand {
                     Err(e) => CommandResult::Error(format!("Could not load session '{id}': {e}")),
                 }
             }
-            sub => CommandResult::Error(format!("Unknown branch subcommand: '{sub}'\nUsage: claurst branch [create|list|switch] [name|id]")),
+            sub => CommandResult::Error(format!("Unknown branch subcommand: '{sub}'\nUsage: mikmik branch [create|list|switch] [name|id]")),
         }
     }
 }
@@ -341,7 +339,7 @@ impl NamedCommand for TagCommand {
         "Toggle a searchable tag on the current session"
     }
     fn usage(&self) -> &str {
-        "claurst tag [list|add|remove|toggle] [tag]"
+        "mikmik tag [list|add|remove|toggle] [tag]"
     }
 
     fn execute_named(&self, args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -377,7 +375,7 @@ impl NamedCommand for TagCommand {
             "add" => {
                 let tag = match args.get(1).copied() {
                     Some(t) if !t.is_empty() => t.to_string(),
-                    _ => return CommandResult::Error("Usage: claurst tag add <tag>".to_string()),
+                    _ => return CommandResult::Error("Usage: mikmik tag add <tag>".to_string()),
                 };
 
                 let result = tokio::task::block_in_place(|| {
@@ -395,9 +393,7 @@ impl NamedCommand for TagCommand {
             "remove" => {
                 let tag = match args.get(1).copied() {
                     Some(t) if !t.is_empty() => t.to_string(),
-                    _ => {
-                        return CommandResult::Error("Usage: claurst tag remove <tag>".to_string())
-                    }
+                    _ => return CommandResult::Error("Usage: mikmik tag remove <tag>".to_string()),
                 };
 
                 let result = tokio::task::block_in_place(|| {
@@ -413,9 +409,7 @@ impl NamedCommand for TagCommand {
             "toggle" => {
                 let tag = match args.get(1).copied() {
                     Some(t) if !t.is_empty() => t.to_string(),
-                    _ => {
-                        return CommandResult::Error("Usage: claurst tag toggle <tag>".to_string())
-                    }
+                    _ => return CommandResult::Error("Usage: mikmik tag toggle <tag>".to_string()),
                 };
 
                 // Load session to check existing tags
@@ -459,7 +453,7 @@ impl NamedCommand for TagCommand {
                 }
             }
             sub => CommandResult::Error(format!(
-                "Unknown tag subcommand: '{sub}'\nUsage: claurst tag [list|add|remove|toggle] [tag]"
+                "Unknown tag subcommand: '{sub}'\nUsage: mikmik tag [list|add|remove|toggle] [tag]"
             )),
         }
     }
@@ -476,18 +470,18 @@ impl NamedCommand for PassesCommand {
         "passes"
     }
     fn description(&self) -> &str {
-        "Share a free week of Claurst with friends"
+        "Share a free week of MikMik with friends"
     }
     fn usage(&self) -> &str {
-        "claurst passes"
+        "mikmik passes"
     }
 
     fn execute_named(&self, _args: &[&str], _ctx: &CommandContext) -> CommandResult {
         CommandResult::Message(
-            "Claurst Passes \u{2014} Share Claurst with friends\n\n\
-             Share a free week of Claurst with a friend\n\
+            "MikMik Passes \u{2014} Share MikMik with friends\n\n\
+             Share a free week of MikMik with a friend\n\
              Visit https://claude.ai/passes to get your referral link\n\
-             Each referral gives your friend 1 week of Claurst Pro"
+             Each referral gives your friend 1 week of MikMik Pro"
                 .to_string(),
         )
     }
@@ -530,7 +524,7 @@ impl NamedCommand for IdeCommand {
         "Manage IDE integrations and show status"
     }
     fn usage(&self) -> &str {
-        "claurst ide [status|connect|disconnect|open]"
+        "mikmik ide [status|connect|disconnect|open]"
     }
 
     fn execute_named(&self, _args: &[&str], _ctx: &CommandContext) -> CommandResult {
@@ -540,7 +534,7 @@ impl NamedCommand for IdeCommand {
             Some(kind) => {
                 let mut lines = vec![format!("Detected IDE: {}", kind.display_name())];
                 if let Some(cmd) = kind.extension_install_command() {
-                    lines.push(format!("To install the Claurst extension: {}", cmd));
+                    lines.push(format!("To install the MikMik extension: {}", cmd));
                 }
                 lines.join("\n")
             }
@@ -592,7 +586,7 @@ impl NamedCommand for IdeCommand {
             "No active IDE extension connections found.".to_string()
         } else {
             format!(
-                "Connected IDEs:\n{}\n\nUse 'claurst ide open <file>' to open a file in the IDE.",
+                "Connected IDEs:\n{}\n\nUse 'mikmik ide open <file>' to open a file in the IDE.",
                 ides.join("\n")
             )
         };
@@ -615,7 +609,7 @@ impl NamedCommand for PrCommentsCommand {
         "Get review comments from the current GitHub pull request"
     }
     fn usage(&self) -> &str {
-        "claurst pr-comments"
+        "mikmik pr-comments"
     }
 
     fn execute_named(&self, _args: &[&str], _ctx: &CommandContext) -> CommandResult {
@@ -696,10 +690,10 @@ impl NamedCommand for DesktopCommand {
         "desktop"
     }
     fn description(&self) -> &str {
-        "Download and set up Claurst Desktop app"
+        "Download and set up MikMik Desktop app"
     }
     fn usage(&self) -> &str {
-        "claurst desktop"
+        "mikmik desktop"
     }
 
     fn execute_named(&self, _args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -707,7 +701,7 @@ impl NamedCommand for DesktopCommand {
         let arch = std::env::consts::ARCH;
         let download_url = "https://claude.ai/download";
 
-        // Detect if Claurst Desktop is likely installed (platform-specific heuristic).
+        // Detect if MikMik Desktop is likely installed (platform-specific heuristic).
         let desktop_likely_installed = match os {
             "macos" => {
                 std::path::Path::new("/Applications/Claude.app").exists()
@@ -737,11 +731,11 @@ impl NamedCommand for DesktopCommand {
             let deep_link = format!("claude://session/{}", session_id);
 
             let mut msg = String::new();
-            msg.push_str("\u{2713} Already connected to Claurst Desktop\n\n");
-            msg.push_str("Your Claurst session is synced with Claurst Desktop.\n\n");
+            msg.push_str("\u{2713} Already connected to MikMik Desktop\n\n");
+            msg.push_str("Your MikMik session is synced with MikMik Desktop.\n\n");
             msg.push_str(&format!("Open this session in Desktop: {deep_link}\n\n"));
             if desktop_likely_installed {
-                msg.push_str("Claurst Desktop is installed on this machine.\n");
+                msg.push_str("MikMik Desktop is installed on this machine.\n");
                 msg.push_str(&format!("Manage your installation: {download_url}"));
             } else {
                 msg.push_str(&format!("Download / manage Desktop: {download_url}"));
@@ -752,45 +746,45 @@ impl NamedCommand for DesktopCommand {
         let msg = if os == "macos" {
             if desktop_likely_installed {
                 format!(
-                    "Open Claurst Desktop \u{2014} macOS\n\n\
-                     Claurst Desktop appears to be installed.\n\
+                    "Open MikMik Desktop \u{2014} macOS\n\n\
+                     MikMik Desktop appears to be installed.\n\
                      Launch it from /Applications/Claude.app and sign in with your Anthropic account.\n\n\
                      Download / update: {download_url}"
                 )
             } else {
                 format!(
-                    "Download Claurst Desktop \u{2014} macOS\n\n\
+                    "Download MikMik Desktop \u{2014} macOS\n\n\
                      Download: {download_url}\n\n\
                      Setup instructions:\n\
-                     1. Download and install Claurst Desktop for macOS\n\
-                     2. Open Claurst Desktop and sign in with the same Anthropic account\n\
-                     3. Claurst will detect the Desktop bridge automatically"
+                     1. Download and install MikMik Desktop for macOS\n\
+                     2. Open MikMik Desktop and sign in with the same Anthropic account\n\
+                     3. MikMik will detect the Desktop bridge automatically"
                 )
             }
         } else if os == "windows" {
             let arch_note = if arch == "x86_64" { " (x64)" } else { "" };
             if desktop_likely_installed {
                 format!(
-                    "Open Claurst Desktop \u{2014} Windows{arch_note}\n\n\
-                     Claurst Desktop appears to be installed.\n\
+                    "Open MikMik Desktop \u{2014} Windows{arch_note}\n\n\
+                     MikMik Desktop appears to be installed.\n\
                      Launch it from your Start menu and sign in with your Anthropic account.\n\n\
                      Download / update: {download_url}"
                 )
             } else {
                 format!(
-                    "Download Claurst Desktop for Windows{arch_note}\n\n\
+                    "Download MikMik Desktop for Windows{arch_note}\n\n\
                      Download: {download_url}\n\n\
                      Setup instructions:\n\
-                     1. Download and run the Claurst Desktop installer\n\
-                     2. Open Claurst Desktop and sign in with the same Anthropic account\n\
-                     3. Claurst will detect the Desktop bridge automatically"
+                     1. Download and run the MikMik Desktop installer\n\
+                     2. Open MikMik Desktop and sign in with the same Anthropic account\n\
+                     3. MikMik will detect the Desktop bridge automatically"
                 )
             }
         } else {
             // Linux and other platforms
             format!(
-                "Claurst Desktop is not yet available for {os}\n\n\
-                 On Linux, you can use Claurst via the CLI or visit https://claude.ai in your browser.\n\
+                "MikMik Desktop is not yet available for {os}\n\n\
+                 On Linux, you can use MikMik via the CLI or visit https://claude.ai in your browser.\n\
                  Check {download_url} for the latest platform availability."
             )
         };
@@ -868,10 +862,10 @@ impl NamedCommand for MobileCommand {
         "mobile"
     }
     fn description(&self) -> &str {
-        "Download the Claurst mobile app"
+        "Download the MikMik mobile app"
     }
     fn usage(&self) -> &str {
-        "claurst mobile [ios|android]"
+        "mikmik mobile [ios|android]"
     }
 
     fn execute_named(&self, args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -909,7 +903,7 @@ impl NamedCommand for MobileCommand {
         let qr_lines = render_qr(qr_url);
 
         let mut out = String::new();
-        out.push_str("Scan to download Claurst mobile app\n");
+        out.push_str("Scan to download MikMik mobile app\n");
         out.push_str(&format!("Platform: {platform_label}\n\n"));
         if has_session {
             out.push_str(
@@ -950,10 +944,10 @@ impl NamedCommand for InstallGithubAppCommand {
         "install-github-app"
     }
     fn description(&self) -> &str {
-        "Set up Claurst GitHub Actions for a repository"
+        "Set up MikMik GitHub Actions for a repository"
     }
     fn usage(&self) -> &str {
-        "claurst install-github-app"
+        "mikmik install-github-app"
     }
 
     fn execute_named(&self, _args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -971,11 +965,11 @@ impl NamedCommand for InstallGithubAppCommand {
             });
 
         CommandResult::Message(format!(
-            "To install the Claurst GitHub App:\n\
+            "To install the MikMik GitHub App:\n\
              1. Visit https://github.com/apps/claude-code-app and click Install\n\
              2. Select the repositories to enable\n\
              {provider_secret_step}\n\n\
-             The app enables Claurst in GitHub Actions workflows for the configured provider."
+             The app enables MikMik in GitHub Actions workflows for the configured provider."
         ))
     }
 }
@@ -991,10 +985,10 @@ impl NamedCommand for RemoteSetupCommand {
         "remote-setup"
     }
     fn description(&self) -> &str {
-        "Check and configure a remote Claurst environment"
+        "Check and configure a remote MikMik environment"
     }
     fn usage(&self) -> &str {
-        "claurst remote-setup"
+        "mikmik remote-setup"
     }
 
     fn execute_named(&self, _args: &[&str], ctx: &CommandContext) -> CommandResult {
@@ -1048,16 +1042,16 @@ impl NamedCommand for RemoteSetupCommand {
             }
         ));
 
-        // Step 3: Check claurst config dir exists
+        // Step 3: Check mikmik config dir exists
         let config_dir = mikmik_core::config::Settings::config_dir();
         let has_config = config_dir.exists();
         steps.push(format!(
-            "{} Claurst config dir {}",
+            "{} MikMik config dir {}",
             if has_config { "\u{2713}" } else { "\u{2717}" },
             if has_config {
                 format!("exists at {}", config_dir.display())
             } else {
-                "missing \u{2014} run 'claurst' once to initialize".to_string()
+                "missing \u{2014} run 'mikmik' once to initialize".to_string()
             }
         ));
 
@@ -1096,9 +1090,9 @@ impl NamedCommand for RemoteSetupCommand {
              {}",
             steps.join("\n"),
             if all_ok {
-                "\u{2713} All checks passed. Claurst is ready for remote use.\nStart a session: claurst --bridge"
+                "\u{2713} All checks passed. MikMik is ready for remote use.\nStart a session: mikmik --bridge"
             } else {
-                "\u{2717} Some checks failed. Fix the issues above and run 'claurst remote-setup' again."
+                "\u{2717} Some checks failed. Fix the issues above and run 'mikmik remote-setup' again."
             }
         ))
     }
@@ -1115,10 +1109,10 @@ impl NamedCommand for StickersCommand {
         "stickers"
     }
     fn description(&self) -> &str {
-        "Open the Claurst sticker page in your browser"
+        "Open the MikMik sticker page in your browser"
     }
     fn usage(&self) -> &str {
-        "claurst stickers"
+        "mikmik stickers"
     }
 
     fn execute_named(&self, _args: &[&str], _ctx: &CommandContext) -> CommandResult {
@@ -1146,7 +1140,7 @@ impl NamedCommand for UltraplanCommand {
         "Launch Ultraplan agentic code planner with extended thinking"
     }
     fn usage(&self) -> &str {
-        "claurst ultraplan [--effort=medium|high|maximum]"
+        "mikmik ultraplan [--effort=medium|high|maximum]"
     }
 
     fn execute_named(&self, args: &[&str], _ctx: &CommandContext) -> CommandResult {
@@ -1195,7 +1189,7 @@ impl NamedCommand for crate::StatsCommand {
         "Aggregate token / cost / tool stats across saved sessions"
     }
     fn usage(&self) -> &str {
-        "claurst stats [summary|sessions|tools|daily|session <id>] \
+        "mikmik stats [summary|sessions|tools|daily|session <id>] \
          [--days N] [--top N] [--all-projects] [--json]"
     }
 

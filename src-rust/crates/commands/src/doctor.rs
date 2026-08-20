@@ -26,7 +26,7 @@ impl SlashCommand for DoctorCommand {
          - Disk space\n\
          - Config file integrity\n\
          - Tool permission summary\n\
-         - Claurst version"
+         - MikMik version"
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -34,7 +34,7 @@ impl SlashCommand for DoctorCommand {
 
         // ── Header ─────────────────────────────────────────────────────────
         lines.push(format!(
-            "Claurst v{}  |  {}",
+            "MikMik v{}  |  {}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
         ));

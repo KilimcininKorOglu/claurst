@@ -24,7 +24,7 @@
 // highlighted; the top native tier (`max`, or `xhigh` on models that don't
 // expose `max`) is a per-character SOFT, DIFFUSED rainbow that gently animates
 // with `frame_count` — so when a model exposes both, only `max` shimmers and
-// `xhigh` stays a plain highlight; and `ultracode`, when selected, paints a bold claurst-red
+// `xhigh` stays a plain highlight; and `ultracode`, when selected, paints a bold mikmik-red
 // spectrum-analyzer audio wave as a background-color gradient (glowing bar tips,
 // so text still sits cleanly on top, no cut-out boxes) framed by a gently
 // breathing red outline.
@@ -39,7 +39,7 @@ use ratatui::Frame;
 use crate::model_picker::EffortLevel;
 
 // ---------------------------------------------------------------------------
-// Palette (selector-only) — claurst red family
+// Palette (selector-only) — mikmik red family
 // ---------------------------------------------------------------------------
 
 /// Brighter red for the selected `ultracode` label / marker.
@@ -616,7 +616,7 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
 // Ultracode red wave (background)
 // ---------------------------------------------------------------------------
 
-/// Paint claurst's red audio wave into `inner` as a BACKGROUND-color gradient
+/// Paint mikmik's red audio wave into `inner` as a BACKGROUND-color gradient
 /// (space glyphs). It reads like a glowing oscilloscope waveform: a bright,
 /// undulating crest LINE that flows slowly sideways over a dim deep-red field,
 /// with a dark wash above. Because the field stays dim and only the thin crest
@@ -668,13 +668,13 @@ fn spectrum_amp(gx: u16, frame: u64) -> f32 {
     0.25 + 0.60 * (0.5 + 0.5 * a)
 }
 
-/// A claurst-red whose brightness scales with `lit` in `[0, 1]`: a deep-red wash
-/// at the base brightening to a vivid claurst red at the crest. Used as a
+/// A mikmik-red whose brightness scales with `lit` in `[0, 1]`: a deep-red wash
+/// at the base brightening to a vivid mikmik red at the crest. Used as a
 /// BACKGROUND color for the wave (so it can be richly red while text stays
 /// readable on top). Always red-dominant (`r > g` and `r > b`) — never purple.
 fn red_shade(lit: f32) -> Color {
     let lit = lit.clamp(0.0, 1.0);
-    // Deep-red wash (34, 8, 16) -> vivid claurst red (255, 42, 104).
+    // Deep-red wash (34, 8, 16) -> vivid mikmik red (255, 42, 104).
     let r = 34.0 + 221.0 * lit;
     let g = 8.0 + 34.0 * lit;
     let b = 16.0 + 88.0 * lit;

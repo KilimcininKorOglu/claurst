@@ -1,4 +1,4 @@
-//! `session/prompt` handler — drives the Claurst query loop and forwards
+//! `session/prompt` handler — drives the MikMik query loop and forwards
 //! every meaningful event back to the ACP client as a `session/update`
 //! notification.
 
@@ -21,7 +21,7 @@ use crate::sessions::SessionState;
 
 /// Handle one `session/prompt` JSON-RPC call.
 ///
-/// Drives the full Claurst query loop with the runtime's tools, MCP servers,
+/// Drives the full MikMik query loop with the runtime's tools, MCP servers,
 /// and provider registry, while streaming every text delta, thinking delta,
 /// and tool invocation back as `session/update` notifications. Returns the
 /// final `PromptResponse` with the appropriate `StopReason`.
@@ -33,7 +33,7 @@ pub async fn handle(
     editor: Option<Arc<dyn mikmik_tools::EditorHost>>,
     params: acp::PromptRequest,
 ) -> Result<acp::PromptResponse, acp::Error> {
-    // Convert prompt content blocks → the user turn in Claurst's internal
+    // Convert prompt content blocks → the user turn in MikMik's internal
     // format.
     let rendered = render_prompt_blocks(&params.prompt);
     let user_text = text_of(&rendered);
@@ -607,7 +607,7 @@ async fn send_session_update(
     }
 }
 
-/// Classify a Claurst tool name into the ACP `ToolKind` the client uses to
+/// Classify a MikMik tool name into the ACP `ToolKind` the client uses to
 /// pick an icon and a verb. The permission path classifies the same names, so
 /// this is the single table both sides read.
 pub(crate) fn classify_tool_kind(tool_name: &str) -> acp::ToolKind {

@@ -1,11 +1,11 @@
-// tips.rs — Tip scheduling system for Claurst.
+// tips.rs — Tip scheduling system for MikMik.
 //
 // Ported from:
 //   src/services/tips/tipScheduler.ts
 //   src/services/tips/tipRegistry.ts
 //   src/services/tips/tipHistory.ts
 //
-// Tips are shown during the spinner while Claurst is processing.  Each tip has
+// Tips are shown during the spinner while MikMik is processing.  Each tip has
 // a `cooldown_sessions` field — the tip won't be shown again until that many
 // sessions have passed since the last display.
 //
@@ -38,7 +38,7 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
     vec![
         Tip {
             id: "new-user-warmup",
-            content: "Start with small features or bug fixes, tell Claurst to propose a plan, and verify its suggested edits",
+            content: "Start with small features or bug fixes, tell MikMik to propose a plan, and verify its suggested edits",
             cooldown_sessions: 3,
         },
         Tip {
@@ -53,12 +53,12 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
         },
         Tip {
             id: "git-worktrees",
-            content: "Use git worktrees to run multiple Claurst sessions in parallel.",
+            content: "Use git worktrees to run multiple MikMik sessions in parallel.",
             cooldown_sessions: 10,
         },
         Tip {
             id: "color-when-multi-clauding",
-            content: "Running multiple Claurst sessions? Use /color and /rename to tell them apart at a glance.",
+            content: "Running multiple MikMik sessions? Use /color and /rename to tell them apart at a glance.",
             cooldown_sessions: 10,
         },
         Tip {
@@ -68,7 +68,7 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
         },
         Tip {
             id: "memory-command",
-            content: "Use /memory to view and manage Claurst memory",
+            content: "Use /memory to view and manage MikMik memory",
             cooldown_sessions: 15,
         },
         Tip {
@@ -78,17 +78,17 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
         },
         Tip {
             id: "prompt-queue",
-            content: "Hit Enter to queue up additional messages while Claurst is working.",
+            content: "Hit Enter to queue up additional messages while MikMik is working.",
             cooldown_sessions: 5,
         },
         Tip {
             id: "enter-to-steer-in-realtime",
-            content: "Send messages to Claurst while it works to steer Claurst in real-time",
+            content: "Send messages to MikMik while it works to steer MikMik in real-time",
             cooldown_sessions: 20,
         },
         Tip {
             id: "todo-list",
-            content: "Ask Claurst to create a todo list when working on complex tasks to track progress and remain on track",
+            content: "Ask MikMik to create a todo list when working on complex tasks to track progress and remain on track",
             cooldown_sessions: 20,
         },
         Tip {

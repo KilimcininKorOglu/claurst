@@ -11,7 +11,7 @@
 //   │  How should the tests be run?                   │
 //   │                                                 │
 //   │  ▶ 1  cargo test --workspace                    │
-//   │    2  cargo test -p claurst-api                 │
+//   │    2  cargo test -p mikmik-api                 │
 //   │    3  cargo test --features dev_full            │
 //   │                                                 │
 //   │  ❯ _                              (custom)      │

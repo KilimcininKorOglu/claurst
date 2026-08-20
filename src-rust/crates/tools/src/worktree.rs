@@ -140,7 +140,7 @@ impl Tool for EnterWorktreeTool {
             "properties": {
                 "branch": {
                     "type": "string",
-                    "description": "Branch name to create. Defaults to a timestamped name like claurst-20240101-120000."
+                    "description": "Branch name to create. Defaults to a timestamped name like mikmik-20240101-120000."
                 },
                 "path": {
                     "type": "string",
@@ -176,7 +176,7 @@ impl Tool for EnterWorktreeTool {
 
         // Determine branch name — use a human-readable timestamp if none supplied
         let branch = params.branch.clone().unwrap_or_else(|| {
-            // Format: claurst-YYYYMMDD-HHMMSS
+            // Format: mikmik-YYYYMMDD-HHMMSS
             use std::time::{SystemTime, UNIX_EPOCH};
             let secs = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -193,7 +193,7 @@ impl Tool for EnterWorktreeTool {
             let month = day_of_year / 30 + 1;
             let day = day_of_year % 30 + 1;
             format!(
-                "claurst-{:04}{:02}{:02}-{:02}{:02}{:02}",
+                "mikmik-{:04}{:02}{:02}-{:02}{:02}{:02}",
                 year, month, day, h, m, s
             )
         });

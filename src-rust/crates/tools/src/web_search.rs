@@ -323,7 +323,7 @@ async fn search_duckduckgo(query: &str, num_results: usize) -> ToolResult {
 
     let resp = match client
         .get(&url)
-        .header("User-Agent", "Claurst/1.0")
+        .header("User-Agent", "MikMik/1.0")
         .send()
         .await
     {

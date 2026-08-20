@@ -1,6 +1,6 @@
-// claurst CLI entry point
+// mikmik CLI entry point
 //
-// This is the main binary for Claurst. It:
+// This is the main binary for MikMik. It:
 // 1. Parses CLI arguments with clap (mirrors cli.tsx + main.tsx flags)
 // 2. Loads configuration from settings.json + env vars
 // 3. Builds system/user context (git status, AGENTS.md)
@@ -78,9 +78,9 @@ fn roots_for_prompt(
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "claurst",
+    name = "mikmik",
     version = APP_VERSION,
-    about = "Claurst - AI-powered coding assistant",
+    about = "MikMik - AI-powered coding assistant",
     long_about = None,
 )]
 struct Cli {
@@ -174,7 +174,7 @@ struct Cli {
     #[arg(long = "auto-commits", action = ArgAction::SetTrue)]
     auto_commits: bool,
 
-    /// Grant Claurst access to an additional directory (can be repeated)
+    /// Grant MikMik access to an additional directory (can be repeated)
     #[arg(long = "add-dir", value_name = "DIR", action = ArgAction::Append)]
     add_dir: Vec<PathBuf>,
 
@@ -391,7 +391,7 @@ async fn main() -> anyhow::Result<()> {
     // Fast-path: handle --version before parsing everything
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("claurst {}", APP_VERSION);
+        println!("mikmik {}", APP_VERSION);
         return Ok(());
     }
 
@@ -402,7 +402,7 @@ async fn main() -> anyhow::Result<()> {
     let moved_keys = mikmik_core::AuthStore::migrate_plaintext_provider_keys();
     if !moved_keys.is_empty() {
         eprintln!(
-            "claurst: moved the API key for {} out of settings.json into auth.json, \
+            "mikmik: moved the API key for {} out of settings.json into auth.json, \
              which is the only credential file locked to your user.",
             moved_keys.join(", ")
         );
@@ -413,7 +413,7 @@ async fn main() -> anyhow::Result<()> {
     let moved_accounts = mikmik_core::AuthStore::migrate_account_registry();
     if !moved_accounts.is_empty() {
         eprintln!(
-            "claurst: moved {} into auth.json and settings.json. The old accounts.json \
+            "mikmik: moved {} into auth.json and settings.json. The old accounts.json \
              and accounts/ directory are kept under accounts-backup-<timestamp>/.",
             moved_accounts.join(", ")
         );
@@ -424,19 +424,19 @@ async fn main() -> anyhow::Result<()> {
         return handle_auth_command(&raw_args[2..]).await;
     }
 
-    // Fast-path: `claurst codex <login|logout|list|switch|remove>` — manage
-    // OpenAI Codex (ChatGPT) accounts. Mirrors `claurst auth` for symmetry.
+    // Fast-path: `mikmik codex <login|logout|list|switch|remove>` — manage
+    // OpenAI Codex (ChatGPT) accounts. Mirrors `mikmik auth` for symmetry.
     if raw_args.get(1).map(|s| s.as_str()) == Some("codex") {
         return handle_codex_account_command(&raw_args[2..]).await;
     }
 
-    // Fast-path: `claurst accounts` — list all stored accounts across providers.
+    // Fast-path: `mikmik accounts` — list all stored accounts across providers.
     if raw_args.get(1).map(|s| s.as_str()) == Some("accounts") {
         handle_accounts_command(&raw_args[2..]);
         return Ok(());
     }
 
-    // Fast-path: `claurst upgrade [--version <v>] [--force]` — self-update.
+    // Fast-path: `mikmik upgrade [--version <v>] [--force]` — self-update.
     if raw_args.get(1).map(|s| s.as_str()) == Some("upgrade") {
         return upgrade::run_upgrade(&raw_args[2..]).await;
     }
@@ -446,7 +446,7 @@ async fn main() -> anyhow::Result<()> {
         return mikmik_acp::run_acp_server(Some(acp_login_runner())).await;
     }
 
-    // Fast-path: `claurst models [provider] [--refresh] [--verbose] [--json]`
+    // Fast-path: `mikmik models [provider] [--refresh] [--verbose] [--json]`
     //   — list all available providers and models from the bundled snapshot
     //     plus any disk-cached overlay from models.dev.
     if raw_args.get(1).map(|s| s.as_str()) == Some("models") {
@@ -534,7 +534,7 @@ async fn main() -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    debug!(cwd = %cwd.display(), "Starting Claurst");
+    debug!(cwd = %cwd.display(), "Starting MikMik");
 
     // Determine mode early (needed for settings error reporting, auth error
     // handling, and permission handler selection).
@@ -718,8 +718,8 @@ async fn main() -> anyhow::Result<()> {
                          - Set OPENAI_API_KEY for OpenAI\n\
                          - Set GOOGLE_API_KEY for Google Gemini\n\
                          - Set GROQ_API_KEY for Groq (fast, free tier available)\n\
-                         - Run `claurst --provider ollama` for local models (no key needed)\n\
-                         - Run `claurst auth login` for Anthropic OAuth"
+                         - Run `mikmik --provider ollama` for local models (no key needed)\n\
+                         - Run `mikmik auth login` for Anthropic OAuth"
                     );
                 } else {
                     (String::new(), false)
@@ -1271,13 +1271,13 @@ async fn connect_mcp_manager_arc(
     Some(mcp_manager)
 }
 
-/// Implementation of the `claurst models` subcommand.
+/// Implementation of the `mikmik models` subcommand.
 ///
 /// Flags:
 /// * `--refresh` — force-fetch from models.dev (ignoring the 5-minute freshness window), then list.
 /// * `--verbose` — also print release date, status, modalities, cache pricing, and capability flags.
 /// * `--json` — emit the registry as a JSON object keyed by `provider/model` (suitable for piping into `jq`).
-/// * `<provider>` — first non-flag arg filters by provider id (e.g. `claurst models openai`).
+/// * `<provider>` — first non-flag arg filters by provider id (e.g. `mikmik models openai`).
 async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
     let mut refresh = false;
     let mut verbose = false;
@@ -1290,13 +1290,13 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
             "--verbose" | "-v" => verbose = true,
             "--json" => as_json = true,
             s if s.starts_with("--") => {
-                eprintln!("claurst models: unknown flag: {}", s);
-                eprintln!("Usage: claurst models [<provider>] [--refresh] [--verbose] [--json]");
+                eprintln!("mikmik models: unknown flag: {}", s);
+                eprintln!("Usage: mikmik models [<provider>] [--refresh] [--verbose] [--json]");
                 std::process::exit(2);
             }
             s => {
                 if provider_filter.is_some() {
-                    eprintln!("claurst models: only one provider id may be supplied");
+                    eprintln!("mikmik models: only one provider id may be supplied");
                     std::process::exit(2);
                 }
                 provider_filter = Some(s.to_string());
@@ -1360,10 +1360,10 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
     if entries.is_empty() {
         if let Some(pid) = &provider_filter {
             eprintln!("No models found for provider '{}'.", pid);
-            eprintln!("Try: claurst models                # list all providers");
-            eprintln!("     claurst models --refresh      # pull latest from models.dev");
+            eprintln!("Try: mikmik models                # list all providers");
+            eprintln!("     mikmik models --refresh      # pull latest from models.dev");
         } else {
-            eprintln!("No models in registry.  Try `claurst models --refresh`.");
+            eprintln!("No models in registry.  Try `mikmik models --refresh`.");
         }
         return Ok(());
     }
@@ -1456,7 +1456,7 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
 
     if provider_filter.is_none() {
         eprintln!(
-            "\n{} models across {} providers.  Use `claurst models <provider>` to filter.",
+            "\n{} models across {} providers.  Use `mikmik models <provider>` to filter.",
             total,
             registry.provider_count()
         );
@@ -1540,7 +1540,7 @@ async fn refresh_models_cache_once() {
     let url = models_source_url();
     let resp = match client
         .get(&url)
-        .header("User-Agent", concat!("Claurst/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("MikMik/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
     {
@@ -3739,7 +3739,7 @@ async fn run_interactive(
                                     )
                                     .await;
                                     // NOTE: opencode appends a synthetic
-                                    // <system-reminder> prompt after a move. claurst
+                                    // <system-reminder> prompt after a move. mikmik
                                     // re-derives working_directory into every turn's
                                     // system prompt (qcfg.working_directory below),
                                     // so repointing tool_ctx.working_dir already
@@ -4216,7 +4216,7 @@ async fn run_interactive(
                                                     Some("Login successful!".to_string());
                                                 eprintln!(
                                                     "\nLogin successful! Please restart \
-                                                     claurst to use the new credentials."
+                                                     mikmik to use the new credentials."
                                                 );
                                                 break 'main;
                                             }
@@ -6312,7 +6312,7 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
 
         Some("remove") | Some("rm") => {
             let id = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| {
-                eprintln!("Usage: claurst auth remove <profile-id>");
+                eprintln!("Usage: mikmik auth remove <profile-id>");
                 std::process::exit(1);
             });
             remove_account(mikmik_core::ProviderId::ANTHROPIC, "Anthropic", id);
@@ -6335,7 +6335,7 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn print_auth_usage() {
-    eprintln!("Usage: claurst auth <subcommand>");
+    eprintln!("Usage: mikmik auth <subcommand>");
     eprintln!("  login [--console] [--label <name>]   Authenticate (claude.ai by default)");
     eprintln!("  logout                                Remove the active account's credentials");
     eprintln!("  status [--json]                       Show authentication status");
@@ -6371,7 +6371,7 @@ fn print_account_list(provider: &str, display_name: &str) {
     if accounts.is_empty() {
         println!("No {} accounts stored.", display_name);
         println!(
-            "Use `claurst {} login` to add one.",
+            "Use `mikmik {} login` to add one.",
             if provider == "anthropic" {
                 "auth"
             } else {
@@ -6420,7 +6420,7 @@ fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
             }
             // No id: print the picker and exit with usage.
             eprintln!(
-                "Usage: claurst {} switch <account>",
+                "Usage: mikmik {} switch <account>",
                 if provider == "anthropic" {
                     "auth"
                 } else {
@@ -6453,7 +6453,7 @@ fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
 }
 
 // ---------------------------------------------------------------------------
-// `claurst codex` subcommand handler (account-level CLI)
+// `mikmik codex` subcommand handler (account-level CLI)
 // ---------------------------------------------------------------------------
 
 async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
@@ -6507,7 +6507,7 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
         }
         Some("remove") | Some("rm") => {
             let id = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| {
-                eprintln!("Usage: claurst codex remove <profile-id>");
+                eprintln!("Usage: mikmik codex remove <profile-id>");
                 std::process::exit(1);
             });
             remove_account(mikmik_core::ProviderId::CODEX, "Codex", id);
@@ -6545,7 +6545,7 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn print_codex_usage() {
-    eprintln!("Usage: claurst codex <subcommand>");
+    eprintln!("Usage: mikmik codex <subcommand>");
     eprintln!("  login [--label <name>]   Authenticate with ChatGPT/Codex");
     eprintln!("  logout                   Remove the active Codex credentials");
     eprintln!("  status                   Show Codex auth status");
@@ -6555,7 +6555,7 @@ fn print_codex_usage() {
 }
 
 // ---------------------------------------------------------------------------
-// `claurst accounts` — unified read-only list across providers
+// `mikmik accounts` — unified read-only list across providers
 // ---------------------------------------------------------------------------
 
 fn handle_accounts_command(args: &[String]) {
@@ -6723,7 +6723,7 @@ async fn auth_status(json_output: bool) {
         .or_else(|| {
             oauth_tokens.as_ref().map(|tokens| {
                 if tokens.uses_bearer_auth() {
-                    "Claurst Account".to_string()
+                    "MikMik Account".to_string()
                 } else {
                     "Console Account".to_string()
                 }
@@ -6788,7 +6788,7 @@ async fn auth_status(json_output: bool) {
     } else {
         if !logged_in {
             let hint = if active_provider == "anthropic" {
-                "Run `claurst auth login` or set ANTHROPIC_API_KEY.".to_string()
+                "Run `mikmik auth login` or set ANTHROPIC_API_KEY.".to_string()
             } else if let Some(env_var) =
                 mikmik_core::config::primary_api_key_env_var_for_provider(active_provider)
             {
@@ -6904,7 +6904,7 @@ mod bare_mode_tests {
 
     #[test]
     fn bare_flag_parses_and_implies_no_claude_md() {
-        let cli = Cli::parse_from(["claurst", "--bare"]);
+        let cli = Cli::parse_from(["mikmik", "--bare"]);
         assert!(cli.bare, "--bare should set cli.bare");
         // main() computes `config.disable_claude_mds = cli.no_claude_md || cli.bare`,
         // so --bare must disable AGENTS.md even without --no-claude-md.
@@ -6913,7 +6913,7 @@ mod bare_mode_tests {
             "--bare must imply disable_claude_mds"
         );
 
-        let normal = Cli::parse_from(["claurst"]);
+        let normal = Cli::parse_from(["mikmik"]);
         assert!(!normal.bare, "bare defaults to false");
         assert!(
             !(normal.no_claude_md || normal.bare),
@@ -7153,7 +7153,7 @@ mod dump_system_prompt_tests {
     /// so it appeared in `--help` and silently did nothing.
     #[test]
     fn a_system_prompt_file_replaces_the_base_prompt() {
-        let dir = std::env::temp_dir().join("claurst-system-prompt-file-test");
+        let dir = std::env::temp_dir().join("mikmik-system-prompt-file-test");
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("sp.txt");
         std::fs::write(&path, "You are a haiku bot.").expect("write");
@@ -8053,13 +8053,13 @@ mod permission_mode_flag_tests {
         // whether or not it was passed and startup wrote that over the
         // settings file. A mode saved by `/yolo` was then gone by the next
         // launch.
-        let cli = Cli::parse_from(["claurst"]);
+        let cli = Cli::parse_from(["mikmik"]);
         assert!(cli.permission_mode.is_none());
     }
 
     #[test]
     fn a_given_flag_still_wins() {
-        let cli = Cli::parse_from(["claurst", "--permission-mode", "plan"]);
+        let cli = Cli::parse_from(["mikmik", "--permission-mode", "plan"]);
         assert_eq!(
             cli.permission_mode.map(PermissionMode::from),
             Some(PermissionMode::Plan)

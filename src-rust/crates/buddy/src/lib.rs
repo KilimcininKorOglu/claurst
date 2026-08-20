@@ -1,4 +1,4 @@
-/// claurst-buddy: Tamagotchi/Buddy companion system for Claurst.
+/// mikmik-buddy: Tamagotchi/Buddy companion system for MikMik.
 ///
 /// Ported from src/buddy/ (TypeScript). All bones (species, rarity, stats,
 /// eye, hat, shiny) are deterministically derived from the user-ID via a

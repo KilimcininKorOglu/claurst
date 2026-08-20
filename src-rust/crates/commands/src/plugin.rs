@@ -23,7 +23,7 @@ impl SlashCommand for PluginCommand {
     }
     fn help(&self) -> &str {
         "Usage: /plugin [list|info <name>|enable <name>|disable <name>|install <source>|update <name>|remove <name>|reload]\n\
-         Manage Claurst plugins.\n\n\
+         Manage MikMik plugins.\n\n\
          Subcommands:\n\
            /plugin              — list all installed plugins\n\
            /plugin list         — list all installed plugins\n\

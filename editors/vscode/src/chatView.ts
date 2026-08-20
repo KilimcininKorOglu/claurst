@@ -4,7 +4,7 @@ import { ChatPanel } from './chatPanel';
 import { chooseWorkingFolder } from './workspace';
 
 /** Names the sidebar view to VS Code. Must match `contributes.views`. */
-export const CHAT_VIEW_ID = 'claurst.chatView';
+export const CHAT_VIEW_ID = 'mikmik.chatView';
 
 /** Puts a conversation in the Activity Bar.
  *
@@ -46,7 +46,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (!cwd) {
       // Opening the view is not the same as choosing a folder to work in. The
       // view stays, saying so, rather than guessing at a root.
-      view.webview.html = emptyView('Run "Claurst: Open Chat" to start a conversation.');
+      view.webview.html = emptyView('Run "MikMik: Open Chat" to start a conversation.');
       return;
     }
     ChatPanel.inView(view, this.extensionUri, this.pool, this.outputChannel, { kind: 'new', cwd });

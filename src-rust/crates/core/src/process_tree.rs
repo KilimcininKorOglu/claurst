@@ -18,7 +18,7 @@
 //! Windows needs no such preparation: `taskkill /T` walks the parent-child
 //! links itself.
 //!
-//! The PTY path in `claurst-tools` is deliberately not a caller. A pty child is
+//! The PTY path in `mikmik-tools` is deliberately not a caller. A pty child is
 //! already a session leader carrying its own foreground group, and moving it
 //! would change what its existing kill does.
 
@@ -57,7 +57,7 @@ pub fn spawn_std_in_own_group(cmd: &mut std::process::Command) {
 /// Kill `pid` and everything it started, without waiting for the kill to land.
 ///
 /// For the cancel and timeout paths, where the caller has already decided the
-/// work is over. Not waiting matches what the PTY guard in `claurst-tools`
+/// work is over. Not waiting matches what the PTY guard in `mikmik-tools`
 /// does with its own `SIGKILL`, and keeps this callable from a `Drop`, which
 /// cannot await.
 pub fn kill_tree(pid: u32) {

@@ -120,7 +120,7 @@ impl SlashCommand for UpgradeCommand {
     }
     fn help(&self) -> &str {
         "Usage: /update\n\n\
-         Checks GitHub releases for the latest version of Claurst.\n\
+         Checks GitHub releases for the latest version of MikMik.\n\
          If a newer version is available, shows where to download it."
     }
 
@@ -129,7 +129,7 @@ impl SlashCommand for UpgradeCommand {
 
         // Check GitHub releases API for latest version
         let client = reqwest::Client::builder()
-            .user_agent(format!("claurst/{}", current))
+            .user_agent(format!("mikmik/{}", current))
             .timeout(std::time::Duration::from_secs(8))
             .build();
 
@@ -139,13 +139,13 @@ impl SlashCommand for UpgradeCommand {
                 return CommandResult::Message(format!(
                     "Current version: {current}\n\
                      Could not check for updates (HTTP client error: {e})\n\
-                     Visit https://github.com/KilimcininKorOglu/claurst/releases for updates."
+                     Visit https://github.com/KilimcininKorOglu/mikmik/releases for updates."
                 ))
             }
         };
 
         let resp = client
-            .get("https://api.github.com/repos/KilimcininKorOglu/claurst/releases/latest")
+            .get("https://api.github.com/repos/KilimcininKorOglu/mikmik/releases/latest")
             .send()
             .await;
 
@@ -162,11 +162,11 @@ impl SlashCommand for UpgradeCommand {
                 let url = json
                     .get("html_url")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("https://github.com/KilimcininKorOglu/claurst/releases");
+                    .unwrap_or("https://github.com/KilimcininKorOglu/mikmik/releases");
 
                 if tag == current || tag == "unknown" {
                     CommandResult::Message(format!(
-                        "Claurst v{current} - you are up to date.\n\
+                        "MikMik v{current} - you are up to date.\n\
                          Release page: {url}"
                     ))
                 } else {
@@ -176,11 +176,11 @@ impl SlashCommand for UpgradeCommand {
                          Latest version:   v{tag}\n\
                          Release page:     {url}\n\n\
                          Upgrade in place (recommended):\n\
-                           claurst upgrade\n\n\
+                           mikmik upgrade\n\n\
                          Or reinstall with your original method:\n\
-                           npm install -g claurst\n\
-                           curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash   (macOS/Linux)\n\
-                           irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex          (Windows)"
+                           npm install -g mikmik\n\
+                           curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash   (macOS/Linux)\n\
+                           irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex          (Windows)"
                     ))
                 }
             }
@@ -189,13 +189,13 @@ impl SlashCommand for UpgradeCommand {
                 CommandResult::Message(format!(
                     "Current version: v{current}\n\
                      Could not check for updates (HTTP {status}).\n\
-                     Visit https://github.com/KilimcininKorOglu/claurst/releases for updates."
+                     Visit https://github.com/KilimcininKorOglu/mikmik/releases for updates."
                 ))
             }
             Err(e) => CommandResult::Message(format!(
                 "Current version: v{current}\n\
                  Could not check for updates: {e}\n\
-                 Visit https://github.com/KilimcininKorOglu/claurst/releases for updates."
+                 Visit https://github.com/KilimcininKorOglu/mikmik/releases for updates."
             )),
         }
     }
@@ -230,7 +230,7 @@ impl SlashCommand for ReleaseNotesCommand {
         };
 
         let client = reqwest::Client::builder()
-            .user_agent(format!("claurst/{}", current))
+            .user_agent(format!("mikmik/{}", current))
             .timeout(std::time::Duration::from_secs(8))
             .build();
 
@@ -238,14 +238,14 @@ impl SlashCommand for ReleaseNotesCommand {
             Ok(c) => c,
             Err(_) => {
                 return CommandResult::Message(format!(
-                    "Claurst {tag} release notes:\n\
-                     Visit https://github.com/KilimcininKorOglu/claurst/releases/tag/{tag}"
+                    "MikMik {tag} release notes:\n\
+                     Visit https://github.com/KilimcininKorOglu/mikmik/releases/tag/{tag}"
                 ))
             }
         };
 
         let url = format!(
-            "https://api.github.com/repos/KilimcininKorOglu/claurst/releases/tags/{}",
+            "https://api.github.com/repos/KilimcininKorOglu/mikmik/releases/tags/{}",
             tag
         );
 
@@ -266,7 +266,7 @@ impl SlashCommand for ReleaseNotesCommand {
                 let html_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
 
                 CommandResult::Message(format!(
-                    "Release Notes: Claurst {tag}\n\
+                    "Release Notes: MikMik {tag}\n\
                      Published: {published}\n\
                      URL: {html_url}\n\
                      ─────────────────────────────────\n\
@@ -275,17 +275,17 @@ impl SlashCommand for ReleaseNotesCommand {
             }
             Ok(r) if r.status().as_u16() == 404 => CommandResult::Message(format!(
                 "No release found for {tag}.\n\
-                 View all releases: https://github.com/KilimcininKorOglu/claurst/releases"
+                 View all releases: https://github.com/KilimcininKorOglu/mikmik/releases"
             )),
             Ok(r) => CommandResult::Message(format!(
                 "Could not fetch release notes (HTTP {}).\n\
-                 View at: https://github.com/KilimcininKorOglu/claurst/releases/tag/{}",
+                 View at: https://github.com/KilimcininKorOglu/mikmik/releases/tag/{}",
                 r.status(),
                 tag
             )),
             Err(e) => CommandResult::Message(format!(
                 "Could not fetch release notes: {e}\n\
-                 View at: https://github.com/KilimcininKorOglu/claurst/releases/tag/{tag}"
+                 View at: https://github.com/KilimcininKorOglu/mikmik/releases/tag/{tag}"
             )),
         }
     }
@@ -304,7 +304,7 @@ impl SlashCommand for RateLimitOptionsCommand {
     fn help(&self) -> &str {
         "Usage: /rate-limit-options\n\n\
          Displays available rate limit tiers and the current tier for your account.\n\
-         Rate limits depend on your Claurst plan (Free, Pro, Max, API)."
+         Rate limits depend on your MikMik plan (Free, Pro, Max, API)."
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {

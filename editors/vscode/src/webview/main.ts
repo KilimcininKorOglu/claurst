@@ -882,8 +882,8 @@ type HostMessage =
       case 'capabilities': {
         acceptsImages = msg.image;
         inputEl.placeholder = acceptsImages
-          ? 'Ask claurst... (/ for commands, @ for files, paste an image)'
-          : 'Ask claurst... (/ for commands, @ for files)';
+          ? 'Ask mikmik... (/ for commands, @ for files, paste an image)'
+          : 'Ask mikmik... (/ for commands, @ for files)';
         break;
       }
       case 'mention': {
