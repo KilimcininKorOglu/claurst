@@ -14,14 +14,9 @@
 //      (creating the file if it doesn't exist).
 //   4. Track state so we don't re-extract from already-processed messages.
 
-use claurst_api::{
-    AnthropicStreamEvent, ApiMessage, CreateMessageRequest, StreamAccumulator, StreamHandler,
-    SystemPrompt,
-};
+use claurst_core::config::WireModel;
 use claurst_core::types::{Message, Role};
-use serde_json::Value;
 use std::path::Path;
-use std::sync::Arc;
 use tokio::fs;
 use tracing::{debug, info, warn};
 
@@ -131,15 +126,18 @@ impl SessionMemoryState {
 
 /// Extracts and persists key memories from a conversation.
 pub struct SessionMemoryExtractor {
-    pub model: String,
+    /// The wire model, not the string the user selected. Extraction used to
+    /// send `config.model` verbatim, so a session on a prefixed account asked
+    /// Anthropic for a model called `"myaccount/claude-opus-5"`.
+    pub model: WireModel,
     pub max_tokens: u32,
 }
 
 impl SessionMemoryExtractor {
     /// Create a new extractor using the given model.
-    pub fn new(model: &str) -> Self {
+    pub fn new(model: WireModel) -> Self {
         Self {
-            model: model.to_string(),
+            model,
             max_tokens: 4096,
         }
     }
@@ -207,11 +205,14 @@ impl SessionMemoryExtractor {
     ///
     /// Calls the API with a structured extraction prompt and parses the
     /// response into `ExtractedMemory` entries.
+    /// `backend` rather than an `AnthropicClient`: extraction ran only when
+    /// `ANTHROPIC_API_KEY` was set, so a session on any other provider
+    /// remembered nothing at all.
     pub async fn extract(
         &self,
         messages: &[Message],
         working_dir: &Path,
-        api_client: &claurst_api::AnthropicClient,
+        backend: &dyn crate::compact::CompactBackend,
     ) -> anyhow::Result<Vec<ExtractedMemory>> {
         let model_visible: Vec<&Message> = messages
             .iter()
@@ -238,32 +239,15 @@ impl SessionMemoryExtractor {
         let working_dir_str = working_dir.display().to_string();
         let prompt = build_extraction_prompt(&transcript, &working_dir_str);
 
-        let api_msgs = vec![ApiMessage {
-            role: "user".to_string(),
-            content: Value::String(prompt),
-        }];
-
-        let request = CreateMessageRequest::builder(&self.model, self.max_tokens)
-            .messages(api_msgs)
-            .system(SystemPrompt::Text(EXTRACTION_SYSTEM_PROMPT.to_string()))
-            .build();
-
-        let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
-        let mut rx = api_client
-            .create_message_stream(request, handler)
+        let response_text = backend
+            .summarise(
+                EXTRACTION_SYSTEM_PROMPT,
+                &prompt,
+                self.model.as_str(),
+                self.max_tokens,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("API error: {}", e))?;
-
-        let mut acc = StreamAccumulator::new();
-        while let Some(evt) = rx.recv().await {
-            acc.on_event(&evt);
-            if matches!(evt, AnthropicStreamEvent::MessageStop) {
-                break;
-            }
-        }
-
-        let (response_msg, _usage, _stop) = acc.finish();
-        let response_text = response_msg.get_all_text();
 
         if response_text.is_empty() {
             debug!("Session memory extraction produced empty response");
@@ -671,5 +655,43 @@ MEMORY: code_pattern | 7 | Uses builder pattern";
         let msgs = vec![msg];
         state.advance_cursor(&msgs);
         assert_eq!(state.last_extracted_message_uuid.as_deref(), Some("uuid-1"));
+    }
+
+    /// Records what it was asked for and answers with nothing, which
+    /// `extract` reports as "no memories".
+    struct RecordingBackend(parking_lot::Mutex<Option<String>>);
+
+    #[async_trait::async_trait]
+    impl crate::compact::CompactBackend for RecordingBackend {
+        async fn summarise(
+            &self,
+            _system: &str,
+            _user: &str,
+            model: &str,
+            _max_tokens: u32,
+        ) -> Result<String, claurst_core::error::ClaudeError> {
+            *self.0.lock() = Some(model.to_string());
+            Ok(String::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn extraction_asks_for_the_wire_model() {
+        // It used to send `config.model` verbatim, so a session on a prefixed
+        // account asked for a model called `"myaccount/claude-opus-5"`, which
+        // no endpoint serves.
+        let config = claurst_core::Config::default();
+        let route = config.route_for_account("myaccount", "claude-opus-5");
+        let extractor = SessionMemoryExtractor::new(route.model);
+
+        let backend = RecordingBackend(parking_lot::Mutex::new(None));
+        let messages = vec![Message::user("build the thing"), Message::assistant("done")];
+        let memories = extractor
+            .extract(&messages, Path::new("/workspace"), &backend)
+            .await
+            .expect("extraction ran");
+
+        assert!(memories.is_empty(), "an empty reply yields no memories");
+        assert_eq!(backend.0.lock().as_deref(), Some("claude-opus-5"));
     }
 }

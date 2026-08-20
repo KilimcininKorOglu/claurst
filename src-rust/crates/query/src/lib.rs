@@ -232,8 +232,14 @@ impl Default for QueryConfig {
 
 impl QueryConfig {
     pub fn from_config(cfg: &Config) -> Self {
+        // Canonical, not `effective_model()`. The turn loop resolves this
+        // string back into a route on every request, and several of the
+        // per-provider fallbacks are slashed ids of their own
+        // (`"anthropic/claude-sonnet-4"` for OpenRouter), which the resolver
+        // would read as an account prefix and send elsewhere.
+        let route = cfg.effective_route();
         Self {
-            model: cfg.effective_model().to_string(),
+            model: cfg.canonical_model(&route.account, &route.model),
             max_tokens: cfg.effective_max_tokens(),
             output_style: cfg.effective_output_style(),
             output_style_prompt: cfg.resolve_output_style_prompt(),
@@ -258,8 +264,9 @@ impl QueryConfig {
     pub fn from_config_with_registry(cfg: &Config, registry: &claurst_api::ModelRegistry) -> Self {
         // We can't move the Arc here, but we need a clone for the query loop.
         // Callers typically wrap the registry in an Arc already.
+        let route = claurst_api::resolve_effective_route(cfg, registry);
         Self {
-            model: claurst_api::effective_model_for_config(cfg, registry),
+            model: cfg.canonical_model(&route.account, &route.model),
             max_tokens: cfg.effective_max_tokens(),
             output_style: cfg.effective_output_style(),
             output_style_prompt: cfg.resolve_output_style_prompt(),
@@ -1743,56 +1750,60 @@ async fn run_query_loop_inner(
                 // Asynchronously extract and persist session memories if warranted.
                 // Runs in a detached Tokio task so it doesn't block the query loop.
                 if session_memory::SessionMemoryExtractor::should_extract(messages) {
-                    let model_clone = config.model.clone();
+                    // Through the account that just served the turn, not a
+                    // fresh Anthropic client built from `ANTHROPIC_API_KEY`.
+                    // That gate meant a session on any other provider
+                    // remembered nothing, and the model it asked for was
+                    // `config.model` unsplit, so a prefixed account sent
+                    // Anthropic a model id it has never heard of.
+                    //
+                    // The provider is resolved inside the task because the
+                    // extraction is detached and the loop's own handles borrow
+                    // from this frame.
+                    let route_clone = route.clone();
+                    let config_clone = tool_ctx.config.clone();
                     let messages_clone = messages.clone();
                     let working_dir_clone = tool_ctx.working_dir.clone();
 
-                    // Build a fresh client using the same API key.  This avoids
-                    // requiring an Arc in the existing run_query_loop signature.
-                    if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-                        if !api_key.is_empty() {
-                            if let Ok(sm_client) = claurst_api::AnthropicClient::new(
-                                claurst_api::client::ClientConfig {
-                                    api_key,
-                                    ..Default::default()
-                                },
-                            ) {
-                                let sm_client = std::sync::Arc::new(sm_client);
-                                tokio::spawn(async move {
-                                    let extractor =
-                                        session_memory::SessionMemoryExtractor::new(&model_clone);
-                                    match extractor
-                                        .extract(&messages_clone, &working_dir_clone, &sm_client)
-                                        .await
-                                    {
-                                        Ok(memories) if !memories.is_empty() => {
-                                            let target = working_dir_clone
-                                                .join(".claurst")
-                                                .join("AGENTS.md");
-                                            if let Err(e) =
-                                                session_memory::SessionMemoryExtractor::persist(
-                                                    &memories, &target,
-                                                )
-                                                .await
-                                            {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    "Failed to persist session memories"
-                                                );
-                                            }
-                                        }
-                                        Ok(_) => {} // no memories extracted
-                                        Err(e) => {
-                                            tracing::debug!(
-                                                error = %e,
-                                                "Session memory extraction failed (non-fatal)"
-                                            );
-                                        }
-                                    }
-                                });
+                    tokio::spawn(async move {
+                        let Some(provider) =
+                            claurst_api::provider_by_id(&config_clone, &route_clone.account).await
+                        else {
+                            tracing::debug!(
+                                account = %route_clone.account,
+                                "Session memory extraction skipped: no usable provider"
+                            );
+                            return;
+                        };
+                        let backend = compact::ProviderBackend(provider);
+                        let extractor =
+                            session_memory::SessionMemoryExtractor::new(route_clone.model);
+                        match extractor
+                            .extract(&messages_clone, &working_dir_clone, &backend)
+                            .await
+                        {
+                            Ok(memories) if !memories.is_empty() => {
+                                let target = working_dir_clone.join(".claurst").join("AGENTS.md");
+                                if let Err(e) = session_memory::SessionMemoryExtractor::persist(
+                                    &memories, &target,
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "Failed to persist session memories"
+                                    );
+                                }
+                            }
+                            Ok(_) => {} // no memories extracted
+                            Err(e) => {
+                                tracing::debug!(
+                                    error = %e,
+                                    "Session memory extraction failed (non-fatal)"
+                                );
                             }
                         }
-                    }
+                    });
                 }
 
                 // Trigger AutoDream consolidation check (non-blocking, best-effort).

@@ -846,14 +846,15 @@ pub fn should_auto_compact_for_window(
 // dispatch through.
 pub use crate::runner::context::{dispatches_through_provider, provider_for_turn};
 
-/// Whatever can turn a transcript into a summary.
+/// One model call, no tools, no streaming to anyone.
 ///
-/// Compaction needs exactly one model call and no tools, so it does not need
-/// the turn loop's dispatch machinery — only a way to send a prompt and read
-/// the text back. Two implementations cover both dispatch arms: the raw
-/// Anthropic client, and any registered [`LlmProvider`]. Without this the
-/// summariser was welded to `AnthropicClient` and every non-Anthropic session
-/// ran uncompacted.
+/// What a feature needs when it wants a single answer out of a model rather
+/// than a turn: compaction, and session-memory extraction. Neither needs the
+/// turn loop's dispatch machinery, only a way to send a prompt and read the
+/// text back. Two implementations cover both dispatch arms: the raw Anthropic
+/// client, and any registered [`LlmProvider`]. Without this both features were
+/// welded to `AnthropicClient`, so every non-Anthropic session compacted never
+/// and remembered nothing.
 ///
 /// [`LlmProvider`]: claurst_api::provider::LlmProvider
 #[async_trait::async_trait]
@@ -940,7 +941,7 @@ impl CompactBackend for ProviderBackend {
             .0
             .create_message(request)
             .await
-            .map_err(|e| ClaudeError::Other(format!("Compact summary failed: {e}")))?;
+            .map_err(|e| ClaudeError::Other(format!("Model call failed: {e}")))?;
 
         Ok(response
             .content

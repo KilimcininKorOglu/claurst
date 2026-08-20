@@ -98,29 +98,37 @@ fn build_model_registry() -> ModelRegistry {
     registry
 }
 
+/// The model string the subagent's own `QueryConfig` will carry.
+///
+/// Canonical, because the subagent resolves it against its own config and a
+/// bare id there lands on whatever provider that config happens to hold.
+///
+/// The old rule left any id containing a slash alone, which is right for
+/// `"myaccount/haiku"` and wrong for `"meta-llama/Llama-3.3-70B"`: that is one
+/// OpenRouter model id, and leaving it unqualified sent the subagent to
+/// whichever account was active instead.
 fn resolve_subagent_model(params: &AgentInput, ctx: &ToolContext) -> String {
-    let base_model = params
-        .model
-        .clone()
-        .filter(|m| !m.is_empty())
-        .or_else(|| {
-            ctx.managed_agent_config
-                .as_ref()
-                .map(|c| c.executor_model.clone())
-                .filter(|m| !m.is_empty())
-        })
-        .unwrap_or_else(|| ctx.config.effective_model().to_string());
+    let chosen = params.model.clone().filter(|m| !m.is_empty()).or_else(|| {
+        ctx.managed_agent_config
+            .as_ref()
+            .map(|c| c.executor_model.clone())
+            .filter(|m| !m.is_empty())
+    });
+    subagent_model_for(&ctx.config, chosen.as_deref())
+}
 
-    if base_model.contains('/') {
-        base_model
-    } else {
-        let provider_id = ctx.config.selected_provider_id();
-        if provider_id != "anthropic" {
-            format!("{}/{}", provider_id, base_model)
-        } else {
-            base_model
-        }
-    }
+/// Split out from [`resolve_subagent_model`] so it can be tested against a
+/// bare `Config`; building a whole `ToolContext` proves nothing about routing.
+fn subagent_model_for(config: &claurst_core::Config, chosen: Option<&str>) -> String {
+    let route = match chosen {
+        Some(model) => config.resolve_route(model),
+        // No override: whatever the parent session resolved to, fallbacks and
+        // all. `effective_route` is not `resolve_route(effective_model())`
+        // precisely because those fallbacks carry vendor namespaces.
+        None => config.effective_route(),
+    };
+
+    config.canonical_model(&route.account, &route.model)
 }
 
 /// One word for how a run ended, for a hook payload.
@@ -766,5 +774,70 @@ mod tests {
     fn a_directory_that_does_not_exist_contributes_nothing() {
         let defs = plugin_agent_definitions(&[PathBuf::from("/nonexistent/agents")]);
         assert!(defs.is_empty());
+    }
+
+    fn config_on(account: &str) -> claurst_core::Config {
+        let mut config = claurst_core::Config {
+            provider: Some(account.to_string()),
+            ..Default::default()
+        };
+        config.provider_configs.insert(
+            account.to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+        config
+    }
+
+    #[test]
+    fn a_subagent_model_names_the_account_it_belongs_to() {
+        let config = config_on("my_gateway");
+        assert_eq!(
+            subagent_model_for(&config, Some("claude-opus-5")),
+            "my_gateway/claude-opus-5"
+        );
+    }
+
+    #[test]
+    fn a_models_own_namespace_is_not_read_as_an_account() {
+        // The old rule left any id containing a slash alone. That is right for
+        // `myaccount/haiku` and wrong here: `meta-llama/Llama-3.3-70B` is one
+        // OpenRouter model id, so the subagent went to whichever account
+        // happened to be active in its own config instead of this one.
+        let config = config_on("openrouter");
+        assert_eq!(
+            subagent_model_for(&config, Some("meta-llama/Llama-3.3-70B")),
+            "openrouter/meta-llama/Llama-3.3-70B"
+        );
+
+        let read_back = config.resolve_route(&subagent_model_for(
+            &config,
+            Some("meta-llama/Llama-3.3-70B"),
+        ));
+        assert_eq!(read_back.account, "openrouter");
+        assert_eq!(read_back.model, "meta-llama/Llama-3.3-70B");
+    }
+
+    #[test]
+    fn an_explicit_account_prefix_still_wins() {
+        let mut config = config_on("my_gateway");
+        config.provider_configs.insert(
+            "other_gateway".to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+        assert_eq!(
+            subagent_model_for(&config, Some("other_gateway/some-model")),
+            "other_gateway/some-model"
+        );
+    }
+
+    #[test]
+    fn no_override_follows_the_parent_session() {
+        // And does not go through `resolve_route(effective_model())`, whose
+        // OpenRouter fallback is the slashed id `anthropic/claude-sonnet-4`.
+        let config = config_on("openrouter");
+        assert_eq!(
+            subagent_model_for(&config, None),
+            "openrouter/anthropic/claude-sonnet-4"
+        );
     }
 }
