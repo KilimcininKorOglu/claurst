@@ -1350,6 +1350,21 @@ pub mod config {
         /// [`Config::effective_compact_threshold`].
         #[serde(default, deserialize_with = "deserialize_compact_threshold")]
         pub compact_threshold: u8,
+        /// The model that writes the summary, when it should not be the one
+        /// the turn is using.
+        ///
+        /// `None` means "whichever model this turn runs on", which is the
+        /// default and the behaviour every compaction had before. Set, it
+        /// applies to every compaction: automatic, `/compact`, and the
+        /// emergency collapse. The point is that a long session on an
+        /// expensive model can have its summaries written somewhere cheap, so
+        /// the string may name an account of its own.
+        ///
+        /// Read it through [`Config::resolve_compact_route`], never directly:
+        /// a bare id here has to resolve against the same rules as any other
+        /// selection.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub compact_model: Option<String>,
         pub verbose: bool,
         pub output_format: OutputFormat,
         pub mcp_servers: Vec<McpServerConfig>,
@@ -2283,6 +2298,25 @@ pub mod config {
             }
         }
 
+        /// Who writes the summary for a turn going to `turn`.
+        ///
+        /// The turn's own route unless [`Config::compact_model`] names
+        /// another, in which case that string is resolved the same way any
+        /// model selection is, prefix and all. A compact model naming its own
+        /// account is the whole point: the summary goes there while the
+        /// conversation stays where it is.
+        pub fn resolve_compact_route(&self, turn: &Route) -> Route {
+            match self
+                .compact_model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+            {
+                Some(model) => self.resolve_route(model),
+                None => turn.clone(),
+            }
+        }
+
         /// Resolve the effective output style for system-prompt assembly.
         pub fn effective_output_style(&self) -> crate::system_prompt::OutputStyle {
             self.output_style
@@ -3076,6 +3110,11 @@ pub mod config {
                 // `verbose` below: a repository has no stake in how much room
                 // the user keeps for their own conversation.
                 compact_threshold: base.config.compact_threshold,
+                // And which model writes the summary, for the same reason plus
+                // one more: it names an account, and a repository must not be
+                // able to send a session's transcript to an endpoint the user
+                // did not choose.
+                compact_model: base.config.compact_model,
                 // How much the session logs is the user's business, like the
                 // interface preferences below.
                 verbose: base.config.verbose,
@@ -9345,6 +9384,54 @@ mod route_resolution_tests {
             offenders.is_empty(),
             "rewritten_by_provider used outside crates/api/src/providers/: {offenders:?}"
         );
+    }
+
+    // ---- the compact model ------------------------------------------------
+
+    #[test]
+    fn no_compact_model_keeps_the_summary_on_the_turns_own_model() {
+        let config = config_with(Some("my_gateway"), &["my_gateway"]);
+        let turn = config.route_for_account("my_gateway", "big-expensive-model");
+        assert_eq!(config.resolve_compact_route(&turn), turn);
+    }
+
+    #[test]
+    fn a_compact_model_may_name_its_own_account() {
+        // The point of the setting: a long session on an expensive account
+        // has its summaries written somewhere cheap, while the conversation
+        // stays where it is.
+        let mut config = config_with(Some("my_gateway"), &["my_gateway", "cheap_account"]);
+        config.compact_model = Some("cheap_account/haiku".to_string());
+
+        let turn = config.route_for_account("my_gateway", "big-expensive-model");
+        let compact = config.resolve_compact_route(&turn);
+
+        assert_eq!(compact.account, "cheap_account");
+        assert_eq!(compact.model, "haiku");
+        assert_eq!(turn.account, "my_gateway", "the turn itself does not move");
+    }
+
+    #[test]
+    fn a_bare_compact_model_stays_on_the_sessions_account() {
+        let mut config = config_with(Some("my_gateway"), &["my_gateway"]);
+        config.compact_model = Some("small-model".to_string());
+
+        let turn = config.route_for_account("my_gateway", "big-expensive-model");
+        let compact = config.resolve_compact_route(&turn);
+
+        assert_eq!(compact.account, "my_gateway");
+        assert_eq!(compact.model, "small-model");
+    }
+
+    #[test]
+    fn a_blank_compact_model_reads_as_unset() {
+        // The settings screen writes an empty string when the row is cleared,
+        // and an empty model id would resolve to a route nothing serves.
+        let mut config = config_with(None, &[]);
+        config.compact_model = Some("   ".to_string());
+
+        let turn = config.route_for_account("anthropic", "claude-opus-5");
+        assert_eq!(config.resolve_compact_route(&turn), turn);
     }
 
     #[test]
