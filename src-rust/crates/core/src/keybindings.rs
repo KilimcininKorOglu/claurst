@@ -197,14 +197,22 @@ pub fn default_bindings() -> Vec<ParsedBinding> {
         // Word navigation
         ("ctrl+left", "moveWordBackward", KeyContext::Chat),
         ("ctrl+right", "moveWordForward", KeyContext::Chat),
+        ("alt+b", "moveWordBackward", KeyContext::Chat),
+        ("alt+f", "moveWordForward", KeyContext::Chat),
         // Word deletion
         ("ctrl+w", "killWord", KeyContext::Chat),
         ("alt+backspace", "killWord", KeyContext::Chat),
+        ("ctrl+backspace", "killWord", KeyContext::Chat),
         ("alt+d", "deleteWord", KeyContext::Chat),
+        ("ctrl+delete", "deleteWord", KeyContext::Chat),
+        ("alt+delete", "deleteWord", KeyContext::Chat),
         // Character/line deletion
         ("ctrl+h", "deleteCharBefore", KeyContext::Chat),
         ("ctrl+u", "killToStart", KeyContext::Chat),
         ("ctrl+l", "clearLine", KeyContext::Chat),
+        // Kill ring
+        ("ctrl+y", "yank", KeyContext::Chat),
+        ("alt+y", "yankPop", KeyContext::Chat),
         // History navigation
         ("up", "historyPrev", KeyContext::Chat),
         ("ctrl+o", "historyPrev", KeyContext::Chat),

@@ -5648,37 +5648,11 @@ impl App {
                 self.help_overlay.toggle();
             }
 
-            // ctrl+u and ctrl+w resolve to killToStart / killWord above, which
-            // do the same thing; arms for them here could only run by
-            // overruling an explicit unbind.
-            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.prompt_input.yank();
-                self.refresh_prompt_input();
-            }
-
-            // ---- Alt/Meta key text editing operations -------------------
-            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.yank_pop();
-                self.refresh_prompt_input();
-            }
-            // alt+backspace resolves to killWord above.
-            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.prompt_input.delete_word_backward();
-                self.refresh_prompt_input();
-            }
-            KeyCode::Delete if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.delete_word_forward();
-                self.refresh_prompt_input();
-            }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.move_word_backward();
-                self.sync_legacy_prompt_fields();
-            }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.move_word_forward();
-                self.sync_legacy_prompt_fields();
-            }
-            // alt+d resolves to deleteWord above.
+            // Every prompt-editing chord now resolves through
+            // claurst_core::keybindings, so it can be rebound and it can be
+            // turned off. Arms here for ctrl+u, ctrl+w, ctrl+y, alt+y,
+            // alt+backspace, ctrl+backspace, alt+d, alt+delete, ctrl+delete,
+            // alt+b and alt+f could only run by overruling an explicit unbind.
 
             // ---- Text entry (allowed while streaming so users can queue
             // the next message; submission queues via Enter at the CLI layer).
@@ -5695,12 +5669,8 @@ impl App {
                 self.prompt_input.backspace();
                 self.refresh_prompt_input();
             }
-            KeyCode::Delete if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Delete => {
                 self.prompt_input.delete();
-                self.refresh_prompt_input();
-            }
-            KeyCode::Delete if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.prompt_input.delete_word_forward();
                 self.refresh_prompt_input();
             }
             // Only the unmodified arrows reach here: ctrl+left/ctrl+right
@@ -6400,6 +6370,16 @@ impl App {
             "moveWordForward" => {
                 self.prompt_input.move_word_forward();
                 self.sync_legacy_prompt_fields();
+                false
+            }
+            "yank" => {
+                self.prompt_input.yank();
+                self.refresh_prompt_input();
+                false
+            }
+            "yankPop" => {
+                self.prompt_input.yank_pop();
+                self.refresh_prompt_input();
                 false
             }
             "expandPaste" => {
@@ -10148,6 +10128,62 @@ mod tests {
             missing.is_empty(),
             "bound Chat/Global actions with no arm: {missing:?}"
         );
+    }
+
+    /// Every prompt-editing chord goes through the keybinding layer, so each
+    /// one can be rebound and turned off. These used to live as inline arms in
+    /// `handle_key_event` and were unreachable from keybindings.json.
+    #[test]
+    fn the_remaining_prompt_chords_resolve_through_the_keybinding_layer() {
+        let cases: &[(KeyCode, KeyModifiers, &str, usize, &str)] = &[
+            (
+                KeyCode::Backspace,
+                KeyModifiers::CONTROL,
+                "alpha beta",
+                10,
+                "alpha ",
+            ),
+            (
+                KeyCode::Delete,
+                KeyModifiers::CONTROL,
+                "alpha beta",
+                6,
+                "alpha ",
+            ),
+            (
+                KeyCode::Delete,
+                KeyModifiers::ALT,
+                "alpha beta",
+                6,
+                "alpha ",
+            ),
+        ];
+        for (code, mods, text, cursor, expected) in cases {
+            let mut app = make_app();
+            app.prompt_input.text = (*text).to_string();
+            app.prompt_input.cursor = *cursor;
+            app.handle_key_event(press_key(*code, *mods));
+            assert_eq!(app.prompt_input.text, *expected, "{code:?}+{mods:?}");
+        }
+
+        // Alt+B / Alt+F move by a word.
+        let mut app = make_app();
+        app.prompt_input.text = "alpha beta".to_string();
+        app.prompt_input.cursor = 10;
+        app.handle_key_event(press_key(KeyCode::Char('b'), KeyModifiers::ALT));
+        assert_eq!(app.prompt_input.cursor, 6, "Alt+B did not move a word");
+        app.handle_key_event(press_key(KeyCode::Char('f'), KeyModifiers::ALT));
+        assert_eq!(app.prompt_input.cursor, 10, "Alt+F did not move a word");
+
+        // Ctrl+W fills the kill ring and Ctrl+Y puts it back, which is the
+        // point of routing ctrl+backspace at killWord rather than a delete.
+        let mut app = make_app();
+        app.prompt_input.text = "alpha beta".to_string();
+        app.prompt_input.cursor = 10;
+        app.handle_key_event(press_key(KeyCode::Backspace, KeyModifiers::CONTROL));
+        assert_eq!(app.prompt_input.text, "alpha ");
+        app.handle_key_event(press_key(KeyCode::Char('y'), KeyModifiers::CONTROL));
+        assert_eq!(app.prompt_input.text, "alpha beta");
     }
 
     /// A chord in `default_bindings` is only reachable if a real key event can

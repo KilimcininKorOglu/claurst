@@ -2289,69 +2289,6 @@ impl PromptInputState {
         self.kill_ring.cycle_backward();
     }
 
-    /// Alt+Backspace: Delete word backward.
-    pub fn delete_word_backward(&mut self) {
-        if self.mode == InputMode::Readonly || self.cursor == 0 {
-            return;
-        }
-        let before = &self.text[..self.cursor];
-        let chars: Vec<char> = before.chars().collect();
-        let mut idx = chars.len();
-        while idx > 0 && chars[idx - 1].is_whitespace() {
-            idx -= 1;
-        }
-        if idx == 0 {
-            return;
-        }
-        if is_word_char(chars[idx - 1]) {
-            while idx > 0 && is_word_char(chars[idx - 1]) {
-                idx -= 1;
-            }
-        } else {
-            while idx > 0 && !is_word_char(chars[idx - 1]) && !chars[idx - 1].is_whitespace() {
-                idx -= 1;
-            }
-        }
-        let delete_start = char_idx_to_byte(before, idx);
-        if delete_start < self.cursor {
-            self.text.drain(delete_start..self.cursor);
-            self.cursor = delete_start;
-            self.update_token_estimate();
-            self.kill_ring.mark_non_kill();
-        }
-    }
-
-    /// Alt+Delete: Delete word forward.
-    pub fn delete_word_forward(&mut self) {
-        if self.mode == InputMode::Readonly || self.cursor >= self.text.len() {
-            return;
-        }
-        let rest = &self.text[self.cursor..];
-        let chars: Vec<char> = rest.chars().collect();
-        let mut idx = 0;
-        while idx < chars.len() && chars[idx].is_whitespace() {
-            idx += 1;
-        }
-        if idx >= chars.len() {
-            return;
-        }
-        if is_word_char(chars[idx]) {
-            while idx < chars.len() && is_word_char(chars[idx]) {
-                idx += 1;
-            }
-        } else {
-            while idx < chars.len() && !is_word_char(chars[idx]) && !chars[idx].is_whitespace() {
-                idx += 1;
-            }
-        }
-        let delete_end = self.cursor + char_idx_to_byte(rest, idx);
-        if delete_end > self.cursor {
-            self.text.drain(self.cursor..delete_end);
-            self.update_token_estimate();
-            self.kill_ring.mark_non_kill();
-        }
-    }
-
     /// Alt+B: Jump to previous word.
     pub fn move_word_backward(&mut self) {
         if self.cursor == 0 {
