@@ -1576,8 +1576,6 @@ pub struct App {
     /// Last stdout of the external status line command (settings `statusLine`),
     /// rendered with its own ANSI styling in the rows above the footer.
     pub status_line_override: Option<String>,
-    /// Guard to prevent re-triggering auto-compact while one is in flight.
-    pub auto_compact_running: bool,
 
     // ---- Voice hold-to-talk ------------------------------------------------
     /// The global voice recorder, Some when voice is enabled in config.
@@ -1973,7 +1971,6 @@ impl App {
             background_task_count: 0,
             background_task_status: None,
             status_line_override: None,
-            auto_compact_running: false,
             voice_recorder: {
                 // Check whether voice input has been enabled via the /voice command
                 // (stored in ~/.claurst/ui-settings.json).  We also accept
