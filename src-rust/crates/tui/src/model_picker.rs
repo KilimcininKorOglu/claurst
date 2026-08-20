@@ -1086,6 +1086,11 @@ impl ModelPickerState {
         }
     }
 
+    /// The rows currently loaded, unfiltered.
+    pub fn models(&self) -> &[ModelEntry] {
+        &self.models
+    }
+
     /// True when the list spans more than one provider.
     ///
     /// A live fetch covers one provider, so it must not replace the whole list

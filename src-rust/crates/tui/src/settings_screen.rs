@@ -30,11 +30,20 @@ pub enum SettingKind {
     Number,
     /// Free text, edited the same way as `Number` but never parsed.
     Text,
+    /// A model, chosen from the same picker `/model` opens rather than typed.
+    ///
+    /// Enter does not edit the row: it asks the session loop to open the
+    /// picker, because the list of models belongs to the accounts and the
+    /// settings screen has no way to fetch it.
+    ModelPicker,
 }
 
 /// Seeded into the SearXNG address prompt. It is the port SearXNG binds in its
 /// own `settings.yml` template and in the official `searxng-docker` compose.
 pub const DEFAULT_SEARXNG_URL: &str = "http://localhost:8080";
+
+/// What an unset compact model reads as, and the picker row that clears it.
+pub const USE_THE_TURNS_MODEL: &str = "Use the turn's model";
 
 #[derive(Debug, Clone)]
 pub struct SettingsEntry {
@@ -58,6 +67,13 @@ pub struct SettingsScreen {
     pub settings_snapshot: Settings,
     /// Pending changes (field_name → new_value string).
     pub pending_changes: HashMap<String, String>,
+    /// A setting whose value is picked from the model picker, waiting for the
+    /// session loop to open it.
+    ///
+    /// The settings screen cannot open the picker itself: the model list is
+    /// fetched per account by the session loop, which owns the registry and
+    /// the credentials. Taken with [`SettingsScreen::take_pending_model_picker`].
+    pending_model_picker: Option<String>,
     /// Why the last write to `settings.json` failed, if it did.
     ///
     /// A settings screen that reports "true" while the file on disk still says
@@ -89,6 +105,9 @@ pub struct SettingsScreen {
     pub timeline_enabled: bool,
     /// Empty when no SearXNG instance is configured.
     pub searxng_url: String,
+    /// The model that writes every summary, or empty for "the one this turn
+    /// is using". Stored canonically, so it names its account.
+    pub compact_model: String,
     pub output_format: String,
     pub disable_claude_mds: bool,
     pub file_injection_enabled: bool,
@@ -109,6 +128,7 @@ impl SettingsScreen {
             edit_value: String::new(),
             settings_snapshot: settings_snapshot.clone(),
             pending_changes: HashMap::new(),
+            pending_model_picker: None,
             save_error: None,
             saves: 0,
             auto_compact: false,
@@ -131,6 +151,7 @@ impl SettingsScreen {
             web_search_fallback: false,
             timeline_enabled: false,
             searxng_url: String::new(),
+            compact_model: String::new(),
             output_format: "text".to_string(),
             disable_claude_mds: false,
             file_injection_enabled: true,
@@ -187,6 +208,12 @@ impl SettingsScreen {
             .settings_snapshot
             .config
             .searxng_url
+            .clone()
+            .unwrap_or_default();
+        self.compact_model = self
+            .settings_snapshot
+            .config
+            .compact_model
             .clone()
             .unwrap_or_default();
         self.output_format = match &self.settings_snapshot.config.output_format {
@@ -281,6 +308,38 @@ impl SettingsScreen {
     /// How many times this screen has written `settings.json`.
     pub fn saves(&self) -> u64 {
         self.saves
+    }
+
+    /// The setting waiting for a model to be picked for it, if any.
+    ///
+    /// Read once: taking it is what stops the picker reopening on every frame.
+    pub fn take_pending_model_picker(&mut self) -> Option<String> {
+        self.pending_model_picker.take()
+    }
+
+    /// Record a model chosen from the picker.
+    ///
+    /// `None` clears the setting, which for the compact model means the
+    /// summary goes back to whichever model the turn is using.
+    ///
+    /// Writes three times on purpose, like `toggle_or_cycle_current`: to the
+    /// screen's own copy so the row redraws, to the snapshot about to be
+    /// written to disk, and to `config`, which is the one the running session
+    /// reads. Skipping the last leaves a setting that looks changed, saves
+    /// correctly, and does nothing until the next launch.
+    pub fn set_picked_model(&mut self, key: &str, model: Option<String>, config: &mut Config) {
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
+        match key {
+            "compact_model" => {
+                self.compact_model = model.clone().unwrap_or_default();
+                self.settings_snapshot.config.compact_model = model.clone();
+                config.compact_model = model;
+            }
+            _ => return,
+        }
+        self.persist();
     }
 
     /// Start editing a field by name, seeding the buffer with current value.
@@ -585,6 +644,19 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
                 "true"
             }
             .to_string(),
+        },
+        SettingsEntry {
+            key: "compact_model".into(),
+            label: "Compact model".into(),
+            description:
+                "The model that writes every conversation summary. Unset, the summary is written by whichever model the turn is using."
+                    .into(),
+            kind: SettingKind::ModelPicker,
+            value: if screen.compact_model.is_empty() {
+                USE_THE_TURNS_MODEL.to_string()
+            } else {
+                screen.compact_model.clone()
+            },
         },
         SettingsEntry {
             key: "searxng_url".into(),
@@ -1288,6 +1360,12 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
             SettingKind::Number | SettingKind::Text => {
                 screen.start_edit(&entry.key, &entry.value);
             }
+            // Nothing changes here. The session loop owns the picker, and the
+            // models in it belong to the accounts, which the settings screen
+            // cannot reach.
+            SettingKind::ModelPicker => {
+                screen.pending_model_picker = Some(entry.key.clone());
+            }
         }
     }
 }
@@ -1839,5 +1917,80 @@ mod tests {
 
         screen.web_search_fallback = true;
         assert_eq!(entry_value(&screen, "web_search_fallback"), "true");
+    }
+
+    // ---- the compact model row ----------------------------------------------
+
+    #[test]
+    fn the_compact_model_row_asks_for_the_picker_rather_than_an_edit_box() {
+        let mut screen = SettingsScreen::new();
+        let entries = all_entries(&screen);
+        let entry = entries
+            .iter()
+            .find(|e| e.key == "compact_model")
+            .expect("the compact model row exists");
+        assert!(matches!(entry.kind, SettingKind::ModelPicker));
+        assert_eq!(entry.value, USE_THE_TURNS_MODEL, "unset by default");
+
+        screen.selected_idx = entries
+            .iter()
+            .position(|e| e.key == "compact_model")
+            .expect("its index");
+        toggle_or_cycle_current(&mut screen, &mut Config::default());
+
+        assert!(
+            screen.edit_field.is_none(),
+            "the row must not open an edit box: the model list belongs to the accounts"
+        );
+        assert_eq!(
+            screen.take_pending_model_picker().as_deref(),
+            Some("compact_model")
+        );
+        assert!(
+            screen.take_pending_model_picker().is_none(),
+            "taking it twice would reopen the picker on the next frame"
+        );
+    }
+
+    #[test]
+    fn a_picked_compact_model_reaches_the_running_session() {
+        let _guard = HomeGuard::new();
+        let mut screen = SettingsScreen::new();
+        let mut config = Config::default();
+
+        screen.set_picked_model(
+            "compact_model",
+            Some("cheap_account/haiku".to_string()),
+            &mut config,
+        );
+
+        assert_eq!(screen.compact_model, "cheap_account/haiku");
+        assert_eq!(
+            screen.settings_snapshot.config.compact_model.as_deref(),
+            Some("cheap_account/haiku")
+        );
+        assert_eq!(
+            config.compact_model.as_deref(),
+            Some("cheap_account/haiku"),
+            "the running session reads the live config, not the snapshot"
+        );
+        assert!(screen.save_error.is_none(), "{:?}", screen.save_error);
+    }
+
+    #[test]
+    fn clearing_the_compact_model_sends_the_summary_back_to_the_turn() {
+        let _guard = HomeGuard::new();
+        let mut screen = SettingsScreen::new();
+        let mut config = Config {
+            compact_model: Some("cheap_account/haiku".to_string()),
+            ..Default::default()
+        };
+        screen.compact_model = "cheap_account/haiku".to_string();
+
+        screen.set_picked_model("compact_model", None, &mut config);
+
+        assert!(screen.compact_model.is_empty());
+        assert_eq!(screen.settings_snapshot.config.compact_model, None);
+        assert_eq!(config.compact_model, None);
     }
 }

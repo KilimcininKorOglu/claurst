@@ -561,6 +561,105 @@ mod tests {
         assert_eq!(route.model, "meta-llama/Llama-3.3-70B");
     }
 
+    /// `Settings::config_dir` reads process-global env, so a test that writes
+    /// settings must repoint it and put it back. CI passes `--test-threads=1`.
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::TempDir::new().expect("temp dir");
+            let previous = std::env::var_os("CLAURST_HOME");
+            std::env::set_var("CLAURST_HOME", dir.path());
+            Self {
+                previous,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("CLAURST_HOME", value),
+                None => std::env::remove_var("CLAURST_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn picking_a_compact_model_does_not_switch_the_session_model() {
+        // The picker's usual job is to change the session's model, and it is
+        // reached here from the settings screen instead. Choosing a compact
+        // model must fill in that setting and leave the conversation on the
+        // model it was already using.
+        let _guard = HomeGuard::new();
+        let mut app = make_app();
+        app.set_model("claude-opus-4-5".to_string());
+        let before = app.model_name.clone();
+
+        app.model_picker
+            .set_models(vec![crate::model_picker::ModelEntry {
+                id: "anthropic/claude-haiku-4-5".to_string(),
+                display_name: "Haiku".to_string(),
+                description: String::new(),
+                is_current: false,
+                provider_id: Some("anthropic".to_string()),
+            }]);
+        app.model_picker.open_with_title(
+            "Model for this setting",
+            "anthropic/claude-haiku-4-5",
+            app.effort_level,
+            false,
+        );
+        app.model_picker_for_setting = Some("compact_model".to_string());
+
+        app.handle_key_event(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(
+            app.config.compact_model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(app.model_name, before, "the session's own model moved");
+        assert!(!app.model_picker.visible);
+        assert!(app.model_picker_for_setting.is_none());
+    }
+
+    #[test]
+    fn choosing_the_unset_row_sends_the_summary_back_to_the_turn() {
+        let _guard = HomeGuard::new();
+        let mut app = make_app();
+        app.config.compact_model = Some("anthropic/claude-haiku-4-5".to_string());
+
+        app.model_picker
+            .set_models(vec![crate::model_picker::ModelEntry {
+                id: crate::settings_screen::USE_THE_TURNS_MODEL.to_string(),
+                display_name: crate::settings_screen::USE_THE_TURNS_MODEL.to_string(),
+                description: String::new(),
+                is_current: true,
+                provider_id: None,
+            }]);
+        app.model_picker.open_with_title(
+            "Model for this setting",
+            crate::settings_screen::USE_THE_TURNS_MODEL,
+            app.effort_level,
+            false,
+        );
+        app.model_picker_for_setting = Some("compact_model".to_string());
+
+        app.handle_key_event(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(app.config.compact_model, None);
+    }
+
     #[test]
     fn an_account_prefix_moves_the_account() {
         let mut app = make_app();

@@ -1490,6 +1490,12 @@ pub struct App {
     /// The provider ID that the model picker was opened for (used when the
     /// fetch is triggered from /connect before the provider is activated).
     pub model_picker_provider_id: Option<String>,
+    /// The settings-screen row the open picker is choosing for.
+    ///
+    /// `Some` means Enter writes the choice back into that setting instead of
+    /// switching the session's own model, which is what the picker does every
+    /// other time it opens.
+    pub model_picker_for_setting: Option<String>,
     /// When `true`, the main event loop should spawn an async task to load
     /// the session list from disk and populate the session browser.
     pub session_list_pending: bool,
@@ -1918,6 +1924,7 @@ impl App {
             model_registry,
             model_picker_fetch_pending: false,
             model_picker_provider_id: None,
+            model_picker_for_setting: None,
             session_list_pending: false,
             pending_resume_session_id: None,
             pending_branch_create: None,
@@ -2439,6 +2446,43 @@ impl App {
         );
     }
 
+    /// Open the model picker to fill in a settings-screen row.
+    ///
+    /// The same list `/model` offers, with one row in front for leaving the
+    /// setting unset. Without it there is no way back to the default once a
+    /// model has been picked, short of editing `settings.json`.
+    fn open_model_picker_for_setting(&mut self, key: String, current: Option<String>) {
+        self.open_model_picker_for_all_providers();
+        if !self.model_picker.visible {
+            return;
+        }
+
+        let mut models = self.model_picker.models().to_vec();
+        models.insert(
+            0,
+            crate::model_picker::ModelEntry {
+                id: crate::settings_screen::USE_THE_TURNS_MODEL.to_string(),
+                display_name: crate::settings_screen::USE_THE_TURNS_MODEL.to_string(),
+                description: "The summary is written by whichever model the turn is using."
+                    .to_string(),
+                is_current: current.is_none(),
+                provider_id: None,
+            },
+        );
+        self.model_picker.set_models(models);
+        // Reopened so the cursor lands on what the setting currently holds
+        // rather than on the session's own model.
+        self.model_picker.open_with_title(
+            "Model for this setting",
+            current
+                .as_deref()
+                .unwrap_or(crate::settings_screen::USE_THE_TURNS_MODEL),
+            self.effort_level,
+            self.fast_mode,
+        );
+        self.model_picker_for_setting = Some(key);
+    }
+
     /// The session's model in `provider/model` form.
     fn qualified_current_model(&self, provider_id: &str) -> String {
         if self.model_name.contains('/') {
@@ -2826,6 +2870,7 @@ impl App {
         self.pending_mcp_panel_auth = None;
         self.model_picker_fetch_pending = false;
         self.model_picker_provider_id = None;
+        self.model_picker_for_setting = None;
         self.has_credentials = has_credentials;
         self.fast_mode = false;
         let effective = self.config.effective_route();
@@ -4829,7 +4874,10 @@ impl App {
         // Model picker intercepts navigation and Esc
         if self.model_picker.visible {
             match key.code {
-                KeyCode::Esc => self.model_picker.close(),
+                KeyCode::Esc => {
+                    self.model_picker_for_setting = None;
+                    self.model_picker.close();
+                }
                 KeyCode::Home => self.model_picker.select_first(),
                 KeyCode::End => self.model_picker.select_last(),
                 KeyCode::Up => self.model_picker.select_prev(),
@@ -4853,6 +4901,29 @@ impl App {
                 KeyCode::Tab => self.model_picker.next_provider_group(),
                 KeyCode::BackTab => self.model_picker.prev_provider_group(),
                 KeyCode::Enter => {
+                    // Filling in a settings row, not switching the session's
+                    // own model: the picker was opened by the settings screen
+                    // and the choice belongs to that setting.
+                    if let Some(setting) = self.model_picker_for_setting.take() {
+                        if let Some((model_id, _effort)) = self.model_picker.confirm() {
+                            let chosen = (model_id != crate::settings_screen::USE_THE_TURNS_MODEL)
+                                .then(|| {
+                                    let route = self.config.resolve_route(&model_id);
+                                    self.config.canonical_model(&route.account, &route.model)
+                                });
+                            self.settings_screen.set_picked_model(
+                                &setting,
+                                chosen.clone(),
+                                &mut self.config,
+                            );
+                            self.status_message = Some(match chosen {
+                                Some(model) => format!("Compact model: {model}"),
+                                None => "Compact model: the turn's own.".to_string(),
+                            });
+                        }
+                        self.model_picker.close();
+                        return false;
+                    }
                     if let Some((model_id, effort)) = self.model_picker.confirm() {
                         // If user picked a model other than the fast-mode model
                         // while fast mode was active, turn fast mode off.
@@ -5153,6 +5224,17 @@ impl App {
                 &mut self.config,
                 key,
             );
+            // A row whose value is a model asks for the picker rather than an
+            // edit box: the list belongs to the accounts, which the settings
+            // screen cannot reach.
+            if let Some(setting) = self.settings_screen.take_pending_model_picker() {
+                let current = match setting.as_str() {
+                    "compact_model" => Some(self.settings_screen.compact_model.clone()),
+                    _ => None,
+                }
+                .filter(|value| !value.is_empty());
+                self.open_model_picker_for_setting(setting, current);
+            }
             return false;
         }
 
