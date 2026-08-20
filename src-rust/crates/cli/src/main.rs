@@ -4902,6 +4902,19 @@ async fn run_interactive(
                     QueryEvent::Status(msg) => Some(BridgeOutbound::Status {
                         message: msg.clone(),
                     }),
+                    QueryEvent::Compacted {
+                        messages_before,
+                        messages_after,
+                        ..
+                    } => {
+                        let removed = messages_before.saturating_sub(*messages_after);
+                        Some(BridgeOutbound::Status {
+                            message: format!(
+                                "Compacted {removed} message{} into a summary.",
+                                if removed == 1 { "" } else { "s" }
+                            ),
+                        })
+                    }
                     QueryEvent::TokenWarning { state, pct_used } => {
                         use claurst_query::compact::TokenWarningState;
                         // `Ok` is the absence of a warning, so sending it would

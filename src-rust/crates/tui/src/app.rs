@@ -8181,6 +8181,29 @@ impl App {
                 self.status_message = Some(msg);
             }
 
+            QueryEvent::Compacted {
+                messages_before,
+                messages_after,
+                tokens_after,
+            } => {
+                // The conversation the model sees is now the summary, so the
+                // footer has to follow it. Without this the counter kept the
+                // pre-compaction figure until the next turn reported usage.
+                self.context_used_tokens = tokens_after;
+                // A warning already shown was about a context that no longer
+                // exists; let the thresholds be reached again on their merits.
+                self.token_warning_threshold_shown = 0;
+                let removed = messages_before.saturating_sub(messages_after);
+                self.push_system_message(
+                    format!(
+                        "Compacted {removed} message{} into a summary.",
+                        if removed == 1 { "" } else { "s" }
+                    ),
+                    SystemMessageStyle::Compact,
+                );
+                self.status_message = None;
+            }
+
             QueryEvent::Error(msg) => {
                 self.is_streaming = false;
                 self.spinner_verb = None;
@@ -8800,6 +8823,35 @@ mod tests {
         let mut app = make_app();
 
         assert_eq!(finish_turn(&mut app, 400, 9_000, 30_000), 30_400);
+    }
+
+    /// A compaction replaces the conversation the model sees, so the footer
+    /// follows it immediately. The counter used to keep climbing until the
+    /// next turn reported usage, and the only reset in the tree belonged to a
+    /// path that never compacted anything.
+    #[test]
+    fn a_compaction_moves_the_footer_to_the_new_size() {
+        let mut app = make_app();
+        finish_turn(&mut app, 190_000, 500, 0);
+        app.token_warning_threshold_shown = 95;
+
+        app.handle_query_event(claurst_query::QueryEvent::Compacted {
+            messages_before: 40,
+            messages_after: 6,
+            tokens_after: 18_000,
+        });
+
+        assert_eq!(app.context_used_tokens, 18_000);
+        assert_eq!(
+            app.token_warning_threshold_shown, 0,
+            "a warning about a context that no longer exists is retired"
+        );
+        assert!(
+            app.system_annotations
+                .iter()
+                .any(|a| a.text.contains("Compacted 34 messages")),
+            "the transcript says what happened"
+        );
     }
 
     // ---- MikMik (the fixed welcome-screen mascot) ----

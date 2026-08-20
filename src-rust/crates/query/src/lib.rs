@@ -311,6 +311,19 @@ pub enum QueryEvent {
     },
     /// An informational status message.
     Status(String),
+    /// The conversation was replaced by a summary of its older part.
+    ///
+    /// Carries the new size because nothing else can report it: the next
+    /// provider usage figure arrives a turn later, so without this the footer
+    /// would go on showing the pre-compaction figure until then.
+    Compacted {
+        /// Message count before the summary replaced the head.
+        messages_before: usize,
+        /// Message count after.
+        messages_after: usize,
+        /// Estimated size of the conversation now, in tokens.
+        tokens_after: u64,
+    },
     /// An error.
     Error(String),
     /// Token usage has crossed a warning threshold.
@@ -815,9 +828,11 @@ async fn run_query_loop_inner(
         if context_pass.compacted {
             last_context_tokens = context_pass.tokens_after;
             if let Some(ref tx) = event_tx {
-                let _ = tx.send(QueryEvent::Status(
-                    "Context compacted to stay within limits.".to_string(),
-                ));
+                let _ = tx.send(QueryEvent::Compacted {
+                    messages_before: context_pass.before,
+                    messages_after: context_pass.after,
+                    tokens_after: context_pass.tokens_after,
+                });
             }
         }
 

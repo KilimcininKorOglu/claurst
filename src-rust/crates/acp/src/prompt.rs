@@ -495,6 +495,18 @@ async fn forward_events(
             QueryEvent::Status(msg) => {
                 send_text_chunk(&connection, &session_id, &format!("\n[{}]", msg), false).await;
             }
+            QueryEvent::Compacted {
+                messages_before,
+                messages_after,
+                ..
+            } => {
+                let removed = messages_before.saturating_sub(messages_after);
+                let note = format!(
+                    "\n[Compacted {removed} message{} into a summary.]",
+                    if removed == 1 { "" } else { "s" }
+                );
+                send_text_chunk(&connection, &session_id, &note, false).await;
+            }
             QueryEvent::TokenWarning { state, pct_used } => {
                 if let Some(note) = token_warning_note(state, pct_used) {
                     send_text_chunk(&connection, &session_id, &note, false).await;
