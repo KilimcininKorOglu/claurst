@@ -5336,8 +5336,14 @@ impl App {
         }
 
         // Clear any active text selection on key press (except Ctrl+C which copies it).
-        let is_copy =
-            key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+        //
+        // Accept `'C'` as well as `'c'`: with the kitty keyboard protocol the
+        // shifted form arrives as the capital, and the copy arm below already
+        // matches both. Comparing only the lowercase here wiped the selection
+        // before that arm ran, so Ctrl+Shift+C copied nothing and fell through
+        // to the exit confirmation instead.
+        let is_copy = matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers.contains(KeyModifiers::CONTROL);
         if !is_copy && self.selection_anchor.is_some() {
             self.selection_anchor = None;
             self.selection_focus = None;
@@ -9916,6 +9922,26 @@ mod tests {
         assert!(!app.should_exit);
         app.handle_key_event(press_key(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.should_exit);
+    }
+
+    /// Both spellings of the copy chord have to survive the selection-clearing
+    /// guard, or the copy arm finds nothing selected and arms the exit prompt.
+    #[test]
+    fn either_case_of_the_copy_chord_copies_the_selection() {
+        for code in [KeyCode::Char('c'), KeyCode::Char('C')] {
+            let mut app = make_app();
+            app.selection_anchor = Some((0, 1));
+            app.selection_focus = Some((10, 1));
+            *app.selection_text.borrow_mut() = "selected text".to_string();
+
+            app.handle_key_event(press_key(code, KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+
+            assert!(
+                app.last_exit_key_warning.is_none(),
+                "{code:?} armed the exit prompt instead of copying"
+            );
+            assert!(!app.should_exit, "{code:?} started an exit");
+        }
     }
 
     #[test]
