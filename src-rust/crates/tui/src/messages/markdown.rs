@@ -275,11 +275,32 @@ fn parse_inline_spans(text: String) -> Vec<Span<'static>> {
     spans
 }
 
+/// Wrap `text` to `width`, keeping the line's own leading whitespace on every
+/// row it produces.
+///
+/// The indent matters twice over: the caller prefixes every transcript line
+/// with two spaces, and a nested list item carries its own. Splitting on
+/// whitespace drops both, so a line that wrapped started at column 0 while the
+/// line above it did not, and a nested bullet lost the nesting that made it
+/// one.
 fn word_wrap(text: &str, width: usize) -> Vec<String> {
     if width == 0 || UnicodeWidthStr::width(text) <= width {
         return vec![text.to_string()];
     }
 
+    let indent = &text[..text.len() - text.trim_start().len()];
+    let indent_width = UnicodeWidthStr::width(indent);
+    // A line indented past the usable width has no room left to wrap into;
+    // fall back rather than wrapping one character per row.
+    if !indent.is_empty() && indent_width < width {
+        let body = &text[indent.len()..];
+        return word_wrap(body, width - indent_width)
+            .into_iter()
+            .map(|chunk| format!("{indent}{chunk}"))
+            .collect();
+    }
+
+    let text = text.trim_start();
     let mut result = Vec::new();
     let mut current_line = String::new();
     let mut current_width = 0usize;
@@ -337,4 +358,96 @@ fn word_wrap(text: &str, width: usize) -> Vec<String> {
         result.push(text.to_string());
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rendered(md: &str, width: u16) -> Vec<String> {
+        render_markdown(md, width)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_wrapped_line_keeps_the_transcript_margin() {
+        let lines = rendered(
+            "This is a fairly long paragraph of prose that must wrap across more than one row.",
+            40,
+        );
+        assert!(lines.len() > 1, "the sample did not wrap");
+        for line in &lines {
+            assert!(
+                line.starts_with("  "),
+                "a wrapped row lost the two-space margin: {line:?}"
+            );
+        }
+    }
+
+    /// Indentation is what makes a nested item nested. Dropping it on the
+    /// continuation rows flattened the list the moment a line was long enough
+    /// to wrap.
+    #[test]
+    fn a_wrapped_nested_item_keeps_its_own_indent() {
+        let lines = rendered(
+            "- item one\n    - nested item that is long enough to wrap at this narrow width\n- item two",
+            40,
+        );
+        let nested: Vec<&String> = lines
+            .iter()
+            .filter(|l| l.trim_start().starts_with("- nested") || l.starts_with("      "))
+            .collect();
+        assert!(nested.len() > 1, "the nested item did not wrap: {lines:?}");
+        for line in nested {
+            assert!(
+                line.starts_with("      "),
+                "a nested continuation row lost its indent: {line:?}"
+            );
+        }
+        // The unnested items keep the plain margin, so nesting is still visible.
+        assert!(lines.iter().any(|l| l == "  - item one"));
+        assert!(lines.iter().any(|l| l == "  - item two"));
+    }
+
+    /// The hard break for an over-long word has to survive the indent change,
+    /// or a link at the end of a message runs off the screen again.
+    #[test]
+    fn an_over_long_word_still_hard_breaks() {
+        let lines = rendered(
+            "See https://example.com/a/very/long/path/that/exceeds/the/width/limit",
+            40,
+        );
+        assert!(lines.len() > 2, "the url did not break: {lines:?}");
+        for line in &lines {
+            assert!(
+                UnicodeWidthStr::width(line.as_str()) <= 40,
+                "a row ran past the width: {line:?}"
+            );
+        }
+    }
+
+    /// When the indent alone fills the width there is no room to wrap into.
+    /// Keeping the indent would leave one character per row, so the text wins
+    /// over the structure — the only case where the indent is dropped.
+    #[test]
+    fn an_indent_wider_than_the_width_gives_way_to_the_text() {
+        let deep = format!("{}some words here", " ".repeat(12));
+        let chunks = word_wrap(&deep, 10);
+
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(
+                UnicodeWidthStr::width(chunk.as_str()) <= 10,
+                "a row ran past the width: {chunk:?}"
+            );
+        }
+        assert_eq!(chunks.concat().replace(' ', ""), "somewordshere");
+    }
 }
