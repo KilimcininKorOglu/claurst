@@ -1712,6 +1712,10 @@ async fn run_query_loop_inner(
             }
         }
 
+        // This arm dispatches through the raw Anthropic client, so the
+        // summariser does too.
+        let backend = compact::AnthropicBackend(client);
+
         // Auto-compact: if context is near-full, summarise older messages now
         // (before the next turn's API call would fail with prompt-too-long).
         //
@@ -1735,7 +1739,7 @@ async fn run_query_loop_inner(
                 }
                 // Pass a clone so the live conversation survives a failed
                 // compaction; `*messages` is only overwritten on success (#213).
-                let outcome = compact::context_collapse(messages.clone(), client, config).await;
+                let outcome = compact::context_collapse(messages.clone(), &backend, config).await;
                 match apply_compact_result(messages, outcome) {
                     Ok(tokens_freed) => {
                         info!(tokens_freed, "Context-collapse complete");
@@ -1753,7 +1757,7 @@ async fn run_query_loop_inner(
                 // compaction; `*messages` is only overwritten on success (#213).
                 let outcome = compact::reactive_compact(
                     messages.clone(),
-                    client,
+                    &backend,
                     config,
                     cancel_token.clone(),
                     &[],
@@ -1775,7 +1779,7 @@ async fn run_query_loop_inner(
         } else if stop == "end_turn" || stop == "tool_use" {
             // Proactive auto-compact (original path, used when reactive compact is off).
             if let Some(new_msgs) = compact::auto_compact_if_needed(
-                client,
+                &backend,
                 messages,
                 context_tokens,
                 &effective_model,

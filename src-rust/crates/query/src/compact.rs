@@ -302,7 +302,7 @@ impl Default for MicroCompactConfig {
 ///
 /// Returns `Some(new_messages)` when compaction occurred, `None` otherwise.
 pub async fn micro_compact_if_needed(
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     messages: &[Message],
     input_tokens: u64,
     model: &str,
@@ -331,7 +331,7 @@ pub async fn micro_compact_if_needed(
     );
 
     let target_tokens = config.summary_target_tokens as u32;
-    match summarise_head(client, messages, split_at, model, target_tokens).await {
+    match summarise_head(backend, messages, split_at, model, target_tokens).await {
         Ok(new_msgs) => {
             info!(
                 original = total,
@@ -987,14 +987,132 @@ pub fn should_auto_compact_for_window(
 }
 
 // ---------------------------------------------------------------------------
+// Summarisation backends
+// ---------------------------------------------------------------------------
+
+/// Whatever can turn a transcript into a summary.
+///
+/// Compaction needs exactly one model call and no tools, so it does not need
+/// the turn loop's dispatch machinery — only a way to send a prompt and read
+/// the text back. Two implementations cover both dispatch arms: the raw
+/// Anthropic client, and any registered [`LlmProvider`]. Without this the
+/// summariser was welded to `AnthropicClient` and every non-Anthropic session
+/// ran uncompacted.
+///
+/// [`LlmProvider`]: claurst_api::provider::LlmProvider
+#[async_trait::async_trait]
+pub trait CompactBackend: Send + Sync {
+    /// Send one prompt and return the model's text.
+    async fn summarise(
+        &self,
+        system: &str,
+        user: &str,
+        model: &str,
+        max_tokens: u32,
+    ) -> Result<String, ClaudeError>;
+}
+
+/// Summarise through the raw Anthropic client.
+pub struct AnthropicBackend<'a>(pub &'a claurst_api::AnthropicClient);
+
+#[async_trait::async_trait]
+impl CompactBackend for AnthropicBackend<'_> {
+    async fn summarise(
+        &self,
+        system: &str,
+        user: &str,
+        model: &str,
+        max_tokens: u32,
+    ) -> Result<String, ClaudeError> {
+        let request = CreateMessageRequest::builder(model, max_tokens)
+            .messages(vec![ApiMessage {
+                role: "user".to_string(),
+                content: Value::String(user.to_string()),
+            }])
+            .system(SystemPrompt::Text(system.to_string()))
+            .build();
+
+        // A null handler: nobody watches a summary stream, only its result.
+        let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
+        let mut rx = self.0.create_message_stream(request, handler).await?;
+        let mut acc = StreamAccumulator::new();
+
+        while let Some(evt) = rx.recv().await {
+            acc.on_event(&evt);
+            if matches!(evt, AnthropicStreamEvent::MessageStop) {
+                break;
+            }
+        }
+
+        let (summary_msg, _usage, _stop) = acc.finish();
+        Ok(summary_msg.get_all_text())
+    }
+}
+
+/// Summarise through any registered provider.
+///
+/// Uses the provider's non-streaming `create_message`, because a summary has
+/// no partial output anyone reads.
+pub struct ProviderBackend(pub Arc<dyn claurst_api::provider::LlmProvider>);
+
+#[async_trait::async_trait]
+impl CompactBackend for ProviderBackend {
+    async fn summarise(
+        &self,
+        system: &str,
+        user: &str,
+        model: &str,
+        max_tokens: u32,
+    ) -> Result<String, ClaudeError> {
+        let request = claurst_api::ProviderRequest {
+            model: model.to_string(),
+            messages: vec![Message::user(user)],
+            system_prompt: Some(SystemPrompt::Text(system.to_string())),
+            // No tools: a summariser that could call one would compact the
+            // conversation by acting on it.
+            tools: Vec::new(),
+            max_tokens,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: Vec::new(),
+            thinking: None,
+            provider_options: Value::Object(Default::default()),
+        };
+
+        let response = self
+            .0
+            .create_message(request)
+            .await
+            .map_err(|e| ClaudeError::Other(format!("Compact summary failed: {e}")))?;
+
+        Ok(response
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""))
+    }
+}
+
+/// The standing instruction every summariser sends, whichever backend runs.
+const COMPACT_SYSTEM_PROMPT: &str =
+    "You are a helpful assistant that creates concise yet thorough conversation summaries. \
+     Preserve all technical details, file names, code snippets, and decisions that would \
+     be important for continuing the work. Follow the structured format exactly.";
+
+// ---------------------------------------------------------------------------
 // Core compaction logic
 // ---------------------------------------------------------------------------
 
-/// Summarise `messages[..split_at]` using the Anthropic API using the
-/// carefully crafted compaction prompt from TypeScript prompt.ts.
+/// Summarise `messages[..split_at]` using the carefully crafted compaction
+/// prompt from TypeScript prompt.ts.
 /// Returns a new conversation: [summary user msg] + messages[split_at..].
 async fn summarise_head(
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     messages: &[Message],
     split_at: usize,
     model: &str,
@@ -1096,35 +1214,14 @@ async fn summarise_head(
         )
     };
 
-    let api_msgs = vec![ApiMessage {
-        role: "user".to_string(),
-        content: Value::String(user_content),
-    }];
-
-    let request = CreateMessageRequest::builder(model, max_summary_tokens)
-        .messages(api_msgs)
-        .system(SystemPrompt::Text(
-            "You are a helpful assistant that creates concise yet thorough conversation summaries. \
-             Preserve all technical details, file names, code snippets, and decisions that would \
-             be important for continuing the work. Follow the structured format exactly."
-                .to_string(),
-        ))
-        .build();
-
-    // Use a null handler since we just want the final accumulated message.
-    let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
-    let mut rx = client.create_message_stream(request, handler).await?;
-    let mut acc = StreamAccumulator::new();
-
-    while let Some(evt) = rx.recv().await {
-        acc.on_event(&evt);
-        if matches!(evt, AnthropicStreamEvent::MessageStop) {
-            break;
-        }
-    }
-
-    let (summary_msg, _usage, _stop) = acc.finish();
-    let raw_summary = summary_msg.get_all_text();
+    let raw_summary = backend
+        .summarise(
+            COMPACT_SYSTEM_PROMPT,
+            &user_content,
+            model,
+            max_summary_tokens,
+        )
+        .await?;
 
     if raw_summary.is_empty() {
         return Err(ClaudeError::Other("Compact summary was empty".to_string()));
@@ -1216,7 +1313,7 @@ fn compute_keep_split_index(messages: &[Message], keep_recent_tokens: u64) -> us
 /// Compact `messages` in-place, replacing the head with a summary.
 /// Returns the new messages vector on success.
 pub async fn compact_conversation(
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     messages: &[Message],
     model: &str,
 ) -> Result<Vec<Message>, ClaudeError> {
@@ -1250,7 +1347,7 @@ pub async fn compact_conversation(
     );
 
     // Use a generous token budget for the summary (20k mirrors TypeScript MAX_OUTPUT_TOKENS_FOR_SUMMARY)
-    let compacted = summarise_head(client, messages, split_at, model, 20_000).await;
+    let compacted = summarise_head(backend, messages, split_at, model, 20_000).await;
 
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::PostCompact,
@@ -1274,7 +1371,7 @@ pub async fn compact_conversation(
 /// (resolve it via [`resolve_context_window`]); `model` is still used for the
 /// summarisation API call.
 pub async fn auto_compact_if_needed(
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     messages: &[Message],
     input_tokens: u64,
     model: &str,
@@ -1294,7 +1391,7 @@ pub async fn auto_compact_if_needed(
         "Auto-compact triggered"
     );
 
-    match compact_conversation(client, messages, model).await {
+    match compact_conversation(backend, messages, model).await {
         Ok(new_msgs) => {
             update_compact_state(session_id, AutoCompactState::on_success);
             info!(
@@ -1480,7 +1577,7 @@ fn strip_images(messages: Vec<claurst_core::types::Message>) -> Vec<claurst_core
 /// a long-running compact.
 pub async fn reactive_compact(
     messages: Vec<claurst_core::types::Message>,
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     config: &crate::QueryConfig,
     cancel: tokio_util::sync::CancellationToken,
     recently_modified: &[std::path::PathBuf],
@@ -1517,7 +1614,7 @@ pub async fn reactive_compact(
     let original_token_estimate = estimate_tokens_for_messages(&stripped[..split_at]) as u64;
 
     let mut new_messages =
-        summarise_head(client, &stripped, split_at, &config.model, 20_000).await?;
+        summarise_head(backend, &stripped, split_at, &config.model, 20_000).await?;
 
     // The summary lives as the first message in new_messages.
     let summary_text = new_messages
@@ -1569,16 +1666,9 @@ pub async fn reactive_compact(
 /// to free enough space.
 pub async fn context_collapse(
     messages: Vec<claurst_core::types::Message>,
-    client: &claurst_api::AnthropicClient,
+    backend: &dyn CompactBackend,
     config: &crate::QueryConfig,
 ) -> Result<CompactResult, claurst_core::error::ClaudeError> {
-    use claurst_api::{
-        AnthropicStreamEvent, ApiMessage, CreateMessageRequest, StreamAccumulator, StreamHandler,
-        SystemPrompt,
-    };
-    use serde_json::Value;
-    use std::sync::Arc;
-
     let total = messages.len();
     if total == 0 {
         return Ok(CompactResult {
@@ -1615,33 +1705,15 @@ pub async fn context_collapse(
         transcript
     );
 
-    let api_msgs = vec![ApiMessage {
-        role: "user".to_string(),
-        content: Value::String(collapse_prompt),
-    }];
-
-    let request = CreateMessageRequest::builder(&config.model, 1_000)
-        .messages(api_msgs)
-        .system(SystemPrompt::Text(
+    let summary_text = backend
+        .summarise(
             "You are a conversation summariser. Produce an emergency ultra-short \
-             summary as instructed. Plain text only."
-                .to_string(),
-        ))
-        .build();
-
-    let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
-    let mut rx = client.create_message_stream(request, handler).await?;
-    let mut acc = StreamAccumulator::new();
-
-    while let Some(evt) = rx.recv().await {
-        acc.on_event(&evt);
-        if matches!(evt, AnthropicStreamEvent::MessageStop) {
-            break;
-        }
-    }
-
-    let (summary_msg, _usage, _stop) = acc.finish();
-    let summary_text = summary_msg.get_all_text();
+             summary as instructed. Plain text only.",
+            &collapse_prompt,
+            &config.model,
+            1_000,
+        )
+        .await?;
 
     if summary_text.is_empty() {
         return Err(claurst_core::error::ClaudeError::Other(
@@ -1816,6 +1888,88 @@ mod tests {
     /// `n` bytes of filler text (≈ `n/4 * 4/3` tokens under the chars/4 estimate).
     fn filler(n: usize) -> String {
         "x".repeat(n)
+    }
+
+    // ---- Summarisation backends ---------------------------------------------
+
+    /// A backend that answers with a fixed summary and records what it was
+    /// asked, so a test can read the prompt without reaching the network.
+    struct RecordingBackend {
+        reply: String,
+        seen: parking_lot::Mutex<Option<(String, String, String, u32)>>,
+    }
+
+    impl RecordingBackend {
+        fn new(reply: &str) -> Self {
+            Self {
+                reply: reply.to_string(),
+                seen: parking_lot::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CompactBackend for RecordingBackend {
+        async fn summarise(
+            &self,
+            system: &str,
+            user: &str,
+            model: &str,
+            max_tokens: u32,
+        ) -> Result<String, ClaudeError> {
+            *self.seen.lock() = Some((
+                system.to_string(),
+                user.to_string(),
+                model.to_string(),
+                max_tokens,
+            ));
+            Ok(self.reply.clone())
+        }
+    }
+
+    /// Compaction asks the backend for one summary and rebuilds the
+    /// conversation around it, whichever backend that is.
+    #[tokio::test]
+    async fn compaction_summarises_the_head_through_the_backend() {
+        let mut messages = vec![make_user(&filler(80_000)), make_assistant(&filler(80_000))];
+        messages.push(make_user("what next"));
+
+        let backend = RecordingBackend::new("Summary of the earlier work.");
+        let out = compact_conversation(&backend, &messages, "some-model")
+            .await
+            .expect("compaction succeeds");
+
+        let (system, user, model, max_tokens) =
+            backend.seen.lock().clone().expect("the backend was called");
+        assert_eq!(model, "some-model");
+        assert_eq!(max_tokens, 20_000);
+        assert!(system.contains("conversation summaries"));
+        assert!(user.contains("<conversation_to_summarize"));
+
+        assert!(out.len() < messages.len(), "the head was replaced");
+        assert!(
+            out[0]
+                .get_all_text()
+                .contains("Summary of the earlier work."),
+            "the summary leads the new conversation"
+        );
+    }
+
+    /// An empty answer is a failed compaction, not a conversation with the
+    /// head silently thrown away.
+    #[tokio::test]
+    async fn an_empty_summary_fails_instead_of_dropping_the_head() {
+        let messages = vec![
+            make_user(&filler(80_000)),
+            make_assistant(&filler(80_000)),
+            make_user("what next"),
+        ];
+
+        let backend = RecordingBackend::new("");
+        let err = compact_conversation(&backend, &messages, "some-model")
+            .await
+            .expect_err("an empty summary is an error");
+        assert!(err.to_string().contains("empty"));
     }
 
     /// An assistant message carrying a single `tool_use` block.
