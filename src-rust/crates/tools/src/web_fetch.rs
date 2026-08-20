@@ -90,13 +90,20 @@ fn is_edge_case_html(html: &str, extracted_text: &str) -> bool {
     false
 }
 
-/// Call Claude Haiku to extract main content from HTML.
+/// Ask a small model to pull the readable text out of a page.
+///
+/// Through the session's own account, on whatever small model that account
+/// serves. It used to build an Anthropic client and ask for a hardcoded
+/// `claude-haiku-4-5`, so a session on any other provider never reached this
+/// path at all and always fell back to tag stripping.
 async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
-    // Try to create an Anthropic client from the config
-    let client = match claurst_api::AnthropicClient::from_config(&ctx.config) {
-        Ok(c) => c,
+    let route =
+        claurst_api::resolve_small_model_route(&ctx.config, &claurst_api::ModelRegistry::new());
+
+    let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
+        Ok(provider) => provider,
         Err(e) => {
-            warn!(error = %e, "Failed to create Anthropic client for semantic extraction");
+            warn!(account = %route.account, error = %e, "No provider for semantic extraction");
             return None;
         }
     };
@@ -109,44 +116,46 @@ async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
     };
 
     let system = "You are a content extraction expert. Given HTML, extract and return only the main text content. Return just plain text, no markdown or formatting.";
-    let user_message = format!(
-        "Extract the main content from this HTML and return only the text:\n\n{}",
-        html_excerpt
-    );
 
-    // Use the builder API to construct the request
-    let api_messages = vec![claurst_api::ApiMessage {
-        role: "user".to_string(),
-        content: serde_json::Value::String(user_message),
-    }];
+    let request = claurst_api::ProviderRequest {
+        model: route.model.to_string(),
+        messages: vec![claurst_core::types::Message::user(format!(
+            "Extract the main content from this HTML and return only the text:\n\n{}",
+            html_excerpt
+        ))],
+        system_prompt: Some(claurst_api::SystemPrompt::Text(system.to_string())),
+        // No tools: this call reads a page, it does not act on one.
+        tools: Vec::new(),
+        max_tokens: 2000,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: Vec::new(),
+        thinking: None,
+        provider_options: serde_json::Value::Object(Default::default()),
+    };
 
-    let request = claurst_api::CreateMessageRequest::builder("claude-haiku-4-5", 2000)
-        .messages(api_messages)
-        .system(claurst_api::SystemPrompt::Text(system.to_string()))
-        .build();
-
-    match client.create_message(request).await {
+    match provider.create_message(request).await {
         Ok(response) => {
-            // Extract text from the response content (Vec<Value>)
-            // Response content is JSON objects like {"type": "text", "text": "..."}
-            let text = response.content.iter().find_map(|block| {
-                if block.get("type")?.as_str()? == "text" {
-                    block.get("text")?.as_str().map(str::to_owned)
-                } else {
-                    None
-                }
-            });
+            let extracted: String = response
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    claurst_core::types::ContentBlock::Text { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
 
-            if let Some(extracted) = text {
-                debug!(
-                    extracted_len = extracted.len(),
-                    "Semantic extraction successful"
-                );
-                return Some(extracted);
+            if extracted.is_empty() {
+                warn!("No text block in semantic extraction response");
+                return None;
             }
 
-            warn!("No text block in semantic extraction response");
-            None
+            debug!(
+                extracted_len = extracted.len(),
+                "Semantic extraction successful"
+            );
+            Some(extracted)
         }
         Err(e) => {
             warn!(error = %e, "Semantic extraction API call failed");

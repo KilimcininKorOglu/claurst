@@ -1595,6 +1595,29 @@ pub fn resolve_effective_route(
     config.effective_route()
 }
 
+/// The cheapest model the active account serves, and that account.
+///
+/// For the work a session does beside the conversation: naming itself,
+/// pulling readable text out of a page, answering in fast mode. Falls back to
+/// the session's own model when the catalogue has nothing small, because doing
+/// the work on an expensive model beats not doing it.
+///
+/// Shared rather than written once per crate: `crates/tools` cannot reach
+/// `crates/commands`, and two copies of "which model is cheap here" is how one
+/// of them came to be a hardcoded `claude-haiku-4-5` that only Anthropic
+/// sessions could reach.
+pub fn resolve_small_model_route(
+    config: &claurst_core::config::Config,
+    registry: &ModelRegistry,
+) -> claurst_core::config::Route {
+    let account = config.selected_provider_id();
+    crate::provider_lookup_ids(&config.vendor_id_for_account(account))
+        .into_iter()
+        .find_map(|lookup_id| registry.best_small_model_for_provider(lookup_id))
+        .map(|best| config.route_for_account(account, &best))
+        .unwrap_or_else(|| config.effective_route())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

@@ -175,22 +175,10 @@ pub trait SlashCommand: Send + Sync {
 }
 
 /// The cheapest model the active account serves, and that account.
-///
-/// A `Route`, because both halves matter: the catalogue is asked about the
-/// protocol the account speaks (an account the user called `work_openai`
-/// appears in no catalogue), while the request goes to the account's own name.
 fn resolve_fast_model_route(config: &Config) -> claurst_core::config::Route {
-    let account = config.selected_provider_id();
-    let registry = claurst_api::ModelRegistry::new();
-
-    provider_lookup_ids(&config.vendor_id_for_account(account))
-        .into_iter()
-        .find_map(|lookup_id| registry.best_small_model_for_provider(lookup_id))
-        .map(|best| config.route_for_account(account, &best))
-        .unwrap_or_else(|| config.effective_route())
+    claurst_api::resolve_small_model_route(config, &claurst_api::ModelRegistry::new())
 }
 
-use claurst_api::provider_lookup_ids;
 use claurst_core::message_utils::text_from_blocks as text_from_content_blocks;
 
 // ---------------------------------------------------------------------------

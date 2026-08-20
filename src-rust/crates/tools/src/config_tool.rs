@@ -102,11 +102,24 @@ impl Tool for ConfigTool {
                         Some(s) => s.to_string(),
                         None => return ToolResult::error("'model' must be a string".to_string()),
                     };
-                    settings.config.model = Some(s.clone());
+                    // Written canonically, and the account written beside it,
+                    // the same way `/model` does. Storing the argument
+                    // verbatim left `provider` naming the previous account
+                    // while the model named a new one.
+                    let route = settings.config.resolve_route(&s);
+                    let canonical = settings
+                        .config
+                        .canonical_model(&route.account, &route.model);
+                    settings.config.model = Some(canonical.clone());
+                    settings.config.provider = Some(route.account.clone());
+                    settings.provider = Some(route.account.clone());
                     if let Err(e) = settings.save().await {
                         return ToolResult::error(format!("Failed to save settings: {}", e));
                     }
-                    ToolResult::success(format!("model = \"{}\"", s))
+                    ToolResult::success(format!(
+                        "model = \"{}\" on account \"{}\"",
+                        route.model, route.account
+                    ))
                 }
                 "provider" => {
                     let s = match new_value.as_str() {
