@@ -1,10 +1,10 @@
-# Claurst installer for Windows (PowerShell).
+# MikMik installer for Windows (PowerShell).
 #
 # Usage (one-liner):
-#   irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
+#   irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex
 #
 # Or download and run locally:
-#   Invoke-WebRequest https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 -OutFile install.ps1
+#   Invoke-WebRequest https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 -OutFile install.ps1
 #   .\install.ps1
 
 [CmdletBinding()]
@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$App = 'claurst'
-$Repo = 'KilimcininKorOglu/claurst'
+$App = 'mikmik'
+$Repo = 'KilimcininKorOglu/mikmik'
 
 function Write-Info($msg)    { Write-Host $msg }
 function Write-Success($msg) { Write-Host $msg -ForegroundColor Green }
@@ -30,7 +30,7 @@ function Write-Muted($msg)   { Write-Host $msg -ForegroundColor DarkGray }
 
 function Show-Usage {
 @"
-Claurst installer (Windows)
+MikMik installer (Windows)
 
 Usage: install.ps1 [options]
 
@@ -38,15 +38,15 @@ Options:
     -Help                   Show this help
     -Version <version>      Install a specific version (e.g., 0.1.0)
     -Binary <path>          Install from a local binary instead of downloading
-    -InstallDir <path>      Override install location (default: %LOCALAPPDATA%\Programs\claurst)
+    -InstallDir <path>      Override install location (default: %LOCALAPPDATA%\Programs\mikmik)
     -Token <token>          GitHub token for API and downloads
                             (or set GITHUB_TOKEN / GH_TOKEN)
     -NoModifyPath           Don't add the install dir to user PATH
 
 Examples:
-    irm https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.ps1 | iex
+    irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex
     .\install.ps1 -Version 0.1.0
-    .\install.ps1 -Binary C:\path\to\claurst.exe
+    .\install.ps1 -Binary C:\path\to\mikmik.exe
     `$env:GITHUB_TOKEN = 'ghp_...'; .\install.ps1
 "@
 }
@@ -71,7 +71,7 @@ $script:GitHubHosts = @('github.com', 'api.github.com', 'www.github.com')
 
 function Get-GitHubHeaders($uri) {
     $headers = @{
-        'User-Agent' = 'claurst-installer'
+        'User-Agent' = 'mikmik-installer'
         'Accept'     = 'application/vnd.github+json'
     }
     if ([string]::IsNullOrEmpty($script:Token)) { return $headers }
@@ -156,12 +156,12 @@ function Get-Arch {
 }
 
 # ----- Resolve install directory -----
-# Binary location is independent of the claurst data dir. Default to the
-# per-user programs location (%LOCALAPPDATA%\Programs\claurst), falling back to
+# Binary location is independent of the mikmik data dir. Default to the
+# per-user programs location (%LOCALAPPDATA%\Programs\mikmik), falling back to
 # the user profile when LOCALAPPDATA is unavailable.
 if ([string]::IsNullOrEmpty($InstallDir)) {
     if (-not [string]::IsNullOrEmpty($env:LOCALAPPDATA)) {
-        $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\claurst"
+        $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\mikmik"
     } else {
         $InstallDir = Join-Path $env:USERPROFILE ".local\bin"
     }
@@ -197,10 +197,10 @@ function Resolve-Version {
 
 # ----- Already-installed check -----
 function Check-Existing($desiredVersion) {
-    $existing = Get-Command claurst -ErrorAction SilentlyContinue
+    $existing = Get-Command mikmik -ErrorAction SilentlyContinue
     if ($null -eq $existing) { return }
     try {
-        $vline = (& claurst --version) 2>&1 | Select-Object -First 1
+        $vline = (& mikmik --version) 2>&1 | Select-Object -First 1
         $installed = ($vline -split '\s+')[-1]
     } catch {
         $installed = 'unknown'
@@ -210,21 +210,21 @@ function Check-Existing($desiredVersion) {
         Write-Muted "Use -Version to install a different one."
         exit 0
     }
-    Write-Muted "Found existing claurst at $($existing.Source) (v$installed) - upgrading to v$desiredVersion"
+    Write-Muted "Found existing mikmik at $($existing.Source) (v$installed) - upgrading to v$desiredVersion"
 }
 
 # ----- Download & extract -----
 function Download-And-Install($desiredVersion, $arch) {
-    $archive = "claurst-windows-$arch.zip"
+    $archive = "mikmik-windows-$arch.zip"
     $url = "https://github.com/$Repo/releases/download/v$desiredVersion/$archive"
-    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("claurst-install-" + [System.Guid]::NewGuid().ToString('N'))
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mikmik-install-" + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
 
     $zipPath = Join-Path $tmpRoot $archive
     $extractDir = Join-Path $tmpRoot "extract"
     New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
-    Write-Info "Installing claurst v$desiredVersion (windows-$arch)"
+    Write-Info "Installing mikmik v$desiredVersion (windows-$arch)"
     Write-Muted "Downloading $url"
     if (-not [string]::IsNullOrEmpty($script:Token)) {
         Write-Muted "Using GitHub authentication."
@@ -296,9 +296,9 @@ function Download-And-Install($desiredVersion, $arch) {
         exit 1
     }
 
-    $extractedExe = Join-Path $extractDir 'claurst.exe'
+    $extractedExe = Join-Path $extractDir 'mikmik.exe'
     if (-not (Test-Path $extractedExe)) {
-        Write-Err "Archive did not contain expected binary 'claurst.exe'"
+        Write-Err "Archive did not contain expected binary 'mikmik.exe'"
         Get-ChildItem -Recurse $extractDir | Format-Table FullName
         Remove-Item -Recurse -Force $tmpRoot -ErrorAction SilentlyContinue
         exit 1
@@ -313,17 +313,17 @@ function Install-FromBinary {
         Write-Err "Binary not found at $script:Binary"
         exit 1
     }
-    Write-Info "Installing claurst from $script:Binary"
+    Write-Info "Installing mikmik from $script:Binary"
     Install-Binary $script:Binary
 }
 
 function Install-Binary($source) {
-    $target = Join-Path $InstallDir 'claurst.exe'
+    $target = Join-Path $InstallDir 'mikmik.exe'
     # Declared outside the block below so the cleanup after the copy can see it;
     # scoped inside, the renamed binary was left behind by every upgrade.
     $stale = "$target.old"
 
-    # The currently running claurst.exe (if any) holds an exclusive file lock on
+    # The currently running mikmik.exe (if any) holds an exclusive file lock on
     # Windows.  Swap by renaming the old one aside, then drop it once the new
     # binary is in place: the lock follows the open handle, not the name.
     if (Test-Path $target) {
@@ -361,7 +361,7 @@ function Add-ToUserPath {
     }
     [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
 
-    # Make it visible in this session too so claurst --version works immediately.
+    # Make it visible in this session too so mikmik --version works immediately.
     $env:Path = $InstallDir + ';' + $env:Path
 
     Write-Success ("Added " + $InstallDir + " to user PATH")
@@ -390,15 +390,15 @@ Add-ToUserPath
 GithubPathHint
 
 Write-Host ""
-Write-Success "claurst is installed!"
+Write-Success "mikmik is installed!"
 Write-Host ""
 Write-Muted  "Quickstart:"
 Write-Muted  "  # Set an API key"
 Write-Host   "  `$env:ANTHROPIC_API_KEY = 'sk-ant-...'"
 Write-Host   ""
 Write-Muted  "  # Open a new terminal, then:"
-Write-Success "  claurst             "
+Write-Success "  mikmik             "
 Write-Muted  "  # or"
-Write-Success "  claurst -p `"...`"      "
+Write-Success "  mikmik -p `"...`"      "
 Write-Host   ""
 Write-Muted  "Docs: https://github.com/$Repo"

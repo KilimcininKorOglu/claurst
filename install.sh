@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Claurst installer for Linux, macOS, and Windows (Git Bash / MSYS / Cygwin).
+# MikMik installer for Linux, macOS, and Windows (Git Bash / MSYS / Cygwin).
 #
 # Usage (one-liner):
-#   curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+#   curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash
 #
 # Or download and run locally:
-#   curl -fsSL -O https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh
+#   curl -fsSL -O https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh
 #   chmod +x install.sh
 #   ./install.sh
 
 set -euo pipefail
 
-APP=claurst
-REPO=KilimcininKorOglu/claurst
+APP=mikmik
+REPO=KilimcininKorOglu/mikmik
 
 # ANSI colours
 MUTED='\033[0;2m'
@@ -23,7 +23,7 @@ NC='\033[0m'
 
 usage() {
     cat <<EOF
-Claurst installer
+MikMik installer
 
 Usage: install.sh [options]
 
@@ -36,12 +36,12 @@ Options:
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --install-dir <dir> Override install location
                             (default: ${XDG_BIN_HOME:-~/.local/bin}; on Windows:
-                            %LOCALAPPDATA%\\Programs\\claurst)
+                            %LOCALAPPDATA%\\Programs\\mikmik)
 
 Examples:
-    curl -fsSL https://github.com/KilimcininKorOglu/claurst/releases/latest/download/install.sh | bash
+    curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.sh | bash
     ./install.sh --version 0.1.0
-    ./install.sh --binary /path/to/claurst
+    ./install.sh --binary /path/to/mikmik
     GITHUB_TOKEN=ghp_... ./install.sh
 EOF
 }
@@ -165,7 +165,7 @@ to_unix_path() {
 default_install_dir() {
     if is_windows_shell; then
         if [[ -n "${LOCALAPPDATA:-}" ]]; then
-            echo "$(to_unix_path "$LOCALAPPDATA")/Programs/claurst"
+            echo "$(to_unix_path "$LOCALAPPDATA")/Programs/mikmik"
         elif [[ -n "${USERPROFILE:-}" ]]; then
             echo "$(to_unix_path "$USERPROFILE")/.local/bin"
         else
@@ -261,7 +261,7 @@ resolve_version() {
         # explanation below would never print.
         local api_response=""
         if ! api_response=$(github_curl -fsSL \
-            -H "User-Agent: claurst-installer" \
+            -H "User-Agent: mikmik-installer" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${REPO}/releases/latest"); then
             api_response=""
@@ -295,7 +295,7 @@ check_existing_install() {
             print_message info "${MUTED}Use --version to install a different version, or pass a different one to upgrade.${NC}"
             exit 0
         fi
-        print_message info "${MUTED}Found existing claurst at ${NC}$existing_path${MUTED} (v$installed_version) - upgrading to v$specific_version${NC}"
+        print_message info "${MUTED}Found existing mikmik at ${NC}$existing_path${MUTED} (v$installed_version) - upgrading to v$specific_version${NC}"
     fi
 }
 
@@ -305,8 +305,8 @@ download_and_install() {
     local url="https://github.com/${REPO}/releases/download/v${specific_version}/${archive}"
     local tmp_dir
     # -t is GNU-style; Git Bash and BSD layouts need the explicit template.
-    tmp_dir=$(mktemp -d -t claurst-install-XXXXXX 2>/dev/null \
-        || mktemp -d "${TMPDIR:-/tmp}/claurst-install.XXXXXX")
+    tmp_dir=$(mktemp -d -t mikmik-install-XXXXXX 2>/dev/null \
+        || mktemp -d "${TMPDIR:-/tmp}/mikmik-install.XXXXXX")
     trap "rm -rf '$tmp_dir'" EXIT
 
     print_message info "${MUTED}Installing ${NC}${APP} ${MUTED}v${NC}${specific_version} ${MUTED}(${target})${NC}"
@@ -316,7 +316,7 @@ download_and_install() {
     fi
 
     if ! github_curl -fL --progress-bar \
-        -H "User-Agent: claurst-installer" \
+        -H "User-Agent: mikmik-installer" \
         -o "$tmp_dir/$archive" "$url"; then
         print_message error "Download failed."
         print_message info "Check that release v${specific_version} exists for ${target}:"
@@ -333,7 +333,7 @@ download_and_install() {
     # case we warn and continue so existing installs keep working.  But if the
     # file IS present and the hash does NOT match, we abort hard.
     local sums_url="https://github.com/${REPO}/releases/download/v${specific_version}/SHA256SUMS"
-    if github_curl -fsSL -H "User-Agent: claurst-installer" \
+    if github_curl -fsSL -H "User-Agent: mikmik-installer" \
         -o "$tmp_dir/SHA256SUMS" "$sums_url" 2>/dev/null; then
         # sha256sum emits "<hash>  <filename>" (two spaces); awk collapses the
         # whitespace so $1=hash, $2=bare filename.  Match on the bare archive
@@ -552,7 +552,7 @@ add_to_unix_path() {
 
     {
         echo ""
-        echo "# claurst"
+        echo "# mikmik"
         echo "$path_line"
     } >> "$config_file"
     print_message success "Added $INSTALL_DIR to PATH in $config_file"
@@ -599,15 +599,15 @@ main() {
 
     # Goodbye banner
     echo ""
-    print_message success "claurst is installed!"
+    print_message success "mikmik is installed!"
     echo ""
     echo -e "${MUTED}Quickstart:${NC}"
     echo -e "  ${MUTED}# Set an API key${NC}"
     echo -e "  export ANTHROPIC_API_KEY=sk-ant-..."
     echo -e ""
     echo -e "  ${MUTED}# Open a new terminal, then:${NC}"
-    echo -e "  ${GREEN}claurst${NC}              ${MUTED}# Interactive TUI${NC}"
-    echo -e "  ${GREEN}claurst -p \"...\"${NC}       ${MUTED}# Headless one-shot${NC}"
+    echo -e "  ${GREEN}mikmik${NC}              ${MUTED}# Interactive TUI${NC}"
+    echo -e "  ${GREEN}mikmik -p \"...\"${NC}       ${MUTED}# Headless one-shot${NC}"
     echo ""
     echo -e "${MUTED}Docs: ${NC}https://github.com/${REPO}"
 }
