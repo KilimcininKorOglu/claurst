@@ -233,14 +233,14 @@ fn hat_name(hat: &claurst_buddy::Hat) -> &'static str {
 /// legendary dragon and a common snail should not read the same.
 async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionSoul, String> {
     let bones = &companion.bones;
-    let model = companion_model(&ctx.config);
+    let route = companion_route(&ctx.config);
 
-    let provider = claurst_api::provider_for_config(&ctx.config)
+    let provider = claurst_api::provider_for_account(&ctx.config, &route.account)
         .await
-        .ok_or("no provider is configured to hatch with")?;
+        .map_err(|e| format!("no provider is configured to hatch with: {e}"))?;
 
     let request = claurst_api::ProviderRequest {
-        model: model.clone(),
+        model: route.model.to_string(),
         messages: vec![Message::user(format!(
             "Name this creature and describe it.\n\n\
              species: {}\nrarity: {}\nhat: {}\n\
@@ -278,7 +278,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
         .map_err(|e| format!("the hatching call failed: {e}"))?;
 
     ctx.cost_tracker.add_usage(
-        &model,
+        route.model.as_str(),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,
@@ -286,7 +286,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
     );
 
     let text = text_from_content_blocks(&response.content);
-    parse_soul(&text).ok_or_else(|| format!("model '{model}' returned no name"))
+    parse_soul(&text).ok_or_else(|| format!("model '{}' returned no name", route.model))
 }
 
 /// Write one line for the companion to say, in reply to the user's message.
@@ -305,14 +305,14 @@ pub async fn companion_reply(
         .soul
         .as_ref()
         .ok_or("the companion has no name yet")?;
-    let model = companion_model(config);
+    let route = companion_route(config);
 
-    let provider = claurst_api::provider_for_config(config)
+    let provider = claurst_api::provider_for_account(config, &route.account)
         .await
-        .ok_or("no provider is configured")?;
+        .map_err(|e| format!("no provider is configured: {e}"))?;
 
     let request = claurst_api::ProviderRequest {
-        model: model.clone(),
+        model: route.model.to_string(),
         messages: vec![Message::user(format!(
             "The user just said:\n\n{}",
             truncate_for_bubble(user_message)
@@ -342,7 +342,7 @@ pub async fn companion_reply(
         .map_err(|e| format!("the companion could not answer: {e}"))?;
 
     cost_tracker.add_usage(
-        &model,
+        route.model.as_str(),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,
@@ -350,7 +350,7 @@ pub async fn companion_reply(
     );
 
     let text = text_from_content_blocks(&response.content);
-    first_line(&text).ok_or_else(|| format!("model '{model}' said nothing"))
+    first_line(&text).ok_or_else(|| format!("model '{}' said nothing", route.model))
 }
 
 /// Keep the prompt small: the companion reacts to what was said, and a pasted
@@ -375,13 +375,22 @@ fn first_line(text: &str) -> Option<String> {
     (!line.is_empty()).then(|| line.to_string())
 }
 
-/// The model that hatches the companion and writes its bubble lines.
-pub(crate) fn companion_model(config: &Config) -> String {
-    config
+/// The account and model that hatch the companion and write its bubble lines.
+///
+/// A `Route`, because the companion's own `model` setting may name an account
+/// (`"cheap_account/haiku"`) and the request has to reach that account with
+/// the prefix removed. It used to go out whole, to whichever account the
+/// session had selected.
+pub(crate) fn companion_route(config: &Config) -> claurst_core::config::Route {
+    match config
         .companion
         .as_ref()
-        .and_then(|companion| companion.model.clone())
-        .unwrap_or_else(|| config.effective_model().to_string())
+        .and_then(|companion| companion.model.as_deref())
+        .filter(|model| !model.is_empty())
+    {
+        Some(model) => config.resolve_route(model),
+        None => config.effective_route(),
+    }
 }
 
 /// Read the two-line hatching reply.

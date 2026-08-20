@@ -417,17 +417,22 @@ impl SlashCommand for RenameCommand {
             );
         }
 
-        let provider = match provider_for_config(&ctx.config).await {
-            Some(provider) => provider,
-            None => {
-                return CommandResult::Error(
-                    "Could not create a provider client for auto-naming.\n\
+        // The account comes from the route, not from `selected_provider_id`:
+        // the two disagree whenever the chosen model carries a prefix, and
+        // `provider_for_config` took the second while the model id came from
+        // the first, so the request went to one account addressed at another's
+        // model.
+        let rename_route = resolve_fast_model_route(&ctx.config);
+        let provider =
+            match claurst_api::provider_for_account(&ctx.config, &rename_route.account).await {
+                Ok(provider) => provider,
+                Err(e) => {
+                    return CommandResult::Error(format!(
+                        "Could not create a provider client for auto-naming: {e}.\n\
                      Use /rename <name> to set the name manually."
-                        .to_string(),
-                );
-            }
-        };
-        let rename_model = resolve_fast_model_id(&ctx.config);
+                    ));
+                }
+            };
 
         let system_prompt = "Generate a short kebab-case name (2-4 words) that captures the \
             main topic of this conversation. Use lowercase words separated by hyphens. \
@@ -435,7 +440,7 @@ impl SlashCommand for RenameCommand {
             Respond with ONLY the name, nothing else.";
 
         let request = claurst_api::ProviderRequest {
-            model: rename_model,
+            model: rename_route.model.to_string(),
             messages: vec![Message::user(format!(
                 "Conversation to name:\n\n{}",
                 &excerpt[..excerpt.len().min(2000)]

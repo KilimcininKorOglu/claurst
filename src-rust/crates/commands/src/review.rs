@@ -115,13 +115,18 @@ impl SlashCommand for ReviewCommand {
         // ------------------------------------------------------------------
         // 3. Call the LLM for a structured PR review
         // ------------------------------------------------------------------
-        let model = ctx.config.effective_model().to_string();
-        let provider = match provider_for_config(&ctx.config).await {
-            Some(provider) => provider,
-            None => {
-                return CommandResult::Error(
-                    "Cannot initialise provider client for code review.".to_string(),
-                );
+        // Both halves from one route. `effective_model()` and
+        // `provider_for_config` answer different questions and used to
+        // disagree: the composite `"myaccount/model"` went out as the model id
+        // while the request went to whichever account was selected.
+        let route = ctx.config.effective_route();
+        let model = route.model.to_string();
+        let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                return CommandResult::Error(format!(
+                    "Cannot initialise provider client for code review: {e}."
+                ));
             }
         };
 

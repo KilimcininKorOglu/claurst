@@ -174,33 +174,23 @@ pub trait SlashCommand: Send + Sync {
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult;
 }
 
-fn stripped_model_for_provider<'a>(provider_id: &str, model_id: &'a str) -> &'a str {
-    model_id
-        .strip_prefix(&format!("{provider_id}/"))
-        .unwrap_or(model_id)
-}
-
-fn canonical_model_for_provider(provider_id: &str, model_id: &str) -> String {
-    if provider_id == "anthropic" || model_id.contains('/') {
-        model_id.to_string()
-    } else {
-        format!("{provider_id}/{model_id}")
-    }
-}
-
-fn resolve_fast_model_id(config: &Config) -> String {
-    let provider_id = config.selected_provider_id();
+/// The cheapest model the active account serves, and that account.
+///
+/// A `Route`, because both halves matter: the catalogue is asked about the
+/// protocol the account speaks (an account the user called `work_openai`
+/// appears in no catalogue), while the request goes to the account's own name.
+fn resolve_fast_model_route(config: &Config) -> claurst_core::config::Route {
+    let account = config.selected_provider_id();
     let registry = claurst_api::ModelRegistry::new();
 
-    provider_lookup_ids(provider_id)
+    provider_lookup_ids(&config.vendor_id_for_account(account))
         .into_iter()
         .find_map(|lookup_id| registry.best_small_model_for_provider(lookup_id))
-        .unwrap_or_else(|| {
-            stripped_model_for_provider(provider_id, config.effective_model()).to_string()
-        })
+        .map(|best| config.route_for_account(account, &best))
+        .unwrap_or_else(|| config.effective_route())
 }
 
-use claurst_api::{provider_for_config, provider_lookup_ids};
+use claurst_api::provider_lookup_ids;
 use claurst_core::message_utils::text_from_blocks as text_from_content_blocks;
 
 // ---------------------------------------------------------------------------
@@ -826,24 +816,22 @@ impl SlashCommand for ModelCommand {
         if args.is_empty() {
             CommandResult::Message(format!("Current model: {}", ctx.config.effective_model()))
         } else {
-            // Accept both "provider/model" and bare model names.
-            // The config stores the full string (including provider prefix when present)
-            // so that downstream dispatch can route to the correct provider.
-            let model_str = args.to_string();
-            let confirmation = if let Some((provider, model)) = model_str.split_once('/') {
-                if provider == "anthropic" {
-                    format!("Switched to {}", model)
-                } else {
-                    format!("Switched to {}/{}", provider, model)
-                }
-            } else {
-                format!("Switched to {}", model_str)
-            };
+            // Accept both "account/model" and bare model names. The split is
+            // `resolve_route`'s to make: a bare `split_once('/')` here read
+            // `meta-llama/Llama-3.3-70B`, one OpenRouter model id, as an
+            // account called `meta-llama` and pointed the session at an
+            // endpoint that does not exist.
+            let route = ctx.config.resolve_route(args);
             let mut new_config = ctx.config.clone();
-            new_config.model = Some(model_str.clone());
-            if let Some((provider, _)) = model_str.split_once('/') {
-                new_config.provider = Some(provider.to_string());
-            }
+            new_config.model = Some(ctx.config.canonical_model(&route.account, &route.model));
+            new_config.provider = Some(route.account.clone());
+            // Naming both halves lets a mistyped account be spotted at once.
+            // An unrecognised prefix is read as part of the model id rather
+            // than rejected, so it does not look wrong on its own.
+            let confirmation = format!(
+                "Switched to '{}' on account '{}'.",
+                route.model, route.account
+            );
             CommandResult::ConfigChangeMessage(new_config, confirmation)
         }
     }
@@ -2522,6 +2510,90 @@ mod tests {
                 "agent alpha".to_string(),
                 "second value".to_string(),
             ]
+        );
+    }
+
+    // ---- Model selection ----------------------------------------------------
+
+    fn ctx_on(account: &str) -> CommandContext {
+        let mut ctx = make_ctx();
+        ctx.config.provider = Some(account.to_string());
+        ctx.config.provider_configs.insert(
+            account.to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+        ctx
+    }
+
+    #[tokio::test]
+    async fn a_models_own_namespace_does_not_become_the_account() {
+        // `/model meta-llama/Llama-3.3-70B` used to set the provider to
+        // `meta-llama`, which names no account, so the credential lookup and
+        // the base URL both came back empty.
+        let mut ctx = ctx_on("openrouter");
+
+        let result = ModelCommand
+            .execute("meta-llama/Llama-3.3-70B", &mut ctx)
+            .await;
+
+        let CommandResult::ConfigChangeMessage(config, message) = result else {
+            panic!("expected a config change, got {result:?}");
+        };
+        assert_eq!(config.provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            config.model.as_deref(),
+            Some("openrouter/meta-llama/Llama-3.3-70B")
+        );
+        assert_eq!(
+            config.effective_route().model,
+            "meta-llama/Llama-3.3-70B",
+            "the namespace belongs to the model id"
+        );
+        assert!(message.contains("openrouter"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn an_account_prefix_moves_the_account() {
+        let mut ctx = ctx_on("openrouter");
+        ctx.config.provider_configs.insert(
+            "my_gateway".to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+
+        let result = ModelCommand
+            .execute("my_gateway/claude-opus-5", &mut ctx)
+            .await;
+
+        let CommandResult::ConfigChangeMessage(config, _) = result else {
+            panic!("expected a config change, got {result:?}");
+        };
+        assert_eq!(config.provider.as_deref(), Some("my_gateway"));
+        assert_eq!(config.effective_route().model, "claude-opus-5");
+    }
+
+    #[test]
+    fn the_fast_model_route_keeps_the_accounts_own_name() {
+        // The catalogue is keyed by vendor, so an account the user named
+        // matched nothing and the fallback handed back a Claude id. The route
+        // still has to reach the account, not the vendor.
+        let mut config = claurst_core::config::Config {
+            provider: Some("work_openai".to_string()),
+            ..Default::default()
+        };
+        config.provider_configs.insert(
+            "work_openai".to_string(),
+            claurst_core::config::ProviderConfig {
+                protocol: Some("openai".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let route = resolve_fast_model_route(&config);
+        assert_eq!(route.account, "work_openai");
+        assert!(
+            !route.model.as_str().contains("claude"),
+            "a small OpenAI model was expected, got {}",
+            route.model
         );
     }
 }

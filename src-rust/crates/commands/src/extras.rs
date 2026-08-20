@@ -218,33 +218,33 @@ impl SlashCommand for FastCommand {
             return CommandResult::Error(format!("Failed to save setting: {}", e));
         }
 
-        let provider_id = ctx.config.selected_provider_id();
-        let fast_model = resolve_fast_model_id(&ctx.config);
-        let normal_model =
-            stripped_model_for_provider(provider_id, ctx.config.effective_model()).to_string();
+        let fast_route = resolve_fast_model_route(&ctx.config);
+        let normal_route = ctx.config.effective_route();
 
         if enable {
             let mut new_config = ctx.config.clone();
-            new_config.model = Some(canonical_model_for_provider(provider_id, &fast_model));
+            new_config.model = Some(
+                ctx.config
+                    .canonical_model(&fast_route.account, &fast_route.model),
+            );
             CommandResult::ConfigChangeMessage(
                 new_config,
                 format!(
                     "Fast mode ON. Using {} for quicker, cheaper responses.\n\
                      Use /fast off to return to {}.",
-                    fast_model, normal_model
+                    fast_route.model, normal_route.model
                 ),
             )
         } else {
             let mut new_config = ctx.config.clone();
             // Restore default / saved model
             new_config.model = None;
-            let restored_model =
-                stripped_model_for_provider(provider_id, new_config.effective_model()).to_string();
+            let restored_route = new_config.effective_route();
             CommandResult::ConfigChangeMessage(
                 new_config,
                 format!(
                     "Fast mode OFF. Restored to default model ({}).",
-                    restored_model
+                    restored_route.model
                 ),
             )
         }

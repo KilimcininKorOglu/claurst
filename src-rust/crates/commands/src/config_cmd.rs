@@ -142,20 +142,21 @@ impl SlashCommand for ConfigCommand {
                 )
             }
             "model" => {
+                // `resolve_route` makes the split, not `split_once`: only a
+                // first segment that actually names an account moves the
+                // account, so a model id carrying a vendor namespace of its
+                // own (`meta-llama/Llama-3.3-70B`) is left whole.
+                let route = ctx.config.resolve_route(value);
+                let canonical = ctx.config.canonical_model(&route.account, &route.model);
+                let account = route.account.clone();
+
                 let mut new_config = ctx.config.clone();
-                new_config.model = Some(value.to_string());
-                let inferred_provider = value
-                    .split_once('/')
-                    .map(|(provider, _)| provider.to_string());
-                if let Some(ref provider) = inferred_provider {
-                    new_config.provider = Some(provider.clone());
-                }
+                new_config.model = Some(canonical.clone());
+                new_config.provider = Some(account.clone());
                 if let Err(err) = save_settings_mutation(|settings| {
-                    settings.config.model = Some(value.to_string());
-                    if let Some(ref provider) = inferred_provider {
-                        settings.provider = Some(provider.clone());
-                        settings.config.provider = Some(provider.clone());
-                    }
+                    settings.config.model = Some(canonical.clone());
+                    settings.provider = Some(account.clone());
+                    settings.config.provider = Some(account.clone());
                 }) {
                     return CommandResult::Error(format!("Failed to save configuration: {}", err));
                 }
