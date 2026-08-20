@@ -14,11 +14,11 @@
 // - Connection manager with exponential-backoff reconnection
 
 use async_trait::async_trait;
-use claurst_core::config::McpServerConfig;
-use claurst_core::mcp_templates::TemplateRenderer;
-use claurst_core::types::ToolDefinition;
 use dashmap::DashMap;
 use futures::stream::{BoxStream, StreamExt};
+use mikmik_core::config::McpServerConfig;
+use mikmik_core::mcp_templates::TemplateRenderer;
+use mikmik_core::types::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

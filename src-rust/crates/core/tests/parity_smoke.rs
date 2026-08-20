@@ -1,7 +1,7 @@
 //! T5-1 parity smoke tests.
 //! Verifies that core data structures are usable as the TS CLI would use them.
 
-use claurst_core::{
+use mikmik_core::{
     claudemd::load_all_memory_files,
     file_history::FileHistory,
     message_utils::{estimate_tokens, get_message_text, is_tool_use_message},

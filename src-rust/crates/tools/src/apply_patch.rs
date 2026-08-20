@@ -246,7 +246,7 @@ impl Tool for ApplyPatchTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_APPLY_PATCH
+        mikmik_core::constants::TOOL_NAME_APPLY_PATCH
     }
 
     fn description(&self) -> &str {

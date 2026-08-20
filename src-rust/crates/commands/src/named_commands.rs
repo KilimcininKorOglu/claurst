@@ -61,7 +61,7 @@ impl NamedCommand for AgentsCommand {
             "list" => {
                 // Load agent definitions from .claurst/agents/ in working dir
                 // (and home dir), using the same loader as the TUI agents view.
-                let defs = claurst_tui::agents_view::load_agent_definitions(&ctx.working_dir);
+                let defs = mikmik_tui::agents_view::load_agent_definitions(&ctx.working_dir);
 
                 if defs.is_empty() {
                     return CommandResult::Message(
@@ -169,7 +169,7 @@ impl NamedCommand for AddDirCommand {
             Err(e) => return CommandResult::Error(format!("Cannot resolve path: {e}")),
         };
 
-        let mut settings = match claurst_core::config::Settings::load_sync() {
+        let mut settings = match mikmik_core::config::Settings::load_sync() {
             Ok(s) => s,
             Err(e) => {
                 return CommandResult::Error(format!(
@@ -240,7 +240,7 @@ impl NamedCommand for BranchCommand {
 
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async move {
-                        claurst_core::history::branch_session(
+                        mikmik_core::history::branch_session(
                             &session_id,
                             msg_count,
                             title_opt.as_deref(),
@@ -269,7 +269,7 @@ impl NamedCommand for BranchCommand {
 
                 let sessions = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::list_sessions())
+                        .block_on(mikmik_core::history::list_sessions())
                 })
                 .sessions;
 
@@ -314,7 +314,7 @@ impl NamedCommand for BranchCommand {
 
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::load_session(&id))
+                        .block_on(mikmik_core::history::load_session(&id))
                 });
 
                 match result {
@@ -351,7 +351,7 @@ impl NamedCommand for TagCommand {
             "list" => {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::load_session(&session_id))
+                        .block_on(mikmik_core::history::load_session(&session_id))
                 });
                 match result {
                     Ok(session) => {
@@ -382,7 +382,7 @@ impl NamedCommand for TagCommand {
 
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::tag_session(&session_id, &tag))
+                        .block_on(mikmik_core::history::tag_session(&session_id, &tag))
                 });
 
                 match result {
@@ -402,7 +402,7 @@ impl NamedCommand for TagCommand {
 
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::untag_session(&session_id, &tag))
+                        .block_on(mikmik_core::history::untag_session(&session_id, &tag))
                 });
 
                 match result {
@@ -421,7 +421,7 @@ impl NamedCommand for TagCommand {
                 // Load session to check existing tags
                 let load_result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(claurst_core::history::load_session(&session_id))
+                        .block_on(mikmik_core::history::load_session(&session_id))
                 });
 
                 match load_result {
@@ -431,7 +431,7 @@ impl NamedCommand for TagCommand {
                             // Tag exists — remove it
                             let remove_result = tokio::task::block_in_place(|| {
                                 tokio::runtime::Handle::current().block_on(
-                                    claurst_core::history::untag_session(&session_id, &tag_clone),
+                                    mikmik_core::history::untag_session(&session_id, &tag_clone),
                                 )
                             });
                             match remove_result {
@@ -444,7 +444,7 @@ impl NamedCommand for TagCommand {
                             // Tag absent — add it
                             let add_result = tokio::task::block_in_place(|| {
                                 tokio::runtime::Handle::current().block_on(
-                                    claurst_core::history::tag_session(&session_id, &tag_clone),
+                                    mikmik_core::history::tag_session(&session_id, &tag_clone),
                                 )
                             });
                             match add_result {
@@ -535,7 +535,7 @@ impl NamedCommand for IdeCommand {
 
     fn execute_named(&self, _args: &[&str], _ctx: &CommandContext) -> CommandResult {
         // ---- Environment-based IDE detection --------------------------------
-        let env_detection = claurst_core::detect_ide();
+        let env_detection = mikmik_core::detect_ide();
         let env_section = match &env_detection {
             Some(kind) => {
                 let mut lines = vec![format!("Detected IDE: {}", kind.display_name())];
@@ -548,7 +548,7 @@ impl NamedCommand for IdeCommand {
         };
 
         // ---- Lockfile-based connection status --------------------------------
-        let lockfile_dir = claurst_core::config::Settings::config_dir().join("ide");
+        let lockfile_dir = mikmik_core::config::Settings::config_dir().join("ide");
 
         let mut ides = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&lockfile_dir) {
@@ -958,7 +958,7 @@ impl NamedCommand for InstallGithubAppCommand {
 
     fn execute_named(&self, _args: &[&str], ctx: &CommandContext) -> CommandResult {
         let provider_id = ctx.config.selected_provider_id();
-        let provider_secret_step = claurst_core::config::primary_api_key_env_var_for_provider(provider_id)
+        let provider_secret_step = mikmik_core::config::primary_api_key_env_var_for_provider(provider_id)
             .map(|provider_secret| {
                 format!(
                     "3. Add your provider credential to repository secrets (for example {provider_secret})"
@@ -1003,7 +1003,7 @@ impl NamedCommand for RemoteSetupCommand {
         let mut steps = Vec::new();
         let provider_id = ctx.config.selected_provider_id();
         let provider_name = provider_id.replace('-', " ");
-        let credential_hint = claurst_core::config::api_key_env_vars_for_provider(provider_id);
+        let credential_hint = mikmik_core::config::api_key_env_vars_for_provider(provider_id);
         let credentials_required = !matches!(
             provider_id,
             "ollama" | "lmstudio" | "lm-studio" | "llamacpp" | "llama-cpp" | "llama-server"
@@ -1049,7 +1049,7 @@ impl NamedCommand for RemoteSetupCommand {
         ));
 
         // Step 3: Check claurst config dir exists
-        let config_dir = claurst_core::config::Settings::config_dir();
+        let config_dir = mikmik_core::config::Settings::config_dir();
         let has_config = config_dir.exists();
         steps.push(format!(
             "{} Claurst config dir {}",
@@ -1243,11 +1243,11 @@ pub fn find_named_command(name: &str) -> Option<Box<dyn NamedCommand>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::cost::CostTracker;
 
     fn make_ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),

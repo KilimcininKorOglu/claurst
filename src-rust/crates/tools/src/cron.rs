@@ -58,7 +58,7 @@ static CRON_STORE: Lazy<Arc<RwLock<HashMap<String, CronTask>>>> =
 
 /// Path to `~/.claurst/scheduled_tasks.json`.
 fn scheduled_tasks_path() -> Option<PathBuf> {
-    Some(claurst_core::config::Settings::config_dir().join("scheduled_tasks.json"))
+    Some(mikmik_core::config::Settings::config_dir().join("scheduled_tasks.json"))
 }
 
 /// Ensure the store has been loaded from disk (once per process).
@@ -556,19 +556,19 @@ mod tests {
 
     /// Handler that always asks; with `non_interactive = true` this denies.
     struct DenyHandler;
-    impl claurst_core::permissions::PermissionHandler for DenyHandler {
+    impl mikmik_core::permissions::PermissionHandler for DenyHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Ask {
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Ask {
                 reason: "denied in test".to_string(),
             }
         }
         fn request_permission(
             &self,
-            request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
+            request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
             self.check_permission(request)
         }
     }
@@ -576,17 +576,17 @@ mod tests {
     fn deny_ctx() -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: Arc::new(DenyHandler),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "cron-deny-test".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,

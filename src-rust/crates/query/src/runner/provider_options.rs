@@ -4,9 +4,9 @@
 use crate::*;
 
 pub(crate) fn reasoning_effort_for_level(
-    effort_level: claurst_core::effort::EffortLevel,
+    effort_level: mikmik_core::effort::EffortLevel,
 ) -> &'static str {
-    use claurst_core::effort::EffortLevel;
+    use mikmik_core::effort::EffortLevel;
     match effort_level {
         // `none`/`minimal` are the two OpenAI reasoning_effort tiers below `low`;
         // pass them through verbatim (the model's variants ladder only offers
@@ -26,9 +26,9 @@ pub(crate) fn reasoning_effort_for_level(
 }
 
 pub(crate) fn google_thinking_level_for_effort(
-    effort_level: Option<claurst_core::effort::EffortLevel>,
+    effort_level: Option<mikmik_core::effort::EffortLevel>,
 ) -> &'static str {
-    use claurst_core::effort::EffortLevel;
+    use mikmik_core::effort::EffortLevel;
     match effort_level.unwrap_or(EffortLevel::High) {
         // Google's thinkingLevel has no "none"; floor it at "low". "minimal" is a
         // real gemini-3 thinking level, so pass Minimal through.
@@ -113,7 +113,7 @@ pub(crate) fn is_openaiish_provider(provider_id: &str) -> bool {
 pub(crate) fn build_provider_options(
     provider_id: &str,
     model_id: &str,
-    effort_level: Option<claurst_core::effort::EffortLevel>,
+    effort_level: Option<mikmik_core::effort::EffortLevel>,
     thinking_budget: Option<u32>,
     account_options: Option<&std::collections::HashMap<String, Value>>,
 ) -> Value {
@@ -209,9 +209,9 @@ pub(crate) fn build_provider_options(
         let reasoning_effort = if matches!(provider_id, "codex" | "openai-codex")
             && matches!(
                 effort_level,
-                Some(claurst_core::effort::EffortLevel::XHigh)
-                    | Some(claurst_core::effort::EffortLevel::Max)
-                    | Some(claurst_core::effort::EffortLevel::Ultracode)
+                Some(mikmik_core::effort::EffortLevel::XHigh)
+                    | Some(mikmik_core::effort::EffortLevel::Max)
+                    | Some(mikmik_core::effort::EffortLevel::Ultracode)
             ) {
             "xhigh"
         } else {
@@ -248,18 +248,18 @@ pub(crate) fn build_provider_options(
             if provider_id == "deepseek" {
                 match effort_level {
                     None
-                    | Some(claurst_core::effort::EffortLevel::Minimal)
-                    | Some(claurst_core::effort::EffortLevel::Medium)
-                    | Some(claurst_core::effort::EffortLevel::High) => {
+                    | Some(mikmik_core::effort::EffortLevel::Minimal)
+                    | Some(mikmik_core::effort::EffortLevel::Medium)
+                    | Some(mikmik_core::effort::EffortLevel::High) => {
                         options.insert(
                             "thinking".to_string(),
                             serde_json::json!({"type": "enabled"}),
                         );
                         options.insert("reasoningEffort".to_string(), serde_json::json!("high"));
                     }
-                    Some(claurst_core::effort::EffortLevel::XHigh)
-                    | Some(claurst_core::effort::EffortLevel::Max)
-                    | Some(claurst_core::effort::EffortLevel::Ultracode) => {
+                    Some(mikmik_core::effort::EffortLevel::XHigh)
+                    | Some(mikmik_core::effort::EffortLevel::Max)
+                    | Some(mikmik_core::effort::EffortLevel::Ultracode) => {
                         options.insert(
                             "thinking".to_string(),
                             serde_json::json!({"type": "enabled"}),
@@ -267,8 +267,8 @@ pub(crate) fn build_provider_options(
                         options.insert("reasoningEffort".to_string(), serde_json::json!("max"));
                     }
                     // `none` and `low` both disable DeepSeek's thinking mode.
-                    Some(claurst_core::effort::EffortLevel::None)
-                    | Some(claurst_core::effort::EffortLevel::Low) => {
+                    Some(mikmik_core::effort::EffortLevel::None)
+                    | Some(mikmik_core::effort::EffortLevel::Low) => {
                         options.insert(
                             "thinking".to_string(),
                             serde_json::json!({"type": "disabled"}),

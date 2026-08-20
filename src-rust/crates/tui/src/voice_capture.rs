@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 // Re-export core voice types so callers only import from one place
 // ---------------------------------------------------------------------------
 
-pub use claurst_core::voice::{
+pub use mikmik_core::voice::{
     check_voice_availability, global_voice_recorder, VoiceAvailability, VoiceConfig, VoiceEvent,
     VoiceRecorder as CoreVoiceRecorder,
 };

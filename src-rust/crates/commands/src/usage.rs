@@ -41,7 +41,7 @@ impl SlashCommand for UsageCommand {
         let cache_read_disp = display_cache_count(cache_read, cache_creation);
 
         // Try to get account tier from OAuth tokens
-        let account_info = match claurst_core::oauth::OAuthTokens::load().await {
+        let account_info = match mikmik_core::oauth::OAuthTokens::load().await {
             Some(tokens) => {
                 let sub = tokens.subscription_type.as_deref().unwrap_or("unknown");
                 format!("Plan: {}", sub)
@@ -112,7 +112,7 @@ impl SlashCommand for ExtraUsageCommand {
         let api_calls = ctx
             .messages
             .iter()
-            .filter(|m| m.role == claurst_core::types::Role::Assistant)
+            .filter(|m| m.role == mikmik_core::types::Role::Assistant)
             .count();
         let api_calls = api_calls.max(1); // at least 1 if we have any data
 

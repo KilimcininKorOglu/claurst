@@ -14,11 +14,11 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{
+use futures::{Stream, StreamExt};
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{
     ContentBlock, Message, MessageContent, Role, ToolResultContent, UsageInfo,
 };
-use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
@@ -1004,8 +1004,8 @@ fn thought_signature_from_part(part: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::WireModel;
-    use claurst_core::types::Message;
+    use mikmik_core::config::WireModel;
+    use mikmik_core::types::Message;
     use serde_json::json;
 
     fn test_request(messages: Vec<Message>) -> ProviderRequest {

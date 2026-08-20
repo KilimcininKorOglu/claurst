@@ -44,7 +44,7 @@ impl Tool for NotebookEditTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_NOTEBOOK_EDIT
+        mikmik_core::constants::TOOL_NAME_NOTEBOOK_EDIT
     }
 
     fn description(&self) -> &str {

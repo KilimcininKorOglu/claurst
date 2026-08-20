@@ -2,7 +2,7 @@
 
 use super::{CommandContext, CommandResult, SlashCommand};
 use async_trait::async_trait;
-use claurst_tools::todo_write::{load_todos, parse_confidence};
+use mikmik_tools::todo_write::{load_todos, parse_confidence};
 use serde_json::Value;
 
 pub struct TodosCommand;

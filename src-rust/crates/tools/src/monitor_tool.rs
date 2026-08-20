@@ -7,7 +7,7 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_core::tasks::{global_registry, TaskStatus};
+use mikmik_core::tasks::{global_registry, TaskStatus};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -146,7 +146,7 @@ impl Tool for MonitorTool {
                             // pid names the wrapper and killing it left the
                             // work the user asked to stop still running.
                             if let Some(pid) = t.pid {
-                                claurst_core::process_tree::terminate_tree(pid);
+                                mikmik_core::process_tree::terminate_tree(pid);
                             }
                             // Signal the task's cancellation token (if any) and
                             // mark it Cancelled. For an in-process background
@@ -249,23 +249,23 @@ mod tests {
     }
 
     fn make_test_ctx() -> ToolContext {
-        use claurst_core::config::Config;
-        use claurst_core::permissions::AutoPermissionHandler;
+        use mikmik_core::config::Config;
+        use mikmik_core::permissions::AutoPermissionHandler;
         use std::path::PathBuf;
         use std::sync::atomic::AtomicUsize;
         use std::sync::Arc;
 
         let handler = Arc::new(AutoPermissionHandler {
-            mode: claurst_core::config::PermissionMode::Default,
+            mode: mikmik_core::config::PermissionMode::Default,
         });
         ToolContext {
             working_dir: PathBuf::from("."),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: handler,
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "test-monitor".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,
@@ -335,8 +335,8 @@ mod tests {
     fn bypassing_ctx() -> ToolContext {
         let mut ctx = make_test_ctx();
         ctx.permission_handler =
-            std::sync::Arc::new(claurst_core::permissions::AutoPermissionHandler {
-                mode: claurst_core::config::PermissionMode::BypassPermissions,
+            std::sync::Arc::new(mikmik_core::permissions::AutoPermissionHandler {
+                mode: mikmik_core::config::PermissionMode::BypassPermissions,
             });
         ctx
     }

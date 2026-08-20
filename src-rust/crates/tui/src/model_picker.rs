@@ -18,20 +18,20 @@ use crate::overlays::{centered_rect, modal_search_line, CLAURST_PANEL_BG};
 
 /// The effort level shown by the /model and /effort pickers.
 ///
-/// This is a re-export of the single canonical [`claurst_core::effort::EffortLevel`]
+/// This is a re-export of the single canonical [`mikmik_core::effort::EffortLevel`]
 /// (`Low, Medium, High, XHigh, Max, Ultracode`). The former TUI-local enum's
 /// `Normal` variant is now [`EffortLevel::Medium`]; `symbol()`, `label()`,
 /// `next()`, and `prev()` all live on the core enum. Effort controls the
 /// extended-thinking budget / reasoning-effort sent to the API; only models that
 /// support reasoning honour it.
-pub use claurst_core::effort::EffortLevel;
+pub use mikmik_core::effort::EffortLevel;
 
 // ---------------------------------------------------------------------------
 // Model capability helpers — driven by the opencode variants() ladder
 // ---------------------------------------------------------------------------
 //
 // Both the /effort command and this /model picker now derive their effort
-// tiers from the single source of truth, `claurst_api::variant_ladder`
+// tiers from the single source of truth, `mikmik_api::variant_ladder`
 // (a faithful port of opencode's `ProviderTransform.variants()`), instead of
 // the old name-string heuristics that disagreed between the two surfaces.
 
@@ -43,9 +43,9 @@ pub use claurst_core::effort::EffortLevel;
 /// snapshot here. The `/effort` command path (`app.rs`) passes the *live*
 /// registry and is therefore exact; both funnel through the same port, so they
 /// agree tier-for-tier for every catalog model.
-fn picker_registry() -> &'static claurst_api::ModelRegistry {
-    static REG: std::sync::OnceLock<claurst_api::ModelRegistry> = std::sync::OnceLock::new();
-    REG.get_or_init(claurst_api::ModelRegistry::new)
+fn picker_registry() -> &'static mikmik_api::ModelRegistry {
+    static REG: std::sync::OnceLock<mikmik_api::ModelRegistry> = std::sync::OnceLock::new();
+    REG.get_or_init(mikmik_api::ModelRegistry::new)
 }
 
 /// The reasoning-effort ladder (ascending, no ultracode) a model exposes, per
@@ -65,7 +65,7 @@ fn picker_variant_ladder(id: &str) -> Vec<EffortLevel> {
             .map(|p| p.to_string())
             .unwrap_or_default(),
     };
-    claurst_api::variant_ladder(&provider, id, Some(reg))
+    mikmik_api::variant_ladder(&provider, id, Some(reg))
 }
 
 /// Returns `true` when the model exposes more than one reasoning-effort tier —
@@ -251,8 +251,8 @@ fn model_entry(id: &str, name: &str, desc: &str) -> ModelEntry {
 /// carry a list of their own.
 pub fn models_for_account(
     account_id: &str,
-    account: Option<&claurst_core::config::ProviderConfig>,
-    registry: &claurst_api::ModelRegistry,
+    account: Option<&mikmik_core::config::ProviderConfig>,
+    registry: &mikmik_api::ModelRegistry,
 ) -> Vec<ModelEntry> {
     models_for_account_with_overrides(account_id, account, registry, &HashMap::new())
 }
@@ -266,9 +266,9 @@ pub fn models_for_account(
 /// gateway creates.
 pub fn models_for_account_with_overrides(
     account_id: &str,
-    account: Option<&claurst_core::config::ProviderConfig>,
-    registry: &claurst_api::ModelRegistry,
-    overrides: &HashMap<String, claurst_core::config::ModelOverride>,
+    account: Option<&mikmik_core::config::ProviderConfig>,
+    registry: &mikmik_api::ModelRegistry,
+    overrides: &HashMap<String, mikmik_core::config::ModelOverride>,
 ) -> Vec<ModelEntry> {
     let mut entries = models_for_account_inner(account_id, account, registry);
     for entry in &mut entries {
@@ -292,8 +292,8 @@ pub fn models_for_account_with_overrides(
 
 fn models_for_account_inner(
     account_id: &str,
-    account: Option<&claurst_core::config::ProviderConfig>,
-    registry: &claurst_api::ModelRegistry,
+    account: Option<&mikmik_core::config::ProviderConfig>,
+    registry: &mikmik_api::ModelRegistry,
 ) -> Vec<ModelEntry> {
     let protocol = account
         .map(|entry| entry.protocol_or(account_id))
@@ -331,7 +331,7 @@ fn models_for_account_inner(
 /// picker isn't blank.
 pub fn models_for_provider_from_registry(
     provider_id: &str,
-    registry: &claurst_api::ModelRegistry,
+    registry: &mikmik_api::ModelRegistry,
 ) -> Vec<ModelEntry> {
     // "free" is the composite Zen → OpenRouter provider; the upstream
     // models.dev catalog has nothing under this id, so serve a curated list
@@ -407,7 +407,7 @@ pub fn models_for_provider_from_registry(
 /// provider too.
 pub fn models_for_all_providers_from_registry(
     provider_ids: &[String],
-    registry: &claurst_api::ModelRegistry,
+    registry: &mikmik_api::ModelRegistry,
 ) -> Vec<ModelEntry> {
     let mut ordered: Vec<String> = provider_ids.to_vec();
     ordered.sort();
@@ -436,7 +436,7 @@ pub fn models_for_all_providers_from_registry(
 /// a synthetic `free/auto` default that the wrapper translates per upstream.
 pub fn default_model_for_provider(
     provider_id: &str,
-    registry: &claurst_api::ModelRegistry,
+    registry: &mikmik_api::ModelRegistry,
 ) -> String {
     if provider_id == "free" {
         return "free/auto".to_string();
@@ -448,7 +448,7 @@ pub fn default_model_for_provider(
         return format!(
             "{}/{}",
             provider_id,
-            claurst_core::codex_oauth::DEFAULT_CODEX_MODEL
+            mikmik_core::codex_oauth::DEFAULT_CODEX_MODEL
         );
     }
     if let Some(best) = registry.best_model_for_provider(provider_id) {
@@ -530,11 +530,11 @@ fn is_codex_provider(provider_id: &str) -> bool {
 /// 400K limit. Falls back to the curated [`CODEX_MODELS`] constant only if the
 /// catalog yields nothing (e.g. an empty/old snapshot).
 ///
-/// [`codex_model_allowed`]: claurst_core::codex_oauth::codex_model_allowed
-fn codex_provider_models(registry: &claurst_api::ModelRegistry) -> Vec<ModelEntry> {
-    use claurst_core::codex_oauth::{codex_limit_override, codex_model_allowed};
+/// [`codex_model_allowed`]: mikmik_core::codex_oauth::codex_model_allowed
+fn codex_provider_models(registry: &mikmik_api::ModelRegistry) -> Vec<ModelEntry> {
+    use mikmik_core::codex_oauth::{codex_limit_override, codex_model_allowed};
 
-    let mut entries: Vec<&claurst_api::ModelEntry> = registry
+    let mut entries: Vec<&mikmik_api::ModelEntry> = registry
         .list_by_provider("openai")
         .into_iter()
         .filter(|e| codex_model_allowed(&e.info.id))
@@ -577,8 +577,8 @@ fn codex_provider_models(registry: &claurst_api::ModelRegistry) -> Vec<ModelEntr
 
 /// Static fallback used when the models.dev `openai` catalog is unavailable.
 fn codex_fallback_models() -> Vec<ModelEntry> {
-    use claurst_core::codex_oauth::codex_limit_override;
-    claurst_core::codex_oauth::CODEX_MODELS
+    use mikmik_core::codex_oauth::codex_limit_override;
+    mikmik_core::codex_oauth::CODEX_MODELS
         .iter()
         .map(|(id, name)| {
             let ctx = codex_limit_override(id)
@@ -610,7 +610,7 @@ fn free_provider_models() -> Vec<ModelEntry> {
         provider_id: None,
     }];
 
-    for upstream in claurst_api::FREE_CATALOG {
+    for upstream in mikmik_api::FREE_CATALOG {
         entries.push(ModelEntry {
             id: format!("{}/{}", upstream.id, upstream.default_model),
             display_name: format!("{} \u{2014} {}", upstream.title, upstream.default_model),
@@ -670,7 +670,7 @@ impl ModelPickerState {
     /// Create a new picker (not yet visible).
     ///
     /// The model list starts empty; it is populated purely from the
-    /// models.dev-backed [`ModelRegistry`](claurst_api::ModelRegistry) via
+    /// models.dev-backed [`ModelRegistry`](mikmik_api::ModelRegistry) via
     /// [`set_models`](Self::set_models) (see
     /// `models_for_provider_from_registry`) each time the picker opens for a
     /// provider. There is deliberately no hardcoded fallback list — a hardcoded
@@ -1588,7 +1588,7 @@ mod tests {
     //    hardcoded set — regression guard for #228 ("latest model won't show").
     #[test]
     fn newly_added_registry_model_surfaces_in_picker() {
-        let mut registry = claurst_api::ModelRegistry::new();
+        let mut registry = mikmik_api::ModelRegistry::new();
 
         // A fabricated future id that cannot already be in the bundled snapshot.
         let novel_id = "claude-opus-9-9-20991231";
@@ -1871,8 +1871,8 @@ mod tests {
     fn an_account_lists_only_what_it_serves() {
         // The whole point of slice 4: a gateway that serves four models must
         // not be advertised with its vendor's entire catalogue.
-        let registry = claurst_api::ModelRegistry::new();
-        let account = claurst_core::config::ProviderConfig {
+        let registry = mikmik_api::ModelRegistry::new();
+        let account = mikmik_core::config::ProviderConfig {
             protocol: Some("anthropic".to_string()),
             models: vec!["claude-sonnet-5".to_string(), "gpt-5.6-sol".to_string()],
             ..Default::default()
@@ -1888,8 +1888,8 @@ mod tests {
         // Discovery records what the endpoint said under "<account>/<model>".
         // Without reading it back, a gateway's models show as bare ids with no
         // context at all, which is the whole case this exists for.
-        let registry = claurst_api::ModelRegistry::new();
-        let account = claurst_core::config::ProviderConfig {
+        let registry = mikmik_api::ModelRegistry::new();
+        let account = mikmik_core::config::ProviderConfig {
             protocol: Some("anthropic".to_string()),
             models: vec!["gpt-5.6-sol".to_string()],
             ..Default::default()
@@ -1897,7 +1897,7 @@ mod tests {
         let mut overrides = std::collections::HashMap::new();
         overrides.insert(
             "is_gateway/gpt-5.6-sol".to_string(),
-            claurst_core::config::ModelOverride {
+            mikmik_core::config::ModelOverride {
                 context_window: Some(1_050_000),
                 name: Some("GPT-5.6 Sol".to_string()),
                 ..Default::default()
@@ -1919,8 +1919,8 @@ mod tests {
     fn an_override_for_another_account_is_ignored() {
         // Keys are account-scoped; two accounts may serve the same model id
         // with different windows.
-        let registry = claurst_api::ModelRegistry::new();
-        let account = claurst_core::config::ProviderConfig {
+        let registry = mikmik_api::ModelRegistry::new();
+        let account = mikmik_core::config::ProviderConfig {
             protocol: Some("anthropic".to_string()),
             models: vec!["gpt-5.6-sol".to_string()],
             ..Default::default()
@@ -1928,7 +1928,7 @@ mod tests {
         let mut overrides = std::collections::HashMap::new();
         overrides.insert(
             "other_gateway/gpt-5.6-sol".to_string(),
-            claurst_core::config::ModelOverride {
+            mikmik_core::config::ModelOverride {
                 context_window: Some(1_050_000),
                 ..Default::default()
             },
@@ -1946,8 +1946,8 @@ mod tests {
     fn a_model_the_catalog_never_heard_of_is_still_offered() {
         // A gateway may proxy an id models.dev has no row for; dropping it
         // would hide a model the account genuinely serves.
-        let registry = claurst_api::ModelRegistry::new();
-        let account = claurst_core::config::ProviderConfig {
+        let registry = mikmik_api::ModelRegistry::new();
+        let account = mikmik_core::config::ProviderConfig {
             protocol: Some("anthropic".to_string()),
             models: vec!["totally-made-up-model".to_string()],
             ..Default::default()
@@ -1962,8 +1962,8 @@ mod tests {
     #[test]
     fn an_undiscovered_account_falls_back_to_its_protocol_catalog() {
         // Nothing regresses for an account written before discovery existed.
-        let registry = claurst_api::ModelRegistry::new();
-        let account = claurst_core::config::ProviderConfig {
+        let registry = mikmik_api::ModelRegistry::new();
+        let account = mikmik_core::config::ProviderConfig {
             protocol: Some("anthropic".to_string()),
             ..Default::default()
         };
@@ -1976,7 +1976,7 @@ mod tests {
 
     #[test]
     fn an_unconfigured_id_behaves_exactly_as_before() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let via_account = models_for_account("anthropic", None, &registry);
         let direct = models_for_provider_from_registry("anthropic", &registry);
         assert_eq!(via_account.len(), direct.len());
@@ -1984,7 +1984,7 @@ mod tests {
 
     #[test]
     fn models_for_provider_anthropic() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let models = models_for_provider_from_registry("anthropic", &registry);
         assert!(!models.is_empty(), "anthropic must yield models");
         assert!(
@@ -1995,7 +1995,7 @@ mod tests {
 
     #[test]
     fn models_for_provider_openai() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let models = models_for_provider_from_registry("openai", &registry);
         assert!(!models.is_empty());
         // Must NOT contain Claude models
@@ -2015,7 +2015,7 @@ mod tests {
     // a fresh claude-opus point-release surface the moment the snapshot ships.
     #[test]
     fn picker_list_equals_registry_projection_for_catalog_providers() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
 
         // Catalog-backed providers skip live discovery; live ones do not.
         // Anthropic now discovers via GET /v1/models, so it's on the live side;
@@ -2062,7 +2062,7 @@ mod tests {
     // catalog — never the empty-registry "default" placeholder.
     #[test]
     fn models_for_provider_codex_aliases() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         for pid in ["codex", "openai-codex"] {
             let models = models_for_provider_from_registry(pid, &registry);
             assert!(!models.is_empty(), "{pid} must yield Codex models");
@@ -2104,12 +2104,12 @@ mod tests {
     // "<id>/default") for both id spellings, preserving the caller's prefix.
     #[test]
     fn default_model_for_provider_codex_aliases() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         for pid in ["codex", "openai-codex"] {
             let m = default_model_for_provider(pid, &registry);
             assert_eq!(
                 m,
-                format!("{}/{}", pid, claurst_core::codex_oauth::DEFAULT_CODEX_MODEL),
+                format!("{}/{}", pid, mikmik_core::codex_oauth::DEFAULT_CODEX_MODEL),
                 "{pid} default must pin the curated flagship Codex model"
             );
             assert!(
@@ -2121,7 +2121,7 @@ mod tests {
 
     #[test]
     fn models_for_provider_unknown_returns_default() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let models = models_for_provider_from_registry("some-unknown-provider", &registry);
         assert!(!models.is_empty());
         assert_eq!(models[0].id, "default");
@@ -2130,7 +2130,7 @@ mod tests {
     // 17. default_model_for_provider returns prefixed models for non-anthropic.
     #[test]
     fn default_model_for_provider_openai() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let m = default_model_for_provider("openai", &registry);
         assert!(
             m.starts_with("openai/"),
@@ -2141,7 +2141,7 @@ mod tests {
     #[test]
     fn default_model_for_provider_anthropic_bare() {
         // Anthropic models are bare (no prefix) for backwards compat.
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let m = default_model_for_provider("anthropic", &registry);
         assert!(!m.contains('/'), "anthropic default must be bare: {m}");
         assert!(
@@ -2152,7 +2152,7 @@ mod tests {
 
     #[test]
     fn default_model_for_provider_unknown_falls_back() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         assert_eq!(
             default_model_for_provider("some-self-hosted-thing", &registry),
             "some-self-hosted-thing/default"
@@ -2162,7 +2162,7 @@ mod tests {
     // 18. set_models replaces the model list.
     #[test]
     fn set_models_replaces_list() {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let mut p = ModelPickerState::new();
         let openai_models = models_for_provider_from_registry("openai", &registry);
         p.set_models(openai_models);

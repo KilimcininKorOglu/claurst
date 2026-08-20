@@ -9,14 +9,14 @@
 use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
-use claurst_core::config::{McpServerConfig, McpServerOrigin};
-use claurst_tools::Tool;
+use mikmik_core::config::{McpServerConfig, McpServerOrigin};
+use mikmik_tools::Tool;
 use tracing::{info, warn};
 
 /// One session's own MCP connection, and the tools it added.
 #[derive(Clone)]
 pub struct SessionMcp {
-    pub manager: Arc<claurst_mcp::McpManager>,
+    pub manager: Arc<mikmik_mcp::McpManager>,
     pub tools: Arc<Vec<Box<dyn Tool>>>,
 }
 
@@ -27,7 +27,7 @@ pub struct SessionMcp {
 /// roster rather than being given an empty one.
 pub async fn connect(
     servers: &[acp::McpServer],
-    config: &claurst_core::Config,
+    config: &mikmik_core::Config,
 ) -> Result<Option<SessionMcp>, acp::Error> {
     if servers.is_empty() {
         return Ok(None);
@@ -45,8 +45,8 @@ pub async fn connect(
     // These came from the client the user is driving, not from a repository
     // this process opened, so they are user-origin. The gate still runs, so
     // the invariant holds if that origin ever stops being true.
-    let store = claurst_core::mcp_trust::McpTrustStore::load();
-    let decision = claurst_core::mcp_trust::partition_mcp_servers(
+    let store = mikmik_core::mcp_trust::McpTrustStore::load();
+    let decision = mikmik_core::mcp_trust::partition_mcp_servers(
         &configs,
         None,
         false,
@@ -61,9 +61,9 @@ pub async fn connect(
         return Ok(None);
     }
 
-    let manager = Arc::new(claurst_mcp::McpManager::connect_all(&decision.allowed).await);
+    let manager = Arc::new(mikmik_mcp::McpManager::connect_all(&decision.allowed).await);
     manager.clone().spawn_notification_poll_loop();
-    let tools = claurst_query::build_tool_roster(Some(manager.clone()), config);
+    let tools = mikmik_query::build_tool_roster(Some(manager.clone()), config);
     info!(
         servers = decision.allowed.len(),
         tools = tools.len(),
@@ -217,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_that_named_no_servers_shares_the_agents_roster() {
-        assert!(connect(&[], &claurst_core::Config::default())
+        assert!(connect(&[], &mikmik_core::Config::default())
             .await
             .expect("no servers is fine")
             .is_none());
@@ -235,7 +235,7 @@ mod tests {
 
         assert!(connect(
             std::slice::from_ref(&server),
-            &claurst_core::Config::default()
+            &mikmik_core::Config::default()
         )
         .await
         .is_err());

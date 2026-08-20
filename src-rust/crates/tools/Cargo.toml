@@ -1,13 +1,13 @@
 [package]
-name = "claurst-tools"
+name = "mikmik-tools"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-mcp = { workspace = true }
-claurst-plugins = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-mcp = { workspace = true }
+mikmik-plugins = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
@@ -44,7 +44,7 @@ portable-pty = "0.9"
 
 # Wire types for the ACP bridge in `acp_agent`. Schema only: the transport is
 # a handful of lines of newline-delimited JSON, so the runtime crate would add
-# a server we do not need. Kept at the same version as `claurst-acp`.
+# a server we do not need. Kept at the same version as `mikmik-acp`.
 agent-client-protocol-schema = { version = "0.13", default-features = false }
 
 [target.'cfg(unix)'.dependencies]

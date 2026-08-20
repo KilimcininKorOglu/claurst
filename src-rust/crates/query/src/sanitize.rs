@@ -21,7 +21,7 @@
 //! This is a *safety net*: it does not (and must not) change compaction /
 //! recovery / command-queue logic. It only repairs whatever those paths hand it.
 
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
 
 /// Content used for a synthesized placeholder `tool_result` that answers a
 /// dangling `tool_use`. Marked `is_error` so the model can tell it apart from a

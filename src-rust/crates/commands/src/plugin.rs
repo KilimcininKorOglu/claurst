@@ -50,23 +50,23 @@ impl SlashCommand for PluginCommand {
         // Helper: read the directories every time rather than the registry the
         // session published at startup, so an install or an edit made since
         // then shows up here.
-        async fn get_registry(project_dir: &std::path::Path) -> claurst_plugins::PluginRegistry {
-            claurst_plugins::load_plugins(project_dir, &[]).await
+        async fn get_registry(project_dir: &std::path::Path) -> mikmik_plugins::PluginRegistry {
+            mikmik_plugins::load_plugins(project_dir, &[]).await
         }
 
-        let parsed = claurst_plugins::parse_plugin_args(args);
+        let parsed = mikmik_plugins::parse_plugin_args(args);
         match parsed {
-            claurst_plugins::PluginSubCommand::List => {
+            mikmik_plugins::PluginSubCommand::List => {
                 let registry = get_registry(&project_dir).await;
-                CommandResult::Message(claurst_plugins::format_plugin_list(&registry))
+                CommandResult::Message(mikmik_plugins::format_plugin_list(&registry))
             }
-            claurst_plugins::PluginSubCommand::Enable(ref name) if name.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Enable(ref name) if name.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin enable <name>\nRun /plugin list to see installed plugins."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Enable(name) => {
+            mikmik_plugins::PluginSubCommand::Enable(name) => {
                 let registry = get_registry(&project_dir).await;
                 if registry.get(&name).is_none() {
                     return CommandResult::Error(format!(
@@ -74,7 +74,7 @@ impl SlashCommand for PluginCommand {
                         name
                     ));
                 }
-                let mut settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+                let mut settings = mikmik_core::config::Settings::load_sync().unwrap_or_default();
                 settings.enabled_plugins.insert(name.clone());
                 settings.disabled_plugins.remove(&name);
                 if let Err(err) = settings.save_sync() {
@@ -88,13 +88,13 @@ impl SlashCommand for PluginCommand {
                     name
                 ))
             }
-            claurst_plugins::PluginSubCommand::Disable(ref name) if name.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Disable(ref name) if name.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin disable <name>\nRun /plugin list to see installed plugins."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Disable(name) => {
+            mikmik_plugins::PluginSubCommand::Disable(name) => {
                 let registry = get_registry(&project_dir).await;
                 if registry.get(&name).is_none() {
                     return CommandResult::Error(format!(
@@ -102,7 +102,7 @@ impl SlashCommand for PluginCommand {
                         name
                     ));
                 }
-                let mut settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+                let mut settings = mikmik_core::config::Settings::load_sync().unwrap_or_default();
                 settings.disabled_plugins.insert(name.clone());
                 settings.enabled_plugins.remove(&name);
                 if let Err(err) = settings.save_sync() {
@@ -116,17 +116,17 @@ impl SlashCommand for PluginCommand {
                     name
                 ))
             }
-            claurst_plugins::PluginSubCommand::Info(ref name) if name.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Info(ref name) if name.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin info <name>\nRun /plugin list to see installed plugins."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Info(name) => {
+            mikmik_plugins::PluginSubCommand::Info(name) => {
                 let registry = get_registry(&project_dir).await;
-                CommandResult::Message(claurst_plugins::format_plugin_info(&registry, &name))
+                CommandResult::Message(mikmik_plugins::format_plugin_info(&registry, &name))
             }
-            claurst_plugins::PluginSubCommand::Install(ref source) if source.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Install(ref source) if source.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin install <source>\n\
                      A source is a local directory, an owner/repo on GitHub \
@@ -134,17 +134,17 @@ impl SlashCommand for PluginCommand {
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Install(source) => {
-                let parsed = match claurst_plugins::parse_install_source(&source) {
+            mikmik_plugins::PluginSubCommand::Install(source) => {
+                let parsed = match mikmik_plugins::parse_install_source(&source) {
                     Ok(parsed) => parsed,
                     Err(reason) => return CommandResult::Error(reason),
                 };
                 let installed = match parsed {
-                    claurst_plugins::InstallSource::Local(path) => {
-                        claurst_plugins::install_from_local(&path).map(|one| vec![one])
+                    mikmik_plugins::InstallSource::Local(path) => {
+                        mikmik_plugins::install_from_local(&path).map(|one| vec![one])
                     }
-                    claurst_plugins::InstallSource::Git { url, reference } => {
-                        claurst_plugins::install_from_git(&url, reference.as_deref()).await
+                    mikmik_plugins::InstallSource::Git { url, reference } => {
+                        mikmik_plugins::install_from_git(&url, reference.as_deref()).await
                     }
                 };
                 match installed {
@@ -162,18 +162,18 @@ impl SlashCommand for PluginCommand {
                     Err(reason) => CommandResult::Error(format!("Install failed: {}", reason)),
                 }
             }
-            claurst_plugins::PluginSubCommand::Update(ref name) if name.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Update(ref name) if name.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin update <name>\nRun /plugin list to see installed plugins."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Update(name) => {
-                match claurst_plugins::update_installed(&name).await {
-                    Ok(claurst_plugins::UpdateOutcome::AlreadyCurrent) => {
+            mikmik_plugins::PluginSubCommand::Update(name) => {
+                match mikmik_plugins::update_installed(&name).await {
+                    Ok(mikmik_plugins::UpdateOutcome::AlreadyCurrent) => {
                         CommandResult::Message(format!("Plugin '{}' is already current.", name))
                     }
-                    Ok(claurst_plugins::UpdateOutcome::Updated(range)) => {
+                    Ok(mikmik_plugins::UpdateOutcome::Updated(range)) => {
                         CommandResult::Message(format!(
                             "Plugin '{}' updated ({}). Run /plugin reload to apply it.",
                             name, range
@@ -182,14 +182,14 @@ impl SlashCommand for PluginCommand {
                     Err(reason) => CommandResult::Error(format!("Update failed: {}", reason)),
                 }
             }
-            claurst_plugins::PluginSubCommand::Remove(ref name) if name.is_empty() => {
+            mikmik_plugins::PluginSubCommand::Remove(ref name) if name.is_empty() => {
                 CommandResult::Error(
                     "Usage: /plugin remove <name>\nRun /plugin list to see installed plugins."
                         .to_string(),
                 )
             }
-            claurst_plugins::PluginSubCommand::Remove(name) => {
-                match claurst_plugins::uninstall(&name) {
+            mikmik_plugins::PluginSubCommand::Remove(name) => {
+                match mikmik_plugins::uninstall(&name) {
                     Ok(path) => CommandResult::Message(format!(
                         "Removed {}. Run /plugin reload to drop it from this session.",
                         path.display()
@@ -197,8 +197,8 @@ impl SlashCommand for PluginCommand {
                     Err(reason) => CommandResult::Error(format!("Remove failed: {}", reason)),
                 }
             }
-            claurst_plugins::PluginSubCommand::Reload => CommandResult::ReloadPlugins,
-            claurst_plugins::PluginSubCommand::Help => CommandResult::Message(
+            mikmik_plugins::PluginSubCommand::Reload => CommandResult::ReloadPlugins,
+            mikmik_plugins::PluginSubCommand::Help => CommandResult::Message(
                 "Plugin commands:\n\
                      /plugin              — list all installed plugins\n\
                      /plugin list         — list all installed plugins\n\
@@ -244,7 +244,7 @@ impl SlashCommand for ReloadPluginsCommand {
 /// built-in slash command.  The adapter is created on-the-fly inside
 /// `execute_command` when no built-in matches the input.
 pub struct PluginSlashCommandAdapter {
-    pub def: claurst_plugins::PluginCommandDef,
+    pub def: mikmik_plugins::PluginCommandDef,
 }
 
 #[async_trait]
@@ -259,15 +259,15 @@ impl SlashCommand for PluginSlashCommandAdapter {
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
         // Enforce capability grants before the action runs.
-        if let Err(reason) = claurst_plugins::check_plugin_capability(&self.def) {
+        if let Err(reason) = mikmik_plugins::check_plugin_capability(&self.def) {
             return CommandResult::Error(reason);
         }
 
         match &self.def.run_action {
-            claurst_plugins::CommandRunAction::StaticResponse(msg) => {
+            mikmik_plugins::CommandRunAction::StaticResponse(msg) => {
                 CommandResult::Message(msg.clone())
             }
-            claurst_plugins::CommandRunAction::MarkdownPrompt {
+            mikmik_plugins::CommandRunAction::MarkdownPrompt {
                 file_path,
                 plugin_root: _,
             } => {
@@ -279,7 +279,7 @@ impl SlashCommand for PluginSlashCommandAdapter {
                 // what the user typed.
                 match std::fs::read_to_string(file_path) {
                     Ok(content) => {
-                        let body = claurst_core::strip_frontmatter(&content);
+                        let body = mikmik_core::strip_frontmatter(&content);
                         let mut words = args.split_whitespace();
                         let arg1 = words.next().unwrap_or("");
                         let arg2 = words.next().unwrap_or("");
@@ -303,7 +303,7 @@ impl SlashCommand for PluginSlashCommandAdapter {
                     )),
                 }
             }
-            claurst_plugins::CommandRunAction::ShellCommand {
+            mikmik_plugins::CommandRunAction::ShellCommand {
                 command,
                 plugin_root,
             } => {
@@ -321,7 +321,7 @@ impl SlashCommand for PluginSlashCommandAdapter {
                         })
                         .env("CLAUDE_PLUGIN_ROOT", plugin_root)
                         .env("CLAUDE_PLUGIN_NAME", &self.def.plugin_name)
-                        .envs(claurst_plugins::plugin_config_env(&self.def.plugin_name))
+                        .envs(mikmik_plugins::plugin_config_env(&self.def.plugin_name))
                         .output();
                 match cmd_result {
                     Ok(out) => {

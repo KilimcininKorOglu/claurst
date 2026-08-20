@@ -30,7 +30,7 @@ fn url_hash(url: &str) -> String {
 
 /// Get the cache directory for web_fetch content.
 fn get_cache_dir() -> PathBuf {
-    claurst_core::config::Settings::config_dir().join("web_cache")
+    mikmik_core::config::Settings::config_dir().join("web_cache")
 }
 
 /// Attempt to load cached extracted content for a URL.
@@ -98,9 +98,9 @@ fn is_edge_case_html(html: &str, extracted_text: &str) -> bool {
 /// path at all and always fell back to tag stripping.
 async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
     let route =
-        claurst_api::resolve_small_model_route(&ctx.config, &claurst_api::ModelRegistry::new());
+        mikmik_api::resolve_small_model_route(&ctx.config, &mikmik_api::ModelRegistry::new());
 
-    let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
+    let provider = match mikmik_api::provider_for_account(&ctx.config, &route.account).await {
         Ok(provider) => provider,
         Err(e) => {
             warn!(account = %route.account, error = %e, "No provider for semantic extraction");
@@ -117,13 +117,13 @@ async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
 
     let system = "You are a content extraction expert. Given HTML, extract and return only the main text content. Return just plain text, no markdown or formatting.";
 
-    let request = claurst_api::ProviderRequest {
+    let request = mikmik_api::ProviderRequest {
         model: route.model.clone(),
-        messages: vec![claurst_core::types::Message::user(format!(
+        messages: vec![mikmik_core::types::Message::user(format!(
             "Extract the main content from this HTML and return only the text:\n\n{}",
             html_excerpt
         ))],
-        system_prompt: Some(claurst_api::SystemPrompt::Text(system.to_string())),
+        system_prompt: Some(mikmik_api::SystemPrompt::Text(system.to_string())),
         // No tools: this call reads a page, it does not act on one.
         tools: Vec::new(),
         max_tokens: 2000,
@@ -141,7 +141,7 @@ async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
                 .content
                 .iter()
                 .filter_map(|block| match block {
-                    claurst_core::types::ContentBlock::Text { text, .. } => Some(text.as_str()),
+                    mikmik_core::types::ContentBlock::Text { text, .. } => Some(text.as_str()),
                     _ => None,
                 })
                 .collect();
@@ -280,7 +280,7 @@ impl Tool for WebFetchTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_WEB_FETCH
+        mikmik_core::constants::TOOL_NAME_WEB_FETCH
     }
 
     fn description(&self) -> &str {

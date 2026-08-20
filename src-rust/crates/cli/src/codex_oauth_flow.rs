@@ -7,12 +7,12 @@
 
 use anyhow::{anyhow, bail};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use claurst_core::codex_oauth::{
+use mikmik_core::codex_oauth::{
     CODEX_AUTHORIZE_URL, CODEX_CLIENT_ID, CODEX_OAUTH_PORT, CODEX_REDIRECT_URI, CODEX_SCOPES,
     CODEX_TOKEN_URL,
 };
-use claurst_core::oauth_config::CodexTokens;
-use claurst_tui::DeviceAuthEvent;
+use mikmik_core::oauth_config::CodexTokens;
+use mikmik_tui::DeviceAuthEvent;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
@@ -112,7 +112,7 @@ pub async fn run_oauth_flow_with_label(
     let tokens = exchange_code_for_tokens(&code, &verifier).await?;
 
     // Persist tokens and register an account profile in the registry.
-    claurst_core::oauth_config::save_codex_tokens_and_register(&tokens, label)?;
+    mikmik_core::oauth_config::save_codex_tokens_and_register(&tokens, label)?;
 
     eprintln!("Codex login successful!");
     Ok(tokens)

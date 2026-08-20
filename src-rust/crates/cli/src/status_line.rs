@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use claurst_core::config::StatusLineConfig;
+use mikmik_core::config::StatusLineConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -288,7 +288,7 @@ impl Snapshot {
 
 /// Collect the current state of an interactive session.
 pub fn snapshot(
-    app: &claurst_tui::app::App,
+    app: &mikmik_tui::app::App,
     session_id: &str,
     transcript_path: Option<String>,
     project_dir: &str,
@@ -320,8 +320,8 @@ pub fn snapshot(
     }
 }
 
-fn vim_mode_name(app: &claurst_tui::app::App) -> Option<String> {
-    use claurst_tui::prompt_input::VimMode;
+fn vim_mode_name(app: &mikmik_tui::app::App) -> Option<String> {
+    use mikmik_tui::prompt_input::VimMode;
     if !app.prompt_input.vim_enabled {
         return None;
     }

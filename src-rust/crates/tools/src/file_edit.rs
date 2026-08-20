@@ -26,7 +26,7 @@ impl Tool for FileEditTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_FILE_EDIT
+        mikmik_core::constants::TOOL_NAME_FILE_EDIT
     }
 
     fn description(&self) -> &str {
@@ -169,8 +169,8 @@ impl Tool for FileEditTool {
             if replacements != 1 { "s" } else { "" }
         );
 
-        claurst_plugins::run_global_hook(
-            claurst_plugins::HookEventKind::FileChanged,
+        mikmik_plugins::run_global_hook(
+            mikmik_plugins::HookEventKind::FileChanged,
             Some(&path.to_string_lossy()),
             json!({
                 "file_path": path.display().to_string(),

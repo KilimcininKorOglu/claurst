@@ -5,9 +5,9 @@
 // Each command is a struct implementing the `SlashCommand` trait.
 
 use async_trait::async_trait;
-use claurst_core::config::{Config, HookEntry, HookEvent, Settings, Theme};
-use claurst_core::cost::CostTracker;
-use claurst_core::types::{ContentBlock, Message};
+use mikmik_core::config::{Config, HookEntry, HookEvent, Settings, Theme};
+use mikmik_core::cost::CostTracker;
+use mikmik_core::types::{ContentBlock, Message};
 use std::collections::BTreeMap;
 #[allow(unused_imports)]
 use std::path::PathBuf;
@@ -29,14 +29,14 @@ pub struct CommandContext {
     ///
     /// `None` means nothing was chosen, which is not the same as choosing the
     /// default: an unset effort sends no reasoning configuration at all.
-    pub effort_level: Option<claurst_core::effort::EffortLevel>,
+    pub effort_level: Option<mikmik_core::effort::EffortLevel>,
     /// Remote session URL set when a bridge connection is active.
     pub remote_session_url: Option<String>,
     // Note: config already contains hooks, mcp_servers, etc.
     /// Live MCP manager — present when servers are connected.
-    pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
+    pub mcp_manager: Option<Arc<mikmik_mcp::McpManager>>,
     /// Optional callback for starting an MCP OAuth flow in the background.
-    pub mcp_auth_runner: Option<Arc<dyn Fn(claurst_mcp::oauth::McpAuthSession) + Send + Sync>>,
+    pub mcp_auth_runner: Option<Arc<dyn Fn(mikmik_mcp::oauth::McpAuthSession) + Send + Sync>>,
     /// Whether whoever ran the command can see a view on this terminal.
     ///
     /// False for an editor over ACP, a remote client, and the headless path.
@@ -49,7 +49,7 @@ pub struct CommandContext {
     /// An agent's own settings win over the session's for the fields it
     /// declares, so a command that changes one of those fields has to be able
     /// to say that its change will not take effect yet.
-    pub active_agent: Option<claurst_core::AgentDefinition>,
+    pub active_agent: Option<mikmik_core::AgentDefinition>,
 }
 
 /// Result of running a slash command.
@@ -81,7 +81,7 @@ pub enum CommandResult {
     /// Replace the conversation with a specific message list (used by /rewind).
     SetMessages(Vec<Message>),
     /// Load a previously saved session into the live REPL.
-    ResumeSession(claurst_core::history::ConversationSession),
+    ResumeSession(mikmik_core::history::ConversationSession),
     /// Update the current session title.
     RenameSession(String),
     /// Trigger the OAuth login flow (handled by the REPL in main.rs).
@@ -90,7 +90,7 @@ pub enum CommandResult {
     /// Trigger the OAuth login flow for a specific provider with optional
     /// human-friendly label for the new account profile.
     ///
-    /// `provider` is one of `claurst_core::ProviderId::ANTHROPIC` or
+    /// `provider` is one of `mikmik_core::ProviderId::ANTHROPIC` or
     /// `PROVIDER_CODEX`. `login_with_claude_ai` is only meaningful for
     /// Anthropic.
     StartLoginForProvider {
@@ -175,11 +175,11 @@ pub trait SlashCommand: Send + Sync {
 }
 
 /// The cheapest model the active account serves, and that account.
-fn resolve_fast_model_route(config: &Config) -> claurst_core::config::Route {
-    claurst_api::resolve_small_model_route(config, &claurst_api::ModelRegistry::new())
+fn resolve_fast_model_route(config: &Config) -> mikmik_core::config::Route {
+    mikmik_api::resolve_small_model_route(config, &mikmik_api::ModelRegistry::new())
 }
 
-use claurst_core::message_utils::text_from_blocks as text_from_content_blocks;
+use mikmik_core::message_utils::text_from_blocks as text_from_content_blocks;
 
 // ---------------------------------------------------------------------------
 // Feature command modules (extracted per issue #232 to shrink this file).
@@ -354,7 +354,7 @@ fn open_with_system(target: &str) -> std::io::Result<()> {
     }
 }
 
-fn format_keystroke(keystroke: &claurst_core::keybindings::ParsedKeystroke) -> String {
+fn format_keystroke(keystroke: &mikmik_core::keybindings::ParsedKeystroke) -> String {
     let mut parts = Vec::new();
     if keystroke.ctrl {
         parts.push("ctrl".to_string());
@@ -375,7 +375,7 @@ fn format_keystroke(keystroke: &claurst_core::keybindings::ParsedKeystroke) -> S
     parts.join("+")
 }
 
-fn format_chord(chord: &[claurst_core::keybindings::ParsedKeystroke]) -> String {
+fn format_chord(chord: &[mikmik_core::keybindings::ParsedKeystroke]) -> String {
     chord
         .iter()
         .map(format_keystroke)
@@ -385,9 +385,9 @@ fn format_chord(chord: &[claurst_core::keybindings::ParsedKeystroke]) -> String 
 
 fn generate_keybindings_template() -> anyhow::Result<String> {
     let mut grouped: BTreeMap<String, BTreeMap<String, Option<String>>> = BTreeMap::new();
-    for binding in claurst_core::keybindings::default_bindings() {
+    for binding in mikmik_core::keybindings::default_bindings() {
         let chord = format_chord(&binding.chord);
-        if claurst_core::keybindings::NON_REBINDABLE.contains(&chord.as_str()) {
+        if mikmik_core::keybindings::NON_REBINDABLE.contains(&chord.as_str()) {
             continue;
         }
         grouped
@@ -423,7 +423,7 @@ fn current_output_style_name(config: &Config) -> &str {
 }
 
 fn available_output_style_names() -> Vec<String> {
-    claurst_core::output_styles::all_styles_with_runtime(&Settings::config_dir())
+    mikmik_core::output_styles::all_styles_with_runtime(&Settings::config_dir())
         .into_iter()
         .map(|style| style.name)
         .collect()
@@ -660,7 +660,7 @@ impl SlashCommand for CompactCommand {
 
 /// The rate card for one model, named so the reader knows whose rates these
 /// are: the model that spent the tokens need not be the session model.
-fn rates_line(model: &str, pricing: claurst_core::cost::ModelPricing) -> String {
+fn rates_line(model: &str, pricing: mikmik_core::cost::ModelPricing) -> String {
     format!(
         "  Rates ($/MTok) for {}: input ${:.2} | output ${:.2} | cache-write ${:.3} | cache-read ${:.3}",
         model,
@@ -707,9 +707,9 @@ impl SlashCommand for CostCommand {
         let pricing_line = match spenders.as_slice() {
             [only] => rates_line(
                 &only.model,
-                claurst_core::cost::ModelPricing::for_model(&only.model),
+                mikmik_core::cost::ModelPricing::for_model(&only.model),
             ),
-            [] => rates_line(model, claurst_core::cost::ModelPricing::for_model(model)),
+            [] => rates_line(model, mikmik_core::cost::ModelPricing::for_model(model)),
             _ => "  Rates ($/MTok): vary by model — see the breakdown below".to_string(),
         };
 
@@ -840,7 +840,7 @@ impl SlashCommand for VersionCommand {
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        CommandResult::Message(format!("Claurst v{}", claurst_core::constants::APP_VERSION))
+        CommandResult::Message(format!("Claurst v{}", mikmik_core::constants::APP_VERSION))
     }
 }
 
@@ -860,18 +860,18 @@ impl SlashCommand for ResumeCommand {
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
         if args.is_empty() {
-            let sessions = claurst_core::history::list_sessions().await.sessions;
+            let sessions = mikmik_core::history::list_sessions().await.sessions;
             let Some(last) = sessions.first() else {
                 return CommandResult::Message("No previous sessions found.".to_string());
             };
-            match claurst_core::history::load_session(&last.id).await {
+            match mikmik_core::history::load_session(&last.id).await {
                 Ok(session) => CommandResult::ResumeSession(session),
                 Err(e) => {
                     CommandResult::Error(format!("Failed to load session {}: {}", last.id, e))
                 }
             }
         } else {
-            match claurst_core::history::load_session(args.trim()).await {
+            match mikmik_core::history::load_session(args.trim()).await {
                 Ok(session) => CommandResult::ResumeSession(session),
                 Err(e) => {
                     CommandResult::Error(format!("Failed to load session {}: {}", args.trim(), e))
@@ -894,7 +894,7 @@ impl SlashCommand for StatusCommand {
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
         // Auth status
-        let auth_status = match claurst_core::oauth::OAuthTokens::load().await {
+        let auth_status = match mikmik_core::oauth::OAuthTokens::load().await {
             Some(tokens) => {
                 let sub = tokens.subscription_type.as_deref().unwrap_or("oauth");
                 format!("Authenticated ({})", sub)
@@ -1102,7 +1102,7 @@ impl SlashCommand for ImportConfigCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        use claurst_core::import_config::{build_import_preview, execute_import, ImportSelection};
+        use mikmik_core::import_config::{build_import_preview, execute_import, ImportSelection};
 
         let args = args.trim();
         if args.eq_ignore_ascii_case("apply") {
@@ -1128,7 +1128,7 @@ impl SlashCommand for ImportConfigCommand {
 }
 
 /// What an import would do, for a caller with no dialog to confirm it in.
-fn import_preview_text(preview: &claurst_core::import_config::ImportPreview) -> String {
+fn import_preview_text(preview: &mikmik_core::import_config::ImportPreview) -> String {
     let mut out = String::from("Run /import-config apply to carry this out.\n");
 
     match &preview.claude_md {
@@ -1174,7 +1174,7 @@ fn import_preview_text(preview: &claurst_core::import_config::ImportPreview) -> 
 }
 
 /// What an import did.
-fn import_outcome(result: &claurst_core::import_config::ImportExecutionResult) -> String {
+fn import_outcome(result: &mikmik_core::import_config::ImportExecutionResult) -> String {
     let mut out = String::new();
     if result.wrote_claude_md {
         out.push_str("Wrote CLAUDE.md.\n");
@@ -1548,11 +1548,11 @@ pub fn find_command(name: &str) -> Option<Box<dyn SlashCommand>> {
 
 /// Build `HelpEntry` values for all non-hidden commands, suitable for
 /// populating `HelpOverlay::commands` at startup.
-pub fn build_help_entries() -> Vec<claurst_tui::overlays::HelpEntry> {
+pub fn build_help_entries() -> Vec<mikmik_tui::overlays::HelpEntry> {
     all_commands()
         .iter()
         .filter(|c| !c.hidden())
-        .map(|c| claurst_tui::overlays::HelpEntry {
+        .map(|c| mikmik_tui::overlays::HelpEntry {
             name: c.name().to_string(),
             aliases: c.aliases().join(", "),
             description: c.description().to_string(),
@@ -1568,7 +1568,7 @@ pub fn build_help_entries() -> Vec<claurst_tui::overlays::HelpEntry> {
 /// A slash command backed by a user-defined template in `settings.json`.
 struct TemplateCommand {
     name: String,
-    template: claurst_core::CommandTemplate,
+    template: mikmik_core::CommandTemplate,
 }
 
 #[async_trait]
@@ -1598,7 +1598,7 @@ impl SlashCommand for TemplateCommand {
 
 /// Build slash commands from user-defined command templates stored in
 /// `settings.commands`.
-pub fn commands_from_settings(settings: &claurst_core::Settings) -> Vec<Box<dyn SlashCommand>> {
+pub fn commands_from_settings(settings: &mikmik_core::Settings) -> Vec<Box<dyn SlashCommand>> {
     settings
         .commands
         .iter()
@@ -1652,9 +1652,9 @@ impl SlashCommand for SkillCommand {
 /// with a built-in command will be silently skipped.
 pub fn commands_from_discovered_skills(
     cwd: &std::path::Path,
-    skills_config: &claurst_core::SkillsConfig,
+    skills_config: &mikmik_core::SkillsConfig,
 ) -> Vec<Box<dyn SlashCommand>> {
-    let discovered = claurst_core::discover_skills(cwd, skills_config);
+    let discovered = mikmik_core::discover_skills(cwd, skills_config);
     // Build a set of built-in command names so we can skip collisions.
     let all_cmds = all_commands();
     let builtin_names: std::collections::HashSet<&str> =
@@ -1675,10 +1675,10 @@ pub fn commands_from_discovered_skills(
 
 /// Execute a slash command string (with leading /).
 pub async fn execute_command(input: &str, ctx: &mut CommandContext) -> Option<CommandResult> {
-    if !claurst_tui::input::is_slash_command(input) {
+    if !mikmik_tui::input::is_slash_command(input) {
         return None;
     }
-    let (name, args) = claurst_tui::input::parse_slash_command(input);
+    let (name, args) = mikmik_tui::input::parse_slash_command(input);
 
     // First check built-in commands.
     if let Some(cmd) = find_command(name) {
@@ -1697,7 +1697,7 @@ pub async fn execute_command(input: &str, ctx: &mut CommandContext) -> Option<Co
 
     // Check discovered skill commands (from .claurst/skills/, git URLs, etc.).
     {
-        let discovered = claurst_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
+        let discovered = mikmik_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
         if let Some(skill) = discovered.get(cmd_name) {
             let sc = SkillCommand {
                 name: skill.name.clone(),
@@ -1710,7 +1710,7 @@ pub async fn execute_command(input: &str, ctx: &mut CommandContext) -> Option<Co
 
     // Then check plugin-defined slash commands.
     let project_dir = ctx.working_dir.clone();
-    let registry = claurst_plugins::load_plugins(&project_dir, &[]).await;
+    let registry = mikmik_plugins::load_plugins(&project_dir, &[]).await;
     for cmd_def in registry.all_command_defs() {
         if cmd_def.name == cmd_name {
             let adapter = PluginSlashCommandAdapter { def: cmd_def };
@@ -1740,11 +1740,11 @@ pub mod stats;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::cost::CostTracker;
 
     fn make_ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),
@@ -2040,7 +2040,7 @@ mod tests {
     #[tokio::test]
     async fn effort_reports_the_level_in_force() {
         let mut ctx = make_ctx();
-        ctx.effort_level = Some(claurst_core::effort::EffortLevel::XHigh);
+        ctx.effort_level = Some(mikmik_core::effort::EffortLevel::XHigh);
         let cmd = find_command("effort").expect("the command exists");
 
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
@@ -2078,7 +2078,7 @@ mod tests {
             );
             assert_eq!(
                 ctx.effort_level,
-                claurst_core::effort::EffortLevel::from_str(level)
+                mikmik_core::effort::EffortLevel::from_str(level)
             );
         }
     }
@@ -2108,7 +2108,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.cost_tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             1000,
             500,
             0,
@@ -2116,7 +2116,7 @@ mod tests {
         );
         ctx.cost_tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             4000,
             2000,
             0,
@@ -2141,7 +2141,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.cost_tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             1000,
             500,
             0,
@@ -2149,7 +2149,7 @@ mod tests {
         );
         ctx.cost_tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             4000,
             2000,
             0,
@@ -2174,7 +2174,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.cost_tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             100_000,
             20_000,
             0,
@@ -2182,7 +2182,7 @@ mod tests {
         );
         ctx.cost_tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             500_000,
             80_000,
             0,
@@ -2225,7 +2225,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.cost_tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             1000,
             500,
             0,
@@ -2233,7 +2233,7 @@ mod tests {
         );
         ctx.cost_tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             1000,
             500,
             0,
@@ -2257,7 +2257,7 @@ mod tests {
         let mut ctx = make_ctx();
         ctx.cost_tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             1000,
             500,
             0,
@@ -2341,9 +2341,9 @@ mod tests {
         // End-to-end of the persist path: /output-style / /rocky set
         // config.output_style, which resolves to the persona's prompt text for
         // the system prompt.
-        let config = claurst_core::config::Config {
+        let config = mikmik_core::config::Config {
             output_style: Some("rocky".to_string()),
-            ..claurst_core::config::Config::default()
+            ..mikmik_core::config::Config::default()
         };
         let prompt = config
             .resolve_output_style_prompt()
@@ -2456,7 +2456,7 @@ mod tests {
                 login_with_claude_ai,
                 label,
             } => {
-                assert_eq!(provider, claurst_core::ProviderId::ANTHROPIC);
+                assert_eq!(provider, mikmik_core::ProviderId::ANTHROPIC);
                 assert!(login_with_claude_ai);
                 assert!(label.is_none());
             }
@@ -2475,7 +2475,7 @@ mod tests {
                 login_with_claude_ai,
                 ..
             } => {
-                assert_eq!(provider, claurst_core::ProviderId::ANTHROPIC);
+                assert_eq!(provider, mikmik_core::ProviderId::ANTHROPIC);
                 assert!(!login_with_claude_ai);
             }
             other => panic!("expected StartLoginForProvider, got {:?}", other),
@@ -2491,7 +2491,7 @@ mod tests {
             CommandResult::StartLoginForProvider {
                 provider, label, ..
             } => {
-                assert_eq!(provider, claurst_core::ProviderId::CODEX);
+                assert_eq!(provider, mikmik_core::ProviderId::CODEX);
                 assert_eq!(label.as_deref(), Some("work"));
             }
             other => panic!("expected StartLoginForProvider, got {:?}", other),
@@ -2562,7 +2562,7 @@ mod tests {
         ctx.config.provider = Some(account.to_string());
         ctx.config.provider_configs.insert(
             account.to_string(),
-            claurst_core::config::ProviderConfig::default(),
+            mikmik_core::config::ProviderConfig::default(),
         );
         ctx
     }
@@ -2599,7 +2599,7 @@ mod tests {
         let mut ctx = ctx_on("openrouter");
         ctx.config.provider_configs.insert(
             "my_gateway".to_string(),
-            claurst_core::config::ProviderConfig::default(),
+            mikmik_core::config::ProviderConfig::default(),
         );
 
         let result = ModelCommand
@@ -2618,13 +2618,13 @@ mod tests {
         // The catalogue is keyed by vendor, so an account the user named
         // matched nothing and the fallback handed back a Claude id. The route
         // still has to reach the account, not the vendor.
-        let mut config = claurst_core::config::Config {
+        let mut config = mikmik_core::config::Config {
             provider: Some("work_openai".to_string()),
             ..Default::default()
         };
         config.provider_configs.insert(
             "work_openai".to_string(),
-            claurst_core::config::ProviderConfig {
+            mikmik_core::config::ProviderConfig {
                 protocol: Some("openai".to_string()),
                 ..Default::default()
             },

@@ -4,7 +4,7 @@
 
 use super::*;
 use async_trait::async_trait;
-use claurst_core::types::Role;
+use mikmik_core::types::Role;
 
 pub struct AdvisorCommand;
 pub struct FastCommand;
@@ -43,7 +43,7 @@ impl SlashCommand for AdvisorCommand {
         // Load and save through the typed `Settings` path. A raw JSON rewrite
         // loses every key the struct does not model, and treats a malformed
         // file as empty rather than refusing to overwrite it.
-        let mut settings = match claurst_core::config::Settings::load_sync() {
+        let mut settings = match mikmik_core::config::Settings::load_sync() {
             Ok(settings) => settings,
             Err(e) => {
                 return CommandResult::Error(format!(
@@ -95,7 +95,7 @@ impl SlashCommand for AdvisorCommand {
 /// wrong without looking wrong, though, because an unrecognised prefix is read
 /// as part of the model id rather than rejected (`meta-llama/Llama-3.3` has to
 /// keep working). Showing the split lets a typo be spotted at once.
-fn describe_advisor_route(config: &claurst_core::config::Config, model: &str) -> String {
+fn describe_advisor_route(config: &mikmik_core::config::Config, model: &str) -> String {
     let route = config.resolve_route(model);
     format!(
         "Runs on account '{}' with model '{}'.",
@@ -131,19 +131,19 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
     let route = ctx.config.resolve_route(configured);
     let model = route.model.as_str();
 
-    let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
+    let provider = match mikmik_api::provider_for_account(&ctx.config, &route.account).await {
         Ok(provider) => provider,
         Err(e) => return CommandResult::Error(format!("Advisor unavailable: {e}.")),
     };
 
-    let request = claurst_api::ProviderRequest {
+    let request = mikmik_api::ProviderRequest {
         model: route.model.clone(),
         messages: vec![Message::user(format!(
             "Review the assistant reply below. Name the most important problem first, \
              then concrete failure cases and wrong assumptions. If it is sound, say so \
              in one line.\n\n---\n\n{last_reply}"
         ))],
-        system_prompt: Some(claurst_api::SystemPrompt::Text(
+        system_prompt: Some(mikmik_api::SystemPrompt::Text(
             "You are a senior engineer giving a second opinion. Be a critic, not a \
              cheerleader. Be specific and brief, with no preamble."
                 .to_string(),
@@ -163,9 +163,9 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
         Ok(response) => {
             ctx.cost_tracker.add_usage(
                 model,
-                claurst_api::pricing_for_route(
+                mikmik_api::pricing_for_route(
                     &ctx.config,
-                    &claurst_api::ModelRegistry::new(),
+                    &mikmik_api::ModelRegistry::new(),
                     &route,
                 ),
                 response.usage.input_tokens,
@@ -316,7 +316,7 @@ impl SlashCommand for ColorSetCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::cost::CostTracker;
 
     /// `Settings::config_dir` reads process-global env, so every test that
     /// repoints it must run serially. CI already passes `--test-threads=1`.
@@ -348,7 +348,7 @@ mod tests {
 
     fn make_ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),
@@ -366,7 +366,7 @@ mod tests {
     #[tokio::test]
     async fn setting_the_advisor_keeps_unrelated_settings() {
         let _home = HomeGuard::new();
-        let path = claurst_core::config::Settings::global_settings_path();
+        let path = mikmik_core::config::Settings::global_settings_path();
         std::fs::create_dir_all(path.parent().expect("settings dir")).expect("mkdir");
         std::fs::write(&path, r#"{"showMessageTimestamps":true}"#).expect("seed settings");
 
@@ -377,7 +377,7 @@ mod tests {
             "setting a model should update the live config"
         );
 
-        let saved = claurst_core::config::Settings::load_sync().expect("settings still parse");
+        let saved = mikmik_core::config::Settings::load_sync().expect("settings still parse");
         assert_eq!(saved.advisor_model.as_deref(), Some("openai/gpt-4o"));
         assert!(
             saved.show_message_timestamps,
@@ -388,7 +388,7 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_settings_file_is_never_overwritten() {
         let _home = HomeGuard::new();
-        let path = claurst_core::config::Settings::global_settings_path();
+        let path = mikmik_core::config::Settings::global_settings_path();
         std::fs::create_dir_all(path.parent().expect("settings dir")).expect("mkdir");
         let malformed = r#"{"showMessageTimestamps": true,,, }"#;
         std::fs::write(&path, malformed).expect("seed settings");
@@ -448,12 +448,12 @@ mod tests {
     #[tokio::test]
     async fn a_known_account_is_accepted() {
         let _home = HomeGuard::new();
-        let mut store = claurst_core::AuthStore::load();
+        let mut store = mikmik_core::AuthStore::load();
         store.set_anthropic_tokens(
             "personal",
-            claurst_core::oauth::OAuthTokens {
+            mikmik_core::oauth::OAuthTokens {
                 access_token: "personal-token".to_string(),
-                scopes: vec![claurst_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
+                scopes: vec![mikmik_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
                 ..Default::default()
             },
         );
@@ -465,7 +465,7 @@ mod tests {
             matches!(result, CommandResult::ConfigChangeMessage(_, _)),
             "a stored account must be accepted, got {result:?}"
         );
-        let saved = claurst_core::config::Settings::load_sync().expect("settings parse");
+        let saved = mikmik_core::config::Settings::load_sync().expect("settings parse");
         assert_eq!(saved.advisor_model.as_deref(), Some("personal/sonnet"));
     }
 

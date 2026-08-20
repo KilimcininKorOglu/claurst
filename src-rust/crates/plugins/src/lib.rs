@@ -48,7 +48,7 @@ pub use registry::PluginRegistry;
 /// Returns nothing when the plugin has no values set, which keeps a hook's
 /// environment as it was.
 pub fn plugin_config_env(plugin_name: &str) -> Vec<(String, String)> {
-    let Ok(settings) = claurst_core::config::Settings::load_sync() else {
+    let Ok(settings) = mikmik_core::config::Settings::load_sync() else {
         return Vec::new();
     };
     let Some(options) = settings.plugin_config.get(plugin_name) else {
@@ -322,7 +322,7 @@ pub async fn load_plugins(
 /// plugin that is still enabled contributes commands, hooks and MCP servers,
 /// and one of those launches a process.
 fn load_disabled_plugin_names() -> std::collections::HashSet<String> {
-    claurst_core::config::Settings::load_sync()
+    mikmik_core::config::Settings::load_sync()
         .map(|settings| settings.disabled_plugins)
         .unwrap_or_default()
 }

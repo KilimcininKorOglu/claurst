@@ -523,7 +523,7 @@ fn staging_dir() -> Result<PathBuf, String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    let root = claurst_core::config::Settings::config_dir().join(".plugin-installs");
+    let root = mikmik_core::config::Settings::config_dir().join(".plugin-installs");
     let unique = format!(
         "{}-{}",
         std::process::id(),

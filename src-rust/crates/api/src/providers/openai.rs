@@ -16,11 +16,11 @@
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{
+use futures::Stream;
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{
     ContentBlock, ImageSource, MessageContent, Role, ToolResultContent, UsageInfo,
 };
-use futures::Stream;
 use serde_json::{json, Value};
 use std::pin::Pin;
 use tracing::debug;
@@ -83,14 +83,14 @@ impl OpenAiProvider {
 
     /// Public wrapper for Azure/Copilot providers that share the OpenAI wire format.
     pub fn to_openai_messages_pub(
-        messages: &[claurst_core::types::Message],
+        messages: &[mikmik_core::types::Message],
         system_prompt: Option<&SystemPrompt>,
     ) -> Vec<Value> {
         Self::to_openai_messages(messages, system_prompt)
     }
 
     /// Public wrapper for tool conversion used by Azure/Copilot providers.
-    pub fn to_openai_tools_pub(tools: &[claurst_core::types::ToolDefinition]) -> Vec<Value> {
+    pub fn to_openai_tools_pub(tools: &[mikmik_core::types::ToolDefinition]) -> Vec<Value> {
         Self::to_openai_tools(tools)
     }
 
@@ -107,7 +107,7 @@ impl OpenAiProvider {
     /// Public wrapper for non-streaming response parsing.
     pub fn parse_non_streaming_response_pub(
         json: &Value,
-        provider_id: &claurst_core::provider_id::ProviderId,
+        provider_id: &mikmik_core::provider_id::ProviderId,
     ) -> Result<crate::provider_types::ProviderResponse, crate::provider_error::ProviderError> {
         Self::parse_non_streaming_response(json, provider_id)
     }
@@ -115,7 +115,7 @@ impl OpenAiProvider {
     /// Convert a provider-agnostic [`ProviderRequest`] into the OpenAI Chat
     /// Completions `messages` array.
     fn to_openai_messages(
-        messages: &[claurst_core::types::Message],
+        messages: &[mikmik_core::types::Message],
         system_prompt: Option<&SystemPrompt>,
     ) -> Vec<Value> {
         let mut result: Vec<Value> = Vec::new();
@@ -317,7 +317,7 @@ impl OpenAiProvider {
     }
 
     /// Convert tool definitions to the OpenAI `tools` array format.
-    fn to_openai_tools(tools: &[claurst_core::types::ToolDefinition]) -> Vec<Value> {
+    fn to_openai_tools(tools: &[mikmik_core::types::ToolDefinition]) -> Vec<Value> {
         tools
             .iter()
             .map(|td| {
@@ -622,7 +622,7 @@ impl OpenAiProvider {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
-    use claurst_core::types::Message;
+    use mikmik_core::types::Message;
 
     #[test]
     fn user_tool_results_become_tool_messages() {

@@ -5,7 +5,7 @@
 // an unchanged screen with no way to tell whether the agent is still working,
 // crashed, or simply finished — the "agent randomly stops" report.
 
-use claurst_core::types::{ContentBlock, Message, MessageContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent};
 use tokio::sync::mpsc;
 
 use crate::QueryEvent;
@@ -41,9 +41,9 @@ pub(crate) fn ensure_turn_has_output(
 
     if let Some(tx) = event_tx {
         let _ = tx.send(QueryEvent::Stream(
-            claurst_api::streaming::AnthropicStreamEvent::ContentBlockDelta {
+            mikmik_api::streaming::AnthropicStreamEvent::ContentBlockDelta {
                 index: 0,
-                delta: claurst_api::streaming::ContentDelta::TextDelta {
+                delta: mikmik_api::streaming::ContentDelta::TextDelta {
                     text: placeholder.clone(),
                 },
             },

@@ -408,7 +408,7 @@ pub fn load_agent_definitions(project_root: &std::path::Path) -> Vec<AgentDefini
         ),
         (
             "user".to_string(),
-            claurst_core::config::Settings::config_dir().join("agents"),
+            mikmik_core::config::Settings::config_dir().join("agents"),
         ),
     ];
     sources.extend(plugin_agent_sources());
@@ -448,7 +448,7 @@ fn collect_agent_defs(sources: &[(String, std::path::PathBuf)]) -> Vec<AgentDefi
 
 /// The `agents/` directory of every installed plugin, labelled by plugin name.
 fn plugin_agent_sources() -> Vec<(String, std::path::PathBuf)> {
-    let Some(registry) = claurst_plugins::global_plugin_registry() else {
+    let Some(registry) = mikmik_plugins::global_plugin_registry() else {
         return Vec::new();
     };
     registry

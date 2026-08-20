@@ -17,9 +17,9 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{ContentBlock, MessageContent, Role, ToolResultContent, UsageInfo};
 use futures::Stream;
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{ContentBlock, MessageContent, Role, ToolResultContent, UsageInfo};
 use serde_json::{json, Value};
 use tracing::debug;
 
@@ -1151,7 +1151,7 @@ fn drain_event_stream_frames(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::provider_id::ProviderId;
+    use mikmik_core::provider_id::ProviderId;
     use serde_json::Value;
 
     /// Build a valid AWS event-stream frame carrying a single `:event-type`

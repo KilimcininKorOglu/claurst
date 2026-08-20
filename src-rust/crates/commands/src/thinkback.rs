@@ -35,7 +35,7 @@ impl SlashCommand for ThinkBackCommand {
             .messages
             .iter()
             .enumerate()
-            .filter(|(_, m)| m.role == claurst_core::types::Role::Assistant)
+            .filter(|(_, m)| m.role == mikmik_core::types::Role::Assistant)
             .filter_map(|(idx, m)| {
                 let blocks = m.get_thinking_blocks();
                 if blocks.is_empty() {
@@ -44,7 +44,7 @@ impl SlashCommand for ThinkBackCommand {
                 let thinking: String = blocks
                     .iter()
                     .filter_map(|b| {
-                        if let claurst_core::types::ContentBlock::Thinking { thinking, .. } = b {
+                        if let mikmik_core::types::ContentBlock::Thinking { thinking, .. } = b {
                             Some(thinking.as_str())
                         } else {
                             None
@@ -110,7 +110,7 @@ impl SlashCommand for ThinkBackPlayCommand {
         let thinking_blocks: Vec<String> = ctx
             .messages
             .iter()
-            .filter(|m| m.role == claurst_core::types::Role::Assistant)
+            .filter(|m| m.role == mikmik_core::types::Role::Assistant)
             .filter_map(|m| {
                 let blocks = m.get_thinking_blocks();
                 if blocks.is_empty() {
@@ -119,7 +119,7 @@ impl SlashCommand for ThinkBackPlayCommand {
                 let t: String = blocks
                     .iter()
                     .filter_map(|b| {
-                        if let claurst_core::types::ContentBlock::Thinking { thinking, .. } = b {
+                        if let mikmik_core::types::ContentBlock::Thinking { thinking, .. } = b {
                             Some(thinking.as_str())
                         } else {
                             None

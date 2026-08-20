@@ -1,10 +1,10 @@
 [package]
-name = "claurst-api"
+name = "mikmik-api"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-claurst-core = { workspace = true }
+mikmik-core = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

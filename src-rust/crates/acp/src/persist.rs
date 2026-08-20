@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use claurst_core::history::{self, ConversationSession};
+use mikmik_core::history::{self, ConversationSession};
 
 use crate::sessions::SessionState;
 
@@ -57,10 +57,10 @@ const TITLE_CHARS: usize = 60;
 /// the protocol names a session on their behalf, so the opening request is
 /// used: it is what a person would call the conversation anyway. An explicit
 /// rename replaces this and is never overwritten.
-pub fn derive_title(messages: &[claurst_core::types::Message]) -> Option<String> {
+pub fn derive_title(messages: &[mikmik_core::types::Message]) -> Option<String> {
     let first = messages
         .iter()
-        .find(|m| m.role == claurst_core::types::Role::User)?;
+        .find(|m| m.role == mikmik_core::types::Role::User)?;
     let line = first
         .get_text()?
         .lines()
@@ -76,7 +76,7 @@ pub fn derive_title(messages: &[claurst_core::types::Message]) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::Message;
+    use mikmik_core::types::Message;
     use std::path::PathBuf;
 
     /// `CLAURST_HOME` is process-wide, so the tests that move it run one at a

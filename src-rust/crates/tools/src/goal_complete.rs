@@ -75,9 +75,9 @@ impl Tool for GoalCompleteTool {
 
         let session_id = &ctx.session_id;
 
-        match claurst_core::GoalStore::open_default() {
+        match mikmik_core::GoalStore::open_default() {
             None => ToolResult::error("Could not open goal store.".to_string()),
-            Some(store) => match store.set_status(session_id, claurst_core::GoalStatus::Complete) {
+            Some(store) => match store.set_status(session_id, mikmik_core::GoalStatus::Complete) {
                 Ok(()) => ToolResult::success(format!(
                     "Goal marked complete.\n\nAudit summary: {}\n\nEvidence: {}",
                     params.audit_summary, params.evidence,

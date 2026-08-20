@@ -12,10 +12,10 @@ use anyhow::Context;
 /// Leaves the settings file in place with its provider, model and key cleared,
 /// so everything else the user configured survives.
 pub async fn clear_saved_provider_state() -> anyhow::Result<()> {
-    remove_file_if_exists(&claurst_core::AuthStore::path())
+    remove_file_if_exists(&mikmik_core::AuthStore::path())
         .await
         .context("Failed to clear auth store")?;
-    remove_file_if_exists(&claurst_core::oauth::OAuthTokens::token_file_path())
+    remove_file_if_exists(&mikmik_core::oauth::OAuthTokens::token_file_path())
         .await
         .context("Failed to clear OAuth token cache")?;
     remove_file_if_exists(&crate::model_cache::models_cache_path())
@@ -25,7 +25,7 @@ pub async fn clear_saved_provider_state() -> anyhow::Result<()> {
         .await
         .context("Failed to clear legacy model cache")?;
 
-    let mut settings = claurst_core::config::Settings::load()
+    let mut settings = mikmik_core::config::Settings::load()
         .await
         .context("Failed to load settings for /refresh")?;
     settings.provider = None;
@@ -85,13 +85,13 @@ mod tests {
         let _lock = HOME_LOCK.lock().await;
         let _home = HomeGuard::set();
 
-        let settings = claurst_core::config::Settings {
+        let settings = mikmik_core::config::Settings {
             provider: Some("acme".to_string()),
-            config: claurst_core::config::Config {
+            config: mikmik_core::config::Config {
                 provider: Some("acme".to_string()),
                 model: Some("acme/fast".to_string()),
                 api_key: Some("secret".to_string()),
-                theme: claurst_core::config::Theme::Light,
+                theme: mikmik_core::config::Theme::Light,
                 ..Default::default()
             },
             ..Default::default()
@@ -102,7 +102,7 @@ mod tests {
             .await
             .expect("state can be cleared");
 
-        let after = claurst_core::config::Settings::load()
+        let after = mikmik_core::config::Settings::load()
             .await
             .expect("settings");
         assert_eq!(after.provider, None);
@@ -113,7 +113,7 @@ mod tests {
         // account survives; /refresh is not a reset of the whole file.
         assert!(matches!(
             after.config.theme,
-            claurst_core::config::Theme::Light
+            mikmik_core::config::Theme::Light
         ));
     }
 

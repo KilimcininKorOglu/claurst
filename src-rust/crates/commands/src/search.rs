@@ -35,9 +35,9 @@ impl SlashCommand for SearchCommand {
             );
         }
 
-        let db_path = claurst_core::config::Settings::config_dir().join("sessions.db");
+        let db_path = mikmik_core::config::Settings::config_dir().join("sessions.db");
 
-        let store = match claurst_core::SqliteSessionStore::open(&db_path) {
+        let store = match mikmik_core::SqliteSessionStore::open(&db_path) {
             Ok(s) => s,
             Err(e) => {
                 return CommandResult::Error(format!(

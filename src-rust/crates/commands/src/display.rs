@@ -156,12 +156,12 @@ impl SlashCommand for TimelineCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        if let Err(message) = claurst_core::timeline::parse_timeline_action(args) {
+        if let Err(message) = mikmik_core::timeline::parse_timeline_action(args) {
             return CommandResult::Error(message);
         }
         if !ctx.config.timeline_enabled {
             return CommandResult::Message(
-                claurst_core::timeline::TIMELINE_DISABLED_HINT.to_string(),
+                mikmik_core::timeline::TIMELINE_DISABLED_HINT.to_string(),
             );
         }
         CommandResult::Message(

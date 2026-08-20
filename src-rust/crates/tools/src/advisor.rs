@@ -10,9 +10,9 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_api::ProviderResolveError;
-use claurst_core::message_utils::text_from_blocks;
-use claurst_core::types::Message;
+use mikmik_api::ProviderResolveError;
+use mikmik_core::message_utils::text_from_blocks;
+use mikmik_core::types::Message;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::debug;
@@ -96,7 +96,7 @@ fn describe_resolve_error(error: &ProviderResolveError) -> String {
 #[async_trait]
 impl Tool for AdvisorTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_ADVISOR
+        mikmik_core::constants::TOOL_NAME_ADVISOR
     }
 
     fn description(&self) -> &str {
@@ -157,11 +157,11 @@ impl Tool for AdvisorTool {
             ));
         }
 
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let account = route.account.as_str();
         debug!(account, model = route.model.as_str(), "Consulting advisor");
 
-        let provider = match claurst_api::provider_for_account(&ctx.config, account).await {
+        let provider = match mikmik_api::provider_for_account(&ctx.config, account).await {
             Ok(provider) => provider,
             Err(e) => return ToolResult::error(describe_resolve_error(&e)),
         };
@@ -174,10 +174,10 @@ impl Tool for AdvisorTool {
             }
         }
 
-        let request = claurst_api::ProviderRequest {
+        let request = mikmik_api::ProviderRequest {
             model: route.model.clone(),
             messages: vec![Message::user(prompt)],
-            system_prompt: Some(claurst_api::SystemPrompt::Text(
+            system_prompt: Some(mikmik_api::SystemPrompt::Text(
                 ADVISOR_SYSTEM_PROMPT.to_string(),
             )),
             tools: vec![],
@@ -199,7 +199,7 @@ impl Tool for AdvisorTool {
         // model's own rates.
         ctx.cost_tracker.add_usage(
             route.model.as_str(),
-            claurst_api::pricing_for_route(&ctx.config, &registry, &route),
+            mikmik_api::pricing_for_route(&ctx.config, &registry, &route),
             response.usage.input_tokens,
             response.usage.output_tokens,
             response.usage.cache_creation_input_tokens,

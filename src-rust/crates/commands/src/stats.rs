@@ -25,8 +25,8 @@ use base64::Engine;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
-use claurst_core::session_storage::TranscriptEntry;
-use claurst_core::types::ContentBlock;
+use mikmik_core::session_storage::TranscriptEntry;
+use mikmik_core::types::ContentBlock;
 
 use crate::{CommandContext, CommandResult};
 
@@ -216,7 +216,7 @@ const TAIL_WINDOW: u64 = 64 * 1024;
 
 fn projects_dir() -> PathBuf {
     // Same convention as core: ~/.claurst/projects/
-    claurst_core::config::Settings::config_dir().join("projects")
+    mikmik_core::config::Settings::config_dir().join("projects")
 }
 
 fn encoded_dir_for_cwd(cwd: &Path) -> String {
@@ -516,7 +516,7 @@ impl Aggregated {
 }
 
 fn aggregate(args: &Args, ctx: &CommandContext) -> Aggregated {
-    let root = claurst_core::session_storage::transcript_root_for(&ctx.working_dir);
+    let root = mikmik_core::session_storage::transcript_root_for(&ctx.working_dir);
     let paths = collect_jsonl_paths(&root, args.all_projects);
     let mut sessions: Vec<SessionStats> = Vec::with_capacity(paths.len());
 
@@ -591,7 +591,7 @@ fn fmt_cost(usd: f64) -> String {
 /// A session is not one model: the advisor and any subagent can run on
 /// another, and each is priced at its own rates. A single total hides that,
 /// so the report shows where the money went.
-pub(crate) fn by_model_block(tracker: &claurst_core::CostTracker) -> String {
+pub(crate) fn by_model_block(tracker: &mikmik_core::CostTracker) -> String {
     let rows = tracker.by_model();
     if rows.is_empty() {
         return String::new();
@@ -1250,18 +1250,18 @@ pub fn run(raw: &[&str], ctx: &CommandContext) -> CommandResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::session_storage::{
+    use mikmik_core::session_storage::{
         AiTitleEntry, CustomTitleEntry, LastPromptEntry, TranscriptMessage,
     };
-    use claurst_core::types::{Message, MessageContent, MessageCost, Role};
+    use mikmik_core::types::{Message, MessageContent, MessageCost, Role};
     use tempfile::TempDir;
 
     #[test]
     fn the_model_breakdown_lines_up_in_columns() {
-        let tracker = claurst_core::CostTracker::new();
+        let tracker = mikmik_core::CostTracker::new();
         tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             4000,
             2000,
             0,
@@ -1269,7 +1269,7 @@ mod tests {
         );
         tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             1000,
             500,
             0,
@@ -1295,10 +1295,10 @@ mod tests {
     #[test]
     fn one_cost_column_uses_one_number_format() {
         // Per-value precision printed "$3.00" beside "$0.7200" in one column.
-        let tracker = claurst_core::CostTracker::new();
+        let tracker = mikmik_core::CostTracker::new();
         tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             100_000,
             20_000,
             0,
@@ -1306,7 +1306,7 @@ mod tests {
         );
         tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             500_000,
             80_000,
             0,
@@ -1326,10 +1326,10 @@ mod tests {
 
     #[test]
     fn a_row_too_small_for_four_places_widens_the_whole_column() {
-        let tracker = claurst_core::CostTracker::new();
+        let tracker = mikmik_core::CostTracker::new();
         tracker.add_usage(
             "claude-opus-4-6",
-            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
             100_000,
             20_000,
             0,
@@ -1337,7 +1337,7 @@ mod tests {
         );
         tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             1,
             0,
             0,
@@ -1357,7 +1357,7 @@ mod tests {
 
     #[test]
     fn nothing_spent_renders_nothing() {
-        assert!(by_model_block(&claurst_core::CostTracker::new()).is_empty());
+        assert!(by_model_block(&mikmik_core::CostTracker::new()).is_empty());
     }
 
     fn make_assistant_with_cost(

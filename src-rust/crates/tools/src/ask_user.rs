@@ -23,7 +23,7 @@ struct AskUserInput {
 #[async_trait]
 impl Tool for AskUserQuestionTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_ASK_USER
+        mikmik_core::constants::TOOL_NAME_ASK_USER
     }
 
     fn description(&self) -> &str {
@@ -81,16 +81,16 @@ impl Tool for AskUserQuestionTool {
             if tx.send(event).is_err() {
                 return ToolResult::error("Question channel closed".to_string());
             }
-            claurst_plugins::run_global_hook(
-                claurst_plugins::HookEventKind::Elicitation,
+            mikmik_plugins::run_global_hook(
+                mikmik_plugins::HookEventKind::Elicitation,
                 None,
                 json!({ "question": params.question, "options": params.options }),
             )
             .await;
 
             let answered = reply_rx.await;
-            claurst_plugins::run_global_hook(
-                claurst_plugins::HookEventKind::ElicitationResult,
+            mikmik_plugins::run_global_hook(
+                mikmik_plugins::HookEventKind::ElicitationResult,
                 None,
                 json!({
                     "question": params.question,

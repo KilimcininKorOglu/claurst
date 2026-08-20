@@ -30,7 +30,7 @@ impl SlashCommand for ShareCommand {
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
-        use claurst_core::share_export::{share_viewer_url, write_session_html, SessionExportMeta};
+        use mikmik_core::share_export::{share_viewer_url, write_session_html, SessionExportMeta};
 
         // 1. Check that `gh` is installed and authenticated. Uses tokio::process
         //    so the TUI event loop keeps animating during the (occasionally
@@ -175,8 +175,8 @@ fn extract_session_urls(messages: &[Message]) -> Vec<String> {
 
     for msg in messages {
         let text: String = match &msg.content {
-            claurst_core::types::MessageContent::Text(t) => t.clone(),
-            claurst_core::types::MessageContent::Blocks(blocks) => blocks
+            mikmik_core::types::MessageContent::Text(t) => t.clone(),
+            mikmik_core::types::MessageContent::Blocks(blocks) => blocks
                 .iter()
                 .filter_map(|b| match b {
                     ContentBlock::Text { text } => Some(text.as_str()),

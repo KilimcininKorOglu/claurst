@@ -8,8 +8,8 @@ use crate::overlays::{
     centered_rect, modal_search_line, render_dark_overlay, render_dialog_bg, CLAURST_ACCENT,
     CLAURST_MUTED, CLAURST_PANEL_BG,
 };
-use claurst_core::config::{Config, Settings};
-use claurst_core::output_styles::find_style;
+use mikmik_core::config::{Config, Settings};
+use mikmik_core::output_styles::find_style;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -217,9 +217,9 @@ impl SettingsScreen {
             .clone()
             .unwrap_or_default();
         self.output_format = match &self.settings_snapshot.config.output_format {
-            claurst_core::config::OutputFormat::Text => "text".to_string(),
-            claurst_core::config::OutputFormat::Json => "json".to_string(),
-            claurst_core::config::OutputFormat::StreamJson => "stream_json".to_string(),
+            mikmik_core::config::OutputFormat::Text => "text".to_string(),
+            mikmik_core::config::OutputFormat::Json => "json".to_string(),
+            mikmik_core::config::OutputFormat::StreamJson => "stream_json".to_string(),
         };
         self.disable_claude_mds = self.settings_snapshot.config.disable_claude_mds;
         self.file_injection_enabled = self.settings_snapshot.config.file_injection_is_enabled();
@@ -505,7 +505,7 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             kind: SettingKind::Number,
             value: screen.settings_snapshot.config.max_tokens
                 .map(|n| n.to_string())
-                .unwrap_or_else(|| claurst_core::constants::DEFAULT_MAX_TOKENS.to_string()),
+                .unwrap_or_else(|| mikmik_core::constants::DEFAULT_MAX_TOKENS.to_string()),
         },
         SettingsEntry {
             key: "auto_compact".into(),
@@ -766,7 +766,7 @@ pub fn split_plugin_option_key(key: &str) -> Option<(&str, &str)> {
 /// Without these the options are parsed out of every manifest and then never
 /// shown, so no value can be set and the plugin reads nothing.
 fn plugin_config_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
-    let Some(registry) = claurst_plugins::global_plugin_registry() else {
+    let Some(registry) = mikmik_plugins::global_plugin_registry() else {
         return Vec::new();
     };
 
@@ -789,13 +789,13 @@ fn plugin_config_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
                 Some(serde_json::Value::String(s)) => s.clone(),
                 Some(other) => other.to_string(),
                 None => match option.value_type {
-                    claurst_plugins::UserConfigValueType::Boolean => "false".to_string(),
+                    mikmik_plugins::UserConfigValueType::Boolean => "false".to_string(),
                     _ => String::new(),
                 },
             };
             let kind = match option.value_type {
-                claurst_plugins::UserConfigValueType::Boolean => SettingKind::Bool,
-                claurst_plugins::UserConfigValueType::Number => SettingKind::Number,
+                mikmik_plugins::UserConfigValueType::Boolean => SettingKind::Bool,
+                mikmik_plugins::UserConfigValueType::Number => SettingKind::Number,
                 _ => SettingKind::Text,
             };
 
@@ -928,8 +928,8 @@ pub fn render_settings_screen(frame: &mut Frame, screen: &SettingsScreen, area: 
             // Every style the session can resolve, not just the built-in
             // ones: the field takes a name, so listing less than the resolver
             // accepts would hide a user's or a plugin's style.
-            let all_styles = claurst_core::output_styles::all_styles_with_runtime(
-                &claurst_core::config::Settings::config_dir(),
+            let all_styles = mikmik_core::output_styles::all_styles_with_runtime(
+                &mikmik_core::config::Settings::config_dir(),
             );
             let current_style_name = if screen.output_style.is_empty() {
                 "default"
@@ -1346,9 +1346,9 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                     "output_format" => {
                         screen.output_format = new_value.to_string();
                         let format = match new_value {
-                            "json" => claurst_core::config::OutputFormat::Json,
-                            "stream_json" => claurst_core::config::OutputFormat::StreamJson,
-                            _ => claurst_core::config::OutputFormat::Text,
+                            "json" => mikmik_core::config::OutputFormat::Json,
+                            "stream_json" => mikmik_core::config::OutputFormat::StreamJson,
+                            _ => mikmik_core::config::OutputFormat::Text,
                         };
                         screen.settings_snapshot.config.output_format = format.clone();
                         config.output_format = format;
@@ -1717,8 +1717,8 @@ mod tests {
             Err(poisoned) => poisoned.into_inner(),
         };
         let _home = HomeGuard::new();
-        let path = claurst_core::claurst_home().join("settings.json");
-        std::fs::create_dir_all(claurst_core::claurst_home()).expect("mkdir");
+        let path = mikmik_core::claurst_home().join("settings.json");
+        std::fs::create_dir_all(mikmik_core::claurst_home()).expect("mkdir");
         std::fs::write(&path, r#"{"config":{"model":"x",}}"#).expect("write");
 
         let mut screen = SettingsScreen::new();
@@ -1832,7 +1832,7 @@ mod tests {
         assert_eq!(screen.searxng_url, "http://searx.lan:9000");
         assert_eq!(config.searxng_url.as_deref(), Some("http://searx.lan:9000"));
 
-        let written = std::fs::read_to_string(claurst_core::claurst_home().join("settings.json"))
+        let written = std::fs::read_to_string(mikmik_core::claurst_home().join("settings.json"))
             .expect("settings.json");
         assert!(
             written.contains("\"searxngUrl\": \"http://searx.lan:9000\""),

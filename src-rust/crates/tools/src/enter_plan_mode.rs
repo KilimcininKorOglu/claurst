@@ -17,7 +17,7 @@ struct EnterPlanModeInput {
 #[async_trait]
 impl Tool for EnterPlanModeTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_ENTER_PLAN_MODE
+        mikmik_core::constants::TOOL_NAME_ENTER_PLAN_MODE
     }
 
     fn description(&self) -> &str {

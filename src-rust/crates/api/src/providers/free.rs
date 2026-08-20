@@ -24,9 +24,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use claurst_core::config::WireModel;
-use claurst_core::provider_id::{ModelId, ProviderId};
 use futures::Stream;
+use mikmik_core::config::WireModel;
+use mikmik_core::provider_id::{ModelId, ProviderId};
 
 use crate::provider::{LlmProvider, ModelInfo};
 use crate::provider_error::ProviderError;
@@ -435,7 +435,7 @@ impl LlmProvider for FreeProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::{Message, UsageInfo};
+    use mikmik_core::types::{Message, UsageInfo};
 
     use crate::provider_types::StopReason;
 

@@ -2,8 +2,8 @@
 
 use super::{CommandContext, CommandResult, SlashCommand};
 use async_trait::async_trait;
-use claurst_core::constants::{MAX_TURNS_DEFAULT, MAX_TURNS_UNLIMITED};
-use claurst_core::AgentDefinition;
+use mikmik_core::constants::{MAX_TURNS_DEFAULT, MAX_TURNS_UNLIMITED};
+use mikmik_core::AgentDefinition;
 
 pub struct TurnsCommand;
 
@@ -239,8 +239,8 @@ mod tests {
 
     fn ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::Config::default(),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            config: mikmik_core::Config::default(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),
             session_id: "test-session".to_string(),
@@ -256,7 +256,7 @@ mod tests {
 
     /// What the settings file on disk holds for `maxTurns`.
     fn saved_max_turns() -> Option<u32> {
-        claurst_core::Settings::load_sync()
+        mikmik_core::Settings::load_sync()
             .expect("settings load")
             .config
             .max_turns

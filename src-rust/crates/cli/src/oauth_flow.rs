@@ -1,8 +1,8 @@
 // OAuth 2.0 PKCE login flow for the Claurst CLI.
 //
 // Uses the Claude Code client ID and impersonates Claude Code at request time
-// (see `claurst_core::oauth_config` for the impersonation constants and
-// `claurst_api::AnthropicClient::apply_oauth_stealth` for how they're applied).
+// (see `mikmik_core::oauth_config` for the impersonation constants and
+// `mikmik_api::AnthropicClient::apply_oauth_stealth` for how they're applied).
 // Claude Pro/Max tokens used through Claurst draw from the account's "extra
 // usage" pool, not subscription quota — users should be aware of this before
 // switching from API-key auth.
@@ -20,8 +20,8 @@
 // 8. Return the credential (API key or Bearer token)
 
 use anyhow::{bail, Context};
-use claurst_core::oauth::{self, OAuthTokens};
-use claurst_tui::DeviceAuthEvent;
+use mikmik_core::oauth::{self, OAuthTokens};
+use mikmik_tui::DeviceAuthEvent;
 use serde::Deserialize;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

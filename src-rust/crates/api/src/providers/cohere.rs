@@ -10,9 +10,9 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{ContentBlock, UsageInfo};
 use futures::Stream;
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{ContentBlock, UsageInfo};
 use serde_json::{json, Value};
 use tracing::debug;
 

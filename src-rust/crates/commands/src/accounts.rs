@@ -34,9 +34,9 @@ impl SlashCommand for LoginCommand {
         let label = parse_label_arg(&tokens);
 
         let provider = if use_codex {
-            claurst_core::ProviderId::CODEX
+            mikmik_core::ProviderId::CODEX
         } else {
-            claurst_core::ProviderId::ANTHROPIC
+            mikmik_core::ProviderId::ANTHROPIC
         };
 
         CommandResult::StartLoginForProvider {
@@ -50,11 +50,11 @@ impl SlashCommand for LoginCommand {
 /// Drop every account speaking `protocol`: its credential and its `providers`
 /// entry. Returns how many were removed.
 fn forget_every_account(protocol: &str) -> usize {
-    let mut store = claurst_core::AuthStore::load();
+    let mut store = mikmik_core::AuthStore::load();
     let ids = store.accounts_for_protocol(protocol);
     for id in &ids {
         store.credentials.remove(id);
-        let _ = claurst_core::config::forget_account(id);
+        let _ = mikmik_core::config::forget_account(id);
     }
     store.save();
     ids.len()
@@ -97,13 +97,13 @@ impl SlashCommand for LogoutCommand {
 
         if use_codex {
             if purge_all {
-                let removed = forget_every_account(claurst_core::ProviderId::CODEX);
+                let removed = forget_every_account(mikmik_core::ProviderId::CODEX);
                 return CommandResult::Message(format!(
                     "Removed {} stored Codex account(s).",
                     removed
                 ));
             }
-            if let Err(e) = claurst_core::oauth_config::clear_codex_tokens() {
+            if let Err(e) = mikmik_core::oauth_config::clear_codex_tokens() {
                 return CommandResult::Error(format!("Failed to clear Codex tokens: {}", e));
             }
             return CommandResult::Message("Logged out of the active Codex account.".to_string());
@@ -111,8 +111,8 @@ impl SlashCommand for LogoutCommand {
 
         // Anthropic logout.
         if purge_all {
-            let removed = forget_every_account(claurst_core::ProviderId::ANTHROPIC);
-            let mut settings = claurst_core::config::Settings::load()
+            let removed = forget_every_account(mikmik_core::ProviderId::ANTHROPIC);
+            let mut settings = mikmik_core::config::Settings::load()
                 .await
                 .unwrap_or_default();
             settings.config.api_key = None;
@@ -124,10 +124,10 @@ impl SlashCommand for LogoutCommand {
             ));
         }
 
-        if let Err(e) = claurst_core::oauth::OAuthTokens::clear().await {
+        if let Err(e) = mikmik_core::oauth::OAuthTokens::clear().await {
             return CommandResult::Error(format!("Failed to clear OAuth tokens: {}", e));
         }
-        let mut settings = claurst_core::config::Settings::load()
+        let mut settings = mikmik_core::config::Settings::load()
             .await
             .unwrap_or_default();
         settings.config.api_key = None;
@@ -159,8 +159,8 @@ impl SlashCommand for AccountsCommand {
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let store = claurst_core::AuthStore::load();
-        let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+        let store = mikmik_core::AuthStore::load();
+        let settings = mikmik_core::config::Settings::load_sync().unwrap_or_default();
         let active = ctx
             .config
             .provider
@@ -209,8 +209,8 @@ impl SlashCommand for AccountsCommand {
 }
 
 /// The identity a credential carries, for the `/accounts` listing.
-fn describe(credential: &claurst_core::StoredCredential) -> String {
-    use claurst_core::StoredCredential as C;
+fn describe(credential: &mikmik_core::StoredCredential) -> String {
+    use mikmik_core::StoredCredential as C;
     match credential {
         C::AnthropicOAuth(tokens) => {
             let tier = tokens
@@ -261,7 +261,7 @@ impl SlashCommand for SwitchCommand {
             );
         };
 
-        let store = claurst_core::AuthStore::load();
+        let store = mikmik_core::AuthStore::load();
         if store.get(account_id).is_none() {
             let mut known: Vec<&str> = store.credentials.keys().map(String::as_str).collect();
             known.sort();
@@ -275,7 +275,7 @@ impl SlashCommand for SwitchCommand {
             });
         }
 
-        let protocol = claurst_core::config::Settings::load_sync()
+        let protocol = mikmik_core::config::Settings::load_sync()
             .ok()
             .and_then(|settings| {
                 settings
@@ -285,7 +285,7 @@ impl SlashCommand for SwitchCommand {
             })
             .unwrap_or_else(|| (*account_id).to_string());
 
-        if let Err(e) = claurst_core::config::register_account(account_id, &protocol, true) {
+        if let Err(e) = mikmik_core::config::register_account(account_id, &protocol, true) {
             return CommandResult::Error(format!("Failed to switch account: {e}"));
         }
         ctx.config.provider = Some((*account_id).to_string());

@@ -8,7 +8,7 @@ pub struct PostSamplingHookResult {
     /// Error messages produced by hooks with non-zero exit codes.
     /// These are injected into the conversation as user messages before the
     /// next model turn so the model can react to them.
-    pub blocking_errors: Vec<claurst_core::types::Message>,
+    pub blocking_errors: Vec<mikmik_core::types::Message>,
     /// When `true` the query loop must not continue and should surface the
     /// error messages to the caller.  Set when any hook exits with code > 1.
     pub prevent_continuation: bool,
@@ -22,11 +22,11 @@ pub struct PostSamplingHookResult {
 /// If the exit code is **strictly greater than 1** `prevent_continuation` is
 /// set so the query loop can return early.
 pub fn fire_post_sampling_hooks(
-    _turn_result: &claurst_core::types::Message,
-    config: &claurst_core::config::Config,
+    _turn_result: &mikmik_core::types::Message,
+    config: &mikmik_core::config::Config,
 ) -> PostSamplingHookResult {
-    use claurst_core::config::HookEvent;
-    use claurst_core::types::Message;
+    use mikmik_core::config::HookEvent;
+    use mikmik_core::types::Message;
 
     let mut result = PostSamplingHookResult::default();
 
@@ -91,11 +91,11 @@ pub fn fire_post_sampling_hooks(
 /// Stop hooks are non-blocking by design: the caller does not wait for them.
 /// Returns an empty `Vec` immediately; results (if any) are lost.
 pub fn stop_hooks_with_full_behavior(
-    turn_result: &claurst_core::types::Message,
-    config: &claurst_core::config::Config,
+    turn_result: &mikmik_core::types::Message,
+    config: &mikmik_core::config::Config,
     working_dir: std::path::PathBuf,
-) -> Vec<claurst_core::types::Message> {
-    use claurst_core::config::HookEvent;
+) -> Vec<mikmik_core::types::Message> {
+    use mikmik_core::config::HookEvent;
 
     let entries = match config.hooks.get(&HookEvent::Stop) {
         Some(e) if !e.is_empty() => e.clone(),
@@ -133,11 +133,11 @@ pub fn stop_hooks_with_full_behavior(
 /// call, and `None` when the tool may run. Both dispatch arms of the query loop
 /// call this, so a hook fires no matter which provider served the turn.
 pub(crate) async fn run_pre_tool_hooks(
-    tool_ctx: &claurst_tools::ToolContext,
+    tool_ctx: &mikmik_tools::ToolContext,
     name: &str,
     input: &serde_json::Value,
-) -> Option<claurst_tools::ToolResult> {
-    let hook_ctx = claurst_core::hooks::HookContext {
+) -> Option<mikmik_tools::ToolResult> {
+    let hook_ctx = mikmik_core::hooks::HookContext {
         event: "PreToolUse".to_string(),
         tool_name: Some(name.to_string()),
         tool_input: Some(input.clone()),
@@ -145,27 +145,27 @@ pub(crate) async fn run_pre_tool_hooks(
         is_error: None,
         session_id: Some(tool_ctx.session_id.clone()),
     };
-    let outcome = claurst_core::hooks::run_hooks(
+    let outcome = mikmik_core::hooks::run_hooks(
         &tool_ctx.config.hooks,
-        claurst_core::config::HookEvent::PreToolUse,
+        mikmik_core::config::HookEvent::PreToolUse,
         &hook_ctx,
         &tool_ctx.working_dir,
     )
     .await;
 
-    if let claurst_core::hooks::HookOutcome::Blocked(reason) = outcome {
+    if let mikmik_core::hooks::HookOutcome::Blocked(reason) = outcome {
         tracing::warn!(tool = %name, reason = %reason, "PreToolUse hook blocked execution");
-        return Some(claurst_tools::ToolResult::error(format!(
+        return Some(mikmik_tools::ToolResult::error(format!(
             "Blocked by hook: {}",
             reason
         )));
     }
 
-    if let claurst_plugins::HookOutcome::Deny(reason) =
-        claurst_plugins::run_global_pre_tool_hook(name, input).await
+    if let mikmik_plugins::HookOutcome::Deny(reason) =
+        mikmik_plugins::run_global_pre_tool_hook(name, input).await
     {
         tracing::warn!(tool = %name, reason = %reason, "Plugin PreToolUse hook blocked execution");
-        return Some(claurst_tools::ToolResult::error(format!(
+        return Some(mikmik_tools::ToolResult::error(format!(
             "Blocked by plugin hook: {}",
             reason
         )));
@@ -176,12 +176,12 @@ pub(crate) async fn run_pre_tool_hooks(
 
 /// Run every `PostToolUse` hook, from settings and from plugins, for one tool.
 pub(crate) async fn run_post_tool_hooks(
-    tool_ctx: &claurst_tools::ToolContext,
+    tool_ctx: &mikmik_tools::ToolContext,
     name: &str,
     input: &serde_json::Value,
-    result: &claurst_tools::ToolResult,
+    result: &mikmik_tools::ToolResult,
 ) {
-    let hook_ctx = claurst_core::hooks::HookContext {
+    let hook_ctx = mikmik_core::hooks::HookContext {
         event: "PostToolUse".to_string(),
         tool_name: Some(name.to_string()),
         tool_input: Some(input.clone()),
@@ -189,13 +189,13 @@ pub(crate) async fn run_post_tool_hooks(
         is_error: Some(result.is_error),
         session_id: Some(tool_ctx.session_id.clone()),
     };
-    claurst_core::hooks::run_hooks(
+    mikmik_core::hooks::run_hooks(
         &tool_ctx.config.hooks,
-        claurst_core::config::HookEvent::PostToolUse,
+        mikmik_core::config::HookEvent::PostToolUse,
         &hook_ctx,
         &tool_ctx.working_dir,
     )
     .await;
 
-    claurst_plugins::run_global_post_tool_hook(name, input, &result.content, result.is_error).await;
+    mikmik_plugins::run_global_post_tool_hook(name, input, &result.content, result.is_error).await;
 }

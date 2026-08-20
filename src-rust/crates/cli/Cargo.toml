@@ -9,20 +9,20 @@ path = "src/main.rs"
 
 [features]
 default = ["voice"]
-voice = ["claurst-core/voice", "claurst-tui/voice"]
+voice = ["mikmik-core/voice", "mikmik-tui/voice"]
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-acp = { workspace = true }
-claurst-tools = { workspace = true }
-claurst-query = { workspace = true }
-claurst-tui = { workspace = true }
-claurst-commands = { workspace = true }
-claurst-mcp = { workspace = true }
-claurst-bridge = { workspace = true }
-claurst-buddy = { workspace = true }
-claurst-plugins = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-acp = { workspace = true }
+mikmik-tools = { workspace = true }
+mikmik-query = { workspace = true }
+mikmik-tui = { workspace = true }
+mikmik-commands = { workspace = true }
+mikmik-mcp = { workspace = true }
+mikmik-bridge = { workspace = true }
+mikmik-buddy = { workspace = true }
+mikmik-plugins = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }

@@ -106,7 +106,7 @@ static ACTIVE_TEAMS: Lazy<DashMap<String, Vec<CancellationToken>>> = Lazy::new(D
 // ---------------------------------------------------------------------------
 
 fn teams_base_dir() -> Option<std::path::PathBuf> {
-    Some(claurst_core::config::Settings::config_dir().join("teams"))
+    Some(mikmik_core::config::Settings::config_dir().join("teams"))
 }
 
 fn team_dir(team_name: &str) -> Option<std::path::PathBuf> {

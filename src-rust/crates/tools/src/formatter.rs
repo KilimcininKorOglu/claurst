@@ -43,7 +43,7 @@ pub async fn try_format_file(path: &str, ctx: &ToolContext) {
         // The formatter is only the wrapper for whatever it starts, and a
         // timeout that drops the future leaves all of it running. Guard the
         // tree so a cancelled turn or an expired limit takes the whole thing.
-        claurst_core::process_tree::spawn_in_own_group(&mut cmd);
+        mikmik_core::process_tree::spawn_in_own_group(&mut cmd);
         let Ok(child) = cmd
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -56,7 +56,7 @@ pub async fn try_format_file(path: &str, ctx: &ToolContext) {
             // one that runs, whether or not it started.
             break;
         };
-        let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+        let mut tree_guard = mikmik_core::process_tree::ProcessTreeKillGuard::new(child.id());
         match tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
             .await
         {
@@ -72,7 +72,7 @@ pub async fn try_format_file(path: &str, ctx: &ToolContext) {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use claurst_core::config::FormatterConfig;
+    use mikmik_core::config::FormatterConfig;
 
     /// A sleep duration no other run can be using, so a process left behind by
     /// an earlier run is never read as this one's.
@@ -95,7 +95,7 @@ mod tests {
     }
 
     fn ctx_with_formatter(command: Vec<String>) -> ToolContext {
-        let mut config = claurst_core::config::Config::default();
+        let mut config = mikmik_core::config::Config::default();
         config.formatter.insert(
             "test".to_string(),
             FormatterConfig {
@@ -106,16 +106,16 @@ mod tests {
         );
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::BypassPermissions,
+            permission_mode: mikmik_core::config::PermissionMode::BypassPermissions,
             permission_handler: std::sync::Arc::new(
-                claurst_core::permissions::AutoPermissionHandler {
-                    mode: claurst_core::config::PermissionMode::BypassPermissions,
+                mikmik_core::permissions::AutoPermissionHandler {
+                    mode: mikmik_core::config::PermissionMode::BypassPermissions,
                 },
             ),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "formatter-test".to_string(),
             file_history: std::sync::Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             non_interactive: true,

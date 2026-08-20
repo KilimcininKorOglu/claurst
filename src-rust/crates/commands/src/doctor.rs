@@ -47,24 +47,24 @@ impl SlashCommand for DoctorCommand {
             .resolve_anthropic_auth_async()
             .await
             .unwrap_or((String::new(), false));
-        let client_config = claurst_api::client::ClientConfig {
+        let client_config = mikmik_api::client::ClientConfig {
             api_key: anthropic_auth.0,
             api_base: ctx.config.resolve_anthropic_api_base(),
             use_bearer_auth: anthropic_auth.1,
             ..Default::default()
         };
         let provider_registry =
-            claurst_api::ProviderRegistry::from_config(&ctx.config, client_config);
-        let provider_id = claurst_core::ProviderId::new(ctx.config.selected_provider_id());
+            mikmik_api::ProviderRegistry::from_config(&ctx.config, client_config);
+        let provider_id = mikmik_core::ProviderId::new(ctx.config.selected_provider_id());
         match provider_registry.get(&provider_id) {
             Some(provider) => match provider.health_check().await {
-                Ok(claurst_api::provider_types::ProviderStatus::Healthy) => {
+                Ok(mikmik_api::provider_types::ProviderStatus::Healthy) => {
                     lines.push(format!("  ✓ {} is healthy", provider.name()));
                 }
-                Ok(claurst_api::provider_types::ProviderStatus::Degraded { reason }) => {
+                Ok(mikmik_api::provider_types::ProviderStatus::Degraded { reason }) => {
                     lines.push(format!("  ⚠ {} is degraded: {}", provider.name(), reason));
                 }
-                Ok(claurst_api::provider_types::ProviderStatus::Unavailable { reason }) => {
+                Ok(mikmik_api::provider_types::ProviderStatus::Unavailable { reason }) => {
                     lines.push(format!(
                         "  ✗ {} is unavailable: {}",
                         provider.name(),
@@ -80,7 +80,7 @@ impl SlashCommand for DoctorCommand {
                 }
             },
             None => {
-                let hint = claurst_core::config::primary_api_key_env_var_for_provider(
+                let hint = mikmik_core::config::primary_api_key_env_var_for_provider(
                     ctx.config.selected_provider_id(),
                 )
                 .map(|env| format!("set {env}"))
@@ -184,7 +184,7 @@ impl SlashCommand for DoctorCommand {
 
         // ── Config directory ────────────────────────────────────────────────
         lines.push("Configuration".to_string());
-        let config_dir = claurst_core::config::Settings::config_dir();
+        let config_dir = mikmik_core::config::Settings::config_dir();
         if config_dir.exists() {
             lines.push(format!("  ✓ Config dir: {}", config_dir.display()));
         } else {
@@ -196,7 +196,7 @@ impl SlashCommand for DoctorCommand {
         if settings_path.exists() {
             match std::fs::read_to_string(&settings_path)
                 .ok()
-                .and_then(|s| serde_json::from_str::<claurst_core::config::Settings>(&s).ok())
+                .and_then(|s| serde_json::from_str::<mikmik_core::config::Settings>(&s).ok())
             {
                 Some(_) => lines.push("  ✓ settings.json valid".to_string()),
                 None => {
@@ -239,7 +239,7 @@ impl SlashCommand for DoctorCommand {
             let statuses = mgr.all_statuses();
             for srv in ctx.config.mcp_servers.iter().take(12) {
                 let status_str = match statuses.get(&srv.name) {
-                    Some(claurst_mcp::McpServerStatus::Connected { tool_count }) => {
+                    Some(mikmik_mcp::McpServerStatus::Connected { tool_count }) => {
                         format!(
                             "  ✓ {} — connected ({} tool{})",
                             srv.name,
@@ -247,18 +247,18 @@ impl SlashCommand for DoctorCommand {
                             if *tool_count == 1 { "" } else { "s" }
                         )
                     }
-                    Some(claurst_mcp::McpServerStatus::Connecting) => {
+                    Some(mikmik_mcp::McpServerStatus::Connecting) => {
                         format!("  ⚠ {} — connecting…", srv.name)
                     }
-                    Some(claurst_mcp::McpServerStatus::Disconnected {
+                    Some(mikmik_mcp::McpServerStatus::Disconnected {
                         last_error: Some(e),
                     }) => {
                         format!("  ✗ {} — failed: {}", srv.name, e)
                     }
-                    Some(claurst_mcp::McpServerStatus::Disconnected { last_error: None }) => {
+                    Some(mikmik_mcp::McpServerStatus::Disconnected { last_error: None }) => {
                         format!("  ✗ {} — disconnected", srv.name)
                     }
-                    Some(claurst_mcp::McpServerStatus::Failed { error, .. }) => {
+                    Some(mikmik_mcp::McpServerStatus::Failed { error, .. }) => {
                         format!("  ✗ {} — failed: {}", srv.name, error)
                     }
                     None => format!("  ⚠ {} — not started", srv.name),
@@ -297,7 +297,7 @@ impl SlashCommand for DoctorCommand {
 
         // ── Tool permissions ─────────────────────────────────────────────────
         lines.push("Tool Permissions".to_string());
-        let all_tool_names: Vec<String> = claurst_tools::all_tools()
+        let all_tool_names: Vec<String> = mikmik_tools::all_tools()
             .iter()
             .map(|t| t.name().to_string())
             .collect();
@@ -317,12 +317,12 @@ impl SlashCommand for DoctorCommand {
             .filter(|n| !explicit_tools.contains(n.as_str()))
             .count();
         let mode_label = match ctx.config.permission_mode {
-            claurst_core::PermissionMode::BypassPermissions => {
+            mikmik_core::PermissionMode::BypassPermissions => {
                 "bypass-permissions (no confirmation required)"
             }
-            claurst_core::PermissionMode::AcceptEdits => "accept-edits (file edits auto-approved)",
-            claurst_core::PermissionMode::Plan => "plan (read-only, no writes)",
-            claurst_core::PermissionMode::Default => "default (confirm destructive actions)",
+            mikmik_core::PermissionMode::AcceptEdits => "accept-edits (file edits auto-approved)",
+            mikmik_core::PermissionMode::Plan => "plan (read-only, no writes)",
+            mikmik_core::PermissionMode::Default => "default (confirm destructive actions)",
         };
         lines.push(format!("  • Mode: {mode_label}"));
         lines.push(format!("  • Total built-in tools: {total_tools}"));
@@ -340,7 +340,7 @@ impl SlashCommand for DoctorCommand {
                 ctx.config.disallowed_tools.join(", ")
             ));
         }
-        if ctx.config.permission_mode == claurst_core::PermissionMode::Default {
+        if ctx.config.permission_mode == mikmik_core::PermissionMode::Default {
             lines.push(format!(
                 "  ⚠ Require confirmation: {} tool(s)",
                 confirm_count

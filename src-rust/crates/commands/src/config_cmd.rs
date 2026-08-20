@@ -164,14 +164,14 @@ impl SlashCommand for ConfigCommand {
             }
             "permission-mode" | "permission_mode" => {
                 let mode = match value.trim().to_lowercase().as_str() {
-                    "default" => claurst_core::config::PermissionMode::Default,
+                    "default" => mikmik_core::config::PermissionMode::Default,
                     "accept-edits" | "accept_edits" => {
-                        claurst_core::config::PermissionMode::AcceptEdits
+                        mikmik_core::config::PermissionMode::AcceptEdits
                     }
                     "bypass-permissions" | "bypass_permissions" => {
-                        claurst_core::config::PermissionMode::BypassPermissions
+                        mikmik_core::config::PermissionMode::BypassPermissions
                     }
-                    "plan" => claurst_core::config::PermissionMode::Plan,
+                    "plan" => mikmik_core::config::PermissionMode::Plan,
                     _ => {
                         return CommandResult::Error(
                             "Permission mode must be one of: default, accept-edits, bypass-permissions, plan"

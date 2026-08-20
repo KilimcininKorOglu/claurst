@@ -1,7 +1,7 @@
 //! The connected client, as the thing that hosts this session's files and
 //! shell.
 //!
-//! Implements `claurst_tools::EditorHost` over the ACP connection, so a tool
+//! Implements `mikmik_tools::EditorHost` over the ACP connection, so a tool
 //! reads the buffer the user is looking at rather than the older text on disk,
 //! and writes through the editor so the change joins its undo stack.
 //!
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
 use async_trait::async_trait;
-use claurst_tools::{EditorCapabilities, EditorHost, TerminalId, TerminalOutput, TerminalRequest};
+use mikmik_tools::{EditorCapabilities, EditorHost, TerminalId, TerminalOutput, TerminalRequest};
 
 use crate::connection::Connection;
 

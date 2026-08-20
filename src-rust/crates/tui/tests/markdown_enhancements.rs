@@ -1,6 +1,6 @@
 //! Tests for markdown table rendering and inline formatting (bold, italic, strikethrough).
 
-use claurst_tui::messages::{detect_table, parse_inline_formatting, render_markdown, render_table};
+use mikmik_tui::messages::{detect_table, parse_inline_formatting, render_markdown, render_table};
 
 fn flatten(lines: &[ratatui::text::Line<'_>]) -> String {
     lines
@@ -53,17 +53,17 @@ fn table_alignment_detection() {
     // First column should be left-aligned
     assert!(matches!(
         table.alignments[0],
-        claurst_tui::messages::TableAlignment::Left
+        mikmik_tui::messages::TableAlignment::Left
     ));
     // Second column should be center-aligned
     assert!(matches!(
         table.alignments[1],
-        claurst_tui::messages::TableAlignment::Center
+        mikmik_tui::messages::TableAlignment::Center
     ));
     // Third column should be right-aligned
     assert!(matches!(
         table.alignments[2],
-        claurst_tui::messages::TableAlignment::Right
+        mikmik_tui::messages::TableAlignment::Right
     ));
 }
 

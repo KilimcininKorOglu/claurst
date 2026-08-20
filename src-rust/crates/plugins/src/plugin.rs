@@ -109,7 +109,7 @@ impl CommandRunAction {
 
 /// A plugin-defined slash command, ready for registration in the command system.
 ///
-/// `cc-plugins` does NOT implement `claurst_commands::SlashCommand` directly (that
+/// `cc-plugins` does NOT implement `mikmik_commands::SlashCommand` directly (that
 /// would create a circular dependency).  Instead `cc-commands` wraps
 /// `PluginCommandDef` in a thin adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]

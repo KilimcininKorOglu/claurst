@@ -10,7 +10,7 @@
 //! variant names ARE the effort tiers ("none" / "minimal" / "low" / "medium" /
 //! "high" / "xhigh" / "max"). Claurst only needs the ordered set of tiers (it maps
 //! each tier to its own thinking-budget / reasoning-effort in
-//! [`claurst_core::effort::EffortLevel`]), so this port extracts the ordered
+//! [`mikmik_core::effort::EffortLevel`]), so this port extracts the ordered
 //! *keys* of that map — weakest to strongest — and maps them onto `EffortLevel`.
 //! The param *values* (thinking budgets, `reasoningConfig`, …) are intentionally
 //! dropped: they are re-derived from `EffortLevel` at request-build time.
@@ -29,7 +29,7 @@
 //!   dedicated "thinking" rung, so `thinking` maps to the nearest rung (`High`).
 //!   See the `// NOTE:` at [`effort_key_to_level`].
 
-use claurst_core::effort::EffortLevel;
+use mikmik_core::effort::EffortLevel;
 use once_cell::sync::Lazy;
 use regex::Regex;
 

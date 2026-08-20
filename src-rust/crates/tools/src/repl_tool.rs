@@ -14,8 +14,8 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_core::bash_classifier::{classify_bash_command, BashRiskLevel};
 use dashmap::DashMap;
+use mikmik_core::bash_classifier::{classify_bash_command, BashRiskLevel};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -67,7 +67,7 @@ pub async fn shutdown_session(session_id: &str) {
         };
         let mut session = session.lock().await;
         if let Some(pid) = session.child.id() {
-            claurst_core::process_tree::kill_tree(pid);
+            mikmik_core::process_tree::kill_tree(pid);
         }
         let _ = session.child.kill().await;
     }
@@ -139,7 +139,7 @@ async fn get_or_spawn_session(
         .stderr(Stdio::piped());
     // Its own group, so `shutdown_session` can reach what the interpreter
     // started and not only the interpreter.
-    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+    mikmik_core::process_tree::spawn_in_own_group(&mut builder);
     let mut child = builder
         .spawn()
         .map_err(|e| format!("Failed to spawn '{}': {}", cmd, e))?;
@@ -335,57 +335,57 @@ mod tests {
     /// Handler that always asks; combined with `non_interactive = true` this
     /// resolves to a permission denial (mirrors `AskPermissionHandler` in lib.rs).
     struct DenyHandler;
-    impl claurst_core::permissions::PermissionHandler for DenyHandler {
+    impl mikmik_core::permissions::PermissionHandler for DenyHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Ask {
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Ask {
                 reason: "denied in test".to_string(),
             }
         }
         fn request_permission(
             &self,
-            request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
+            request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
             self.check_permission(request)
         }
     }
 
     /// Handler that allows everything — used to exercise the Critical-block path.
     struct AllowHandler;
-    impl claurst_core::permissions::PermissionHandler for AllowHandler {
+    impl mikmik_core::permissions::PermissionHandler for AllowHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Allow
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Allow
         }
         fn request_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Allow
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Allow
         }
     }
 
     fn ctx_with(
-        handler: Arc<dyn claurst_core::permissions::PermissionHandler>,
+        handler: Arc<dyn mikmik_core::permissions::PermissionHandler>,
         session_id: &str,
     ) -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: handler,
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: session_id.to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,

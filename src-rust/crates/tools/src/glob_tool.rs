@@ -24,7 +24,7 @@ impl Tool for GlobTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_GLOB
+        mikmik_core::constants::TOOL_NAME_GLOB
     }
 
     fn description(&self) -> &str {
@@ -174,8 +174,8 @@ impl Tool for GlobTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::Config;
-    use claurst_core::permissions::AutoPermissionHandler;
+    use mikmik_core::config::Config;
+    use mikmik_core::permissions::AutoPermissionHandler;
     use std::path::Path;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
@@ -212,14 +212,14 @@ mod tests {
         };
         ToolContext {
             working_dir: root.to_path_buf(),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: Arc::new(AutoPermissionHandler {
-                mode: claurst_core::config::PermissionMode::Default,
+                mode: mikmik_core::config::PermissionMode::Default,
             }),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "test-glob".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,

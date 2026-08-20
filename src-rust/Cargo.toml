@@ -111,17 +111,17 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 schemars = { version = "0.8", features = ["derive"] }
 
 # Workspace crates
-claurst-core = { path = "crates/core" }
-claurst-acp = { path = "crates/acp" }
-claurst-api = { path = "crates/api" }
-claurst-tools = { path = "crates/tools" }
-claurst-query = { path = "crates/query" }
-claurst-tui = { path = "crates/tui" }
-claurst-commands = { path = "crates/commands" }
-claurst-mcp = { path = "crates/mcp" }
-claurst-bridge = { path = "crates/bridge" }
-claurst-buddy = { path = "crates/buddy" }
-claurst-plugins = { path = "crates/plugins" }
+mikmik-core = { path = "crates/core" }
+mikmik-acp = { path = "crates/acp" }
+mikmik-api = { path = "crates/api" }
+mikmik-tools = { path = "crates/tools" }
+mikmik-query = { path = "crates/query" }
+mikmik-tui = { path = "crates/tui" }
+mikmik-commands = { path = "crates/commands" }
+mikmik-mcp = { path = "crates/mcp" }
+mikmik-bridge = { path = "crates/bridge" }
+mikmik-buddy = { path = "crates/buddy" }
+mikmik-plugins = { path = "crates/plugins" }
 
 # Shipped binaries statically link two TLS stacks (rustls + BoringSSL),
 # bundled SQLite, syntect, and image codecs — LTO and symbol stripping cut

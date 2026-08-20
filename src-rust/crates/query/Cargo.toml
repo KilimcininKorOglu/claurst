@@ -1,14 +1,14 @@
 [package]
-name = "claurst-query"
+name = "mikmik-query"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-plugins = { workspace = true }
-claurst-tools = { workspace = true }
-claurst-mcp = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-plugins = { workspace = true }
+mikmik-tools = { workspace = true }
+mikmik-mcp = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

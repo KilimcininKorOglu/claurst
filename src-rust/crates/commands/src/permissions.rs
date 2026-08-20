@@ -62,14 +62,14 @@ impl SlashCommand for PermissionsCommand {
         match sub {
             "set" => {
                 let mode = match arg.to_lowercase().as_str() {
-                    "default" => claurst_core::config::PermissionMode::Default,
+                    "default" => mikmik_core::config::PermissionMode::Default,
                     "accept-edits" | "accept_edits" => {
-                        claurst_core::config::PermissionMode::AcceptEdits
+                        mikmik_core::config::PermissionMode::AcceptEdits
                     }
                     "bypass-permissions" | "bypass_permissions" => {
-                        claurst_core::config::PermissionMode::BypassPermissions
+                        mikmik_core::config::PermissionMode::BypassPermissions
                     }
-                    "plan" => claurst_core::config::PermissionMode::Plan,
+                    "plan" => mikmik_core::config::PermissionMode::Plan,
                     _ => {
                         return CommandResult::Error(
                             "Mode must be: default, accept-edits, bypass-permissions, or plan"
@@ -131,11 +131,11 @@ impl SlashCommand for PermissionsCommand {
                 let mut new_config = ctx.config.clone();
                 new_config.allowed_tools.clear();
                 new_config.disallowed_tools.clear();
-                new_config.permission_mode = claurst_core::config::PermissionMode::Default;
+                new_config.permission_mode = mikmik_core::config::PermissionMode::Default;
                 if let Err(e) = save_settings_mutation(|s| {
                     s.config.allowed_tools.clear();
                     s.config.disallowed_tools.clear();
-                    s.config.permission_mode = claurst_core::config::PermissionMode::Default;
+                    s.config.permission_mode = mikmik_core::config::PermissionMode::Default;
                 }) {
                     return CommandResult::Error(format!("Failed to save: {}", e));
                 }

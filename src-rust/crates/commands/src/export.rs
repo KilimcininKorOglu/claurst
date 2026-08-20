@@ -15,11 +15,11 @@ pub struct ExportCommand;
 /// Assistant messages render as `## Assistant\n<text>` followed by
 /// `### Tool: <name>\n**Input:** …\n**Output:** …` for each tool call pair.
 fn export_message_to_markdown(
-    msg: &claurst_core::types::Message,
-    all_messages: &[claurst_core::types::Message],
+    msg: &mikmik_core::types::Message,
+    all_messages: &[mikmik_core::types::Message],
     msg_idx: usize,
 ) -> String {
-    use claurst_core::types::{ContentBlock, MessageContent, Role, ToolResultContent};
+    use mikmik_core::types::{ContentBlock, MessageContent, Role, ToolResultContent};
 
     let role_label = match msg.role {
         Role::User => "User",

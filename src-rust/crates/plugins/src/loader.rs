@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 /// Return the default user-level plugins directory: `<claurst home>/plugins`.
 pub fn default_user_plugins_dir() -> Option<PathBuf> {
-    Some(claurst_core::config::Settings::config_dir().join("plugins"))
+    Some(mikmik_core::config::Settings::config_dir().join("plugins"))
 }
 
 /// Return the project-level plugins directory: `<project>/.claurst/plugins`.
@@ -377,7 +377,7 @@ fn extract_description_from_markdown_file(path: &Path) -> Option<String> {
         }
     }
 
-    for line in claurst_core::strip_frontmatter(&content).lines() {
+    for line in mikmik_core::strip_frontmatter(&content).lines() {
         let trimmed = line.trim_start_matches('#').trim();
         if !trimmed.is_empty() {
             return Some(trimmed.to_string());

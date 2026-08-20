@@ -15,7 +15,7 @@
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_core::ps_classifier::{classify_ps_command, PsRiskLevel};
+use mikmik_core::ps_classifier::{classify_ps_command, PsRiskLevel};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::process::Stdio;
@@ -165,8 +165,8 @@ impl Tool for PowerShellTool {
                 let needs_gate = params.require_confirmation
                     || matches!(
                         ctx.permission_mode,
-                        claurst_core::config::PermissionMode::Default
-                            | claurst_core::config::PermissionMode::Plan
+                        mikmik_core::config::PermissionMode::Default
+                            | mikmik_core::config::PermissionMode::Plan
                     );
 
                 if needs_gate {
@@ -237,7 +237,7 @@ impl Tool for PowerShellTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
-        claurst_core::process_tree::spawn_in_own_group(&mut builder);
+        mikmik_core::process_tree::spawn_in_own_group(&mut builder);
         let mut child = match builder.spawn() {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to spawn PowerShell: {}", e)),
@@ -247,7 +247,7 @@ impl Tool for PowerShellTool {
         // drop, and the timeout below reached the interpreter alone, so a
         // cancelled turn left the script's own children running on every
         // platform, not just Windows.
-        let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+        let mut tree_guard = mikmik_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -355,21 +355,21 @@ mod tests {
     fn bypassing_ctx() -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::BypassPermissions,
+            permission_mode: mikmik_core::config::PermissionMode::BypassPermissions,
             permission_handler: std::sync::Arc::new(
-                claurst_core::permissions::AutoPermissionHandler {
-                    mode: claurst_core::config::PermissionMode::BypassPermissions,
+                mikmik_core::permissions::AutoPermissionHandler {
+                    mode: mikmik_core::config::PermissionMode::BypassPermissions,
                 },
             ),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "powershell-test".to_string(),
             file_history: std::sync::Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,

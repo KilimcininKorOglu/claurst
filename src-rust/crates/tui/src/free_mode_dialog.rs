@@ -35,7 +35,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use claurst_api::{FreeUpstream, FREE_CATALOG};
+use mikmik_api::{FreeUpstream, FREE_CATALOG};
 
 use crate::overlays::{centered_rect, render_dark_overlay, render_dialog_bg, CLAURST_PANEL_BG};
 

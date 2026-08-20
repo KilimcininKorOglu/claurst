@@ -1,4 +1,4 @@
-use claurst_core::import_config::{ImportPreview, ImportSelection, PreviewAction};
+use mikmik_core::import_config::{ImportPreview, ImportSelection, PreviewAction};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

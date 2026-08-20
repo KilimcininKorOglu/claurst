@@ -35,7 +35,7 @@ pub(crate) struct UiSettings {
 }
 
 pub(crate) fn ui_settings_path() -> std::path::PathBuf {
-    claurst_core::config::Settings::config_dir().join("ui-settings.json")
+    mikmik_core::config::Settings::config_dir().join("ui-settings.json")
 }
 
 pub(crate) fn load_ui_settings() -> UiSettings {

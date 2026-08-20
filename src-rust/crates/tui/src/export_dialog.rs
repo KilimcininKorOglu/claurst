@@ -156,10 +156,10 @@ fn export_option_row(
 // ---------------------------------------------------------------------------
 
 pub fn export_as_markdown(
-    messages: &[claurst_core::types::Message],
+    messages: &[mikmik_core::types::Message],
     session_title: Option<&str>,
 ) -> String {
-    use claurst_core::types::Role;
+    use mikmik_core::types::Role;
     let mut out = String::new();
     if let Some(title) = session_title {
         out.push_str(&format!("# {}\n\n", title));
@@ -178,10 +178,10 @@ pub fn export_as_markdown(
 }
 
 pub fn export_as_json(
-    messages: &[claurst_core::types::Message],
+    messages: &[mikmik_core::types::Message],
     session_title: Option<&str>,
 ) -> serde_json::Value {
-    use claurst_core::types::Role;
+    use mikmik_core::types::Role;
     let items: Vec<serde_json::Value> = messages
         .iter()
         .map(|m| {

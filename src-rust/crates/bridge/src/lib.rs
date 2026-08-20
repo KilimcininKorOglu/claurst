@@ -18,7 +18,7 @@
 
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use claurst_core::timeline::TimelineRow;
+use mikmik_core::timeline::TimelineRow;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -275,7 +275,7 @@ pub enum PermissionDecision {
 
 /// What a client decided about a project-defined MCP server.
 ///
-/// Mirrors `claurst_tui::dialogs::McpApprovalChoice`, which this crate cannot
+/// Mirrors `mikmik_tui::dialogs::McpApprovalChoice`, which this crate cannot
 /// name: `tui` and `bridge` are siblings. The CLI translates between the two,
 /// the same way it does for `PermissionDecision`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1209,7 +1209,7 @@ pub struct SimpleMessage {
 ///
 /// ```rust,no_run
 /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
-/// match claurst_bridge::start_bridge_session(None).await {
+/// match mikmik_bridge::start_bridge_session(None).await {
 ///     Ok(info) => println!("Session URL: {}", info.session_url),
 ///     Err(e) => eprintln!("Could not start bridge: {e}"),
 /// }
@@ -2548,7 +2548,7 @@ mod tests {
 #[cfg(test)]
 mod timeline_event_tests {
     use super::*;
-    use claurst_core::timeline::{TimelineKind, TimelineStatus};
+    use mikmik_core::timeline::{TimelineKind, TimelineStatus};
 
     fn sample_row() -> TimelineRow {
         TimelineRow {

@@ -14,8 +14,8 @@
 //      (creating the file if it doesn't exist).
 //   4. Track state so we don't re-extract from already-processed messages.
 
-use claurst_core::config::WireModel;
-use claurst_core::types::{Message, Role};
+use mikmik_core::config::WireModel;
+use mikmik_core::types::{Message, Role};
 use std::path::Path;
 use tokio::fs;
 use tracing::{debug, info, warn};
@@ -407,7 +407,7 @@ fn parse_extraction_response(response: &str) -> Vec<ExtractedMemory> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::Message;
+    use mikmik_core::types::Message;
 
     fn make_user(text: &str) -> Message {
         Message::user(text)
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_should_not_extract_mid_tool_chain() {
-        use claurst_core::types::ContentBlock;
+        use mikmik_core::types::ContentBlock;
         let mut msgs = make_messages(MIN_MESSAGES_TO_EXTRACT);
         // Replace the last assistant message with one that has a tool_use block
         let last = msgs.last_mut().unwrap();
@@ -669,7 +669,7 @@ MEMORY: code_pattern | 7 | Uses builder pattern";
             _user: &str,
             model: &WireModel,
             _max_tokens: u32,
-        ) -> Result<String, claurst_core::error::ClaudeError> {
+        ) -> Result<String, mikmik_core::error::ClaudeError> {
             *self.0.lock() = Some(model.to_string());
             Ok(String::new())
         }
@@ -680,7 +680,7 @@ MEMORY: code_pattern | 7 | Uses builder pattern";
         // It used to send `config.model` verbatim, so a session on a prefixed
         // account asked for a model called `"myaccount/claude-opus-5"`, which
         // no endpoint serves.
-        let config = claurst_core::Config::default();
+        let config = mikmik_core::Config::default();
         let route = config.route_for_account("myaccount", "claude-opus-5");
         let extractor = SessionMemoryExtractor::new(route.model);
 

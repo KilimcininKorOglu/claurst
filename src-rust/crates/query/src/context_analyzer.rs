@@ -2,7 +2,7 @@
 //! Mirrors src/utils/analyzeContext.ts (1,382 lines).
 //! Used by the /ctx-viz slash command.
 
-use claurst_core::types::{ContentBlock, Message, MessageContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,7 +99,7 @@ fn content_tokens(content: &MessageContent) -> u64 {
                     estimate_chars(name) + estimate_chars(&input.to_string())
                 }
                 ContentBlock::ToolResult { content, .. } => {
-                    use claurst_core::types::ToolResultContent;
+                    use mikmik_core::types::ToolResultContent;
                     match content {
                         ToolResultContent::Text(t) => estimate_chars(t),
                         ToolResultContent::Blocks(inner) => inner
@@ -273,7 +273,7 @@ pub fn format_ctx_viz(analysis: &ContextAnalysis, context_limit: u64) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::{Message, MessageContent, Role};
+    use mikmik_core::types::{Message, MessageContent, Role};
 
     fn text_msg(role: Role, text: &str) -> Message {
         Message {

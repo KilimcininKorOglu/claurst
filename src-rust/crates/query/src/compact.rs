@@ -21,13 +21,13 @@
 //   the most recent `keep_recent_messages` intact.  This is lighter than a
 //   full compaction and can fire proactively at 75 % capacity.
 
-use claurst_api::{
+use mikmik_api::{
     AnthropicStreamEvent, ApiMessage, CreateMessageRequest, StreamAccumulator, StreamHandler,
     SystemPrompt,
 };
-use claurst_core::config::WireModel;
-use claurst_core::error::ClaudeError;
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
+use mikmik_core::config::WireModel;
+use mikmik_core::error::ClaudeError;
+use mikmik_core::types::{ContentBlock, Message, MessageContent, Role};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -189,8 +189,8 @@ fn estimate_block_chars(block: &ContentBlock) -> usize {
         ContentBlock::Text { text } => text.len(),
         ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
         ContentBlock::ToolResult { content, .. } => match content {
-            claurst_core::types::ToolResultContent::Text(t) => t.len(),
-            claurst_core::types::ToolResultContent::Blocks(blocks) => {
+            mikmik_core::types::ToolResultContent::Text(t) => t.len(),
+            mikmik_core::types::ToolResultContent::Blocks(blocks) => {
                 blocks.iter().map(estimate_block_chars).sum()
             }
         },
@@ -522,7 +522,7 @@ fn extract_file_operations(messages: &[Message]) -> FileOps {
 
 /// Pull the file path(s) touched by a single tool call into `ops`.
 fn collect_file_op(name: &str, input: &Value, ops: &mut FileOps) {
-    use claurst_core::constants::{
+    use mikmik_core::constants::{
         TOOL_NAME_APPLY_PATCH, TOOL_NAME_BATCH_EDIT, TOOL_NAME_FILE_EDIT, TOOL_NAME_FILE_READ,
         TOOL_NAME_FILE_WRITE, TOOL_NAME_NOTEBOOK_EDIT,
     };
@@ -721,7 +721,7 @@ const MIN_PLAUSIBLE_REGISTRY_WINDOW: u64 = 8192;
 /// `(provider, model_id)` pair. Returns `None` when there is no entry or the
 /// stored window is an implausible placeholder.
 fn registry_context_window(
-    registry: &claurst_api::ModelRegistry,
+    registry: &mikmik_api::ModelRegistry,
     provider: &str,
     model_id: &str,
 ) -> Option<u64> {
@@ -731,7 +731,7 @@ fn registry_context_window(
 
 /// Resolve the effective context window for the active provider + model.
 ///
-/// The models.dev-backed [`claurst_api::ModelRegistry`] is the source of truth:
+/// The models.dev-backed [`mikmik_api::ModelRegistry`] is the source of truth:
 /// it carries real per-model context windows for *every* provider (Gemini/GPT
 /// 1M windows, 32k local models, …), so we prefer it. We fall back to the
 /// Claude-only [`context_window_for_model`] heuristic only when the registry is
@@ -740,7 +740,7 @@ fn registry_context_window(
 /// `model` may be either a bare model id (`"gemini-3-pro"`) or a canonical
 /// `"provider/model"` string; both forms are handled.
 pub fn resolve_context_window(
-    registry: Option<&claurst_api::ModelRegistry>,
+    registry: Option<&mikmik_api::ModelRegistry>,
     provider: &str,
     model: &str,
 ) -> u64 {
@@ -859,7 +859,7 @@ pub use crate::runner::context::{
 /// welded to `AnthropicClient`, so every non-Anthropic session compacted never
 /// and remembered nothing.
 ///
-/// [`LlmProvider`]: claurst_api::provider::LlmProvider
+/// [`LlmProvider`]: mikmik_api::provider::LlmProvider
 #[async_trait::async_trait]
 pub trait CompactBackend: Send + Sync {
     /// Send one prompt and return the model's text.
@@ -873,7 +873,7 @@ pub trait CompactBackend: Send + Sync {
 }
 
 /// Summarise through the raw Anthropic client.
-pub struct AnthropicBackend<'a>(pub &'a claurst_api::AnthropicClient);
+pub struct AnthropicBackend<'a>(pub &'a mikmik_api::AnthropicClient);
 
 #[async_trait::async_trait]
 impl CompactBackend for AnthropicBackend<'_> {
@@ -893,7 +893,7 @@ impl CompactBackend for AnthropicBackend<'_> {
             .build();
 
         // A null handler: nobody watches a summary stream, only its result.
-        let handler: Arc<dyn StreamHandler> = Arc::new(claurst_api::streaming::NullStreamHandler);
+        let handler: Arc<dyn StreamHandler> = Arc::new(mikmik_api::streaming::NullStreamHandler);
         let mut rx = self.0.create_message_stream(request, handler).await?;
         let mut acc = StreamAccumulator::new();
 
@@ -913,7 +913,7 @@ impl CompactBackend for AnthropicBackend<'_> {
 ///
 /// Uses the provider's non-streaming `create_message`, because a summary has
 /// no partial output anyone reads.
-pub struct ProviderBackend(pub Arc<dyn claurst_api::provider::LlmProvider>);
+pub struct ProviderBackend(pub Arc<dyn mikmik_api::provider::LlmProvider>);
 
 #[async_trait::async_trait]
 impl CompactBackend for ProviderBackend {
@@ -924,7 +924,7 @@ impl CompactBackend for ProviderBackend {
         model: &WireModel,
         max_tokens: u32,
     ) -> Result<String, ClaudeError> {
-        let request = claurst_api::ProviderRequest {
+        let request = mikmik_api::ProviderRequest {
             model: model.clone(),
             messages: vec![Message::user(user)],
             system_prompt: Some(SystemPrompt::Text(system.to_string())),
@@ -1025,10 +1025,10 @@ async fn summarise_head(
                         is_error,
                     } => {
                         let result_text = match content {
-                            claurst_core::types::ToolResultContent::Text(t) => {
+                            mikmik_core::types::ToolResultContent::Text(t) => {
                                 t.as_str().to_string()
                             }
-                            claurst_core::types::ToolResultContent::Blocks(_) => {
+                            mikmik_core::types::ToolResultContent::Blocks(_) => {
                                 "[complex content]".to_string()
                             }
                         };
@@ -1182,8 +1182,8 @@ pub async fn compact_conversation(
 ) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
 
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::PreCompact,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::PreCompact,
         None,
         serde_json::json!({ "message_count": total, "model": model }),
     )
@@ -1227,8 +1227,8 @@ pub async fn compact_conversation(
     )
     .await;
 
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::PostCompact,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::PostCompact,
         None,
         serde_json::json!({
             "message_count_before": total,
@@ -1316,7 +1316,7 @@ impl CompactBackend for UnreachableBackend {
 /// Who writes a summary, and over which endpoint.
 pub struct Summariser<'a> {
     pub backend: &'a dyn CompactBackend,
-    pub route: &'a claurst_core::config::Route,
+    pub route: &'a mikmik_core::config::Route,
 }
 
 /// What one compaction came to, and what to tell the user about it.
@@ -1414,7 +1414,7 @@ pub enum CompactTrigger {
 #[derive(Debug, Clone)]
 pub struct CompactResult {
     /// The new (reduced) message list.
-    pub messages: Vec<claurst_core::types::Message>,
+    pub messages: Vec<mikmik_core::types::Message>,
     /// Formatted summary text injected at the head of `messages`.
     pub summary: String,
     /// Rough estimate of how many tokens were freed.
@@ -1454,7 +1454,7 @@ pub fn should_context_collapse(tokens_used: u64, context_limit: u64) -> bool {
 /// Iterates from the newest message backwards, accumulating token estimates
 /// until the budget is exhausted.
 pub fn calculate_messages_to_keep_index(
-    messages: &[claurst_core::types::Message],
+    messages: &[mikmik_core::types::Message],
     token_budget: u64,
 ) -> usize {
     if messages.is_empty() {
@@ -1483,8 +1483,8 @@ pub fn calculate_messages_to_keep_index(
 /// Image tokens are expensive and carry no information that a text summary
 /// needs.  Mirrors the TypeScript `stripImages` helper used inside
 /// `reactiveCompact.ts`.
-fn strip_images(messages: Vec<claurst_core::types::Message>) -> Vec<claurst_core::types::Message> {
-    use claurst_core::types::{ContentBlock, MessageContent};
+fn strip_images(messages: Vec<mikmik_core::types::Message>) -> Vec<mikmik_core::types::Message> {
+    use mikmik_core::types::{ContentBlock, MessageContent};
 
     messages
         .into_iter()
@@ -1507,19 +1507,19 @@ fn strip_images(messages: Vec<claurst_core::types::Message>) -> Vec<claurst_core
 /// conversation.
 ///
 /// Feature gate: only call this when
-/// `claurst_core::feature_gates::is_feature_enabled("reactive_compact")` is true.
+/// `mikmik_core::feature_gates::is_feature_enabled("reactive_compact")` is true.
 ///
 /// The `cancel` token is checked before the API call so the user can abort
 /// a long-running compact.
 pub async fn reactive_compact(
-    messages: Vec<claurst_core::types::Message>,
+    messages: Vec<mikmik_core::types::Message>,
     backend: &dyn CompactBackend,
     model: &WireModel,
     cancel: tokio_util::sync::CancellationToken,
     recently_modified: &[std::path::PathBuf],
-) -> Result<CompactResult, claurst_core::error::ClaudeError> {
+) -> Result<CompactResult, mikmik_core::error::ClaudeError> {
     if cancel.is_cancelled() {
-        return Err(claurst_core::error::ClaudeError::Cancelled);
+        return Err(mikmik_core::error::ClaudeError::Cancelled);
     }
 
     let total = messages.len();
@@ -1579,7 +1579,7 @@ pub async fn reactive_compact(
         };
         let file_name = path.display().to_string();
         let text = format!("<file path=\"{}\">\n{}\n</file>", file_name, content);
-        new_messages.push(claurst_core::types::Message::user(text));
+        new_messages.push(mikmik_core::types::Message::user(text));
         injected += 1;
     }
 
@@ -1601,10 +1601,10 @@ pub async fn reactive_compact(
 /// context is at ≥ 97 % capacity and a regular reactive compact is unlikely
 /// to free enough space.
 pub async fn context_collapse(
-    messages: Vec<claurst_core::types::Message>,
+    messages: Vec<mikmik_core::types::Message>,
     backend: &dyn CompactBackend,
     model: &WireModel,
-) -> Result<CompactResult, claurst_core::error::ClaudeError> {
+) -> Result<CompactResult, mikmik_core::error::ClaudeError> {
     let total = messages.len();
     if total == 0 {
         return Ok(CompactResult {
@@ -1620,8 +1620,8 @@ pub async fn context_collapse(
     let mut transcript = String::new();
     for msg in &messages {
         let role = match msg.role {
-            claurst_core::types::Role::User => "Human",
-            claurst_core::types::Role::Assistant => "Assistant",
+            mikmik_core::types::Role::User => "Human",
+            mikmik_core::types::Role::Assistant => "Assistant",
         };
         let text = msg.get_all_text();
         if !text.is_empty() {
@@ -1652,13 +1652,13 @@ pub async fn context_collapse(
         .await?;
 
     if summary_text.is_empty() {
-        return Err(claurst_core::error::ClaudeError::Other(
+        return Err(mikmik_core::error::ClaudeError::Other(
             "Context-collapse summary was empty".to_string(),
         ));
     }
 
     // Keep only: the synthetic summary + the most recent user turn.
-    let collapse_notice = claurst_core::types::Message::user(format!(
+    let collapse_notice = mikmik_core::types::Message::user(format!(
         "[EMERGENCY CONTEXT COLLAPSE — conversation condensed to stay within limits]\n\n{}",
         summary_text
     ));
@@ -1667,7 +1667,7 @@ pub async fn context_collapse(
     let last_user = messages
         .iter()
         .rev()
-        .find(|m| m.role == claurst_core::types::Role::User)
+        .find(|m| m.role == mikmik_core::types::Role::User)
         .cloned();
 
     let mut new_messages = vec![collapse_notice];
@@ -1701,9 +1701,9 @@ const CONTEXT_COLLAPSE_THRESHOLD: f64 = 0.97;
 /// When the same file is read more than once in the conversation, replaces
 /// all but the last read with `[Content shown N time(s); showing last occurrence only]`.
 pub fn collapse_read_tool_results(
-    messages: Vec<claurst_core::types::Message>,
-) -> Vec<claurst_core::types::Message> {
-    use claurst_core::types::{ContentBlock, MessageContent, ToolResultContent};
+    messages: Vec<mikmik_core::types::Message>,
+) -> Vec<mikmik_core::types::Message> {
+    use mikmik_core::types::{ContentBlock, MessageContent, ToolResultContent};
     use std::collections::HashMap;
 
     // Helper: extract a fingerprint string from ToolResultContent.
@@ -1763,9 +1763,9 @@ pub fn collapse_read_tool_results(
 /// If the same search was run more than once (same query), keep only the
 /// most recent result; replace earlier results with a truncation notice.
 pub fn collapse_search_results(
-    messages: Vec<claurst_core::types::Message>,
-) -> Vec<claurst_core::types::Message> {
-    use claurst_core::types::{ContentBlock, MessageContent, ToolResultContent};
+    messages: Vec<mikmik_core::types::Message>,
+) -> Vec<mikmik_core::types::Message> {
+    use mikmik_core::types::{ContentBlock, MessageContent, ToolResultContent};
     use std::collections::HashSet;
 
     fn fingerprint(content: &ToolResultContent) -> Option<String> {
@@ -1778,7 +1778,7 @@ pub fn collapse_search_results(
     let mut seen_results: HashSet<String> = HashSet::new();
 
     // Iterate in reverse to keep the latest occurrence.
-    let mut result: Vec<claurst_core::types::Message> = messages
+    let mut result: Vec<mikmik_core::types::Message> = messages
         .into_iter()
         .rev()
         .map(|mut msg| {
@@ -1811,7 +1811,7 @@ pub fn collapse_search_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::{Message, ToolResultContent};
+    use mikmik_core::types::{Message, ToolResultContent};
 
     fn make_user(text: &str) -> Message {
         Message::user(text)
@@ -2074,7 +2074,7 @@ mod tests {
     // ---- should_auto_compact_for_window ------------------------------------
 
     /// The default threshold, as `Config::effective_compact_threshold` gives it.
-    const DEFAULT_PCT: u8 = claurst_core::constants::DEFAULT_COMPACT_THRESHOLD;
+    const DEFAULT_PCT: u8 = mikmik_core::constants::DEFAULT_COMPACT_THRESHOLD;
 
     #[test]
     fn test_should_not_compact_when_disabled() {
@@ -2287,11 +2287,11 @@ mod tests {
 
     /// Build an in-memory `ModelRegistry` from a models.dev-style JSON snapshot
     /// by round-tripping it through the real `load_cache` parse path.
-    fn registry_from_json(json: &str) -> claurst_api::ModelRegistry {
+    fn registry_from_json(json: &str) -> mikmik_api::ModelRegistry {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("models_dev.json");
         std::fs::write(&path, json).expect("write snapshot");
-        let mut reg = claurst_api::ModelRegistry::new();
+        let mut reg = mikmik_api::ModelRegistry::new();
         reg.load_cache(&path);
         reg
     }

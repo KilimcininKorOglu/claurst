@@ -1,7 +1,7 @@
 //! T5-2: Message renderer snapshot tests.
 //! Renders each message type and verifies key content in returned Lines.
 
-use claurst_tui::messages::{
+use mikmik_tui::messages::{
     render_assistant_text, render_code_block, render_compact_boundary, render_hook_progress,
     render_rate_limit_banner, render_summary_message, render_system_message, render_thinking_block,
     render_tool_result_error, render_tool_result_success, render_tool_use, render_unseen_divider,

@@ -295,7 +295,7 @@ impl HooksConfigMenuState {
         // a plugin's hooks run whether or not settings.json declares any.
         self.hooks.extend(plugin_hook_entries());
 
-        let settings_path = claurst_core::config::Settings::config_dir().join("settings.json");
+        let settings_path = mikmik_core::config::Settings::config_dir().join("settings.json");
         let json_str = match std::fs::read_to_string(&settings_path) {
             Ok(s) => s,
             Err(_) => return,
@@ -386,7 +386,7 @@ impl HooksConfigMenuState {
 /// this the browser would report none of them while they run on every tool
 /// call.
 fn plugin_hook_entries() -> Vec<HookEntry> {
-    let Some(registry) = claurst_plugins::global_hook_registry() else {
+    let Some(registry) = mikmik_plugins::global_hook_registry() else {
         return Vec::new();
     };
 

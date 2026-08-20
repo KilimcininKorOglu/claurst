@@ -347,7 +347,7 @@ impl HelpOverlay {
 
 /// Render the help overlay into the frame.
 pub fn render_help_overlay(frame: &mut Frame, overlay: &HelpOverlay, area: Rect) {
-    use claurst_core::constants::APP_VERSION;
+    use mikmik_core::constants::APP_VERSION;
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::widgets::Wrap;
 
@@ -601,7 +601,7 @@ impl HistoryEntry {
     pub fn relative_time(&self) -> String {
         match self.timestamp {
             None => String::new(),
-            Some(ts) => claurst_core::format_utils::format_relative_time(ts.saturating_mul(1000)),
+            Some(ts) => mikmik_core::format_utils::format_relative_time(ts.saturating_mul(1000)),
         }
     }
 }
@@ -611,7 +611,7 @@ impl HistoryEntry {
 // ---------------------------------------------------------------------------
 
 fn pins_path() -> std::path::PathBuf {
-    claurst_core::config::Settings::config_dir().join("history_pins.json")
+    mikmik_core::config::Settings::config_dir().join("history_pins.json")
 }
 
 /// Load the set of pinned entry texts from `~/.claurst/history_pins.json`.

@@ -70,7 +70,7 @@ pub async fn load_stats() -> AggregatedStats {
     let mut daily: HashMap<String, u64> = HashMap::new();
 
     for path in transcript_paths().await {
-        let entries = match claurst_core::session_storage::load_transcript(&path).await {
+        let entries = match mikmik_core::session_storage::load_transcript(&path).await {
             Ok(entries) => entries,
             // A single unreadable transcript must not empty the whole screen.
             Err(e) => {
@@ -80,7 +80,7 @@ pub async fn load_stats() -> AggregatedStats {
         };
 
         for entry in &entries {
-            let claurst_core::session_storage::TranscriptEntry::Assistant(m) = entry else {
+            let mikmik_core::session_storage::TranscriptEntry::Assistant(m) = entry else {
                 continue;
             };
             let Some(cost) = &m.message.cost else {
@@ -118,7 +118,7 @@ pub async fn load_stats() -> AggregatedStats {
 
 /// Every `.jsonl` transcript under `~/.claurst/projects/`.
 async fn transcript_paths() -> Vec<std::path::PathBuf> {
-    let root = claurst_core::session_storage::projects_dir();
+    let root = mikmik_core::session_storage::projects_dir();
     let mut paths = Vec::new();
     let Ok(mut projects) = tokio::fs::read_dir(&root).await else {
         return paths;
@@ -920,10 +920,10 @@ mod tests {
 
         let project = tempfile::tempdir().expect("tempdir");
         let path =
-            claurst_core::session_storage::transcript_path(project.path(), "sess-1").expect("path");
-        let mut message = claurst_core::types::Message::assistant("hello");
+            mikmik_core::session_storage::transcript_path(project.path(), "sess-1").expect("path");
+        let mut message = mikmik_core::types::Message::assistant("hello");
         message.uuid = Some("uuid-1".to_string());
-        message.cost = Some(claurst_core::types::MessageCost {
+        message.cost = Some(mikmik_core::types::MessageCost {
             input_tokens: 100,
             output_tokens: 50,
             cache_creation_input_tokens: 0,
@@ -931,10 +931,10 @@ mod tests {
             cost_usd: 0.25,
             model: Some("some-model".to_string()),
         });
-        let entry = claurst_core::session_storage::make_assistant_entry(
+        let entry = mikmik_core::session_storage::make_assistant_entry(
             message, "uuid-1", None, "sess-1", "/tmp",
         );
-        claurst_core::session_storage::write_transcript_entry(&path, &entry)
+        mikmik_core::session_storage::write_transcript_entry(&path, &entry)
             .await
             .expect("write");
 

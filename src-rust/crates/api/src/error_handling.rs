@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use claurst_core::provider_id::ProviderId;
+use mikmik_core::provider_id::ProviderId;
 
 use crate::provider_error::ProviderError;
 

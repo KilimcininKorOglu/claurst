@@ -11,8 +11,8 @@ use crate::provider_types::{ProviderRequest, ProviderResponse, StopReason};
 use crate::providers::message_normalization::normalize_anthropic_messages;
 use crate::transform::MessageTransformer;
 use crate::types::{ApiMessage, ApiToolDefinition};
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{ContentBlock, UsageInfo};
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{ContentBlock, UsageInfo};
 
 // ---------------------------------------------------------------------------
 // AnthropicTransformer

@@ -31,8 +31,8 @@
 
 use super::{CommandContext, CommandResult, SlashCommand};
 use async_trait::async_trait;
-use claurst_core::git_utils::get_repo_root;
-use claurst_core::history::ConversationSession;
+use mikmik_core::git_utils::get_repo_root;
+use mikmik_core::history::ConversationSession;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -469,7 +469,7 @@ mod tests {
         let old = {
             let mut s = ConversationSession::new("claude-sonnet-4-6".to_string());
             s.working_dir = Some("/tmp/project".to_string());
-            s.messages.push(claurst_core::types::Message::user("hi"));
+            s.messages.push(mikmik_core::types::Message::user("hi"));
             s.title = Some("Old title".to_string());
             s
         };

@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use claurst_core::config::Config;
+use mikmik_core::config::Config;
 
 use crate::ModelRegistry;
 

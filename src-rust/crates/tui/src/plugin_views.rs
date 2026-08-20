@@ -91,7 +91,7 @@ pub fn render_plugin_hints(frame: &mut Frame, hints: &[PluginHintBanner], area: 
 // ---------------------------------------------------------------------------
 
 /// A concise, displayable summary of one loaded plugin.
-/// Constructed from `claurst_plugins::LoadedPlugin` when the caller does not want
+/// Constructed from `mikmik_plugins::LoadedPlugin` when the caller does not want
 /// to take a direct dependency on the plugins crate inside TUI rendering code.
 #[derive(Debug, Clone)]
 pub struct PluginListItem {

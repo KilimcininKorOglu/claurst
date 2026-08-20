@@ -1,61 +1,61 @@
 [package]
-name = "claurst-tui"
+name = "mikmik-tui"
 version.workspace = true
 edition.workspace = true
 
 [features]
 # Enable real microphone capture for voice PTT mode.
-voice = ["claurst-core/voice", "dep:cpal", "dep:hound"]
+voice = ["mikmik-core/voice", "dep:cpal", "dep:hound"]
 
 # UI & Interaction features (pass-through from cc-core)
-token_budget = ["claurst-core/token_budget"]
-ultraplan = ["claurst-core/ultraplan"]
-ultrathink = ["claurst-core/ultrathink"]
-history_picker = ["claurst-core/history_picker"]
-message_actions = ["claurst-core/message_actions"]
-quick_search = ["claurst-core/quick_search"]
-away_summary = ["claurst-core/away_summary"]
-hook_prompts = ["claurst-core/hook_prompts"]
-kairos_brief = ["claurst-core/kairos_brief"]
-kairos_channels = ["claurst-core/kairos_channels"]
-lodestone = ["claurst-core/lodestone"]
+token_budget = ["mikmik-core/token_budget"]
+ultraplan = ["mikmik-core/ultraplan"]
+ultrathink = ["mikmik-core/ultrathink"]
+history_picker = ["mikmik-core/history_picker"]
+message_actions = ["mikmik-core/message_actions"]
+quick_search = ["mikmik-core/quick_search"]
+away_summary = ["mikmik-core/away_summary"]
+hook_prompts = ["mikmik-core/hook_prompts"]
+kairos_brief = ["mikmik-core/kairos_brief"]
+kairos_channels = ["mikmik-core/kairos_channels"]
+lodestone = ["mikmik-core/lodestone"]
 
 # Agents & Memory features (pass-through from cc-core)
-agent_triggers = ["claurst-core/agent_triggers"]
-agent_triggers_remote = ["claurst-core/agent_triggers_remote"]
-extract_memories = ["claurst-core/extract_memories"]
-verification_agent = ["claurst-core/verification_agent"]
-builtin_explore_plan_agents = ["claurst-core/builtin_explore_plan_agents"]
-cached_microcompact = ["claurst-core/cached_microcompact"]
-compaction_reminders = ["claurst-core/compaction_reminders"]
-agent_memory_snapshot = ["claurst-core/agent_memory_snapshot"]
-teammem = ["claurst-core/teammem"]
+agent_triggers = ["mikmik-core/agent_triggers"]
+agent_triggers_remote = ["mikmik-core/agent_triggers_remote"]
+extract_memories = ["mikmik-core/extract_memories"]
+verification_agent = ["mikmik-core/verification_agent"]
+builtin_explore_plan_agents = ["mikmik-core/builtin_explore_plan_agents"]
+cached_microcompact = ["mikmik-core/cached_microcompact"]
+compaction_reminders = ["mikmik-core/compaction_reminders"]
+agent_memory_snapshot = ["mikmik-core/agent_memory_snapshot"]
+teammem = ["mikmik-core/teammem"]
 
 # Tools & Infrastructure features (pass-through from cc-core)
-bash_classifier = ["claurst-core/bash_classifier"]
-bridge_mode = ["claurst-core/bridge_mode"]
-mcp_rich_output = ["claurst-core/mcp_rich_output"]
-connector_text = ["claurst-core/connector_text"]
-unattended_retry = ["claurst-core/unattended_retry"]
-new_init = ["claurst-core/new_init"]
-powershell_auto_mode = ["claurst-core/powershell_auto_mode"]
-shot_stats = ["claurst-core/shot_stats"]
-tree_sitter_bash = ["claurst-core/tree_sitter_bash"]
-tree_sitter_bash_shadow = ["claurst-core/tree_sitter_bash_shadow"]
-native_clipboard_image = ["claurst-core/native_clipboard_image"]
-prompt_cache_break_detection = ["claurst-core/prompt_cache_break_detection"]
-ccr_auto_connect = ["claurst-core/ccr_auto_connect"]
-ccr_mirror = ["claurst-core/ccr_mirror"]
-ccr_remote_setup = ["claurst-core/ccr_remote_setup"]
+bash_classifier = ["mikmik-core/bash_classifier"]
+bridge_mode = ["mikmik-core/bridge_mode"]
+mcp_rich_output = ["mikmik-core/mcp_rich_output"]
+connector_text = ["mikmik-core/connector_text"]
+unattended_retry = ["mikmik-core/unattended_retry"]
+new_init = ["mikmik-core/new_init"]
+powershell_auto_mode = ["mikmik-core/powershell_auto_mode"]
+shot_stats = ["mikmik-core/shot_stats"]
+tree_sitter_bash = ["mikmik-core/tree_sitter_bash"]
+tree_sitter_bash_shadow = ["mikmik-core/tree_sitter_bash_shadow"]
+native_clipboard_image = ["mikmik-core/native_clipboard_image"]
+prompt_cache_break_detection = ["mikmik-core/prompt_cache_break_detection"]
+ccr_auto_connect = ["mikmik-core/ccr_auto_connect"]
+ccr_mirror = ["mikmik-core/ccr_mirror"]
+ccr_remote_setup = ["mikmik-core/ccr_remote_setup"]
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-tools = { workspace = true }
-claurst-query = { workspace = true }
-claurst-plugins = { workspace = true }
-claurst-mcp = { workspace = true }
-claurst-buddy = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-tools = { workspace = true }
+mikmik-query = { workspace = true }
+mikmik-plugins = { workspace = true }
+mikmik-mcp = { workspace = true }
+mikmik-buddy = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

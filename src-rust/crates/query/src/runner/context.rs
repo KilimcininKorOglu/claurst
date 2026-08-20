@@ -12,7 +12,7 @@
 //! both arms, and the work happens in front of the request that would
 //! otherwise overflow rather than behind the one that just finished.
 
-use claurst_core::types::Message;
+use mikmik_core::types::Message;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -35,10 +35,10 @@ use crate::{QueryConfig, QueryEvent};
 /// summarised by one endpoint and answered by another.
 pub fn dispatches_through_provider(
     account: &str,
-    config: &claurst_core::Config,
-    client: &claurst_api::AnthropicClient,
+    config: &mikmik_core::Config,
+    client: &mikmik_api::AnthropicClient,
 ) -> bool {
-    config.vendor_id_for_account(account) != claurst_core::ProviderId::ANTHROPIC
+    config.vendor_id_for_account(account) != mikmik_core::ProviderId::ANTHROPIC
         || client.api_key_is_empty()
 }
 
@@ -48,16 +48,16 @@ pub fn dispatches_through_provider(
 /// handle, and picking it twice by hand is how the two would come to disagree
 /// about which endpoint a turn belongs to.
 pub fn provider_for_turn(
-    registry: &claurst_api::ProviderRegistry,
-    config: &claurst_core::Config,
+    registry: &mikmik_api::ProviderRegistry,
+    config: &mikmik_core::Config,
     account: &str,
-) -> Option<std::sync::Arc<dyn claurst_api::provider::LlmProvider>> {
-    let pid = claurst_core::provider_id::ProviderId::new(account);
+) -> Option<std::sync::Arc<dyn mikmik_api::provider::LlmProvider>> {
+    let pid = mikmik_core::provider_id::ProviderId::new(account);
 
     // Always prefer a fresh provider built from the auth_store so that keys
     // added at runtime via /connect are picked up immediately, even when the
     // provider was pre-registered at startup with a stale or missing key.
-    let runtime_provider = claurst_api::registry::runtime_provider_for(account);
+    let runtime_provider = mikmik_api::registry::runtime_provider_for(account);
     let registry_provider = if runtime_provider.is_some() {
         None
     } else {
@@ -67,8 +67,8 @@ pub fn provider_for_turn(
 
     // Rebuild through the unified base resolver so overrides from settings,
     // env and defaults apply consistently.
-    if claurst_api::registry::resolve_provider_api_base(config, account).is_some() {
-        if let Some(overridden) = claurst_api::registry::provider_from_config(config, account) {
+    if mikmik_api::registry::resolve_provider_api_base(config, account).is_some() {
+        if let Some(overridden) = mikmik_api::registry::provider_from_config(config, account) {
             provider = Some(overridden);
         }
     }
@@ -82,10 +82,10 @@ pub fn provider_for_turn(
 /// endpoint and answered by another, and the compact model reaches its own
 /// account rather than the session's.
 pub fn backend_for<'a>(
-    route: &claurst_core::config::Route,
-    registry: Option<&claurst_api::ProviderRegistry>,
-    core_config: &claurst_core::Config,
-    client: &'a claurst_api::AnthropicClient,
+    route: &mikmik_core::config::Route,
+    registry: Option<&mikmik_api::ProviderRegistry>,
+    core_config: &mikmik_core::Config,
+    client: &'a mikmik_api::AnthropicClient,
 ) -> Box<dyn CompactBackend + 'a> {
     match registry
         .filter(|_| dispatches_through_provider(&route.account, core_config, client))
@@ -103,10 +103,10 @@ pub fn backend_for<'a>(
 /// ends up not honouring the setting. The turn loop keeps its own wiring
 /// because it needs the turn's backend for micro-compaction as well.
 pub async fn compact_on_demand(
-    turn: &claurst_core::config::Route,
-    config: &claurst_core::Config,
-    registry: Option<&claurst_api::ProviderRegistry>,
-    client: &claurst_api::AnthropicClient,
+    turn: &mikmik_core::config::Route,
+    config: &mikmik_core::Config,
+    registry: Option<&mikmik_api::ProviderRegistry>,
+    client: &mikmik_api::AnthropicClient,
     messages: &[Message],
     instruction: Option<&str>,
     session_id: &str,
@@ -161,9 +161,9 @@ pub async fn compact_on_demand(
 pub(crate) fn record_turn_usage(
     assistant_msg: &mut Message,
     model: &str,
-    pricing: claurst_core::cost::ModelPricing,
-    usage: &claurst_core::types::UsageInfo,
-    cost_tracker: &claurst_core::cost::CostTracker,
+    pricing: mikmik_core::cost::ModelPricing,
+    usage: &mikmik_core::types::UsageInfo,
+    cost_tracker: &mikmik_core::cost::CostTracker,
     session_id: &str,
 ) {
     cost_tracker.add_usage(
@@ -189,12 +189,12 @@ pub(crate) fn record_turn_usage(
 /// only as the answer for a turn with no registry loaded.
 pub(crate) fn pricing_for_turn(
     config: &QueryConfig,
-    core_config: &claurst_core::Config,
-    route: &claurst_core::config::Route,
-) -> claurst_core::cost::ModelPricing {
+    core_config: &mikmik_core::Config,
+    route: &mikmik_core::config::Route,
+) -> mikmik_core::cost::ModelPricing {
     match config.model_registry.as_deref() {
-        Some(registry) => claurst_api::pricing_for_route(core_config, registry, route),
-        None => claurst_core::cost::ModelPricing::for_model(route.model.as_str()),
+        Some(registry) => mikmik_api::pricing_for_route(core_config, registry, route),
+        None => mikmik_core::cost::ModelPricing::for_model(route.model.as_str()),
     }
 }
 
@@ -221,13 +221,13 @@ pub(crate) struct ContextPassInput<'a> {
     /// as `"myaccount/some-model"` reaches the dispatch arm already split, and
     /// anything handed the unsplit string addresses a model the account does
     /// not serve.
-    pub route: &'a claurst_core::config::Route,
+    pub route: &'a mikmik_core::config::Route,
     /// The turn's own endpoint, and the fallback when the chosen summariser
     /// cannot be reached.
     pub turn_backend: &'a dyn CompactBackend,
     /// Who writes the summary, from `Config::resolve_compact_route`. Equal to
     /// `route` unless the user chose a compact model.
-    pub compact_route: &'a claurst_core::config::Route,
+    pub compact_route: &'a mikmik_core::config::Route,
     /// The chosen summariser's endpoint, or `None` when its account has no
     /// usable credential. `None` is not a failure: the turn's own model
     /// writes the summary instead and the user is told.
@@ -307,7 +307,7 @@ pub(crate) async fn compact_before_request(
     // Reactive compact (T1-1) replaces the proactive path when its gate is set;
     // it fires from usage rather than from a finished turn and adds a 97%
     // emergency collapse. Off by default.
-    if claurst_core::feature_gates::is_feature_enabled("reactive_compact") {
+    if mikmik_core::feature_gates::is_feature_enabled("reactive_compact") {
         run_reactive(
             messages,
             config,
@@ -444,7 +444,7 @@ async fn run_reactive(
             pass.compacted = true;
             compact::record_context_tokens(input.session_id, pass.tokens_after);
         }
-        Err(claurst_core::error::ClaudeError::Cancelled) => {
+        Err(mikmik_core::error::ClaudeError::Cancelled) => {
             warn!("{label} was cancelled; conversation preserved");
         }
         Err(e) => {
@@ -456,7 +456,7 @@ async fn run_reactive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::error::ClaudeError;
+    use mikmik_core::error::ClaudeError;
 
     /// A summariser that answers with a fixed string and remembers the model
     /// it was asked to use.
@@ -487,7 +487,7 @@ mod tests {
             &self,
             _system: &str,
             _user: &str,
-            model: &claurst_core::config::WireModel,
+            model: &mikmik_core::config::WireModel,
             _max_tokens: u32,
         ) -> Result<String, ClaudeError> {
             *self.model_seen.lock() = Some(model.to_string());
@@ -509,9 +509,9 @@ mod tests {
     /// A pass whose summary is written somewhere other than the turn.
     fn split_input<'a>(
         turn_backend: &'a StubBackend,
-        route: &'a claurst_core::config::Route,
+        route: &'a mikmik_core::config::Route,
         compact_backend: Option<&'a StubBackend>,
-        compact_route: &'a claurst_core::config::Route,
+        compact_route: &'a mikmik_core::config::Route,
         session_id: &'a str,
     ) -> ContextPassInput<'a> {
         ContextPassInput {
@@ -544,13 +544,13 @@ mod tests {
     }
 
     /// A route as `Config::resolve_route` would hand it over.
-    fn route(model: &str) -> claurst_core::config::Route {
-        claurst_core::config::Config::default().route_for_account("anthropic", model)
+    fn route(model: &str) -> mikmik_core::config::Route {
+        mikmik_core::config::Config::default().route_for_account("anthropic", model)
     }
 
     fn input<'a>(
         backend: &'a StubBackend,
-        route: &'a claurst_core::config::Route,
+        route: &'a mikmik_core::config::Route,
         session_id: &'a str,
     ) -> ContextPassInput<'a> {
         ContextPassInput {
@@ -623,10 +623,10 @@ mod tests {
         compact::forget_compact_state(session);
         let mut messages = a_full_conversation();
         let backend = StubBackend::answering("Short.");
-        let composite = claurst_core::config::Config {
+        let composite = mikmik_core::config::Config {
             provider_configs: std::iter::once((
                 "myaccount".to_string(),
-                claurst_core::config::ProviderConfig::default(),
+                mikmik_core::config::ProviderConfig::default(),
             ))
             .collect(),
             ..Default::default()
@@ -820,18 +820,18 @@ mod tests {
         compact::forget_compact_state(session);
 
         let mut msg = Message::assistant("done");
-        let usage = claurst_core::types::UsageInfo {
+        let usage = mikmik_core::types::UsageInfo {
             input_tokens: 30_000,
             output_tokens: 500,
             cache_read_input_tokens: 120_000,
             cache_creation_input_tokens: 10_000,
         };
-        let tracker = claurst_core::cost::CostTracker::new();
+        let tracker = mikmik_core::cost::CostTracker::new();
 
         record_turn_usage(
             &mut msg,
             "claude-opus-4-5",
-            claurst_core::cost::ModelPricing::OPUS,
+            mikmik_core::cost::ModelPricing::OPUS,
             &usage,
             &tracker,
             session,
@@ -897,7 +897,7 @@ mod tests {
         let turn_backend = StubBackend::answering("the turn should not write this");
         let compact_backend = StubBackend::answering("Short.");
         let turn = route("big-expensive-model");
-        let compact = claurst_core::config::Config::default()
+        let compact = mikmik_core::config::Config::default()
             .route_for_account("cheap_account", "small-model");
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -948,7 +948,7 @@ mod tests {
 
         let turn_backend = StubBackend::answering("Short.");
         let turn = route("big-expensive-model");
-        let compact = claurst_core::config::Config::default()
+        let compact = mikmik_core::config::Config::default()
             .route_for_account("cheap_account", "small-model");
 
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -995,7 +995,7 @@ mod tests {
         let turn_backend = StubBackend::answering("Short.");
         let compact_backend = StubBackend::failing();
         let turn = route("big-expensive-model");
-        let compact = claurst_core::config::Config::default()
+        let compact = mikmik_core::config::Config::default()
             .route_for_account("cheap_account", "small-model");
 
         let (tx, mut rx) = mpsc::unbounded_channel();

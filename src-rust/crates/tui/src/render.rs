@@ -52,9 +52,9 @@ use crate::theme_screen::render_theme_screen;
 use crate::transcript_turn::{build_transcript_turns, TranscriptTurn};
 use crate::virtual_list::{VirtualItem, VirtualList};
 use crate::voice_mode_notice::render_voice_mode_notice;
-use claurst_core::constants::APP_VERSION;
-use claurst_core::timeline::{TimelineRow, TimelineStatus};
-use claurst_core::types::Role;
+use mikmik_core::constants::APP_VERSION;
+use mikmik_core::timeline::{TimelineRow, TimelineStatus};
+use mikmik_core::types::Role;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -207,7 +207,7 @@ fn relative_mtime(mtime: std::time::SystemTime) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    claurst_core::format_utils::format_relative_time(ms)
+    mikmik_core::format_utils::format_relative_time(ms)
 }
 
 /// Build the body lines for the welcome box's "Recent activity" section.
@@ -385,12 +385,12 @@ fn startup_notice_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         .clone()
         .or_else(|| app.current_dir.as_deref().map(std::path::PathBuf::from))
         .unwrap_or_default();
-    for (name, dir) in claurst_core::workspace::generate_root_names(
+    for (name, dir) in mikmik_core::workspace::generate_root_names(
         &project_dir,
         &app.config.additional_dirs,
         &app.config.workspace_paths,
     ) {
-        if name == claurst_core::workspace::MAIN_ROOT {
+        if name == mikmik_core::workspace::MAIN_ROOT {
             continue;
         }
         let label = format!(" &{name} ");
@@ -2396,7 +2396,7 @@ fn render_welcome_box(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // --- Right column ---
-    let tip_text = claurst_core::tips::select_tip(0)
+    let tip_text = mikmik_core::tips::select_tip(0)
         .map(|t| t.content.to_string())
         .unwrap_or_else(|| "Edit AGENTS.md to add instructions for Claurst".to_string());
 
@@ -2534,12 +2534,12 @@ fn welcome_banner_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 /// Build a tool_use_id → tool_name lookup from all messages in the transcript.
 /// This allows ToolResult blocks to dispatch to tool-specific renderers.
 fn build_tool_names(
-    messages: &[claurst_core::types::Message],
+    messages: &[mikmik_core::types::Message],
 ) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for msg in messages {
         for block in msg.content_blocks() {
-            if let claurst_core::types::ContentBlock::ToolUse { id, name, .. } = block {
+            if let mikmik_core::types::ContentBlock::ToolUse { id, name, .. } = block {
                 map.insert(id.clone(), name.clone());
             }
         }
@@ -2815,7 +2815,7 @@ fn todo_confidence(todo: &serde_json::Value) -> Option<u8> {
         .flatten()
         .filter(|value| !value.is_null())
         .or_else(|| todo.get("confidence"))?;
-    claurst_tools::todo_write::parse_confidence(value)
+    mikmik_tools::todo_write::parse_confidence(value)
 }
 
 /// One score for the whole list, weighted by priority so a shaky high-priority
@@ -3136,12 +3136,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 ///
 /// Rows that do not fit are dropped from the top, which is where the sprites
 /// keep their hat and their per-frame flourishes.
-fn render_companion(
-    frame: &mut Frame,
-    companion: &claurst_buddy::Companion,
-    app: &App,
-    area: Rect,
-) {
+fn render_companion(frame: &mut Frame, companion: &mikmik_buddy::Companion, app: &App, area: Rect) {
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -3149,7 +3144,7 @@ fn render_companion(
     // The sprite animates on a 500 ms cycle. Derived from elapsed time rather
     // than the frame counter so the pace does not follow the redraw rate.
     let tick = app.session_start.elapsed().as_millis() as u64 / 500;
-    let sprite = claurst_buddy::render(companion, tick);
+    let sprite = mikmik_buddy::render(companion, tick);
 
     let rows: Vec<&str> = sprite.lines().collect();
     let shown = rows.len().min(area.height as usize);
@@ -3179,7 +3174,7 @@ fn render_companion(
 /// around while the user is typing.
 fn render_companion_bubble(
     frame: &mut Frame,
-    companion: &claurst_buddy::Companion,
+    companion: &mikmik_buddy::Companion,
     line: &str,
     area: Rect,
 ) {
@@ -3190,7 +3185,7 @@ fn render_companion_bubble(
     let dim = Color::Rgb(150, 150, 164);
     let spans = vec![
         Span::styled(
-            format!("  {} ", claurst_buddy::render_face(&companion.bones)),
+            format!("  {} ", mikmik_buddy::render_face(&companion.bones)),
             Style::default().fg(dim),
         ),
         Span::styled(
@@ -3525,7 +3520,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         // Permission mode badge (left side, mirrors TS bottom-left indicator).
         // Default mode is silent; non-default modes show a badge.
         {
-            use claurst_core::config::PermissionMode;
+            use mikmik_core::config::PermissionMode;
             match &app.config.permission_mode {
                 PermissionMode::BypassPermissions => {
                     if !spans.is_empty() {
@@ -4773,8 +4768,8 @@ mod tool_block_tests {
     #[test]
     fn legacy_history_search_narrow_multibyte_no_panic() {
         use crate::app::{App, HistorySearch};
-        use claurst_core::config::Config;
-        use claurst_core::cost::CostTracker;
+        use mikmik_core::config::Config;
+        use mikmik_core::cost::CostTracker;
         use ratatui::{backend::TestBackend, Terminal};
 
         let mut app = App::new(Config::default(), CostTracker::new());
@@ -4799,9 +4794,9 @@ mod tool_block_tests {
 mod stream_cache_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
-    use claurst_core::types::Message;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
+    use mikmik_core::types::Message;
 
     const WIDTH: u16 = 80;
 
@@ -5024,8 +5019,8 @@ mod effort_dock_tests {
     use super::*;
     use crate::app::App;
     use crate::model_picker::EffortLevel;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use ratatui::{backend::TestBackend, Terminal};
 
     /// The prompt pointer glyph drawn by `render_prompt_input`.
@@ -5054,13 +5049,13 @@ mod effort_dock_tests {
     #[test]
     fn a_compaction_boundary_is_drawn_in_the_transcript() {
         let mut app = App::new(Config::default(), CostTracker::new());
-        app.push_message(claurst_core::types::Message::user("do the thing"));
-        app.push_message(claurst_core::types::Message::assistant("done"));
+        app.push_message(mikmik_core::types::Message::user("do the thing"));
+        app.push_message(mikmik_core::types::Message::assistant("done"));
 
         let before = render_screen(&app);
         assert!(!before.contains("Compacted"));
 
-        app.handle_query_event(claurst_query::QueryEvent::Compacted {
+        app.handle_query_event(mikmik_query::QueryEvent::Compacted {
             messages_before: 40,
             messages_after: 6,
             tokens_after: 18_000,
@@ -5121,9 +5116,9 @@ mod find_bar_tests {
     use super::*;
     use crate::app::App;
     use crate::transcript_find::FindMode;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
-    use claurst_core::types::Message;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
+    use mikmik_core::types::Message;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn render_screen(app: &App) -> String {
@@ -5328,8 +5323,8 @@ mod mikmik_welcome_tests {
     use super::*;
     use crate::app::App;
     use crate::mikmik::MikMikPose;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn welcome_rows(pose: MikMikPose) -> Vec<String> {
@@ -5413,16 +5408,16 @@ mod mikmik_welcome_tests {
 mod companion_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use ratatui::{backend::TestBackend, Terminal};
 
     const PROMPT_POINTER: char = '\u{276f}';
 
     fn app_with_companion() -> App {
         let mut app = App::new(Config::default(), CostTracker::new());
-        let mut companion = claurst_buddy::Companion::new("render-test", None);
-        companion.soul = Some(claurst_buddy::CompanionSoul {
+        let mut companion = mikmik_buddy::Companion::new("render-test", None);
+        companion.soul = Some(mikmik_buddy::CompanionSoul {
             name: "Quackers".to_string(),
             personality: "chaotic, helpful, slightly damp".to_string(),
             hatched_at: chrono::Utc::now(),
@@ -5578,8 +5573,8 @@ mod companion_tests {
 mod recent_activity_tests {
     use super::*;
     use crate::app::{App, RecentSession};
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use ratatui::{backend::TestBackend, Terminal};
     use std::time::{Duration, SystemTime};
 
@@ -5762,9 +5757,9 @@ mod recent_activity_tests {
 mod message_timestamp_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
-    use claurst_core::types::Message;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
+    use mikmik_core::types::Message;
 
     /// Whether the rendered transcript contains an `HH:MM` clock.
     fn has_clock(text: &str) -> bool {
@@ -5826,8 +5821,8 @@ mod message_timestamp_tests {
 mod status_line_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::{Config, ProviderConfig};
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::{Config, ProviderConfig};
+    use mikmik_core::cost::CostTracker;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -5913,9 +5908,9 @@ mod status_line_tests {
 mod timeline_panel_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
-    use claurst_query::QueryEvent;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
+    use mikmik_query::QueryEvent;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -6088,7 +6083,7 @@ mod timeline_panel_tests {
         };
         let mut app = App::new(config, CostTracker::new());
         app.timeline_visible = true;
-        app.messages.push(claurst_core::types::Message::user("hi"));
+        app.messages.push(mikmik_core::types::Message::user("hi"));
 
         let joined = screen(&app, 140, 30).join("\n");
         assert!(
@@ -6204,7 +6199,7 @@ mod tab_expansion_tests {
         let row = TimelineRow {
             id: "tool-1".to_string(),
             title: "Reading file:\tnotes.txt".to_string(),
-            kind: claurst_core::timeline::TimelineKind::ToolCall,
+            kind: mikmik_core::timeline::TimelineKind::ToolCall,
             status: TimelineStatus::Done,
             started_at_ms: 0,
             finished_at_ms: Some(5),
@@ -6224,8 +6219,8 @@ mod tab_expansion_tests {
 mod external_status_line_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::{Config, StatusLineConfig};
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::{Config, StatusLineConfig};
+    use mikmik_core::cost::CostTracker;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -6372,8 +6367,8 @@ mod external_status_line_tests {
 mod workspace_root_notice_tests {
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use std::path::PathBuf;
 
     fn notices(config: Config) -> String {
@@ -6445,9 +6440,9 @@ mod footer_todo_progress_tests {
     //! input without drawing a misleading count.
     use super::*;
     use crate::app::App;
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
-    use claurst_query::QueryEvent;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
+    use mikmik_query::QueryEvent;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -6561,9 +6556,9 @@ mod timeline_summary_tests {
     //! same height budget as the entries above it.
     use super::*;
     use crate::app::App;
-    use claurst_core::config::{Config, McpServerConfig};
-    use claurst_core::cost::CostTracker;
-    use claurst_core::timeline::{TimelineKind, TimelineRow, TimelineStatus};
+    use mikmik_core::config::{Config, McpServerConfig};
+    use mikmik_core::cost::CostTracker;
+    use mikmik_core::timeline::{TimelineKind, TimelineRow, TimelineStatus};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -6742,8 +6737,8 @@ mod bridge_indicator_tests {
 mod annotation_only_transcript_tests {
     use super::*;
     use crate::app::{App, SystemMessageStyle};
-    use claurst_core::config::Config;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::config::Config;
+    use mikmik_core::cost::CostTracker;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn drawn_rows(app: &App) -> Vec<String> {

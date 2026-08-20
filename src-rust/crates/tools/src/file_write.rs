@@ -22,7 +22,7 @@ impl Tool for FileWriteTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_FILE_WRITE
+        mikmik_core::constants::TOOL_NAME_FILE_WRITE
     }
 
     fn description(&self) -> &str {
@@ -121,8 +121,8 @@ impl Tool for FileWriteTool {
 
         let action = if is_new { "Created" } else { "Wrote" };
 
-        claurst_plugins::run_global_hook(
-            claurst_plugins::HookEventKind::FileChanged,
+        mikmik_plugins::run_global_hook(
+            mikmik_plugins::HookEventKind::FileChanged,
             Some(&path.to_string_lossy()),
             json!({
                 "file_path": path.display().to_string(),

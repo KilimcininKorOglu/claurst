@@ -1,12 +1,12 @@
 [package]
-name = "claurst-bridge"
+name = "mikmik-bridge"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-query = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-query = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

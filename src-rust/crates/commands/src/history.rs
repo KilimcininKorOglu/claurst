@@ -58,7 +58,7 @@ impl SlashCommand for RevertCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let snap = match claurst_core::snapshot::get_or_create(&ctx.working_dir) {
+        let snap = match mikmik_core::snapshot::get_or_create(&ctx.working_dir) {
             Some(s) => s,
             None => {
                 return CommandResult::Error(
@@ -68,12 +68,10 @@ impl SlashCommand for RevertCommand {
         };
 
         // Collect assistant messages that have a snapshot patch (newest last).
-        let checkpoints: Vec<&claurst_core::types::Message> = ctx
+        let checkpoints: Vec<&mikmik_core::types::Message> = ctx
             .messages
             .iter()
-            .filter(|m| {
-                m.role == claurst_core::types::Role::Assistant && m.snapshot_patch.is_some()
-            })
+            .filter(|m| m.role == mikmik_core::types::Role::Assistant && m.snapshot_patch.is_some())
             .collect();
 
         if checkpoints.is_empty() {
@@ -113,7 +111,7 @@ impl SlashCommand for RevertCommand {
             None => return CommandResult::Error("Target turn has no uuid; cannot revert.".into()),
         };
 
-        let patches: Vec<claurst_core::snapshot::Patch> = ctx
+        let patches: Vec<mikmik_core::snapshot::Patch> = ctx
             .messages
             .iter()
             .skip_while(|m| m.uuid.as_deref() != Some(&target_uuid))
@@ -132,15 +130,14 @@ impl SlashCommand for RevertCommand {
         // target so the reverted turn (and everything after it) is retained on a
         // sibling branch that can be returned to. `branch_before` only falls
         // back to a destructive truncate for legacy/unchained transcripts.
-        let project_root = claurst_core::session_storage::transcript_root_for(&ctx.working_dir);
+        let project_root = mikmik_core::session_storage::transcript_root_for(&ctx.working_dir);
         let path =
-            match claurst_core::session_storage::transcript_path(&project_root, &ctx.session_id) {
+            match mikmik_core::session_storage::transcript_path(&project_root, &ctx.session_id) {
                 Ok(p) => p,
                 Err(e) => return CommandResult::Error(format!("Invalid session ID: {e}")),
             };
         if path.exists() {
-            if let Err(e) = claurst_core::session_storage::branch_before(&path, &target_uuid).await
-            {
+            if let Err(e) = mikmik_core::session_storage::branch_before(&path, &target_uuid).await {
                 return CommandResult::Error(format!(
                     "Reverted files but could not update transcript: {e}"
                 ));
@@ -172,12 +169,12 @@ impl SlashCommand for CheckpointsCommand {
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let checkpoints: Vec<(usize, &claurst_core::types::Message)> = ctx
+        let checkpoints: Vec<(usize, &mikmik_core::types::Message)> = ctx
             .messages
             .iter()
             .enumerate()
             .filter(|(_, m)| {
-                m.role == claurst_core::types::Role::Assistant && m.snapshot_patch.is_some()
+                m.role == mikmik_core::types::Role::Assistant && m.snapshot_patch.is_some()
             })
             .collect();
 
@@ -251,7 +248,7 @@ impl SlashCommand for SnapshotDiffCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let snap = match claurst_core::snapshot::get_or_create(&ctx.working_dir) {
+        let snap = match mikmik_core::snapshot::get_or_create(&ctx.working_dir) {
             Some(s) => s,
             None => {
                 return CommandResult::Error(
@@ -270,11 +267,11 @@ impl SlashCommand for SnapshotDiffCommand {
             args.to_string()
         } else {
             // Otherwise find the n-th most recent checkpoint.
-            let checkpoints: Vec<&claurst_core::snapshot::Patch> = ctx
+            let checkpoints: Vec<&mikmik_core::snapshot::Patch> = ctx
                 .messages
                 .iter()
                 .filter_map(|m| {
-                    if m.role == claurst_core::types::Role::Assistant {
+                    if m.role == mikmik_core::types::Role::Assistant {
                         m.snapshot_patch.as_ref()
                     } else {
                         None
@@ -344,7 +341,7 @@ impl SlashCommand for CheckpointCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let session = match claurst_core::history::load_session(&ctx.session_id).await {
+        let session = match mikmik_core::history::load_session(&ctx.session_id).await {
             Ok(session) => session,
             Err(e) => {
                 return CommandResult::Error(format!(
@@ -395,7 +392,7 @@ impl SlashCommand for CheckpointCommand {
                 // one: the turn in progress has not been written yet.
                 let mut live = session.clone();
                 live.messages = ctx.messages.clone();
-                match claurst_core::history::restore_checkpoint(&mut live, n - 1) {
+                match mikmik_core::history::restore_checkpoint(&mut live, n - 1) {
                     Some(dropped) if dropped.is_empty() => {
                         CommandResult::Message("Already at that checkpoint.".into())
                     }

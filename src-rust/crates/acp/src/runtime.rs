@@ -7,10 +7,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use claurst_core::config::{Config, Settings};
-use claurst_core::permissions::PermissionManager;
-use claurst_query::QueryConfig;
-use claurst_tools::Tool;
+use mikmik_core::config::{Config, Settings};
+use mikmik_core::permissions::PermissionManager;
+use mikmik_query::QueryConfig;
+use mikmik_tools::Tool;
 
 /// An account to log in to.
 #[derive(Debug, Clone)]
@@ -46,12 +46,12 @@ pub type LoginRunner = Arc<
 pub struct AgentRuntime {
     pub config: Config,
     pub settings: Settings,
-    pub api_client: Arc<claurst_api::AnthropicClient>,
-    pub provider_registry: Arc<claurst_api::ProviderRegistry>,
-    pub model_registry: Arc<claurst_api::ModelRegistry>,
+    pub api_client: Arc<mikmik_api::AnthropicClient>,
+    pub provider_registry: Arc<mikmik_api::ProviderRegistry>,
+    pub model_registry: Arc<mikmik_api::ModelRegistry>,
     pub tools: Arc<Vec<Box<dyn Tool>>>,
     pub query_config: QueryConfig,
-    pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
+    pub mcp_manager: Option<Arc<mikmik_mcp::McpManager>>,
     pub permission_manager: Arc<std::sync::Mutex<PermissionManager>>,
     pub working_dir: PathBuf,
     /// How `/login` and `/connect` are carried out, when the caller supplied
@@ -72,8 +72,8 @@ impl AgentRuntime {
         let mut config = settings.effective_config();
         // Plan mode requires interactive UI — fall back to Default so the
         // ACP permission bridge can route decisions to the client.
-        if config.permission_mode == claurst_core::PermissionMode::Plan {
-            config.permission_mode = claurst_core::PermissionMode::Default;
+        if config.permission_mode == mikmik_core::PermissionMode::Plan {
+            config.permission_mode = mikmik_core::PermissionMode::Default;
         }
         config.project_dir = Some(working_dir.clone());
 
@@ -87,14 +87,14 @@ impl AgentRuntime {
             (String::new(), false)
         };
 
-        let client_config = claurst_api::client::ClientConfig {
+        let client_config = mikmik_api::client::ClientConfig {
             api_key: api_key.clone(),
             api_base: config.resolve_anthropic_api_base(),
             use_bearer_auth,
             ..Default::default()
         };
-        let api_client = Arc::new(claurst_api::AnthropicClient::new(client_config.clone())?);
-        let provider_registry = Arc::new(claurst_api::ProviderRegistry::from_config(
+        let api_client = Arc::new(mikmik_api::AnthropicClient::new(client_config.clone())?);
+        let provider_registry = Arc::new(mikmik_api::ProviderRegistry::from_config(
             &config,
             client_config,
         ));
@@ -112,16 +112,16 @@ impl AgentRuntime {
 
         // The same roster a terminal session gets, MCP tools included: both
         // read the same settings, so both must end up with the same tools.
-        let tools = claurst_query::build_tool_roster(mcp_manager.clone(), &config);
+        let tools = mikmik_query::build_tool_roster(mcp_manager.clone(), &config);
 
         // Same catalog the CLI reads, so a session started from an editor
         // resolves the same model as one started from a terminal.
-        let model_registry = claurst_api::model_cache::load_cached_model_registry(&config);
+        let model_registry = mikmik_api::model_cache::load_cached_model_registry(&config);
 
         let mut query_config = QueryConfig::from_config_with_registry(&config, &model_registry);
         query_config.model_registry = Some(model_registry.clone());
         query_config.working_directory = Some(working_dir.display().to_string());
-        query_config.workspace_roots = claurst_core::workspace::generate_root_names(
+        query_config.workspace_roots = mikmik_core::workspace::generate_root_names(
             &working_dir,
             &config.additional_dirs,
             &config.workspace_paths,
@@ -151,7 +151,7 @@ async fn build_mcp_manager(
     config: &Config,
     settings: &Settings,
     working_dir: &std::path::Path,
-) -> Option<Arc<claurst_mcp::McpManager>> {
+) -> Option<Arc<mikmik_mcp::McpManager>> {
     if config.mcp_servers.is_empty() {
         return None;
     }
@@ -160,9 +160,9 @@ async fn build_mcp_manager(
     // runtime loads only global settings today (so all servers are user-origin
     // and pass through), but gating here keeps the invariant if project config
     // is ever merged in.
-    let project_root = claurst_core::mcp_trust::project_root_for(working_dir);
-    let store = claurst_core::mcp_trust::McpTrustStore::load();
-    let decision = claurst_core::mcp_trust::partition_mcp_servers(
+    let project_root = mikmik_core::mcp_trust::project_root_for(working_dir);
+    let store = mikmik_core::mcp_trust::McpTrustStore::load();
+    let decision = mikmik_core::mcp_trust::partition_mcp_servers(
         &config.mcp_servers,
         project_root.as_deref(),
         settings.trust_project_mcp_servers,
@@ -179,7 +179,7 @@ async fn build_mcp_manager(
     if decision.allowed.is_empty() {
         return None;
     }
-    let mgr = Arc::new(claurst_mcp::McpManager::connect_all(&decision.allowed).await);
+    let mgr = Arc::new(mikmik_mcp::McpManager::connect_all(&decision.allowed).await);
     mgr.clone().spawn_notification_poll_loop();
     Some(mgr)
 }

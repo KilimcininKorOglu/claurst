@@ -10,7 +10,7 @@
 // The caller (cli/src/main.rs) is responsible for the actual dispatch so that
 // TUI event handling and cancellation tokens stay in the right place.
 
-use claurst_core::{goal_continuation_message, GoalStatus, GoalStore, MAX_GOAL_TURNS};
+use mikmik_core::{goal_continuation_message, GoalStatus, GoalStore, MAX_GOAL_TURNS};
 
 /// Result returned to the caller after a completed query loop turn.
 pub enum GoalContinuation {

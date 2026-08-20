@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
-use claurst_core::types::Message;
-use claurst_tools::PendingPermissionStore;
 use dashmap::DashMap;
+use mikmik_core::types::Message;
+use mikmik_tools::PendingPermissionStore;
 use tokio_util::sync::CancellationToken;
 
 /// What the connected client has changed for this session alone.
@@ -17,10 +17,10 @@ use tokio_util::sync::CancellationToken;
 /// belongs to that panel's session, not to the user's next terminal run.
 #[derive(Debug, Clone, Default)]
 pub struct SessionSettings {
-    pub permission_mode: Option<claurst_core::PermissionMode>,
+    pub permission_mode: Option<mikmik_core::PermissionMode>,
     pub model: Option<String>,
     pub provider: Option<String>,
-    pub effort: Option<claurst_core::effort::EffortLevel>,
+    pub effort: Option<mikmik_core::effort::EffortLevel>,
 }
 
 /// One ACP session — a logical conversation with its own cwd, transcript,
@@ -37,7 +37,7 @@ pub struct SessionState {
     /// later prompt on that session.
     cancel_token: parking_lot::Mutex<CancellationToken>,
     pub pending_permissions: Arc<parking_lot::Mutex<PendingPermissionStore>>,
-    pub file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
+    pub file_history: Arc<parking_lot::Mutex<mikmik_core::file_history::FileHistory>>,
     pub current_turn: Arc<std::sync::atomic::AtomicUsize>,
     pub settings: parking_lot::Mutex<SessionSettings>,
     /// Human-readable name, shown by anything that lists sessions.
@@ -50,7 +50,7 @@ pub struct SessionState {
     /// What this session spent. One agent process now serves many editor
     /// panels, so a tracker shared across sessions would make every panel
     /// report the whole process.
-    pub cost_tracker: Arc<claurst_core::CostTracker>,
+    pub cost_tracker: Arc<mikmik_core::CostTracker>,
     /// Whether a turn is running. Two prompts on one session would each clone
     /// the transcript, run against it, and write their own copy back, so the
     /// second one to finish would erase the first.
@@ -93,7 +93,7 @@ impl SessionState {
     pub fn restored(
         session_id: acp::SessionId,
         cwd: PathBuf,
-        stored: &claurst_core::history::ConversationSession,
+        stored: &mikmik_core::history::ConversationSession,
     ) -> Arc<Self> {
         Self::build(
             session_id,
@@ -110,7 +110,7 @@ impl SessionState {
     pub fn forked(
         session_id: acp::SessionId,
         cwd: PathBuf,
-        stored: &claurst_core::history::ConversationSession,
+        stored: &mikmik_core::history::ConversationSession,
     ) -> Arc<Self> {
         Self::build(
             session_id,
@@ -139,14 +139,14 @@ impl SessionState {
                 PendingPermissionStore::default(),
             )),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             settings: parking_lot::Mutex::new(SessionSettings::default()),
             title: parking_lot::Mutex::new(title),
             created_at,
             forked_from,
-            cost_tracker: claurst_core::CostTracker::new(),
+            cost_tracker: mikmik_core::CostTracker::new(),
             turn_in_flight: AtomicBool::new(false),
             mcp: parking_lot::Mutex::new(None),
         })
@@ -309,7 +309,7 @@ mod tests {
 
         first.cost_tracker.add_usage(
             "m",
-            claurst_core::cost::ModelPricing::for_model("m"),
+            mikmik_core::cost::ModelPricing::for_model("m"),
             100,
             20,
             0,

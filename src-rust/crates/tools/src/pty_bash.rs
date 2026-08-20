@@ -12,8 +12,8 @@
 
 use crate::{session_shell_state, PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
-use claurst_core::bash_classifier::{classify_bash_command, BashRiskLevel};
-use claurst_core::tasks::{global_registry, BackgroundTask};
+use mikmik_core::bash_classifier::{classify_bash_command, BashRiskLevel};
+use mikmik_core::tasks::{global_registry, BackgroundTask};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -182,13 +182,13 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                 .stderr(Stdio::piped())
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
-            claurst_core::process_tree::spawn_in_own_group(&mut builder);
+            mikmik_core::process_tree::spawn_in_own_group(&mut builder);
             let child = builder.spawn();
 
             match child {
                 Ok(mut c) => {
                     let mut tree_guard =
-                        claurst_core::process_tree::ProcessTreeKillGuard::new(c.id());
+                        mikmik_core::process_tree::ProcessTreeKillGuard::new(c.id());
                     if let Some(pid) = c.id() {
                         global_registry().set_pid(&task_id_clone, pid);
                     }
@@ -220,7 +220,7 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                             let code = status.code().unwrap_or(-1);
                             global_registry().update_status(
                                 &task_id_clone,
-                                claurst_core::tasks::TaskStatus::Failed(format!(
+                                mikmik_core::tasks::TaskStatus::Failed(format!(
                                     "exit code {}",
                                     code
                                 )),
@@ -229,7 +229,7 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                         Err(e) => {
                             global_registry().update_status(
                                 &task_id_clone,
-                                claurst_core::tasks::TaskStatus::Failed(e.to_string()),
+                                mikmik_core::tasks::TaskStatus::Failed(e.to_string()),
                             );
                         }
                     }
@@ -237,7 +237,7 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
                 Err(e) => {
                     global_registry().update_status(
                         &task_id_clone,
-                        claurst_core::tasks::TaskStatus::Failed(e.to_string()),
+                        mikmik_core::tasks::TaskStatus::Failed(e.to_string()),
                     );
                 }
             }
@@ -247,10 +247,7 @@ async fn run_in_background(command: String, cwd: PathBuf, timeout_ms: u64) -> To
         if result.is_err() {
             global_registry().update_status(
                 &task_id_clone,
-                claurst_core::tasks::TaskStatus::Failed(format!(
-                    "timed out after {}ms",
-                    timeout_ms
-                )),
+                mikmik_core::tasks::TaskStatus::Failed(format!("timed out after {}ms", timeout_ms)),
             );
         }
     });
@@ -585,7 +582,7 @@ async fn run_windows_fallback(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+    mikmik_core::process_tree::spawn_in_own_group(&mut builder);
     let mut child = match builder.spawn() {
         Ok(c) => c,
         Err(e) => return ToolResult::error(format!("Failed to spawn command: {}", e)),
@@ -594,7 +591,7 @@ async fn run_windows_fallback(
     // `cmd.exe` is only the wrapper. Without this, cancelling the turn left
     // both it and whatever it started running, and the timeout path below
     // reached the wrapper alone.
-    let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+    let mut tree_guard = mikmik_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
     let stdout_handle = child.stdout.take();
     let stderr_handle = child.stderr.take();
@@ -692,7 +689,7 @@ impl Tool for PtyBashTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_BASH
+        mikmik_core::constants::TOOL_NAME_BASH
     }
 
     fn description(&self) -> &str {
@@ -1305,36 +1302,36 @@ mod tests {
     /// Permission handler that allows everything — for exercising `execute`.
     struct AllowAllHandler;
 
-    impl claurst_core::permissions::PermissionHandler for AllowAllHandler {
+    impl mikmik_core::permissions::PermissionHandler for AllowAllHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Allow
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Allow
         }
 
         fn request_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Allow
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Allow
         }
     }
 
     fn allow_all_context() -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: std::sync::Arc::new(AllowAllHandler),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "pty-bash-test".to_string(),
             file_history: std::sync::Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,
@@ -1500,19 +1497,19 @@ mod tests {
     /// point asks and which does not.
     struct DenyAllHandler;
 
-    impl claurst_core::permissions::PermissionHandler for DenyAllHandler {
+    impl mikmik_core::permissions::PermissionHandler for DenyAllHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Deny
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Deny
         }
 
         fn request_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Deny
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Deny
         }
     }
 

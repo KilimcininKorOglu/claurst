@@ -125,7 +125,7 @@ impl SlashCommand for UpgradeCommand {
     }
 
     async fn execute(&self, _args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        let current = claurst_core::constants::APP_VERSION;
+        let current = mikmik_core::constants::APP_VERSION;
 
         // Check GitHub releases API for latest version
         let client = reqwest::Client::builder()
@@ -218,7 +218,7 @@ impl SlashCommand for ReleaseNotesCommand {
     }
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
-        let current = claurst_core::constants::APP_VERSION;
+        let current = mikmik_core::constants::APP_VERSION;
         let version = args.trim();
 
         let tag = if version.is_empty() {
@@ -309,7 +309,7 @@ impl SlashCommand for RateLimitOptionsCommand {
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
         // Try to read from OAuth tokens file to get subscription/tier info
-        let tier_info = match claurst_core::oauth::OAuthTokens::load().await {
+        let tier_info = match mikmik_core::oauth::OAuthTokens::load().await {
             Some(tokens) => {
                 let sub_type = tokens.subscription_type.as_deref().unwrap_or("unknown");
                 format!(

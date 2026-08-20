@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use claurst_core::types::ToolDefinition;
+use mikmik_core::types::ToolDefinition;
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 
@@ -16,7 +16,7 @@ use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 pub struct McpToolWrapper {
     tool_def: ToolDefinition,
     server_name: String,
-    manager: Arc<claurst_mcp::McpManager>,
+    manager: Arc<mikmik_mcp::McpManager>,
 }
 
 #[async_trait]
@@ -56,7 +56,7 @@ impl Tool for McpToolWrapper {
 
         match self.manager.call_tool(&self.tool_def.name, args).await {
             Ok(result) => {
-                let text = claurst_mcp::mcp_result_to_string(&result);
+                let text = mikmik_mcp::mcp_result_to_string(&result);
                 if result.is_error {
                     ToolResult::error(text)
                 } else {
@@ -69,7 +69,7 @@ impl Tool for McpToolWrapper {
 }
 
 /// Every tool the connected MCP servers offer, ready to join a roster.
-pub fn mcp_tools(manager: &Arc<claurst_mcp::McpManager>) -> Vec<Box<dyn Tool>> {
+pub fn mcp_tools(manager: &Arc<mikmik_mcp::McpManager>) -> Vec<Box<dyn Tool>> {
     manager
         .all_tool_definitions()
         .into_iter()

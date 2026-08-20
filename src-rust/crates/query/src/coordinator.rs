@@ -156,9 +156,9 @@ impl Default for ScratchpadGate {
 // would ripple through those call sites for no functional gain.
 #[allow(clippy::borrowed_box)]
 pub fn filter_tools_for_mode(
-    tools: &[Box<dyn claurst_tools::Tool>],
+    tools: &[Box<dyn mikmik_tools::Tool>],
     mode: AgentMode,
-) -> Vec<&Box<dyn claurst_tools::Tool>> {
+) -> Vec<&Box<dyn mikmik_tools::Tool>> {
     match mode {
         AgentMode::Coordinator | AgentMode::Normal => tools.iter().collect(),
         AgentMode::Worker => tools

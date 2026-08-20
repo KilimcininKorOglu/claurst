@@ -233,7 +233,7 @@ impl McpCommand {
             } else {
                 format!("Configured env vars: {}", env_keys.join(", "))
             };
-            let token_note = match claurst_mcp::oauth::get_mcp_token(server_name) {
+            let token_note = match mikmik_mcp::oauth::get_mcp_token(server_name) {
                 Some(tok) if !tok.is_expired(60) => " (valid token stored)".to_string(),
                 Some(_) => " (stored token is expired)".to_string(),
                 None => " (no token stored)".to_string(),
@@ -249,7 +249,7 @@ impl McpCommand {
         }
 
         if let Some(manager) = &ctx.mcp_manager {
-            use claurst_mcp::McpServerStatus;
+            use mikmik_mcp::McpServerStatus;
             if matches!(
                 manager.server_status(server_name),
                 McpServerStatus::Connecting
@@ -313,7 +313,7 @@ impl McpCommand {
 
         // No live manager — static instructions.
         let server_url = srv.url.as_deref().unwrap_or("(URL not configured)");
-        let token_note = match claurst_mcp::oauth::get_mcp_token(server_name) {
+        let token_note = match mikmik_mcp::oauth::get_mcp_token(server_name) {
             Some(tok) if !tok.is_expired(60) => " (valid token stored)".to_string(),
             Some(_) => " (stored token is expired)".to_string(),
             None => " (no token stored)".to_string(),
@@ -428,7 +428,7 @@ impl McpCommand {
             }
             Some(manager) => {
                 let current = manager.server_status(server_name);
-                use claurst_mcp::McpServerStatus;
+                use mikmik_mcp::McpServerStatus;
                 match current {
                     McpServerStatus::Connected { tool_count } => CommandResult::Message(format!(
                         "MCP server '{}' is already connected ({} tool{} available).",
@@ -491,7 +491,7 @@ impl McpCommand {
         )];
 
         if let Some(manager) = &ctx.mcp_manager {
-            use claurst_mcp::McpServerStatus;
+            use mikmik_mcp::McpServerStatus;
             let status = manager.server_status(server_name);
             lines.push(format!("Current status:  {}", status.display()));
 
@@ -686,11 +686,11 @@ impl McpCommand {
                         let mut injected = String::new();
                         for msg in &result.messages {
                             let text = match &msg.content {
-                                claurst_mcp::PromptMessageContent::Text { text } => text.clone(),
-                                claurst_mcp::PromptMessageContent::Image { .. } => {
+                                mikmik_mcp::PromptMessageContent::Text { text } => text.clone(),
+                                mikmik_mcp::PromptMessageContent::Image { .. } => {
                                     "[image]".to_string()
                                 }
-                                claurst_mcp::PromptMessageContent::Resource { resource } => {
+                                mikmik_mcp::PromptMessageContent::Resource { resource } => {
                                     resource.to_string()
                                 }
                             };

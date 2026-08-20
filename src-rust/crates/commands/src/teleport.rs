@@ -11,8 +11,8 @@ pub struct TeleportCommand;
 
 /// Serialisable bundle written to / read from a `.teleport` file.
 mod teleport_bundle {
-    use claurst_core::permissions::{PermissionAction, SerializedPermissionRule};
-    use claurst_core::types::Message;
+    use mikmik_core::permissions::{PermissionAction, SerializedPermissionRule};
+    use mikmik_core::types::Message;
     use serde::{Deserialize, Serialize};
 
     pub const BUNDLE_VERSION: &str = "1";
@@ -119,7 +119,7 @@ impl SlashCommand for TeleportCommand {
                         p
                     } else {
                         // Default: <claurst home>/teleport_<session_id>.json
-                        let base = claurst_core::config::Settings::config_dir();
+                        let base = mikmik_core::config::Settings::config_dir();
                         let _ = std::fs::create_dir_all(&base);
                         base.join(format!("teleport_{}.json", ctx.session_id))
                     }
@@ -127,7 +127,7 @@ impl SlashCommand for TeleportCommand {
 
                 // ---- collect recently accessed file paths from messages ----
                 let files: Vec<String> = {
-                    use claurst_core::types::{ContentBlock, MessageContent};
+                    use mikmik_core::types::{ContentBlock, MessageContent};
                     let mut seen: Vec<String> = Vec::new();
                     for msg in &ctx.messages {
                         if let MessageContent::Blocks(blocks) = &msg.content {
@@ -170,14 +170,14 @@ impl SlashCommand for TeleportCommand {
                     .provider_configs
                     .keys()
                     .flat_map(|provider_id| {
-                        claurst_core::config::api_key_env_vars_for_provider(provider_id)
+                        mikmik_core::config::api_key_env_vars_for_provider(provider_id)
                             .iter()
                             .copied()
                     })
                     .map(str::to_string)
                     .collect();
                 redacted_env_vars.extend(
-                    claurst_core::config::api_key_env_vars_for_provider(
+                    mikmik_core::config::api_key_env_vars_for_provider(
                         ctx.config.selected_provider_id(),
                     )
                     .iter()
@@ -197,7 +197,7 @@ impl SlashCommand for TeleportCommand {
                     let denied: Vec<String> = ctx.config.disallowed_tools.clone();
                     // Build minimal SerializedPermissionRule list from config lists.
                     let mut rules = Vec::new();
-                    use claurst_core::permissions::{PermissionAction, SerializedPermissionRule};
+                    use mikmik_core::permissions::{PermissionAction, SerializedPermissionRule};
                     for name in &allowed {
                         rules.push(SerializedPermissionRule {
                             tool_name: Some(name.clone()),
@@ -364,7 +364,7 @@ impl SlashCommand for TeleportCommand {
                 let permissions = {
                     let allowed = ctx.config.allowed_tools.clone();
                     let denied = ctx.config.disallowed_tools.clone();
-                    use claurst_core::permissions::{PermissionAction, SerializedPermissionRule};
+                    use mikmik_core::permissions::{PermissionAction, SerializedPermissionRule};
                     let mut rules = Vec::new();
                     for name in &allowed {
                         rules.push(SerializedPermissionRule {

@@ -1,5 +1,5 @@
 use crate::app::{App, ToolStatus, ToolUseBlock, TurnMetadata};
-use claurst_core::types::{ContentBlock, Message, Role};
+use mikmik_core::types::{ContentBlock, Message, Role};
 
 #[derive(Debug)]
 pub struct TranscriptTurn<'a> {

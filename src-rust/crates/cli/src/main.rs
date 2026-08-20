@@ -38,17 +38,17 @@ pub const ISSUES_EXPLAINER: &str = env!("ISSUES_EXPLAINER");
 
 use anyhow::Context;
 use clap::{ArgAction, Parser, ValueEnum};
-use claurst_api::model_cache::{
+use mikmik_api::model_cache::{
     load_cached_model_registry, models_cache_path, models_dev_cache_path, models_source_url,
 };
-use claurst_core::{
+use mikmik_core::{
     config::{Config, PermissionMode, Settings},
     constants::APP_VERSION,
     context::ContextBuilder,
     cost::CostTracker,
     permissions::{AutoPermissionHandler, InteractivePermissionHandler, PermissionManager},
 };
-use claurst_tools::ToolContext;
+use mikmik_tools::ToolContext;
 use parking_lot::Mutex as ParkingMutex;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, info, warn};
@@ -56,13 +56,13 @@ use tracing_subscriber::EnvFilter;
 
 /// Name the directories the session can reach, for the system prompt.
 ///
-/// Takes the same inputs as [`claurst_tools::ToolContext::workspace_roots`], so
+/// Takes the same inputs as [`mikmik_tools::ToolContext::workspace_roots`], so
 /// the names the model is told about are the names path arguments resolve by.
 fn roots_for_prompt(
     working_dir: &std::path::Path,
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
 ) -> std::collections::BTreeMap<String, String> {
-    claurst_core::workspace::generate_root_names(
+    mikmik_core::workspace::generate_root_names(
         working_dir,
         &config.additional_dirs,
         &config.workspace_paths,
@@ -278,12 +278,12 @@ enum CliOutputFormat {
     StreamJson,
 }
 
-impl From<CliOutputFormat> for claurst_core::config::OutputFormat {
+impl From<CliOutputFormat> for mikmik_core::config::OutputFormat {
     fn from(f: CliOutputFormat) -> Self {
         match f {
-            CliOutputFormat::Text => claurst_core::config::OutputFormat::Text,
-            CliOutputFormat::Json => claurst_core::config::OutputFormat::Json,
-            CliOutputFormat::StreamJson => claurst_core::config::OutputFormat::StreamJson,
+            CliOutputFormat::Text => mikmik_core::config::OutputFormat::Text,
+            CliOutputFormat::Json => mikmik_core::config::OutputFormat::Json,
+            CliOutputFormat::StreamJson => mikmik_core::config::OutputFormat::StreamJson,
         }
     }
 }
@@ -302,12 +302,12 @@ fn resolve_bridge_config(
     auth_credential: &str,
     use_bearer_auth: bool,
     is_headless: bool,
-) -> Option<claurst_bridge::BridgeConfig> {
+) -> Option<mikmik_bridge::BridgeConfig> {
     if is_headless {
         return None;
     }
 
-    let mut bridge_config = claurst_bridge::BridgeConfig::from_env();
+    let mut bridge_config = mikmik_bridge::BridgeConfig::from_env();
 
     if settings.remote_control_at_startup {
         bridge_config.enabled = true;
@@ -357,7 +357,7 @@ fn resolve_bridge_config(
 }
 
 fn handle_exit_key(
-    app: &mut claurst_tui::app::App,
+    app: &mut mikmik_tui::app::App,
     key: crossterm::event::KeyEvent,
     cancel: &Option<tokio_util::sync::CancellationToken>,
 ) -> bool {
@@ -399,7 +399,7 @@ async fn main() -> anyhow::Result<()> {
     // credential, so every path below resolves it from the same place. Runs
     // ahead of the subcommand fast-paths because `auth`, `codex` and
     // `accounts` all read credentials too.
-    let moved_keys = claurst_core::AuthStore::migrate_plaintext_provider_keys();
+    let moved_keys = mikmik_core::AuthStore::migrate_plaintext_provider_keys();
     if !moved_keys.is_empty() {
         eprintln!(
             "claurst: moved the API key for {} out of settings.json into auth.json, \
@@ -410,7 +410,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Fold the old per-provider account registry into the same two files, so
     // every account is one credential plus one providers entry.
-    let moved_accounts = claurst_core::AuthStore::migrate_account_registry();
+    let moved_accounts = mikmik_core::AuthStore::migrate_account_registry();
     if !moved_accounts.is_empty() {
         eprintln!(
             "claurst: moved {} into auth.json and settings.json. The old accounts.json \
@@ -443,7 +443,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Fast-path: `claude acp` — start the Agent Client Protocol stdio server.
     if raw_args.get(1).map(|s| s.as_str()) == Some("acp") {
-        return claurst_acp::run_acp_server(Some(acp_login_runner())).await;
+        return mikmik_acp::run_acp_server(Some(acp_login_runner())).await;
     }
 
     // Fast-path: `claurst models [provider] [--refresh] [--verbose] [--json]`
@@ -458,13 +458,12 @@ async fn main() -> anyhow::Result<()> {
     if let Some(cmd_name) = raw_args.get(1).map(|s| s.as_str()) {
         // Only intercept if it looks like a subcommand (no leading `-` or `/`)
         if !cmd_name.starts_with('-') && !cmd_name.starts_with('/') {
-            if let Some(named_cmd) = claurst_commands::named_commands::find_named_command(cmd_name)
-            {
+            if let Some(named_cmd) = mikmik_commands::named_commands::find_named_command(cmd_name) {
                 // Build a minimal CommandContext (named commands are pre-session)
                 let settings = Settings::load().await.unwrap_or_default();
                 let config = settings.effective_config();
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                let cmd_ctx = claurst_commands::CommandContext {
+                let cmd_ctx = mikmik_commands::CommandContext {
                     config,
                     cost_tracker: CostTracker::new(),
                     messages: vec![],
@@ -485,12 +484,12 @@ async fn main() -> anyhow::Result<()> {
                 let rest: Vec<&str> = raw_args[2..].iter().map(|s| s.as_str()).collect();
                 let result = named_cmd.execute_named(&rest, &cmd_ctx);
                 match result {
-                    claurst_commands::CommandResult::Message(msg)
-                    | claurst_commands::CommandResult::UserMessage(msg) => {
+                    mikmik_commands::CommandResult::Message(msg)
+                    | mikmik_commands::CommandResult::UserMessage(msg) => {
                         println!("{}", msg);
                         std::process::exit(0);
                     }
-                    claurst_commands::CommandResult::Error(e) => {
+                    mikmik_commands::CommandResult::Error(e) => {
                         eprintln!("Error: {}", e);
                         eprintln!("Usage: {}", named_cmd.usage());
                         std::process::exit(1);
@@ -518,11 +517,11 @@ async fn main() -> anyhow::Result<()> {
         )
         // Suppress error/warn logs from providers and query — errors are already shown as error modals
         .add_directive(
-            "claurst_api::providers::free=off"
+            "mikmik_api::providers::free=off"
                 .parse()
                 .expect("valid directive"),
         )
-        .add_directive("claurst_query=off".parse().expect("valid directive"));
+        .add_directive("mikmik_query=off".parse().expect("valid directive"));
     tracing_subscriber::fmt()
         .with_env_filter(log_filter)
         .with_target(false)
@@ -670,13 +669,13 @@ async fn main() -> anyhow::Result<()> {
     if cli.dump_system_prompt {
         let model_registry = load_cached_model_registry(&config);
         let mut dump_config =
-            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+            mikmik_query::QueryConfig::from_config_with_registry(&config, &model_registry);
         dump_config.system_prompt = Some(system_prompt);
         dump_config.append_system_prompt = None;
         dump_config.working_directory = Some(cwd.display().to_string());
         dump_config.workspace_roots = roots_for_prompt(&cwd, &config);
         dump_config.enabled_tools = Some(
-            claurst_query::build_tool_roster(None, &config)
+            mikmik_query::build_tool_roster(None, &config)
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),
@@ -685,14 +684,14 @@ async fn main() -> anyhow::Result<()> {
         // The dump has no REPL, so it reads the same files itself — otherwise
         // this output silently omits a block a real run sends.
         if config.companion.as_ref().is_some_and(|c| c.enabled) {
-            let identity = claurst_core::accounts::stable_identity();
-            let companion = claurst_buddy::get_companion(&identity, &claurst_core::claurst_home());
-            dump_config.companion_addendum = claurst_buddy::intro_for(&companion);
+            let identity = mikmik_core::accounts::stable_identity();
+            let companion = mikmik_buddy::get_companion(&identity, &mikmik_core::claurst_home());
+            dump_config.companion_addendum = mikmik_buddy::intro_for(&companion);
         }
 
-        match claurst_query::build_system_prompt(&dump_config) {
-            claurst_api::SystemPrompt::Text(text) => println!("{text}"),
-            claurst_api::SystemPrompt::Blocks(blocks) => {
+        match mikmik_query::build_system_prompt(&dump_config) {
+            mikmik_api::SystemPrompt::Text(text) => println!("{text}"),
+            mikmik_api::SystemPrompt::Blocks(blocks) => {
                 for block in blocks {
                     println!("{}", block.text);
                 }
@@ -733,15 +732,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Apply the user-configured request timeout (issue #175) before building any
     // client so the Anthropic client and all providers honour it.
-    claurst_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
-    let client_config = claurst_api::client::ClientConfig {
+    mikmik_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
+    let client_config = mikmik_api::client::ClientConfig {
         api_key: api_key.clone(),
         api_base: config.resolve_anthropic_api_base(),
         use_bearer_auth,
         ..Default::default()
     };
     let client = Arc::new(
-        claurst_api::AnthropicClient::new(client_config.clone())
+        mikmik_api::AnthropicClient::new(client_config.clone())
             .context("Failed to create API client")?,
     );
 
@@ -750,7 +749,7 @@ async fn main() -> anyhow::Result<()> {
     // Anthropic is always the default; additional providers (OpenAI, Google,
     // Bedrock, Azure, Copilot, Cohere, local providers) are registered when
     // their respective environment variables or auth store entries are found.
-    let provider_registry = claurst_api::ProviderRegistry::from_config(&config, client_config);
+    let provider_registry = mikmik_api::ProviderRegistry::from_config(&config, client_config);
 
     let bridge_config = resolve_bridge_config(&settings, &api_key, use_bearer_auth, is_headless);
     if let Some(cfg) = bridge_config.as_ref() {
@@ -766,7 +765,7 @@ async fn main() -> anyhow::Result<()> {
         &settings,
     )));
 
-    let permission_handler: Arc<dyn claurst_core::PermissionHandler> = if is_headless {
+    let permission_handler: Arc<dyn mikmik_core::PermissionHandler> = if is_headless {
         Arc::new(AutoPermissionHandler::with_manager(
             permission_manager.clone(),
         ))
@@ -782,7 +781,7 @@ async fn main() -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let file_history = Arc::new(ParkingMutex::new(
-        claurst_core::file_history::FileHistory::new(),
+        mikmik_core::file_history::FileHistory::new(),
     ));
     let current_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
@@ -796,9 +795,9 @@ async fn main() -> anyhow::Result<()> {
     // no plugin commands, hooks, or MCP servers are loaded from an untrusted
     // repo. Downstream code still works against the empty registry.
     let plugin_registry = if cli.bare {
-        claurst_plugins::PluginRegistry::new()
+        mikmik_plugins::PluginRegistry::new()
     } else {
-        claurst_plugins::load_plugins(&cwd, &[]).await
+        mikmik_plugins::load_plugins(&cwd, &[]).await
     };
     {
         let plugin_cmd_count = plugin_registry.all_command_defs().len();
@@ -813,25 +812,25 @@ async fn main() -> anyhow::Result<()> {
 
         // The tool loop reads its plugin hooks from this static; without it
         // every hook a plugin declares is parsed and then never runs.
-        claurst_plugins::set_global_hooks(hook_registry);
+        mikmik_plugins::set_global_hooks(hook_registry);
 
         apply_plugin_contributions(&plugin_registry, None, &mut config);
     }
 
     // Publish the registry: sub-agent prompts read the plugins' `agents/`
     // definitions from here.
-    claurst_plugins::set_global_registry(plugin_registry);
+    mikmik_plugins::set_global_registry(plugin_registry);
 
     // Setup, then SessionStart: a plugin gets one chance to prepare itself
     // before the session tells it a session is under way.
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::Setup,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::Setup,
         None,
         serde_json::json!({ "working_dir": cwd.display().to_string() }),
     )
     .await;
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::SessionStart,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::SessionStart,
         None,
         serde_json::json!({
             "working_dir": cwd.display().to_string(),
@@ -839,8 +838,8 @@ async fn main() -> anyhow::Result<()> {
         }),
     )
     .await;
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::InstructionsLoaded,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::InstructionsLoaded,
         None,
         serde_json::json!({
             "working_dir": cwd.display().to_string(),
@@ -857,10 +856,10 @@ async fn main() -> anyhow::Result<()> {
     // processes. User/global servers are unaffected. The untrusted project
     // servers are surfaced to the TUI for an approval prompt, or skipped (with
     // a notice) in headless mode unless trust was granted.
-    let mcp_project_root = claurst_core::mcp_trust::project_root_for(&cwd);
+    let mcp_project_root = mikmik_core::mcp_trust::project_root_for(&cwd);
     let mcp_decision = {
-        let store = claurst_core::mcp_trust::McpTrustStore::load();
-        claurst_core::mcp_trust::partition_mcp_servers(
+        let store = mikmik_core::mcp_trust::McpTrustStore::load();
+        mikmik_core::mcp_trust::partition_mcp_servers(
             &config.mcp_servers,
             mcp_project_root.as_deref(),
             settings.trust_project_mcp_servers,
@@ -918,7 +917,7 @@ async fn main() -> anyhow::Result<()> {
     let mcp_manager_arc = connect_mcp_manager_arc(&mcp_decision.allowed).await;
 
     let pending_permissions = Arc::new(ParkingMutex::new(
-        claurst_tools::PendingPermissionStore::default(),
+        mikmik_tools::PendingPermissionStore::default(),
     ));
 
     let is_non_interactive = cli.print || cli.prompt.is_some();
@@ -926,7 +925,7 @@ async fn main() -> anyhow::Result<()> {
     // Side-channel for the AskUserQuestion tool to send questions to the TUI.
     // Only created in interactive mode; None in headless/print mode.
     let (user_question_tx, user_question_rx) =
-        tokio::sync::mpsc::unbounded_channel::<claurst_tools::UserQuestionEvent>();
+        tokio::sync::mpsc::unbounded_channel::<mikmik_tools::UserQuestionEvent>();
     let user_question_rx = if is_non_interactive {
         None
     } else {
@@ -967,7 +966,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             loop {
-                if let Some(snap) = claurst_core::snapshot::get_or_create(&gc_dir) {
+                if let Some(snap) = mikmik_core::snapshot::get_or_create(&gc_dir) {
                     snap.cleanup().await;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
@@ -981,13 +980,13 @@ async fn main() -> anyhow::Result<()> {
     // but we guard with a std::sync::OnceLock internally).
     {
         static SWARM_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        SWARM_INIT.get_or_init(claurst_query::init_team_swarm_runner);
+        SWARM_INIT.get_or_init(mikmik_query::init_team_swarm_runner);
     }
 
     // Build the full tool list: built-ins from cc-tools plus AgentTool from cc-query
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
-    let tools = claurst_query::build_tool_roster(mcp_manager_arc.clone(), &config);
+    let tools = mikmik_query::build_tool_roster(mcp_manager_arc.clone(), &config);
 
     // Build model registry for dynamic model/provider resolution.
     // The registry is pre-populated with a hardcoded snapshot and enriched
@@ -996,7 +995,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Build query config
     let mut query_config =
-        claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+        mikmik_query::QueryConfig::from_config_with_registry(&config, &model_registry);
     query_config.model_registry = Some(model_registry.clone());
     // The flag overrides the `maxTurns` setting that `from_config` already
     // read; unset leaves the setting in place.
@@ -1011,7 +1010,7 @@ async fn main() -> anyhow::Result<()> {
         query_config.thinking_budget = Some(tokens);
     }
     if let Some(ref level_str) = cli.effort {
-        if let Some(level) = claurst_core::effort::EffortLevel::from_str(level_str) {
+        if let Some(level) = mikmik_core::effort::EffortLevel::from_str(level_str) {
             query_config.effort_level = Some(level);
         } else {
             eprintln!(
@@ -1034,7 +1033,7 @@ async fn main() -> anyhow::Result<()> {
     // Merge built-in default agents with user-defined agents (user wins on collision).
     let tools = if let Some(ref agent_name) = cli.agent {
         query_config.agent_name = Some(agent_name.clone());
-        let mut all_agents = claurst_core::default_agents();
+        let mut all_agents = mikmik_core::default_agents();
         all_agents.extend(config.agents.clone());
         if let Some(def) = all_agents.get(agent_name) {
             let access = def.access.clone();
@@ -1058,7 +1057,7 @@ async fn main() -> anyhow::Result<()> {
     // Spawn the background cron scheduler (fires cron tasks at scheduled times).
     // Cancelled automatically when the process exits since we use a shared token.
     let cron_cancel = tokio_util::sync::CancellationToken::new();
-    claurst_query::start_cron_scheduler(
+    mikmik_query::start_cron_scheduler(
         client.clone(),
         tools.clone(),
         tool_ctx.clone(),
@@ -1086,9 +1085,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
     } else {
-        let auth_store = claurst_core::AuthStore::load();
+        let auth_store = mikmik_core::AuthStore::load();
         let has_saved_credentials = !auth_store.credentials.is_empty()
-            || claurst_core::oauth_config::get_codex_tokens().is_some();
+            || mikmik_core::oauth_config::get_codex_tokens().is_some();
         let has_credentials = !api_key.is_empty()
             || has_saved_credentials
             || config.provider.as_deref().is_some_and(|p| p != "anthropic");
@@ -1120,7 +1119,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// The names of the MCP servers a registry contributes, sorted, so two
 /// registries can be compared for "did the plugin servers move".
-fn plugin_mcp_names(registry: &claurst_plugins::PluginRegistry) -> Vec<String> {
+fn plugin_mcp_names(registry: &mikmik_plugins::PluginRegistry) -> Vec<String> {
     let mut names: Vec<String> = registry
         .all_mcp_servers()
         .into_iter()
@@ -1145,9 +1144,9 @@ fn plugin_mcp_names(registry: &claurst_plugins::PluginRegistry) -> Vec<String> {
 /// entry that also comes from the settings file survives: the current registry
 /// still names it.
 fn apply_plugin_contributions(
-    registry: &claurst_plugins::PluginRegistry,
-    previous: Option<&claurst_plugins::PluginRegistry>,
-    config: &mut claurst_core::Config,
+    registry: &mikmik_plugins::PluginRegistry,
+    previous: Option<&mikmik_plugins::PluginRegistry>,
+    config: &mut mikmik_core::Config,
 ) {
     if let Some(previous) = previous {
         let current_mcp: std::collections::HashSet<String> = registry
@@ -1221,8 +1220,8 @@ fn apply_plugin_contributions(
     // a style is chosen by name and resolved on demand. Registering the same
     // name twice is ignored there.
     for style_dir in registry.all_output_style_paths() {
-        for style in claurst_core::output_styles::load_output_styles_dir(&style_dir) {
-            claurst_core::output_styles::register_runtime_style(style);
+        for style in mikmik_core::output_styles::load_output_styles_dir(&style_dir) {
+            mikmik_core::output_styles::register_runtime_style(style);
         }
     }
 }
@@ -1238,18 +1237,18 @@ fn apply_plugin_contributions(
 /// filesystem, so counting here avoids a second walk.
 fn session_slash_commands(
     cwd: &std::path::Path,
-    config: &claurst_core::Config,
+    config: &mikmik_core::Config,
 ) -> (Vec<(String, String)>, usize) {
     let mut commands: Vec<(String, String)> = Vec::new();
 
-    if let Some(registry) = claurst_plugins::global_plugin_registry() {
+    if let Some(registry) = mikmik_plugins::global_plugin_registry() {
         for def in registry.all_command_defs() {
             commands.push((def.name.clone(), def.description.clone()));
         }
     }
 
     let mut skill_count = 0;
-    for (name, skill) in claurst_core::discover_skills(cwd, &config.skills) {
+    for (name, skill) in mikmik_core::discover_skills(cwd, &config.skills) {
         commands.push((name, skill.description.clone()));
         skill_count += 1;
     }
@@ -1260,14 +1259,14 @@ fn session_slash_commands(
 }
 
 async fn connect_mcp_manager_arc(
-    servers: &[claurst_core::config::McpServerConfig],
-) -> Option<Arc<claurst_mcp::McpManager>> {
+    servers: &[mikmik_core::config::McpServerConfig],
+) -> Option<Arc<mikmik_mcp::McpManager>> {
     if servers.is_empty() {
         return None;
     }
 
     info!(count = servers.len(), "Connecting to MCP servers");
-    let mcp_manager = Arc::new(claurst_mcp::McpManager::connect_all(servers).await);
+    let mcp_manager = Arc::new(mikmik_mcp::McpManager::connect_all(servers).await);
     mcp_manager.clone().spawn_notification_poll_loop();
     Some(mcp_manager)
 }
@@ -1305,7 +1304,7 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let mut registry = claurst_api::ModelRegistry::new().with_cache_path(models_cache_path());
+    let mut registry = mikmik_api::ModelRegistry::new().with_cache_path(models_cache_path());
 
     if refresh {
         // Force-refresh by clearing the freshness check first.
@@ -1323,12 +1322,12 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
 
     // Layer user metadata overrides on top of the catalog (issue #309) so the
     // listing matches what the TUI picker and context logic use.
-    let overrides = claurst_core::config::Settings::load_sync()
+    let overrides = mikmik_core::config::Settings::load_sync()
         .map(|s| s.effective_config().model_overrides)
         .unwrap_or_default();
     registry.apply_model_overrides(&overrides);
 
-    let mut entries: Vec<&claurst_api::ModelEntry> = match &provider_filter {
+    let mut entries: Vec<&mikmik_api::ModelEntry> = match &provider_filter {
         Some(pid) => registry.list_by_provider(pid),
         None => registry.list_all(),
     };
@@ -1348,7 +1347,7 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
 
     if as_json {
         // Re-key by `provider/model` for jq-friendly output.
-        let mut map: std::collections::BTreeMap<String, &claurst_api::ModelEntry> =
+        let mut map: std::collections::BTreeMap<String, &mikmik_api::ModelEntry> =
             std::collections::BTreeMap::new();
         for e in &entries {
             map.insert(format!("{}/{}", e.info.provider_id, e.info.id), *e);
@@ -1421,7 +1420,7 @@ async fn run_models_command(args: &[String]) -> anyhow::Result<()> {
             } else if let Some(cr) = entry.cost_cache_read {
                 println!("    cache read=${:.2}/M", cr);
             }
-            if !matches!(entry.status, claurst_api::ModelStatus::Active) {
+            if !matches!(entry.status, mikmik_api::ModelStatus::Active) {
                 println!("    status: {:?}", entry.status);
             }
             if !entry.modalities_input.is_empty() {
@@ -1574,14 +1573,14 @@ async fn refresh_models_cache_once() {
 /// which is the binary's business, not the protocol layer's. The variants that
 /// report through a channel are the ones used: the printing ones would put
 /// their text on stdout, where every byte is parsed as JSON-RPC.
-fn acp_login_runner() -> claurst_acp::LoginRunner {
-    Arc::new(|request: claurst_acp::LoginRequest, notes| {
+fn acp_login_runner() -> mikmik_acp::LoginRunner {
+    Arc::new(|request: mikmik_acp::LoginRequest, notes| {
         Box::pin(async move {
             let (event_tx, mut event_rx) =
-                tokio::sync::mpsc::channel::<claurst_tui::DeviceAuthEvent>(8);
+                tokio::sync::mpsc::channel::<mikmik_tui::DeviceAuthEvent>(8);
             let relay = tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
-                    if let claurst_tui::DeviceAuthEvent::GotBrowserUrl { url } = event {
+                    if let mikmik_tui::DeviceAuthEvent::GotBrowserUrl { url } = event {
                         let _ = notes.send(format!(
                             "Opening a browser to sign in. If it did not open, visit:\n{url}"
                         ));
@@ -1589,7 +1588,7 @@ fn acp_login_runner() -> claurst_acp::LoginRunner {
                 }
             });
 
-            let who = if request.provider == claurst_core::ProviderId::CODEX {
+            let who = if request.provider == mikmik_core::ProviderId::CODEX {
                 codex_oauth_flow::run_oauth_flow_with_label(event_tx, request.label.as_deref())
                     .await
                     .map(|tokens| {
@@ -1620,16 +1619,16 @@ fn acp_login_runner() -> claurst_acp::LoginRunner {
 
 struct RefreshedProviderRuntime {
     config: Config,
-    client: Arc<claurst_api::AnthropicClient>,
-    provider_registry: Arc<claurst_api::ProviderRegistry>,
-    model_registry: Arc<claurst_api::ModelRegistry>,
-    auth_store: claurst_core::AuthStore,
+    client: Arc<mikmik_api::AnthropicClient>,
+    provider_registry: Arc<mikmik_api::ProviderRegistry>,
+    model_registry: Arc<mikmik_api::ModelRegistry>,
+    auth_store: mikmik_core::AuthStore,
 }
 
 async fn refresh_provider_runtime_state(
     current_config: &Config,
 ) -> anyhow::Result<RefreshedProviderRuntime> {
-    claurst_api::provider_state::clear_saved_provider_state().await?;
+    mikmik_api::provider_state::clear_saved_provider_state().await?;
 
     let mut config = current_config.clone();
     config.api_key = None;
@@ -1641,18 +1640,18 @@ async fn refresh_provider_runtime_state(
         .await
         .unwrap_or((String::new(), false));
     // Apply the user-configured request timeout (issue #175) before rebuilding.
-    claurst_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
-    let client_config = claurst_api::client::ClientConfig {
+    mikmik_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
+    let client_config = mikmik_api::client::ClientConfig {
         api_key,
         api_base: config.resolve_anthropic_api_base(),
         use_bearer_auth,
         ..Default::default()
     };
     let client = Arc::new(
-        claurst_api::AnthropicClient::new(client_config.clone())
+        mikmik_api::AnthropicClient::new(client_config.clone())
             .context("Failed to rebuild Anthropic client")?,
     );
-    let provider_registry = Arc::new(claurst_api::ProviderRegistry::from_config(
+    let provider_registry = Arc::new(mikmik_api::ProviderRegistry::from_config(
         &config,
         client_config,
     ));
@@ -1665,7 +1664,7 @@ async fn refresh_provider_runtime_state(
         client,
         provider_registry,
         model_registry,
-        auth_store: claurst_core::AuthStore::default(),
+        auth_store: mikmik_core::AuthStore::default(),
     })
 }
 
@@ -1688,18 +1687,18 @@ async fn reload_provider_runtime_state(
         (config.resolve_api_key().unwrap_or_default(), false)
     };
 
-    claurst_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
-    let client_config = claurst_api::client::ClientConfig {
+    mikmik_api::set_request_timeout_secs(config.resolve_request_timeout_secs_active());
+    let client_config = mikmik_api::client::ClientConfig {
         api_key,
         api_base: config.resolve_anthropic_api_base(),
         use_bearer_auth,
         ..Default::default()
     };
     let client = Arc::new(
-        claurst_api::AnthropicClient::new(client_config.clone())
+        mikmik_api::AnthropicClient::new(client_config.clone())
             .context("Failed to rebuild Anthropic client")?,
     );
-    let provider_registry = Arc::new(claurst_api::ProviderRegistry::from_config(
+    let provider_registry = Arc::new(mikmik_api::ProviderRegistry::from_config(
         &config,
         client_config,
     ));
@@ -1710,7 +1709,7 @@ async fn reload_provider_runtime_state(
         client,
         provider_registry,
         model_registry,
-        auth_store: claurst_core::AuthStore::default(),
+        auth_store: mikmik_core::AuthStore::default(),
     })
 }
 
@@ -1742,8 +1741,8 @@ fn normalize_provider_from_model(config: &mut Config) {
 /// with the composite `"<account>/<model>"` about half the time and the bare
 /// wire id the other half, with nothing in the type to say which, and this is
 /// the string that lands in `session.model` and `qcfg.model`.
-fn session_model_string(config: &Config, registry: &claurst_api::ModelRegistry) -> String {
-    let route = claurst_api::resolve_effective_route(config, registry);
+fn session_model_string(config: &Config, registry: &mikmik_api::ModelRegistry) -> String {
+    let route = mikmik_api::resolve_effective_route(config, registry);
     config.canonical_model(&route.account, &route.model)
 }
 
@@ -1751,12 +1750,12 @@ fn session_model_string(config: &Config, registry: &claurst_api::ModelRegistry) 
 ///
 /// `model.contains("haiku")` only ever answered for Anthropic, so turning fast
 /// mode on anywhere else left the badge off while fast mode was on.
-fn is_fast_mode_model(config: &Config, registry: &claurst_api::ModelRegistry) -> bool {
+fn is_fast_mode_model(config: &Config, registry: &mikmik_api::ModelRegistry) -> bool {
     let Some(model) = config.model.as_deref() else {
         return false;
     };
     let chosen = config.resolve_route(model);
-    let fast = claurst_api::resolve_small_model_route(config, registry);
+    let fast = mikmik_api::resolve_small_model_route(config, registry);
     chosen.account == fast.account && chosen.model == fast.model
 }
 
@@ -1765,10 +1764,10 @@ fn is_fast_mode_model(config: &Config, registry: &claurst_api::ModelRegistry) ->
 /// - "read-only"   → only ReadOnly/None permission tools and AskUserQuestion
 /// - "search-only" → only Grep, Glob, Read, WebSearch, WebFetch tools
 fn filter_tools_for_agent(
-    tools: Arc<Vec<Box<dyn claurst_tools::Tool>>>,
+    tools: Arc<Vec<Box<dyn mikmik_tools::Tool>>>,
     access: &str,
-) -> Arc<Vec<Box<dyn claurst_tools::Tool>>> {
-    use claurst_tools::PermissionLevel as PL;
+) -> Arc<Vec<Box<dyn mikmik_tools::Tool>>> {
+    use mikmik_tools::PermissionLevel as PL;
     match access {
         "read-only" => {
             // Collect names of tools that are read-only, then rebuild from all_tools
@@ -1781,7 +1780,7 @@ fn filter_tools_for_agent(
                 })
                 .map(|t| t.name().to_string())
                 .collect();
-            let filtered: Vec<Box<dyn claurst_tools::Tool>> = claurst_tools::all_tools()
+            let filtered: Vec<Box<dyn mikmik_tools::Tool>> = mikmik_tools::all_tools()
                 .into_iter()
                 .filter(|t| allowed_names.iter().any(|n| n == t.name()))
                 .collect();
@@ -1789,7 +1788,7 @@ fn filter_tools_for_agent(
         }
         "search-only" => {
             const SEARCH_TOOLS: &[&str] = &["Grep", "Glob", "Read", "WebSearch", "WebFetch"];
-            let filtered: Vec<Box<dyn claurst_tools::Tool>> = claurst_tools::all_tools()
+            let filtered: Vec<Box<dyn mikmik_tools::Tool>> = mikmik_tools::all_tools()
                 .into_iter()
                 .filter(|t| SEARCH_TOOLS.contains(&t.name()))
                 .collect();
@@ -1805,14 +1804,14 @@ fn filter_tools_for_agent(
 
 async fn run_headless(
     cli: &Cli,
-    client: Arc<claurst_api::AnthropicClient>,
-    tools: Arc<Vec<Box<dyn claurst_tools::Tool>>>,
+    client: Arc<mikmik_api::AnthropicClient>,
+    tools: Arc<Vec<Box<dyn mikmik_tools::Tool>>>,
     tool_ctx: ToolContext,
-    query_config: claurst_query::QueryConfig,
+    query_config: mikmik_query::QueryConfig,
     cost_tracker: Arc<CostTracker>,
     resume_request: Option<String>,
 ) -> anyhow::Result<()> {
-    use claurst_query::{QueryEvent, QueryOutcome};
+    use mikmik_query::{QueryEvent, QueryOutcome};
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
@@ -1827,7 +1826,7 @@ async fn run_headless(
         }
         ResumeOutcome::NothingToResume => {
             eprintln!("Warning: no previous sessions found, starting a new one.");
-            claurst_core::history::ConversationSession::new(query_config.model.clone())
+            mikmik_core::history::ConversationSession::new(query_config.model.clone())
         }
         // A script that asked to continue a conversation and silently got a
         // fresh one is worse off than one that was told.
@@ -1837,7 +1836,7 @@ async fn run_headless(
         }
         ResumeOutcome::NotRequested => {
             let mut session =
-                claurst_core::history::ConversationSession::new(query_config.model.clone());
+                mikmik_core::history::ConversationSession::new(query_config.model.clone());
             session.id = tool_ctx.session_id.clone();
             session
         }
@@ -1848,13 +1847,13 @@ async fn run_headless(
     // --input-format stream-json: stdin is newline-delimited JSON, each line is
     //   {"role":"user"|"assistant","content":"..."} (mirrors TS --input-format stream-json).
     // --input-format text (default): read prompt from positional arg or entire stdin as text.
-    let mut messages: Vec<claurst_core::types::Message> =
+    let mut messages: Vec<mikmik_core::types::Message> =
         if cli.input_format == CliInputFormat::StreamJson {
             use tokio::io::{self, AsyncBufReadExt, BufReader};
             let stdin = io::stdin();
             let mut reader = BufReader::new(stdin);
             let mut line = String::new();
-            let mut parsed: Vec<claurst_core::types::Message> = Vec::new();
+            let mut parsed: Vec<mikmik_core::types::Message> = Vec::new();
             loop {
                 line.clear();
                 let n = reader.read_line(&mut line).await?;
@@ -1874,9 +1873,9 @@ async fn run_headless(
                             .unwrap_or("")
                             .to_string();
                         if role == "assistant" {
-                            parsed.push(claurst_core::types::Message::assistant(content));
+                            parsed.push(mikmik_core::types::Message::assistant(content));
                         } else {
-                            parsed.push(claurst_core::types::Message::user(content));
+                            parsed.push(mikmik_core::types::Message::user(content));
                         }
                     }
                     Err(e) => {
@@ -1890,7 +1889,7 @@ async fn run_headless(
             if parsed.is_empty() {
                 // Also check positional arg as fallback
                 if let Some(ref p) = cli.prompt {
-                    parsed.push(claurst_core::types::Message::user(p.clone()));
+                    parsed.push(mikmik_core::types::Message::user(p.clone()));
                 }
             }
             parsed
@@ -1911,15 +1910,13 @@ async fn run_headless(
                 std::process::exit(1);
             }
 
-            vec![claurst_core::types::Message::user(prompt)]
+            vec![mikmik_core::types::Message::user(prompt)]
         };
 
     // --prefill: inject a partial assistant turn before the query so the model
     // continues from that text (mirrors TS --prefill flag).
     if let Some(ref prefill_text) = cli.prefill {
-        messages.push(claurst_core::types::Message::assistant(
-            prefill_text.clone(),
-        ));
+        messages.push(mikmik_core::types::Message::assistant(prefill_text.clone()));
     }
 
     if messages.is_empty() {
@@ -1956,7 +1953,7 @@ async fn run_headless(
     let msgs_arc_clone = msgs_arc.clone();
     let query_handle = tokio::spawn(async move {
         let mut msgs = msgs_arc_clone.lock().await.clone();
-        let outcome = claurst_query::run_query_loop(
+        let outcome = mikmik_query::run_query_loop(
             client_clone.as_ref(),
             &mut msgs,
             tools.as_slice(),
@@ -1980,8 +1977,8 @@ async fn run_headless(
 
     while let Some(event) = event_rx.recv().await {
         match &event {
-            QueryEvent::Stream(claurst_api::AnthropicStreamEvent::ContentBlockDelta {
-                delta: claurst_api::streaming::ContentDelta::TextDelta { text },
+            QueryEvent::Stream(mikmik_api::AnthropicStreamEvent::ContentBlockDelta {
+                delta: mikmik_api::streaming::ContentDelta::TextDelta { text },
                 ..
             }) => {
                 full_text.push_str(text);
@@ -2015,9 +2012,12 @@ async fn run_headless(
     }
 
     // Wait for the query task to finish and get the final outcome
-    let outcome = query_handle.await.unwrap_or(QueryOutcome::Error(
-        claurst_core::error::ClaudeError::Other("Query task panicked".to_string()),
-    ));
+    let outcome =
+        query_handle
+            .await
+            .unwrap_or(QueryOutcome::Error(mikmik_core::error::ClaudeError::Other(
+                "Query task panicked".to_string(),
+            )));
 
     // Final output
     match cli.output_format {
@@ -2105,8 +2105,8 @@ async fn run_headless(
     // `/session`, `/resume`, `/search` and every report, however long it ran.
     {
         let mut final_messages = msgs_arc.lock().await.clone();
-        let mut transcript = claurst_core::session_storage::TranscriptRecorder::new(
-            claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+        let mut transcript = mikmik_core::session_storage::TranscriptRecorder::new(
+            mikmik_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
             session.id.clone(),
         );
         if let Err(e) = transcript
@@ -2117,7 +2117,7 @@ async fn run_headless(
         }
         session.messages = final_messages;
         session.updated_at = chrono::Utc::now();
-        claurst_core::history::create_checkpoint(&mut session, None);
+        mikmik_core::history::create_checkpoint(&mut session, None);
         session.model = query_config.model.clone();
         session.working_dir = Some(tool_ctx.working_dir.display().to_string());
         if let Err(e) = persist_session(&session).await {
@@ -2127,13 +2127,13 @@ async fn run_headless(
 
     // Interpreters started by the REPL tool are kept alive between calls on
     // purpose; this is where that purpose ends.
-    claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
+    mikmik_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
     // The auto-compact circuit breaker is keyed by session, so it has to be
     // dropped here or a long-lived process keeps one entry per session it ran.
-    claurst_query::compact::forget_compact_state(&tool_ctx.session_id);
+    mikmik_query::compact::forget_compact_state(&tool_ctx.session_id);
 
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::SessionEnd,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::SessionEnd,
         None,
         serde_json::json!({ "session_id": tool_ctx.session_id }),
     )
@@ -2147,8 +2147,8 @@ async fn run_headless(
 // ---------------------------------------------------------------------------
 
 fn permission_request_from_core(
-    pending: &claurst_tools::PendingPermissionRequest,
-) -> claurst_tui::dialogs::PermissionRequest {
+    pending: &mikmik_tools::PendingPermissionRequest,
+) -> mikmik_tui::dialogs::PermissionRequest {
     let reason = pending.reason.clone();
     let tool_name = pending.request.tool_name.clone();
     let tool_use_id = pending.tool_use_id.clone();
@@ -2160,7 +2160,7 @@ fn permission_request_from_core(
                 .next()
                 .filter(|prefix| !prefix.is_empty())
                 .map(|prefix| format!("{} ", prefix));
-            claurst_tui::dialogs::PermissionRequest::bash(
+            mikmik_tui::dialogs::PermissionRequest::bash(
                 tool_use_id,
                 tool_name,
                 reason,
@@ -2168,24 +2168,19 @@ fn permission_request_from_core(
                 suggested_prefix,
             )
         }
-        ("PowerShell", Some(command)) => claurst_tui::dialogs::PermissionRequest::powershell(
+        ("PowerShell", Some(command)) => mikmik_tui::dialogs::PermissionRequest::powershell(
             tool_use_id,
             tool_name,
             reason,
             command,
         ),
         ("Read", Some(path)) => {
-            claurst_tui::dialogs::PermissionRequest::file_read(tool_use_id, tool_name, reason, path)
+            mikmik_tui::dialogs::PermissionRequest::file_read(tool_use_id, tool_name, reason, path)
         }
         (_, Some(path)) if matches!(tool_name.as_str(), "Write" | "Edit" | "NotebookEdit") => {
-            claurst_tui::dialogs::PermissionRequest::file_write(
-                tool_use_id,
-                tool_name,
-                reason,
-                path,
-            )
+            mikmik_tui::dialogs::PermissionRequest::file_write(tool_use_id, tool_name, reason, path)
         }
-        _ => claurst_tui::dialogs::PermissionRequest::from_reason(
+        _ => mikmik_tui::dialogs::PermissionRequest::from_reason(
             tool_use_id,
             tool_name,
             reason,
@@ -2220,18 +2215,18 @@ const BRIDGE_HISTORY_CHARS: usize = 4_000;
 /// the old name.
 async fn apply_session_rename(
     title: String,
-    session: &mut claurst_core::history::ConversationSession,
-    cmd_ctx: &mut claurst_commands::CommandContext,
-    app: &mut claurst_tui::App,
-    transcript: &mut claurst_core::session_storage::TranscriptRecorder,
+    session: &mut mikmik_core::history::ConversationSession,
+    cmd_ctx: &mut mikmik_commands::CommandContext,
+    app: &mut mikmik_tui::App,
+    transcript: &mut mikmik_core::session_storage::TranscriptRecorder,
 ) {
     session.title = Some(title.clone());
     session.updated_at = chrono::Utc::now();
     cmd_ctx.session_title = session.title.clone();
     app.session_title = session.title.clone();
-    if let Err(e) = claurst_core::history::save_session(session).await {
+    if let Err(e) = mikmik_core::history::save_session(session).await {
         app.push_notification(
-            claurst_tui::NotificationKind::Error,
+            mikmik_tui::NotificationKind::Error,
             format!("Renamed the session, but could not save it: {e}"),
             None,
         );
@@ -2240,12 +2235,12 @@ async fn apply_session_rename(
     // that stopped at the session record would not reach it.
     if let Err(e) = transcript.record_title(&title).await {
         app.push_notification(
-            claurst_tui::NotificationKind::Error,
+            mikmik_tui::NotificationKind::Error,
             format!("Renamed the session, but could not record it: {e}"),
             None,
         );
     }
-    claurst_tui::update_terminal_title(Some(&title));
+    mikmik_tui::update_terminal_title(Some(&title));
     app.status_message = Some(format!("Session renamed to \"{}\".", title));
 }
 
@@ -2256,13 +2251,13 @@ async fn apply_session_rename(
 /// out under the wrong session. Kept in one place because two callers need it:
 /// `/resume <id>` and the session browser's Enter.
 fn apply_session_resume(
-    resumed: claurst_core::history::ConversationSession,
-    session: &mut claurst_core::history::ConversationSession,
-    messages: &mut Vec<claurst_core::types::Message>,
-    cmd_ctx: &mut claurst_commands::CommandContext,
+    resumed: mikmik_core::history::ConversationSession,
+    session: &mut mikmik_core::history::ConversationSession,
+    messages: &mut Vec<mikmik_core::types::Message>,
+    cmd_ctx: &mut mikmik_commands::CommandContext,
     tool_ctx: &mut ToolContext,
-    app: &mut claurst_tui::App,
-    transcript: &mut claurst_core::session_storage::TranscriptRecorder,
+    app: &mut mikmik_tui::App,
+    transcript: &mut mikmik_core::session_storage::TranscriptRecorder,
 ) {
     *session = resumed;
     *messages = session.messages.clone();
@@ -2273,7 +2268,7 @@ fn apply_session_resume(
     app.model_name = session.model.clone();
     tool_ctx.session_id = session.id.clone();
     tool_ctx.file_history = Arc::new(ParkingMutex::new(
-        claurst_core::file_history::FileHistory::new(),
+        mikmik_core::file_history::FileHistory::new(),
     ));
     tool_ctx.current_turn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     cmd_ctx.session_id = session.id.clone();
@@ -2294,10 +2289,10 @@ fn apply_session_resume(
     // The resumed session has its own transcript, under whatever root its
     // working directory resolves to.
     transcript.rebind(
-        claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+        mikmik_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
         session.id.clone(),
     );
-    claurst_tui::update_terminal_title(session.title.as_deref());
+    mikmik_tui::update_terminal_title(session.title.as_deref());
     // By characters, not bytes: an id shorter than eight of them would panic
     // a byte slice, and nothing guarantees the length of one.
     let short_id: String = session.id.chars().take(8).collect();
@@ -2317,17 +2312,17 @@ fn apply_session_resume(
 /// is written by the model the session is actually talking to rather than by
 /// whichever one happens to have a client lying around.
 async fn run_compaction(
-    messages: &[claurst_core::types::Message],
+    messages: &[mikmik_core::types::Message],
     model: &str,
     instruction: Option<&str>,
     session_id: &str,
-    config: &claurst_core::Config,
-    client: &claurst_api::AnthropicClient,
-    provider_registry: Option<&std::sync::Arc<claurst_api::ProviderRegistry>>,
-) -> claurst_query::compact::CompactionRun {
+    config: &mikmik_core::Config,
+    client: &mikmik_api::AnthropicClient,
+    provider_registry: Option<&std::sync::Arc<mikmik_api::ProviderRegistry>>,
+) -> mikmik_query::compact::CompactionRun {
     // `/compact` honours the compact model too. "Always that one" has to hold
     // on every surface, or the setting means "usually".
-    claurst_query::compact::compact_on_demand(
+    mikmik_query::compact::compact_on_demand(
         &config.resolve_route(model),
         config,
         provider_registry.map(|registry| registry.as_ref()),
@@ -2340,20 +2335,20 @@ async fn run_compaction(
 }
 
 async fn persist_session(
-    session: &claurst_core::history::ConversationSession,
+    session: &mikmik_core::history::ConversationSession,
 ) -> anyhow::Result<()> {
-    claurst_core::history::save_session(session).await?;
+    mikmik_core::history::save_session(session).await?;
 
-    let db_path = claurst_core::config::Settings::config_dir().join("sessions.db");
-    let store = claurst_core::SqliteSessionStore::open(&db_path)?;
+    let db_path = mikmik_core::config::Settings::config_dir().join("sessions.db");
+    let store = mikmik_core::SqliteSessionStore::open(&db_path)?;
     store.save_session(&session.id, session.title.as_deref(), &session.model)?;
     for msg in &session.messages {
         let content_str = match &msg.content {
-            claurst_core::types::MessageContent::Text(t) => t.clone(),
-            claurst_core::types::MessageContent::Blocks(blocks) => blocks
+            mikmik_core::types::MessageContent::Text(t) => t.clone(),
+            mikmik_core::types::MessageContent::Blocks(blocks) => blocks
                 .iter()
                 .filter_map(|b| {
-                    if let claurst_core::types::ContentBlock::Text { text } = b {
+                    if let mikmik_core::types::ContentBlock::Text { text } = b {
                         Some(text.as_str())
                     } else {
                         None
@@ -2363,8 +2358,8 @@ async fn persist_session(
                 .join(" "),
         };
         let role = match msg.role {
-            claurst_core::types::Role::User => "user",
-            claurst_core::types::Role::Assistant => "assistant",
+            mikmik_core::types::Role::User => "user",
+            mikmik_core::types::Role::Assistant => "assistant",
         };
         let msg_id = msg.uuid.as_deref().unwrap_or("unknown");
         store.save_message(&session.id, msg_id, role, &content_str, None)?;
@@ -2380,7 +2375,7 @@ async fn persist_session(
 enum ResumeOutcome {
     /// No resume was asked for.
     NotRequested,
-    Resumed(Box<claurst_core::history::ConversationSession>),
+    Resumed(Box<mikmik_core::history::ConversationSession>),
     /// The most recent session was asked for and there is none.
     NothingToResume,
     /// A named session could not be loaded.
@@ -2394,7 +2389,7 @@ async fn resolve_resume(resume_id: Option<&str>) -> ResumeOutcome {
     };
 
     let id = if id == "__last__" {
-        let listing = claurst_core::history::list_sessions().await;
+        let listing = mikmik_core::history::list_sessions().await;
         for failure in &listing.unreadable {
             warn!(
                 path = %failure.path.display(),
@@ -2410,7 +2405,7 @@ async fn resolve_resume(resume_id: Option<&str>) -> ResumeOutcome {
         id.to_string()
     };
 
-    match claurst_core::history::load_session(&id).await {
+    match mikmik_core::history::load_session(&id).await {
         Ok(session) => ResumeOutcome::Resumed(Box::new(session)),
         Err(e) => ResumeOutcome::Failed(format!("Could not load session {id}: {e}")),
     }
@@ -2439,7 +2434,7 @@ fn remote_turn_can_start(
 /// form lives: `/model` answers with the way to set a model outright, which is
 /// the thing the picker would have done.
 fn terminal_only_notice(cmd: &str) -> String {
-    let usage = claurst_commands::find_command(cmd)
+    let usage = mikmik_commands::find_command(cmd)
         .map(|command| command.help().to_string())
         .unwrap_or_default();
     if usage.is_empty() {
@@ -2479,9 +2474,9 @@ fn remote_wait_reason(
 /// same prompt.
 fn mcp_approval_request(
     request_id: &str,
-    server: &claurst_core::config::McpServerConfig,
-) -> claurst_bridge::BridgeOutbound {
-    claurst_bridge::BridgeOutbound::McpApprovalRequest {
+    server: &mikmik_core::config::McpServerConfig,
+) -> mikmik_bridge::BridgeOutbound {
+    mikmik_bridge::BridgeOutbound::McpApprovalRequest {
         request_id: request_id.to_string(),
         server_name: server.name.clone(),
         command: server.command_line(),
@@ -2496,11 +2491,11 @@ fn mcp_approval_request(
 /// entry is rebuilt from what is on screen, which is the only state that
 /// outlives the relay's ring buffer.
 fn session_snapshot(
-    app: &claurst_tui::App,
+    app: &mikmik_tui::App,
     question_id: Option<&str>,
     mcp_request_id: Option<&str>,
-    messages: &[claurst_core::types::Message],
-) -> Vec<claurst_bridge::BridgeOutbound> {
+    messages: &[mikmik_core::types::Message],
+) -> Vec<mikmik_bridge::BridgeOutbound> {
     let mut snapshot = Vec::new();
 
     // First, because a client treats History as the whole transcript and
@@ -2511,7 +2506,7 @@ fn session_snapshot(
     if !app.is_streaming {
         let (entries, omitted) = history_for_bridge(messages);
         if !entries.is_empty() || omitted > 0 {
-            snapshot.push(claurst_bridge::BridgeOutbound::History { entries, omitted });
+            snapshot.push(mikmik_bridge::BridgeOutbound::History { entries, omitted });
         }
     }
 
@@ -2522,11 +2517,11 @@ fn session_snapshot(
     let rows = &app.timeline.rows;
     let dropped = rows.len().saturating_sub(BRIDGE_TIMELINE_ROWS);
     for row in &rows[dropped..] {
-        snapshot.push(claurst_bridge::BridgeOutbound::TimelineRow(row.clone()));
+        snapshot.push(mikmik_bridge::BridgeOutbound::TimelineRow(row.clone()));
     }
 
     if let Some(request) = app.permission_request.as_ref() {
-        snapshot.push(claurst_bridge::BridgeOutbound::PermissionRequest {
+        snapshot.push(mikmik_bridge::BridgeOutbound::PermissionRequest {
             request_id: request.tool_use_id.clone(),
             tool_use_id: request.tool_use_id.clone(),
             tool_name: request.tool_name.clone(),
@@ -2541,7 +2536,7 @@ fn session_snapshot(
 
     if app.ask_user_dialog.visible {
         if let Some(question_id) = question_id {
-            snapshot.push(claurst_bridge::BridgeOutbound::UserQuestion {
+            snapshot.push(mikmik_bridge::BridgeOutbound::UserQuestion {
                 question_id: question_id.to_string(),
                 question: app.ask_user_dialog.question.clone(),
                 options: app.ask_user_dialog.options.clone().unwrap_or_default(),
@@ -2563,10 +2558,10 @@ fn session_snapshot(
 /// Kept separate from the dialog so a remote answer and a keyboard answer end
 /// up at the same `handle_mcp_approval_decision` call.
 fn mcp_choice_for(
-    decision: claurst_bridge::McpApprovalDecision,
-) -> claurst_tui::dialogs::McpApprovalChoice {
-    use claurst_bridge::McpApprovalDecision;
-    use claurst_tui::dialogs::McpApprovalChoice;
+    decision: mikmik_bridge::McpApprovalDecision,
+) -> mikmik_tui::dialogs::McpApprovalChoice {
+    use mikmik_bridge::McpApprovalDecision;
+    use mikmik_tui::dialogs::McpApprovalChoice;
     match decision {
         McpApprovalDecision::AllowSession => McpApprovalChoice::AllowSession,
         McpApprovalDecision::AllowAlways => McpApprovalChoice::AllowAlways,
@@ -2580,9 +2575,9 @@ fn mcp_choice_for(
 /// client can say the transcript is partial instead of implying it starts
 /// here.
 fn history_for_bridge(
-    messages: &[claurst_core::types::Message],
-) -> (Vec<claurst_bridge::BridgeHistoryEntry>, usize) {
-    use claurst_core::types::{ContentBlock, MessageContent, Role};
+    messages: &[mikmik_core::types::Message],
+) -> (Vec<mikmik_bridge::BridgeHistoryEntry>, usize) {
+    use mikmik_core::types::{ContentBlock, MessageContent, Role};
 
     let omitted = messages.len().saturating_sub(BRIDGE_HISTORY_TURNS);
     let entries = messages[omitted..]
@@ -2622,7 +2617,7 @@ fn history_for_bridge(
                 return None;
             }
 
-            Some(claurst_bridge::BridgeHistoryEntry {
+            Some(mikmik_bridge::BridgeHistoryEntry {
                 role: role.to_string(),
                 text,
                 tools,
@@ -2647,15 +2642,15 @@ fn history_for_bridge(
 /// finishing between reads would misattribute the cost.
 fn bridge_usage(
     model: &str,
-    usage: &claurst_core::types::UsageInfo,
+    usage: &mikmik_core::types::UsageInfo,
     session_cost_usd: f64,
-) -> claurst_bridge::BridgeUsage {
-    claurst_bridge::BridgeUsage {
+) -> mikmik_bridge::BridgeUsage {
+    mikmik_bridge::BridgeUsage {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_tokens: usage.cache_creation_input_tokens,
         cache_read_tokens: usage.cache_read_input_tokens,
-        cost_usd: Some(claurst_core::cost::ModelPricing::for_model(model).cost_of(
+        cost_usd: Some(mikmik_core::cost::ModelPricing::for_model(model).cost_of(
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_creation_input_tokens,
@@ -2667,12 +2662,12 @@ fn bridge_usage(
 
 fn remote_user_message(
     content: &str,
-    attachments: &[claurst_bridge::BridgeAttachment],
-) -> claurst_core::types::Message {
-    use claurst_core::types::{ContentBlock, ImageSource, MessageContent};
+    attachments: &[mikmik_bridge::BridgeAttachment],
+) -> mikmik_core::types::Message {
+    use mikmik_core::types::{ContentBlock, ImageSource, MessageContent};
 
     if attachments.is_empty() {
-        return claurst_core::types::Message::user(content);
+        return mikmik_core::types::Message::user(content);
     }
 
     let mut text = content.to_string();
@@ -2702,7 +2697,7 @@ fn remote_user_message(
         }
     }
 
-    let mut message = claurst_core::types::Message::user(String::new());
+    let mut message = mikmik_core::types::Message::user(String::new());
     let mut blocks = Vec::with_capacity(images.len() + 1);
     if !text.trim().is_empty() {
         blocks.push(ContentBlock::Text { text });
@@ -2730,10 +2725,8 @@ struct PermissionSettlement {
 }
 
 fn settle_pending_permission(
-    pending_permissions: &ParkingMutex<claurst_tools::PendingPermissionStore>,
-    permission_manager: Option<
-        &Arc<std::sync::Mutex<claurst_core::permissions::PermissionManager>>,
-    >,
+    pending_permissions: &ParkingMutex<mikmik_tools::PendingPermissionStore>,
+    permission_manager: Option<&Arc<std::sync::Mutex<mikmik_core::permissions::PermissionManager>>>,
     tool_use_id: &str,
     selected_key: Option<char>,
 ) -> Option<PermissionSettlement> {
@@ -2741,8 +2734,8 @@ fn settle_pending_permission(
 
     let selected_path = pending.request.path.clone();
     let decision = match selected_key {
-        Some('n') => claurst_core::permissions::PermissionDecision::Deny,
-        _ => claurst_core::permissions::PermissionDecision::Allow,
+        Some('n') => mikmik_core::permissions::PermissionDecision::Deny,
+        _ => mikmik_core::permissions::PermissionDecision::Allow,
     };
 
     if let Some(manager) = permission_manager {
@@ -2757,7 +2750,7 @@ fn settle_pending_permission(
                 }
                 Some('p') => {
                     let mut settings =
-                        claurst_core::config::Settings::load_sync().unwrap_or_default();
+                        mikmik_core::config::Settings::load_sync().unwrap_or_default();
                     if let Some(path) = selected_path.as_deref() {
                         let pattern = format!("{}*", path);
                         let _ = manager.add_persistent_allow_path(
@@ -2775,10 +2768,7 @@ fn settle_pending_permission(
         }
     }
 
-    let denied = matches!(
-        decision,
-        claurst_core::permissions::PermissionDecision::Deny
-    );
+    let denied = matches!(decision, mikmik_core::permissions::PermissionDecision::Deny);
     if let Some(tx) = pending.decision_tx.take() {
         let _ = tx.send(decision);
     }
@@ -2795,9 +2785,9 @@ fn settle_pending_permission(
 /// Paused, budget-limited and absent goals clear the footer badge without
 /// counting as complete, which is what makes the muted transcript block mean
 /// "this goal is closed" rather than "this goal is not running right now".
-fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, bool) {
+fn goal_display_state(goal: Option<&mikmik_core::Goal>) -> (Option<String>, bool) {
     let badge = goal
-        .filter(|goal| goal.status == claurst_core::GoalStatus::Active)
+        .filter(|goal| goal.status == mikmik_core::GoalStatus::Active)
         .map(|goal| {
             format!(
                 "active · {} · {} turns",
@@ -2805,7 +2795,7 @@ fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, boo
                 goal.turns_used
             )
         });
-    let completed = goal.is_some_and(|goal| goal.status == claurst_core::GoalStatus::Complete);
+    let completed = goal.is_some_and(|goal| goal.status == mikmik_core::GoalStatus::Complete);
     (badge, completed)
 }
 
@@ -2817,9 +2807,9 @@ fn goal_display_state(goal: Option<&claurst_core::Goal>) -> (Option<String>, boo
 /// costs a token.
 async fn run_bang_command(
     command: &str,
-    tool_ctx: &claurst_tools::ToolContext,
-) -> (String, claurst_tui::app::SystemMessageStyle) {
-    let result = claurst_tools::PtyBashTool
+    tool_ctx: &mikmik_tools::ToolContext,
+) -> (String, mikmik_tui::app::SystemMessageStyle) {
+    let result = mikmik_tools::PtyBashTool
         .run_unprompted(command, tool_ctx)
         .await;
     let body = result.content.trim_end();
@@ -2829,9 +2819,9 @@ async fn run_bang_command(
         format!("$ {command}\n{body}")
     };
     let style = if result.is_error {
-        claurst_tui::app::SystemMessageStyle::Warning
+        mikmik_tui::app::SystemMessageStyle::Warning
     } else {
-        claurst_tui::app::SystemMessageStyle::Info
+        mikmik_tui::app::SystemMessageStyle::Info
     };
     (text, style)
 }
@@ -2841,39 +2831,37 @@ async fn run_bang_command(
 /// Both config-changing command arms derive the flag from the same place, so a
 /// command that leaves plan mode through either one cannot leave the badge up
 /// with nothing behind it.
-fn plan_badge_for(mode: claurst_core::config::PermissionMode) -> bool {
-    matches!(mode, claurst_core::config::PermissionMode::Plan)
+fn plan_badge_for(mode: mikmik_core::config::PermissionMode) -> bool {
+    matches!(mode, mikmik_core::config::PermissionMode::Plan)
 }
 
 async fn run_interactive(
     config: Config,
-    settings: claurst_core::config::Settings,
+    settings: mikmik_core::config::Settings,
     settings_load_error: Option<String>,
-    client: Arc<claurst_api::AnthropicClient>,
-    tools: Arc<Vec<Box<dyn claurst_tools::Tool>>>,
+    client: Arc<mikmik_api::AnthropicClient>,
+    tools: Arc<Vec<Box<dyn mikmik_tools::Tool>>>,
     tool_ctx: ToolContext,
-    query_config: claurst_query::QueryConfig,
+    query_config: mikmik_query::QueryConfig,
     cost_tracker: Arc<CostTracker>,
     resume_id: Option<String>,
-    bridge_config: Option<claurst_bridge::BridgeConfig>,
+    bridge_config: Option<mikmik_bridge::BridgeConfig>,
     has_credentials: bool,
-    model_registry: Arc<claurst_api::ModelRegistry>,
-    user_question_rx: Option<
-        tokio::sync::mpsc::UnboundedReceiver<claurst_tools::UserQuestionEvent>,
-    >,
-    pending_project_mcp: Vec<claurst_core::config::McpServerConfig>,
+    model_registry: Arc<mikmik_api::ModelRegistry>,
+    user_question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::UserQuestionEvent>>,
+    pending_project_mcp: Vec<mikmik_core::config::McpServerConfig>,
     mcp_project_root: Option<PathBuf>,
-    project_trust_pending: Option<claurst_core::project_trust::GatedProjectSettings>,
+    project_trust_pending: Option<mikmik_core::project_trust::GatedProjectSettings>,
     project_trust_root: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    use claurst_bridge::{BridgeOutbound, TuiBridgeEvent};
-    use claurst_commands::{execute_command, CommandContext, CommandResult};
-    use claurst_query::{QueryEvent, QueryOutcome};
-    use claurst_tui::{
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+    use mikmik_bridge::{BridgeOutbound, TuiBridgeEvent};
+    use mikmik_commands::{execute_command, CommandContext, CommandResult};
+    use mikmik_query::{QueryEvent, QueryOutcome};
+    use mikmik_tui::{
         bridge_state::BridgeConnectionState, device_auth_dialog::DeviceAuthEvent,
         notifications::NotificationKind, render::render_app, restore_terminal, setup_terminal, App,
     };
-    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
     use std::time::Duration;
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
@@ -2883,7 +2871,7 @@ async fn run_interactive(
     let mut tool_ctx = tool_ctx;
     let mut resume_warning: Option<String> = None;
     let fresh_session = || {
-        let mut session = claurst_core::history::ConversationSession::new(session_model_string(
+        let mut session = mikmik_core::history::ConversationSession::new(session_model_string(
             &config,
             &model_registry,
         ));
@@ -2921,8 +2909,8 @@ async fn run_interactive(
     // after each turn, instead of the REPL re-dispatching a fresh turn. Select
     // the goal policy for interactive user turns when the /goal feature is on;
     // the GoalPolicy is a no-op (stops after one turn) when no goal is active.
-    if claurst_core::goals_enabled() {
-        base_query_config.continuation = claurst_query::ContinuationMode::Goal;
+    if mikmik_core::goals_enabled() {
+        base_query_config.continuation = mikmik_query::ContinuationMode::Goal;
     }
     let mut live_config = config.clone();
     if !session.model.is_empty() {
@@ -2930,14 +2918,14 @@ async fn run_interactive(
     }
     let pending_permissions = tool_ctx.pending_permissions.clone().unwrap_or_else(|| {
         Arc::new(ParkingMutex::new(
-            claurst_tools::PendingPermissionStore::default(),
+            mikmik_tools::PendingPermissionStore::default(),
         ))
     });
 
     // Appends each completed turn to the session's JSONL transcript, which
     // the welcome screen's recent activity, `/stats` and `/rewind` read.
-    let mut transcript = claurst_core::session_storage::TranscriptRecorder::new(
-        claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+    let mut transcript = mikmik_core::session_storage::TranscriptRecorder::new(
+        mikmik_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
         session.id.clone(),
     );
 
@@ -2950,14 +2938,14 @@ async fn run_interactive(
     app.skill_count = skill_count;
     if let Some(error) = settings_load_error {
         app.invalid_config_dialog =
-            claurst_tui::InvalidConfigDialogState::show_settings_error(&error);
+            mikmik_tui::InvalidConfigDialogState::show_settings_error(&error);
     }
     // Gate input shift-normalization on whether the terminal speaks the kitty
     // keyboard protocol (detected in setup_terminal). On terminals that don't —
     // Windows conhost / CMD / legacy PowerShell, etc. — printable keys already
     // arrive as their final character, so re-shifting them would corrupt input
     // (issue #183: typing `/` produced `?`).
-    app.kitty_keyboard_active = claurst_tui::keyboard_enhancement_active();
+    app.kitty_keyboard_active = mikmik_tui::keyboard_enhancement_active();
     // The companion reads two files, so it is loaded once here rather than
     // per frame. `/buddy` reports a config change and the loop reloads it.
     app.reload_companion();
@@ -3030,7 +3018,7 @@ async fn run_interactive(
     // Accepting persists `skipDangerousModePermissionPrompt` to settings.json
     // (TS parity), so the warning is a one-time gate — not re-shown on every
     // launch.
-    use claurst_core::config::PermissionMode;
+    use mikmik_core::config::PermissionMode;
     if live_config.permission_mode == PermissionMode::BypassPermissions
         && !settings.skip_dangerous_mode_permission_prompt
         && !app.bypass_permissions_dialog_shown
@@ -3050,19 +3038,19 @@ async fn run_interactive(
         } else if !settings.has_completed_onboarding {
             // User has credentials but hasn't formally completed onboarding — mark it done
             // silently so they never see it.
-            let _ = claurst_tui::App::persist_onboarding_complete_pub();
+            let _ = mikmik_tui::App::persist_onboarding_complete_pub();
         }
     }
 
     // Version-upgrade notice: record the current version for future comparisons.
     // (Actual upgrade notice UI is handled by the release-notes slash command.)
     {
-        let current_version = claurst_core::constants::APP_VERSION.to_string();
+        let current_version = mikmik_core::constants::APP_VERSION.to_string();
         if settings.last_seen_version.as_deref() != Some(&current_version) {
             // Persist asynchronously to avoid blocking startup.
             let version_clone = current_version.clone();
             tokio::spawn(async move {
-                if let Ok(mut s) = claurst_core::config::Settings::load().await {
+                if let Ok(mut s) = mikmik_core::config::Settings::load().await {
                     s.last_seen_version = Some(version_clone);
                     let _ = s.save().await;
                 }
@@ -3112,7 +3100,7 @@ async fn run_interactive(
     // one, the other dropped the prompt without a trace.
     let mut deferred_remote_prompts: std::collections::VecDeque<(
         String,
-        Vec<claurst_bridge::BridgeAttachment>,
+        Vec<mikmik_bridge::BridgeAttachment>,
     )> = std::collections::VecDeque::new();
 
     // Whether the client has already been told why its prompt is waiting. One
@@ -3131,7 +3119,7 @@ async fn run_interactive(
 
     // Last session facts pushed to the relay, so a re-registration only goes
     // out when one of them actually changed.
-    let mut bridge_info_sent: Option<claurst_bridge::SessionInfo> = None;
+    let mut bridge_info_sent: Option<mikmik_bridge::SessionInfo> = None;
 
     // Preserve the bridge token before consuming bridge_config so we can reconstruct
     // a BridgeSessionInfo once the bridge worker reports it has connected.
@@ -3148,7 +3136,7 @@ async fn run_interactive(
         let cancel_clone = bridge_cancel.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                claurst_bridge::run_bridge_loop(cfg, tui_tx, outbound_rx, cancel_clone).await
+                mikmik_bridge::run_bridge_loop(cfg, tui_tx, outbound_rx, cancel_clone).await
             {
                 warn!("Bridge loop exited with error: {}", e);
             }
@@ -3178,7 +3166,7 @@ async fn run_interactive(
 
     // Once the bridge worker reports Connected we build this from the session
     // credentials so both relay tasks can POST/poll the /api/bridge/sessions API.
-    let mut bridge_session_info: Option<std::sync::Arc<claurst_bridge::BridgeSessionInfo>> = None;
+    let mut bridge_session_info: Option<std::sync::Arc<mikmik_bridge::BridgeSessionInfo>> = None;
 
     let mut messages = initial_messages;
     let mut cmd_ctx = CommandContext {
@@ -3201,8 +3189,7 @@ async fn run_interactive(
 
     // tools is already Arc<Vec<...>> — share it across spawned tasks without copying.
     // Keep the full unfiltered tool set so agent-mode switching can re-filter.
-    let all_tools_arc: Arc<Vec<Box<dyn claurst_tools::Tool>>> =
-        Arc::new(claurst_tools::all_tools());
+    let all_tools_arc: Arc<Vec<Box<dyn mikmik_tools::Tool>>> = Arc::new(mikmik_tools::all_tools());
     let mut tools_arc = tools;
 
     // Current cancel token (replaced each turn)
@@ -3213,12 +3200,12 @@ async fn run_interactive(
     // would also have to be given a meaning on the bridge, where the companion
     // does not exist.
     let (bubble_tx, mut bubble_rx) = mpsc::unbounded_channel::<String>();
-    type MessagesArc = Arc<tokio::sync::Mutex<Vec<claurst_core::types::Message>>>;
+    type MessagesArc = Arc<tokio::sync::Mutex<Vec<mikmik_core::types::Message>>>;
     let mut current_query: Option<(tokio::task::JoinHandle<QueryOutcome>, MessagesArc)> = None;
     // Background update check: spawned once at startup; result delivered via channel.
     let (update_tx, mut update_rx) = tokio::sync::mpsc::channel::<Option<String>>(1);
     tokio::spawn(async move {
-        let info = claurst_core::check_for_updates().await;
+        let info = mikmik_core::check_for_updates().await;
         let version = info.map(|i| i.latest_version);
         let _ = update_tx.send(version).await;
     });
@@ -3231,19 +3218,19 @@ async fn run_interactive(
     // loop can update status and trigger a reconnect after browser auth finishes.
     enum McpAuthEvent {
         /// Browser auth completed and the token was persisted successfully.
-        Completed(claurst_mcp::oauth::McpAuthResult),
+        Completed(mikmik_mcp::oauth::McpAuthResult),
         /// Browser auth or token exchange failed.
         Failed(String),
     }
     let (mcp_auth_tx, mut mcp_auth_rx) = mpsc::channel::<McpAuthEvent>(8);
     // Build a non-blocking runner so `/mcp auth` can return immediately while
     // the browser flow continues in the background.
-    let mcp_auth_runner: Arc<dyn Fn(claurst_mcp::oauth::McpAuthSession) + Send + Sync> = {
+    let mcp_auth_runner: Arc<dyn Fn(mikmik_mcp::oauth::McpAuthSession) + Send + Sync> = {
         let tx = mcp_auth_tx.clone();
         Arc::new(move |session| {
             let tx = tx.clone();
             tokio::spawn(async move {
-                let event = match claurst_mcp::oauth::run_mcp_auth_session(session).await {
+                let event = match mikmik_mcp::oauth::run_mcp_auth_session(session).await {
                     Ok(result) => McpAuthEvent::Completed(result),
                     Err(err) => McpAuthEvent::Failed(err.to_string()),
                 };
@@ -3266,7 +3253,7 @@ async fn run_interactive(
     // setting; read it once at startup. `progress_shown` tracks whether we've
     // told the terminal we're "busy", so the escape is only emitted on an actual
     // streaming-state edge.
-    let progress_bar_enabled = claurst_core::config::Settings::load_sync()
+    let progress_bar_enabled = mikmik_core::config::Settings::load_sync()
         .map(|s| s.terminal_progress_bar)
         .unwrap_or(true);
     let mut progress_shown = false;
@@ -3287,8 +3274,7 @@ async fn run_interactive(
         // Creating a branch writes a new session record, so the screen asks
         // and this loop does it, then switches to what it made.
         if let Some((name, at_message)) = app.pending_branch_create.take() {
-            match claurst_core::history::branch_session(&session.id, at_message, Some(&name)).await
-            {
+            match mikmik_core::history::branch_session(&session.id, at_message, Some(&name)).await {
                 Ok(branched) => {
                     app.status_message = Some(format!(
                         "Created branch \"{name}\" at message {at_message}."
@@ -3296,7 +3282,7 @@ async fn run_interactive(
                     app.pending_resume_session_id = Some(branched.id);
                 }
                 Err(e) => app.push_notification(
-                    claurst_tui::NotificationKind::Error,
+                    mikmik_tui::NotificationKind::Error,
                     format!("Could not create the branch: {e}"),
                     None,
                 ),
@@ -3307,13 +3293,13 @@ async fn run_interactive(
             if id == session.id {
                 app.status_message = Some("The current branch cannot be deleted.".to_string());
             } else {
-                match claurst_core::history::delete_session(&id).await {
+                match mikmik_core::history::delete_session(&id).await {
                     Ok(()) => {
                         app.status_message = Some("Branch deleted.".to_string());
                         app.branch_list_pending = app.session_branching.visible;
                     }
                     Err(e) => app.push_notification(
-                        claurst_tui::NotificationKind::Error,
+                        mikmik_tui::NotificationKind::Error,
                         format!("Could not delete the branch: {e}"),
                         None,
                     ),
@@ -3324,7 +3310,7 @@ async fn run_interactive(
         // The session browser's Enter hands the id over rather than acting on
         // it, because swapping sessions moves state the TUI does not hold.
         if let Some(id) = app.pending_resume_session_id.take() {
-            match claurst_core::history::load_session(&id).await {
+            match mikmik_core::history::load_session(&id).await {
                 Ok(resumed) => apply_session_resume(
                     resumed,
                     &mut session,
@@ -3336,7 +3322,7 @@ async fn run_interactive(
                 ),
                 Err(e) => {
                     app.push_notification(
-                        claurst_tui::NotificationKind::Error,
+                        mikmik_tui::NotificationKind::Error,
                         format!("Could not resume session: {e}"),
                         Some(8),
                     );
@@ -3348,7 +3334,7 @@ async fn run_interactive(
         if let Some((outcome, pending_input, pending_imgs)) =
             app.file_injection_dialog.take_outcome()
         {
-            use claurst_tui::FileInjectionOutcome;
+            use mikmik_tui::FileInjectionOutcome;
 
             if matches!(outcome, FileInjectionOutcome::Abort) {
                 // Abort: input already restored to prompt by app.rs handler
@@ -3381,13 +3367,13 @@ async fn run_interactive(
         // the user is looking at.
         let osc8_hits = {
             let completed = terminal.draw(|f| render_app(f, &app))?;
-            claurst_tui::osc8::scan_buffer_for_urls(completed.buffer)
+            mikmik_tui::osc8::scan_buffer_for_urls(completed.buffer)
         };
 
         // Re-emit those cells wrapped in hyperlink escapes so terminals that
         // support OSC 8 make them clickable. A failed write is never worth
         // killing the TUI over.
-        if let Err(err) = claurst_tui::osc8::emit_hits(&osc8_hits) {
+        if let Err(err) = mikmik_tui::osc8::emit_hits(&osc8_hits) {
             tracing::debug!(target: "osc8", "hyperlink overlay write failed: {err}");
         }
 
@@ -3396,7 +3382,7 @@ async fn run_interactive(
         // show a "working" bar while a turn is active and clear it when idle.
         let want_progress = app.is_streaming && progress_bar_enabled;
         if want_progress != progress_shown {
-            claurst_tui::set_terminal_progress(want_progress);
+            mikmik_tui::set_terminal_progress(want_progress);
             progress_shown = want_progress;
         }
 
@@ -3503,13 +3489,13 @@ async fn run_interactive(
                         // Queue the message: it will auto-submit once the
                         // current turn finishes (issue #149).
                         let input = app.take_input();
-                        if claurst_tui::input::is_bang_command(&input) {
+                        if mikmik_tui::input::is_bang_command(&input) {
                             // A queued bang would reach the model as a message
                             // once the turn ended, which is the one thing this
                             // path exists to avoid. Hand the text back instead.
                             app.set_prompt_text(input);
                             app.notifications.push(
-                                claurst_tui::NotificationKind::Warning,
+                                mikmik_tui::NotificationKind::Warning,
                                 "Shell commands wait for the turn to finish.".to_string(),
                                 Some(3),
                             );
@@ -3520,7 +3506,7 @@ async fn run_interactive(
                             app.queued_messages.push_back(input);
                             let total = app.queued_messages.len();
                             app.notifications.push(
-                                claurst_tui::NotificationKind::Info,
+                                mikmik_tui::NotificationKind::Info,
                                 format!("Queued ({}): {}", total, preview),
                                 Some(3),
                             );
@@ -3535,7 +3521,7 @@ async fn run_interactive(
                             .and_then(|index| app.prompt_input.suggestions.get(index))
                             .is_some_and(|suggestion| {
                                 suggestion.source
-                                    == claurst_tui::prompt_input::TypeaheadSource::FileRef
+                                    == mikmik_tui::prompt_input::TypeaheadSource::FileRef
                             })
                         {
                             app.prompt_input.accept_suggestion();
@@ -3559,9 +3545,8 @@ async fn run_interactive(
 
                         // Check for a shell command to run here, before the
                         // slash check: a bang line never reaches the model.
-                        if claurst_tui::input::is_bang_command(&input) {
-                            let command =
-                                claurst_tui::input::parse_bang_command(&input).to_string();
+                        if mikmik_tui::input::is_bang_command(&input) {
+                            let command = mikmik_tui::input::parse_bang_command(&input).to_string();
                             if command.is_empty() {
                                 app.set_prompt_text(input);
                                 app.status_message =
@@ -3584,7 +3569,7 @@ async fn run_interactive(
                         // Check for slash command
                         if input.starts_with('/') {
                             let (cmd_name, cmd_args) =
-                                claurst_tui::input::parse_slash_command(&input);
+                                mikmik_tui::input::parse_slash_command(&input);
                             let cmd_name = cmd_name.to_string();
                             let cmd_args = cmd_args.to_string();
 
@@ -3636,7 +3621,7 @@ async fn run_interactive(
                             // to make room for it. Let that text through
                             // instead.
                             let remote_wants_text =
-                                from_remote && claurst_tui::App::opens_terminal_view(&cmd_name);
+                                from_remote && mikmik_tui::App::opens_terminal_view(&cmd_name);
                             let handled_by_tui = if skip_tui_for_args || remote_wants_text {
                                 false
                             } else {
@@ -3686,7 +3671,7 @@ async fn run_interactive(
                                     // lazy-session semantics.
                                     let model =
                                         session_model_string(&cmd_ctx.config, &model_registry);
-                                    session = claurst_commands::build_home_session(
+                                    session = mikmik_commands::build_home_session(
                                         model,
                                         Some(tool_ctx.working_dir.display().to_string()),
                                     );
@@ -3697,7 +3682,7 @@ async fn run_interactive(
                                     cmd_ctx.session_title = None;
                                     app.session_id = session.id.clone();
                                     transcript.rebind(
-                                        claurst_core::session_storage::transcript_root_for(
+                                        mikmik_core::session_storage::transcript_root_for(
                                             &tool_ctx.working_dir,
                                         ),
                                         session.id.clone(),
@@ -3705,7 +3690,7 @@ async fn run_interactive(
                                     // Reset per-turn diff/turn bookkeeping, as
                                     // ResumeSession does when swapping sessions.
                                     tool_ctx.file_history = Arc::new(ParkingMutex::new(
-                                        claurst_core::file_history::FileHistory::new(),
+                                        mikmik_core::file_history::FileHistory::new(),
                                     ));
                                     tool_ctx.current_turn =
                                         Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3713,7 +3698,7 @@ async fn run_interactive(
                                         tool_ctx.file_history.clone(),
                                         tool_ctx.current_turn.clone(),
                                     );
-                                    claurst_tui::update_terminal_title(None);
+                                    mikmik_tui::update_terminal_title(None);
                                     app.status_message = Some("Started a new session.".to_string());
                                     transcript_replaced = true;
                                 }
@@ -3737,16 +3722,16 @@ async fn run_interactive(
                                     session.working_dir = Some(destination.display().to_string());
                                     session.updated_at = chrono::Utc::now();
                                     if let Err(e) =
-                                        claurst_core::history::save_session(&session).await
+                                        mikmik_core::history::save_session(&session).await
                                     {
                                         app.push_notification(
-                                            claurst_tui::NotificationKind::Error,
+                                            mikmik_tui::NotificationKind::Error,
                                             format!("Could not save the session: {e}"),
                                             None,
                                         );
                                     }
-                                    claurst_plugins::run_global_hook(
-                                        claurst_plugins::HookEventKind::CwdChanged,
+                                    mikmik_plugins::run_global_hook(
+                                        mikmik_plugins::HookEventKind::CwdChanged,
                                         None,
                                         serde_json::json!({
                                             "working_dir": destination.display().to_string(),
@@ -3786,7 +3771,7 @@ async fn run_interactive(
                                     if let Err(e) = transcript.set_active_leaf(tip.as_deref()).await
                                     {
                                         app.push_notification(
-                                            claurst_tui::NotificationKind::Error,
+                                            mikmik_tui::NotificationKind::Error,
                                             format!("Could not move the transcript's tip: {e}"),
                                             None,
                                         );
@@ -3819,7 +3804,7 @@ async fn run_interactive(
                                     // outcome, so the reason arrives with it.
                                     if let Some(note) = run.note {
                                         app.push_notification(
-                                            claurst_tui::NotificationKind::Warning,
+                                            mikmik_tui::NotificationKind::Warning,
                                             note,
                                             None,
                                         );
@@ -3839,7 +3824,7 @@ async fn run_interactive(
                                                 transcript.set_active_leaf(tip.as_deref()).await
                                             {
                                                 app.push_notification(
-                                                    claurst_tui::NotificationKind::Error,
+                                                    mikmik_tui::NotificationKind::Error,
                                                     format!(
                                                         "Could not move the transcript's tip: {e}"
                                                     ),
@@ -3849,7 +3834,7 @@ async fn run_interactive(
                                             // The summary is the whole prompt now,
                                             // so the footer has to say so.
                                             app.context_used_tokens =
-                                                claurst_query::compact::estimate_context_size(
+                                                mikmik_query::compact::estimate_context_size(
                                                     &messages,
                                                 );
                                             app.token_warning_threshold_shown = 0;
@@ -3868,7 +3853,7 @@ async fn run_interactive(
                                             // The conversation is untouched.
                                             app.status_message = None;
                                             app.push_notification(
-                                                claurst_tui::NotificationKind::Error,
+                                                mikmik_tui::NotificationKind::Error,
                                                 format!("Could not compact: {e}"),
                                                 None,
                                             );
@@ -3882,16 +3867,16 @@ async fn run_interactive(
                                         Some("Select a message to rewind to.".to_string());
                                 }
                                 Some(CommandResult::ReloadPlugins) => {
-                                    let previous = claurst_plugins::global_plugin_registry();
+                                    let previous = mikmik_plugins::global_plugin_registry();
                                     let registry =
-                                        claurst_plugins::load_plugins(&tool_ctx.working_dir, &[])
+                                        mikmik_plugins::load_plugins(&tool_ctx.working_dir, &[])
                                             .await;
                                     let diff = previous
                                         .as_ref()
                                         .map(|old| registry.diff_against(old))
                                         .unwrap_or_default();
 
-                                    claurst_plugins::set_global_hooks(
+                                    mikmik_plugins::set_global_hooks(
                                         registry.build_hook_registry(),
                                     );
                                     // Every cwd-aware copy of the config, or a
@@ -3914,7 +3899,7 @@ async fn run_interactive(
                                         &mut app.config,
                                     );
                                     let summary =
-                                        claurst_plugins::format_reload_summary(&registry, &diff);
+                                        mikmik_plugins::format_reload_summary(&registry, &diff);
                                     // Reconnecting drops every live MCP session,
                                     // and it reports its own outcome over this
                                     // summary, so it happens only when the set of
@@ -3926,7 +3911,7 @@ async fn run_interactive(
                                             plugin_mcp_names(old) != plugin_mcp_names(&registry)
                                         })
                                         .unwrap_or(false);
-                                    claurst_plugins::set_global_registry(registry);
+                                    mikmik_plugins::set_global_registry(registry);
 
                                     let (session_commands, skill_count) = session_slash_commands(
                                         &tool_ctx.working_dir,
@@ -4104,7 +4089,7 @@ async fn run_interactive(
                                                 },
                                             );
                                         }
-                                        app.push_message(claurst_core::types::Message::assistant(
+                                        app.push_message(mikmik_core::types::Message::assistant(
                                             msg,
                                         ));
                                     }
@@ -4155,7 +4140,7 @@ async fn run_interactive(
                                     submit_user_msg = Some(msg);
                                 }
                                 Some(CommandResult::StartOAuthFlow(with_claude_ai)) => {
-                                    claurst_tui::restore_terminal(&mut terminal).ok();
+                                    mikmik_tui::restore_terminal(&mut terminal).ok();
                                     match oauth_flow::run_oauth_login_flow(with_claude_ai).await {
                                         Ok(_) => {
                                             app.status_message =
@@ -4170,26 +4155,27 @@ async fn run_interactive(
                                             eprintln!("\nLogin failed: {}", e);
                                         }
                                     }
-                                    terminal = claurst_tui::setup_terminal(
+                                    terminal = mikmik_tui::setup_terminal(
                                         app.config.mouse_capture_enabled(),
                                     )?;
                                     app.kitty_keyboard_active =
-                                        claurst_tui::keyboard_enhancement_active();
+                                        mikmik_tui::keyboard_enhancement_active();
                                 }
                                 Some(CommandResult::StartLoginForProvider {
                                     provider,
                                     login_with_claude_ai,
                                     label,
                                 }) => {
-                                    claurst_tui::restore_terminal(&mut terminal).ok();
-                                    if provider == claurst_core::ProviderId::CODEX {
-                                        let (tx, mut rx) =
-                                            tokio::sync::mpsc::channel::<
-                                                claurst_tui::DeviceAuthEvent,
-                                            >(8);
+                                    mikmik_tui::restore_terminal(&mut terminal).ok();
+                                    if provider == mikmik_core::ProviderId::CODEX {
+                                        let (tx, mut rx) = tokio::sync::mpsc::channel::<
+                                            mikmik_tui::DeviceAuthEvent,
+                                        >(
+                                            8
+                                        );
                                         tokio::spawn(async move {
                                             while let Some(evt) = rx.recv().await {
-                                                if let claurst_tui::DeviceAuthEvent::GotBrowserUrl {
+                                                if let mikmik_tui::DeviceAuthEvent::GotBrowserUrl {
                                                     url,
                                                 } = evt
                                                 {
@@ -4239,11 +4225,11 @@ async fn run_interactive(
                                             }
                                         }
                                     }
-                                    terminal = claurst_tui::setup_terminal(
+                                    terminal = mikmik_tui::setup_terminal(
                                         app.config.mouse_capture_enabled(),
                                     )?;
                                     app.kitty_keyboard_active =
-                                        claurst_tui::keyboard_enhancement_active();
+                                        mikmik_tui::keyboard_enhancement_active();
                                 }
                                 Some(CommandResult::Error(e)) => {
                                     app.status_message = Some(format!("Error: {}", e));
@@ -4258,7 +4244,7 @@ async fn run_interactive(
                             // /effort with explicit args (/effort high).
                             if handled_by_cli && cmd_name == "effort" && !cmd_args.is_empty() {
                                 if let Some(level) =
-                                    claurst_core::effort::EffortLevel::from_str(&cmd_args)
+                                    mikmik_core::effort::EffortLevel::from_str(&cmd_args)
                                 {
                                     app.set_effort_level(level);
                                     app.status_message = Some(format!(
@@ -4283,7 +4269,7 @@ async fn run_interactive(
                                     // The command layer had nothing to say, so
                                     // the view really was the whole answer.
                                     app.status_message = Some(terminal_only_notice(&cmd_name));
-                                } else if claurst_commands::find_command(&cmd_name).is_none() {
+                                } else if mikmik_commands::find_command(&cmd_name).is_none() {
                                     app.status_message =
                                         Some(format!("Unknown command: /{}", cmd_name));
                                     command_failed = true;
@@ -4323,8 +4309,8 @@ async fn run_interactive(
 
                             // If a UserMessage was queued (e.g. /compact), submit it.
                             if let Some(msg) = submit_user_msg {
-                                messages.push(claurst_core::types::Message::user(msg.clone()));
-                                app.push_message(claurst_core::types::Message::user(msg));
+                                messages.push(mikmik_core::types::Message::user(msg.clone()));
+                                app.push_message(mikmik_core::types::Message::user(msg));
                                 // Fall through to the send path below.
                             } else {
                                 continue;
@@ -4335,8 +4321,8 @@ async fn run_interactive(
                         // The plugin side runs whether or not settings.json
                         // declares hooks; only the settings side is skipped
                         // when the map is empty.
-                        claurst_plugins::run_global_hook(
-                            claurst_plugins::HookEventKind::UserPromptSubmit,
+                        mikmik_plugins::run_global_hook(
+                            mikmik_plugins::HookEventKind::UserPromptSubmit,
                             None,
                             serde_json::json!({
                                 "prompt": input,
@@ -4345,7 +4331,7 @@ async fn run_interactive(
                         )
                         .await;
                         if !cmd_ctx.config.hooks.is_empty() {
-                            let hook_ctx = claurst_core::hooks::HookContext {
+                            let hook_ctx = mikmik_core::hooks::HookContext {
                                 event: "UserPromptSubmit".to_string(),
                                 tool_name: None,
                                 tool_input: None,
@@ -4353,9 +4339,9 @@ async fn run_interactive(
                                 is_error: None,
                                 session_id: Some(tool_ctx.session_id.clone()),
                             };
-                            claurst_core::hooks::run_hooks(
+                            mikmik_core::hooks::run_hooks(
                                 &cmd_ctx.config.hooks,
-                                claurst_core::config::HookEvent::UserPromptSubmit,
+                                mikmik_core::config::HookEvent::UserPromptSubmit,
                                 &hook_ctx,
                                 &tool_ctx.working_dir,
                             )
@@ -4367,7 +4353,7 @@ async fn run_interactive(
 
                         // Check for file injection if enabled
                         if app.config.file_injection_is_enabled() {
-                            use claurst_tui::file_injection::parse_at_refs;
+                            use mikmik_tui::file_injection::parse_at_refs;
 
                             // file_injection_force is set when user chose "inject anyways" in the
                             // warning dialog — pass limit 0 so all files are treated as within
@@ -4384,7 +4370,7 @@ async fn run_interactive(
                                 parse_at_refs(&input, &tool_ctx.working_dir, effective_limit);
                             if was_force {
                                 oversized.retain(|f| {
-                                    !matches!(f.issue, Some(claurst_tui::AtFileIssue::IsDirectory))
+                                    !matches!(f.issue, Some(mikmik_tui::AtFileIssue::IsDirectory))
                                 });
                             }
 
@@ -4392,18 +4378,18 @@ async fn run_interactive(
                                 // Show either the directory warning or the file warning, never both.
                                 // Directories take precedence: if any are present, show only those.
                                 let has_dirs = oversized.iter().any(|f| {
-                                    matches!(f.issue, Some(claurst_tui::AtFileIssue::IsDirectory))
+                                    matches!(f.issue, Some(mikmik_tui::AtFileIssue::IsDirectory))
                                 });
                                 let oversized_summaries: Vec<(
                                     String,
                                     usize,
-                                    claurst_tui::AtFileIssue,
+                                    mikmik_tui::AtFileIssue,
                                 )> = oversized
                                     .iter()
                                     .filter(|f| {
                                         let is_dir = matches!(
                                             f.issue,
-                                            Some(claurst_tui::AtFileIssue::IsDirectory)
+                                            Some(mikmik_tui::AtFileIssue::IsDirectory)
                                         );
                                         if has_dirs {
                                             is_dir
@@ -4431,14 +4417,14 @@ async fn run_interactive(
 
                             // No oversized files: inject within-limit files and send
                             let file_prefix =
-                                claurst_tui::file_injection::build_file_blocks(&within_limit);
+                                mikmik_tui::file_injection::build_file_blocks(&within_limit);
 
                             let user_msg = if !file_prefix.is_empty() || !pending_imgs.is_empty() {
-                                let mut blocks: Vec<claurst_core::types::ContentBlock> = Vec::new();
+                                let mut blocks: Vec<mikmik_core::types::ContentBlock> = Vec::new();
 
                                 // Add file blocks if there's any file content
                                 if !file_prefix.is_empty() {
-                                    blocks.push(claurst_core::types::ContentBlock::Text {
+                                    blocks.push(mikmik_core::types::ContentBlock::Text {
                                         text: file_prefix,
                                     });
                                 }
@@ -4446,10 +4432,10 @@ async fn run_interactive(
                                 // Add image blocks
                                 for img in &pending_imgs {
                                     if let Some(b64) =
-                                        claurst_tui::image_paste::encode_image_base64(&img.path)
+                                        mikmik_tui::image_paste::encode_image_base64(&img.path)
                                     {
-                                        blocks.push(claurst_core::types::ContentBlock::Image {
-                                            source: claurst_core::types::ImageSource {
+                                        blocks.push(mikmik_core::types::ContentBlock::Image {
+                                            source: mikmik_core::types::ImageSource {
                                                 source_type: "base64".to_string(),
                                                 media_type: Some("image/png".to_string()),
                                                 data: Some(b64),
@@ -4460,13 +4446,13 @@ async fn run_interactive(
                                 }
 
                                 // Add the original input text
-                                blocks.push(claurst_core::types::ContentBlock::Text {
+                                blocks.push(mikmik_core::types::ContentBlock::Text {
                                     text: input.clone(),
                                 });
 
-                                claurst_core::types::Message::user_blocks(blocks)
+                                mikmik_core::types::Message::user_blocks(blocks)
                             } else {
-                                claurst_core::types::Message::user(input.clone())
+                                mikmik_core::types::Message::user(input.clone())
                             };
 
                             messages.push(user_msg.clone());
@@ -4476,16 +4462,16 @@ async fn run_interactive(
                         } else {
                             // File injection disabled: send as-is
                             let user_msg = if pending_imgs.is_empty() {
-                                claurst_core::types::Message::user(input.clone())
+                                mikmik_core::types::Message::user(input.clone())
                             } else {
-                                let mut blocks: Vec<claurst_core::types::ContentBlock> =
+                                let mut blocks: Vec<mikmik_core::types::ContentBlock> =
                                     pending_imgs
                                         .iter()
                                         .filter_map(|img| {
-                                            claurst_tui::image_paste::encode_image_base64(&img.path)
+                                            mikmik_tui::image_paste::encode_image_base64(&img.path)
                                                 .map(|b64| {
-                                                    claurst_core::types::ContentBlock::Image {
-                                                        source: claurst_core::types::ImageSource {
+                                                    mikmik_core::types::ContentBlock::Image {
+                                                        source: mikmik_core::types::ImageSource {
                                                             source_type: "base64".to_string(),
                                                             media_type: Some(
                                                                 "image/png".to_string(),
@@ -4497,10 +4483,10 @@ async fn run_interactive(
                                                 })
                                         })
                                         .collect();
-                                blocks.push(claurst_core::types::ContentBlock::Text {
+                                blocks.push(mikmik_core::types::ContentBlock::Text {
                                     text: input.clone(),
                                 });
-                                claurst_core::types::Message::user_blocks(blocks)
+                                mikmik_core::types::Message::user_blocks(blocks)
                             };
 
                             messages.push(user_msg.clone());
@@ -4511,11 +4497,11 @@ async fn run_interactive(
 
                         // Update terminal title from session title or first message
                         if session.title.is_some() {
-                            claurst_tui::update_terminal_title(session.title.as_deref());
+                            mikmik_tui::update_terminal_title(session.title.as_deref());
                         } else {
                             // Use a truncated version of the first user message
                             let topic: String = input.chars().take(60).collect();
-                            claurst_tui::update_terminal_title(Some(&topic));
+                            mikmik_tui::update_terminal_title(Some(&topic));
                         }
 
                         // The companion answers only when addressed by name.
@@ -4531,7 +4517,7 @@ async fn run_interactive(
                                 // Spawned rather than awaited: the turn must
                                 // not wait on a decoration.
                                 tokio::spawn(async move {
-                                    if let Ok(line) = claurst_commands::companion_reply(
+                                    if let Ok(line) = mikmik_commands::companion_reply(
                                         &cfg, &tracker, &companion, &said,
                                     )
                                     .await
@@ -4564,7 +4550,7 @@ async fn run_interactive(
                         qcfg.max_turns = cmd_ctx
                             .config
                             .max_turns
-                            .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT);
+                            .unwrap_or(mikmik_core::constants::MAX_TURNS_DEFAULT);
                         qcfg.append_system_prompt = cmd_ctx.config.append_system_prompt.clone();
                         qcfg.system_prompt = base_query_config.system_prompt.clone();
                         qcfg.output_style = cmd_ctx.config.effective_output_style();
@@ -4589,10 +4575,10 @@ async fn run_interactive(
                         if let Some(ref cq) = qcfg.command_queue {
                             let cq = cq.clone();
                             ctx_clone.completion_notifier =
-                                Some(claurst_tools::CompletionNotifier::new(move |msg| {
+                                Some(mikmik_tools::CompletionNotifier::new(move |msg| {
                                     cq.push(
-                                        claurst_query::QueuedCommand::InjectSystemMessage(msg),
-                                        claurst_query::CommandPriority::Normal,
+                                        mikmik_query::QueuedCommand::InjectSystemMessage(msg),
+                                        mikmik_query::CommandPriority::Normal,
                                     );
                                 }));
                         }
@@ -4602,7 +4588,7 @@ async fn run_interactive(
 
                         let handle = tokio::spawn(async move {
                             let mut msgs = msgs_arc_clone.lock().await.clone();
-                            let outcome = claurst_query::run_query_loop(
+                            let outcome = mikmik_query::run_query_loop(
                                 client_clone.as_ref(),
                                 &mut msgs,
                                 tools_arc_clone.as_slice(),
@@ -4624,14 +4610,14 @@ async fn run_interactive(
                         continue;
                     }
                     if let Some(pr) = app.permission_request.as_mut() {
-                        if claurst_tui::dialogs::handle_permission_key(pr, key) {
+                        if mikmik_tui::dialogs::handle_permission_key(pr, key) {
                             let tool_use_id = pr.tool_use_id.clone();
                             let selected_option = pr.selected_option;
                             let selected_key = pr.options.get(selected_option).map(|o| o.key);
                             let should_record_bash_prefix = selected_key == Some('P');
                             let bash_prefix = if should_record_bash_prefix {
                                 match &pr.kind {
-                                    claurst_tui::dialogs::PermissionDialogKind::Bash {
+                                    mikmik_tui::dialogs::PermissionDialogKind::Bash {
                                         command,
                                         ..
                                     } => {
@@ -4658,8 +4644,7 @@ async fn run_interactive(
                                 // "Always allow" must survive restarts: persist
                                 // the prefix to settings.json so it is reloaded
                                 // into the allowlist on the next launch.
-                                if let Ok(mut settings) =
-                                    claurst_core::config::Settings::load_sync()
+                                if let Ok(mut settings) = mikmik_core::config::Settings::load_sync()
                                 {
                                     if !settings.allowed_bash_prefixes.contains(&prefix) {
                                         settings.allowed_bash_prefixes.push(prefix);
@@ -4675,8 +4660,8 @@ async fn run_interactive(
                                 selected_key,
                             ) {
                                 if settlement.denied {
-                                    claurst_plugins::run_global_hook(
-                                        claurst_plugins::HookEventKind::PermissionDenied,
+                                    mikmik_plugins::run_global_hook(
+                                        mikmik_plugins::HookEventKind::PermissionDenied,
                                         Some(&settlement.tool_name),
                                         serde_json::json!({ "tool_name": settlement.tool_name }),
                                     )
@@ -4703,7 +4688,7 @@ async fn run_interactive(
                     if app.agent_mode_changed {
                         app.agent_mode_changed = false;
                         let mode = app.agent_mode.as_deref().unwrap_or("build");
-                        let mut all_agents = claurst_core::default_agents();
+                        let mut all_agents = mikmik_core::default_agents();
                         all_agents.extend(cmd_ctx.config.agents.clone());
                         if let Some(def) = all_agents.get(mode) {
                             base_query_config.agent_name = Some(mode.to_string());
@@ -4782,7 +4767,7 @@ async fn run_interactive(
                         .unwrap_or(false);
 
                 let reevaluated = if prefix_allowed {
-                    Some(claurst_core::permissions::PermissionDecision::Allow)
+                    Some(mikmik_core::permissions::PermissionDecision::Allow)
                 } else {
                     tool_ctx
                         .permission_manager
@@ -4800,7 +4785,7 @@ async fn run_interactive(
                 };
 
                 match reevaluated {
-                    Some(claurst_core::permissions::PermissionDecision::Ask { .. }) | None => {
+                    Some(mikmik_core::permissions::PermissionDecision::Ask { .. }) | None => {
                         let tool_use_id = pending.tool_use_id.clone();
                         let dialog = permission_request_from_core(&pending);
                         // Tell the remote client too, or a remotely-driven
@@ -4821,8 +4806,8 @@ async fn run_interactive(
                                             .collect(),
                                     });
                         }
-                        claurst_plugins::run_global_hook(
-                            claurst_plugins::HookEventKind::PermissionRequest,
+                        mikmik_plugins::run_global_hook(
+                            mikmik_plugins::HookEventKind::PermissionRequest,
                             Some(&dialog.tool_name),
                             serde_json::json!({
                                 "tool_name": dialog.tool_name,
@@ -4857,16 +4842,16 @@ async fn run_interactive(
             // Forward to bridge before consuming (clone only what we need).
             if let Some(ref runtime) = bridge_runtime {
                 let outbound: Option<BridgeOutbound> = match &evt {
-                    QueryEvent::Stream(claurst_api::AnthropicStreamEvent::ContentBlockDelta {
-                        delta: claurst_api::streaming::ContentDelta::TextDelta { text },
+                    QueryEvent::Stream(mikmik_api::AnthropicStreamEvent::ContentBlockDelta {
+                        delta: mikmik_api::streaming::ContentDelta::TextDelta { text },
                         index,
                         ..
                     }) => Some(BridgeOutbound::TextDelta {
                         delta: text.clone(),
                         message_id: format!("msg-{}", index),
                     }),
-                    QueryEvent::Stream(claurst_api::AnthropicStreamEvent::ContentBlockDelta {
-                        delta: claurst_api::streaming::ContentDelta::ThinkingDelta { thinking },
+                    QueryEvent::Stream(mikmik_api::AnthropicStreamEvent::ContentBlockDelta {
+                        delta: mikmik_api::streaming::ContentDelta::ThinkingDelta { thinking },
                         index,
                         ..
                     }) => Some(BridgeOutbound::ThinkingDelta {
@@ -4924,7 +4909,7 @@ async fn run_interactive(
                         })
                     }
                     QueryEvent::TokenWarning { state, pct_used } => {
-                        use claurst_query::compact::TokenWarningState;
+                        use mikmik_query::compact::TokenWarningState;
                         // `Ok` is the absence of a warning, so sending it would
                         // put a reassurance on screen that was never asked for.
                         match state {
@@ -4949,8 +4934,8 @@ async fn run_interactive(
             // This drives the post_bridge_event relay task spawned on Connected.
             if bridge_session_info.is_some() {
                 let relay_payload: Option<String> = match &evt {
-                    QueryEvent::Stream(claurst_api::AnthropicStreamEvent::ContentBlockDelta {
-                        delta: claurst_api::streaming::ContentDelta::TextDelta { text },
+                    QueryEvent::Stream(mikmik_api::AnthropicStreamEvent::ContentBlockDelta {
+                        delta: mikmik_api::streaming::ContentDelta::TextDelta { text },
                         ..
                     }) => Some(
                         serde_json::json!({
@@ -5053,9 +5038,9 @@ async fn run_interactive(
                         // Persist the session URL into the saved session record.
                         session.remote_session_url = Some(session_url.clone());
                         session.updated_at = chrono::Utc::now();
-                        if let Err(e) = claurst_core::history::save_session(&session).await {
+                        if let Err(e) = mikmik_core::history::save_session(&session).await {
                             app.push_notification(
-                                claurst_tui::NotificationKind::Error,
+                                mikmik_tui::NotificationKind::Error,
                                 format!("Could not save the session: {e}"),
                                 None,
                             );
@@ -5065,7 +5050,7 @@ async fn run_interactive(
                         // the web UI via /api/bridge/sessions. This runs alongside
                         // run_bridge_loop as a best-effort supplementary delivery path.
                         if let Some(ref token) = bridge_token {
-                            let info = std::sync::Arc::new(claurst_bridge::BridgeSessionInfo {
+                            let info = std::sync::Arc::new(mikmik_bridge::BridgeSessionInfo {
                                 session_id: conn_sid.clone(),
                                 session_url: session_url.clone(),
                                 token: token.clone(),
@@ -5080,7 +5065,7 @@ async fn run_interactive(
                                     let mut rx = rx;
                                     while let Some(payload) = rx.recv().await {
                                         let _ =
-                                            claurst_bridge::post_bridge_event(&info_relay, payload)
+                                            mikmik_bridge::post_bridge_event(&info_relay, payload)
                                                 .await;
                                     }
                                 });
@@ -5093,7 +5078,7 @@ async fn run_interactive(
                             tokio::spawn(async move {
                                 let mut since_id: Option<String> = None;
                                 loop {
-                                    match claurst_bridge::poll_bridge_messages(
+                                    match mikmik_bridge::poll_bridge_messages(
                                         &info_poll,
                                         since_id.as_deref(),
                                     )
@@ -5162,7 +5147,7 @@ async fn run_interactive(
                         // A remote answer must take the same route as a keyboard
                         // answer, otherwise the blocked tool never learns the
                         // outcome and the dialog only appears to close.
-                        use claurst_bridge::PermissionResponseKind;
+                        use mikmik_bridge::PermissionResponseKind;
                         let selected_key = match response {
                             PermissionResponseKind::Allow => 'y',
                             PermissionResponseKind::AllowSession => 'Y',
@@ -5176,8 +5161,8 @@ async fn run_interactive(
                         );
                         if let Some(ref settled) = settlement {
                             if settled.denied {
-                                claurst_plugins::run_global_hook(
-                                    claurst_plugins::HookEventKind::PermissionDenied,
+                                mikmik_plugins::run_global_hook(
+                                    mikmik_plugins::HookEventKind::PermissionDenied,
                                     Some(&settled.tool_name),
                                     serde_json::json!({ "tool_name": settled.tool_name }),
                                 )
@@ -5351,7 +5336,7 @@ async fn run_interactive(
                     qcfg.max_turns = cmd_ctx
                         .config
                         .max_turns
-                        .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT);
+                        .unwrap_or(mikmik_core::constants::MAX_TURNS_DEFAULT);
                     // A prompt from a phone is the same turn as one typed
                     // here, so it runs at the same effort, and the model is
                     // told about the same companion.
@@ -5364,7 +5349,7 @@ async fn run_interactive(
                     let client_clone = client.clone();
                     let handle = tokio::spawn(async move {
                         let mut msgs = msgs_arc_clone.lock().await.clone();
-                        let outcome = claurst_query::run_query_loop(
+                        let outcome = mikmik_query::run_query_loop(
                             client_clone.as_ref(),
                             &mut msgs,
                             tools_arc_clone.as_slice(),
@@ -5391,8 +5376,8 @@ async fn run_interactive(
             let snapshot = status_line::snapshot(
                 &app,
                 &tool_ctx.session_id,
-                claurst_core::session_storage::transcript_path(
-                    &claurst_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
+                mikmik_core::session_storage::transcript_path(
+                    &mikmik_core::session_storage::transcript_root_for(&tool_ctx.working_dir),
                     &tool_ctx.session_id,
                 )
                 .ok()
@@ -5456,7 +5441,7 @@ async fn run_interactive(
                     // rewrite that section and leave the others standing.
                     let cross_provider = app.model_picker.is_cross_provider();
                     let authoritative = provider == "anthropic"
-                        || claurst_tui::model_picker::provider_has_authoritative_live_models(
+                        || mikmik_tui::model_picker::provider_has_authoritative_live_models(
                             &provider,
                         );
                     let keep_projection_when_empty = provider == "anthropic";
@@ -5506,7 +5491,7 @@ async fn run_interactive(
             // Facts the session list shows, refreshed only when they move.
             // Cost is rounded first: it creeps with every model call, and
             // comparing the raw float would re-register on each one.
-            let info = claurst_bridge::SessionInfo {
+            let info = mikmik_bridge::SessionInfo {
                 model: Some(session_model_string(&cmd_ctx.config, &model_registry)),
                 permission_mode: Some(
                     format!("{:?}", cmd_ctx.config.permission_mode).to_lowercase(),
@@ -5570,8 +5555,8 @@ async fn run_interactive(
             // the credential can use; intersect it with the rich catalog
             // projection so we keep context/cost metadata for known ids but drop
             // models the subscription/key can't serve (e.g. legacy claude-3.x).
-            let anthropic_catalog: Vec<claurst_tui::model_picker::ModelEntry> = if is_anthropic {
-                claurst_tui::model_picker::models_for_provider_from_registry(
+            let anthropic_catalog: Vec<mikmik_tui::model_picker::ModelEntry> = if is_anthropic {
+                mikmik_tui::model_picker::models_for_provider_from_registry(
                     "anthropic",
                     model_registry.as_ref(),
                 )
@@ -5579,7 +5564,7 @@ async fn run_interactive(
                 Vec::new()
             };
             if let Some(ref registry) = app.provider_registry {
-                let pid = claurst_core::ProviderId::new(&provider_id_str);
+                let pid = mikmik_core::ProviderId::new(&provider_id_str);
                 if let Some(provider) = registry.get(&pid) {
                     let provider = provider.clone();
                     // Layer user metadata overrides (issue #309) onto the
@@ -5607,11 +5592,11 @@ async fn run_interactive(
                         };
                         match provider.discover_models().await {
                             Ok(models) => {
-                                let entries: Vec<claurst_tui::model_picker::ModelEntry> =
+                                let entries: Vec<mikmik_tui::model_picker::ModelEntry> =
                                     if is_anthropic && !models.is_empty() {
                                         let by_id: std::collections::HashMap<
                                             String,
-                                            claurst_tui::model_picker::ModelEntry,
+                                            mikmik_tui::model_picker::ModelEntry,
                                         > = anthropic_catalog
                                             .into_iter()
                                             .map(|e| (e.id.clone(), e))
@@ -5621,11 +5606,11 @@ async fn run_interactive(
                                             .map(|m| {
                                                 let id = m.id.to_string();
                                                 by_id.get(&id).cloned().unwrap_or_else(|| {
-                                                    claurst_tui::model_picker::ModelEntry {
+                                                    mikmik_tui::model_picker::ModelEntry {
                                                         id: id.clone(),
                                                         display_name: name_for(&id, &m.name),
                                                         description:
-                                                            claurst_tui::model_picker::format_context_window(
+                                                            mikmik_tui::model_picker::format_context_window(
                                                                 ctx_for(&id, m.context_window),
                                                             ),
                                                         is_current: false,
@@ -5639,10 +5624,10 @@ async fn run_interactive(
                                             .into_iter()
                                             .map(|m| {
                                                 let id = m.id.to_string();
-                                                claurst_tui::model_picker::ModelEntry {
+                                                mikmik_tui::model_picker::ModelEntry {
                                                     display_name: name_for(&id, &m.name),
                                                     description:
-                                                        claurst_tui::model_picker::format_context_window(
+                                                        mikmik_tui::model_picker::format_context_window(
                                                             ctx_for(&id, m.context_window),
                                                         ),
                                                     id,
@@ -5665,7 +5650,7 @@ async fn run_interactive(
 
         // Refresh task list if the overlay is visible.
         if app.tasks_overlay.visible {
-            app.tasks_overlay.refresh_tasks(&claurst_tools::TASK_STORE);
+            app.tasks_overlay.refresh_tasks(&mikmik_tools::TASK_STORE);
         }
 
         // Check if the background update task has reported a result.
@@ -5688,7 +5673,7 @@ async fn run_interactive(
                     const COPILOT_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
                     tokio::spawn(async move {
                         // Step 1: Request device code
-                        match claurst_core::device_code::request_device_code(
+                        match mikmik_core::device_code::request_device_code(
                             COPILOT_CLIENT_ID,
                             "read:user",
                             "https://github.com/login/device/code",
@@ -5705,7 +5690,7 @@ async fn run_interactive(
                                     })
                                     .await;
                                 // Step 2: Poll for access token
-                                match claurst_core::device_code::poll_for_token(
+                                match mikmik_core::device_code::poll_for_token(
                                     COPILOT_CLIENT_ID,
                                     &resp.device_code,
                                     "https://github.com/login/oauth/access_token",
@@ -5724,7 +5709,7 @@ async fn run_interactive(
                                         // still completes under the provider
                                         // id, which is what it always did.
                                         let event =
-                                            match claurst_core::device_code::github_login(&token)
+                                            match mikmik_core::device_code::github_login(&token)
                                                 .await
                                             {
                                                 Ok(login) => DeviceAuthEvent::TokenReceivedFor {
@@ -5818,7 +5803,7 @@ async fn run_interactive(
                     interval,
                 } => {
                     // Auto-copy the user code to clipboard
-                    let _ = claurst_tui::try_copy_to_clipboard(&user_code);
+                    let _ = mikmik_tui::try_copy_to_clipboard(&user_code);
 
                     // Auto-open the verification URL in the browser
                     let _ = open::that(&verification_uri);
@@ -5831,7 +5816,7 @@ async fn run_interactive(
                     );
 
                     app.notifications.push(
-                        claurst_tui::NotificationKind::Info,
+                        mikmik_tui::NotificationKind::Info,
                         "Code copied to clipboard & browser opened.".to_string(),
                         Some(4),
                     );
@@ -5840,10 +5825,10 @@ async fn run_interactive(
                     // Copy the URL to clipboard so the user can paste it even
                     // when the automatic browser launch silently fails (headless
                     // terminals, tty2, Wayland-without-xdg-open, etc.).
-                    let _ = claurst_tui::try_copy_to_clipboard(&url);
+                    let _ = mikmik_tui::try_copy_to_clipboard(&url);
                     app.device_auth_dialog.set_browser_url(url);
                     app.notifications.push(
-                        claurst_tui::NotificationKind::Info,
+                        mikmik_tui::NotificationKind::Info,
                         "Login URL copied to clipboard.".to_string(),
                         Some(5),
                     );
@@ -5892,7 +5877,7 @@ async fn run_interactive(
                         app.notifications.dismiss_current();
                     }
                     app.notifications.push(
-                        claurst_tui::notifications::NotificationKind::Error,
+                        mikmik_tui::notifications::NotificationKind::Error,
                         err.to_string(),
                         None,
                     );
@@ -5907,7 +5892,7 @@ async fn run_interactive(
                     .await
                 {
                     app.notifications.push(
-                        claurst_tui::notifications::NotificationKind::Error,
+                        mikmik_tui::notifications::NotificationKind::Error,
                         format!("Could not write the session transcript: {e}"),
                         None,
                     );
@@ -5917,7 +5902,7 @@ async fn run_interactive(
                 session.model = session_model_string(&cmd_ctx.config, &model_registry);
                 session.working_dir = Some(tool_ctx.working_dir.display().to_string());
                 // A point to come back to, recorded once the turn is whole.
-                claurst_core::history::create_checkpoint(&mut session, None);
+                mikmik_core::history::create_checkpoint(&mut session, None);
                 app.is_streaming = false;
                 app.status_message = None;
                 // Drain one queued message into the prompt and request an
@@ -5929,7 +5914,7 @@ async fn run_interactive(
                 }
                 if let Err(e) = persist_session(&session).await {
                     app.notifications.push(
-                        claurst_tui::notifications::NotificationKind::Error,
+                        mikmik_tui::notifications::NotificationKind::Error,
                         format!("Could not save the session: {e}"),
                         None,
                     );
@@ -5947,8 +5932,8 @@ async fn run_interactive(
                 // One store read feeds both surfaces: the footer badge only
                 // fills while the goal is still running, and the transcript
                 // badge goes muted once it is complete.
-                if claurst_core::goals_enabled() {
-                    let goal = claurst_core::GoalStore::open_default()
+                if mikmik_core::goals_enabled() {
+                    let goal = mikmik_core::GoalStore::open_default()
                         .and_then(|s| s.get_goal(&session.id));
                     let (badge, completed) = goal_display_state(goal.as_ref());
                     app.active_goal_badge = badge;
@@ -6032,20 +6017,20 @@ async fn run_interactive(
         // Runs after the reload above, because discovery needs a provider that
         // can already reach the endpoint.
         for request in app.take_pending_model_sync() {
-            let claurst_tui::app::ModelSyncRequest {
+            let mikmik_tui::app::ModelSyncRequest {
                 account: account_id,
                 force,
             } = request;
             let provider = app.provider_registry.as_ref().and_then(|registry| {
                 registry
-                    .get(&claurst_core::ProviderId::new(&account_id))
+                    .get(&mikmik_core::ProviderId::new(&account_id))
                     .cloned()
             });
 
             match provider {
                 Some(provider) => match provider.discover_models().await {
                     Ok(models) if !models.is_empty() => {
-                        match claurst_api::model_sync::persist_account_models(
+                        match mikmik_api::model_sync::persist_account_models(
                             &account_id,
                             &models,
                             force,
@@ -6054,23 +6039,23 @@ async fn run_interactive(
                                 // Apply to every live config, or the session
                                 // keeps refusing a model the endpoint just
                                 // confirmed and the picker keeps the old list.
-                                claurst_api::model_sync::apply_model_sync(
+                                mikmik_api::model_sync::apply_model_sync(
                                     &mut app.config,
                                     &account_id,
                                     &outcome,
                                 );
-                                claurst_api::model_sync::apply_model_sync(
+                                mikmik_api::model_sync::apply_model_sync(
                                     &mut cmd_ctx.config,
                                     &account_id,
                                     &outcome,
                                 );
-                                claurst_api::model_sync::apply_model_sync(
+                                mikmik_api::model_sync::apply_model_sync(
                                     &mut tool_ctx.config,
                                     &account_id,
                                     &outcome,
                                 );
                                 app.status_message =
-                                    Some(claurst_api::model_sync::describe_model_sync(
+                                    Some(mikmik_api::model_sync::describe_model_sync(
                                         &account_id,
                                         &outcome,
                                     ))
@@ -6110,8 +6095,8 @@ async fn run_interactive(
             // Re-apply the project-MCP trust gate on reconnect: only user
             // servers plus project servers approved this session, persisted, or
             // globally trusted are launched (issue #123).
-            let store = claurst_core::mcp_trust::McpTrustStore::load();
-            let decision = claurst_core::mcp_trust::partition_mcp_servers(
+            let store = mikmik_core::mcp_trust::McpTrustStore::load();
+            let decision = mikmik_core::mcp_trust::partition_mcp_servers(
                 &cmd_ctx.config.mcp_servers,
                 app.mcp_project_root.as_deref(),
                 settings.trust_project_mcp_servers,
@@ -6121,7 +6106,7 @@ async fn run_interactive(
             let new_mcp_manager = connect_mcp_manager_arc(&decision.allowed).await;
             tool_ctx.mcp_manager = new_mcp_manager.clone();
             app.mcp_manager = new_mcp_manager.clone();
-            tools_arc = claurst_query::build_tool_roster(new_mcp_manager.clone(), &tool_ctx.config);
+            tools_arc = mikmik_query::build_tool_roster(new_mcp_manager.clone(), &tool_ctx.config);
             if app.mcp_view.visible {
                 app.refresh_mcp_view();
             }
@@ -6160,7 +6145,7 @@ async fn run_interactive(
                 app.set_extra_slash_commands(session_commands);
                 app.skill_count = skill_count;
                 tools_arc =
-                    claurst_query::build_tool_roster(app.mcp_manager.clone(), &tool_ctx.config);
+                    mikmik_query::build_tool_roster(app.mcp_manager.clone(), &tool_ctx.config);
             }
         }
 
@@ -6196,7 +6181,7 @@ async fn run_interactive(
         // plugins. Both surfaces are synchronous, so this is where the async
         // side happens.
         for (kind, message) in app.drain_notification_outbox() {
-            let hook_ctx = claurst_core::hooks::HookContext {
+            let hook_ctx = mikmik_core::hooks::HookContext {
                 event: "Notification".to_string(),
                 tool_name: None,
                 tool_input: None,
@@ -6204,15 +6189,15 @@ async fn run_interactive(
                 is_error: Some(kind == "error"),
                 session_id: Some(tool_ctx.session_id.clone()),
             };
-            claurst_core::hooks::run_hooks(
+            mikmik_core::hooks::run_hooks(
                 &cmd_ctx.config.hooks,
-                claurst_core::config::HookEvent::Notification,
+                mikmik_core::config::HookEvent::Notification,
                 &hook_ctx,
                 &tool_ctx.working_dir,
             )
             .await;
-            claurst_plugins::run_global_hook(
-                claurst_plugins::HookEventKind::Notification,
+            mikmik_plugins::run_global_hook(
+                mikmik_plugins::HookEventKind::Notification,
                 None,
                 serde_json::json!({ "kind": kind, "message": message }),
             )
@@ -6221,8 +6206,8 @@ async fn run_interactive(
 
         if app.settings_screen.saves() != settings_saves_seen {
             settings_saves_seen = app.settings_screen.saves();
-            claurst_plugins::run_global_hook(
-                claurst_plugins::HookEventKind::ConfigChange,
+            mikmik_plugins::run_global_hook(
+                mikmik_plugins::HookEventKind::ConfigChange,
                 None,
                 serde_json::json!({ "source": "settings_screen" }),
             )
@@ -6243,13 +6228,13 @@ async fn run_interactive(
 
     // Interpreters started by the REPL tool are kept alive between calls on
     // purpose; this is where that purpose ends.
-    claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
+    mikmik_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
     // The auto-compact circuit breaker is keyed by session, so it has to be
     // dropped here or a long-lived process keeps one entry per session it ran.
-    claurst_query::compact::forget_compact_state(&tool_ctx.session_id);
+    mikmik_query::compact::forget_compact_state(&tool_ctx.session_id);
 
-    claurst_plugins::run_global_hook(
-        claurst_plugins::HookEventKind::SessionEnd,
+    mikmik_plugins::run_global_hook(
+        mikmik_plugins::HookEventKind::SessionEnd,
         None,
         serde_json::json!({ "session_id": tool_ctx.session_id }),
     )
@@ -6316,13 +6301,13 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
         }
 
         Some("list") | Some("ls") | Some("accounts") => {
-            print_account_list(claurst_core::ProviderId::ANTHROPIC, "Anthropic");
+            print_account_list(mikmik_core::ProviderId::ANTHROPIC, "Anthropic");
             std::process::exit(0);
         }
 
         Some("switch") | Some("use") => {
             let id = args.get(1).map(|s| s.as_str());
-            switch_account(claurst_core::ProviderId::ANTHROPIC, "Anthropic", id);
+            switch_account(mikmik_core::ProviderId::ANTHROPIC, "Anthropic", id);
         }
 
         Some("remove") | Some("rm") => {
@@ -6330,7 +6315,7 @@ async fn handle_auth_command(args: &[String]) -> anyhow::Result<()> {
                 eprintln!("Usage: claurst auth remove <profile-id>");
                 std::process::exit(1);
             });
-            remove_account(claurst_core::ProviderId::ANTHROPIC, "Anthropic", id);
+            remove_account(mikmik_core::ProviderId::ANTHROPIC, "Anthropic", id);
         }
 
         Some(unknown) => {
@@ -6374,13 +6359,13 @@ fn extract_label_flag(args: &[String]) -> Option<String> {
 
 /// The account the session is pointed at, whatever protocol it speaks.
 fn active_account() -> Option<String> {
-    claurst_core::config::Settings::load_sync()
+    mikmik_core::config::Settings::load_sync()
         .ok()
         .and_then(|settings| settings.provider)
 }
 
 fn print_account_list(provider: &str, display_name: &str) {
-    let store = claurst_core::AuthStore::load();
+    let store = mikmik_core::AuthStore::load();
     let accounts = store.accounts_for_protocol(provider);
     let active = active_account();
     if accounts.is_empty() {
@@ -6405,7 +6390,7 @@ fn print_account_list(provider: &str, display_name: &str) {
         // Identity comes from the credential, which is the only place it is
         // recorded now that there is no separate registry.
         let detail = match store.get(&id) {
-            Some(claurst_core::StoredCredential::AnthropicOAuth(tokens)) => {
+            Some(mikmik_core::StoredCredential::AnthropicOAuth(tokens)) => {
                 let tier = tokens
                     .subscription_type
                     .as_deref()
@@ -6413,7 +6398,7 @@ fn print_account_list(provider: &str, display_name: &str) {
                     .unwrap_or_default();
                 format!("{}  {}", tier, tokens.email.as_deref().unwrap_or(""))
             }
-            Some(claurst_core::StoredCredential::CodexOAuth(tokens)) => {
+            Some(mikmik_core::StoredCredential::CodexOAuth(tokens)) => {
                 format!("  {}", tokens.account_id.as_deref().unwrap_or(""))
             }
             _ => String::new(),
@@ -6423,7 +6408,7 @@ fn print_account_list(provider: &str, display_name: &str) {
 }
 
 fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
-    let store = claurst_core::AuthStore::load();
+    let store = mikmik_core::AuthStore::load();
     let accounts = store.accounts_for_protocol(provider);
 
     let target = match id {
@@ -6455,7 +6440,7 @@ fn switch_account(provider: &str, display_name: &str, id: Option<&str>) -> ! {
         std::process::exit(1);
     }
 
-    match claurst_core::config::register_account(&target, provider, true) {
+    match mikmik_core::config::register_account(&target, provider, true) {
         Ok(()) => {
             println!("Switched to '{}'.", target);
             std::process::exit(0);
@@ -6479,10 +6464,10 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
             // login we still spin up the OAuth listener but route the URL
             // through a no-op channel; the user opens the URL in their browser
             // either way.
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<claurst_tui::DeviceAuthEvent>(8);
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<mikmik_tui::DeviceAuthEvent>(8);
             tokio::spawn(async move {
                 while let Some(evt) = rx.recv().await {
-                    if let claurst_tui::DeviceAuthEvent::GotBrowserUrl { url } = evt {
+                    if let mikmik_tui::DeviceAuthEvent::GotBrowserUrl { url } = evt {
                         println!("Opening browser for Codex authentication...");
                         println!("If the browser did not open, visit:\n\n  {}\n", url);
                     }
@@ -6502,7 +6487,7 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
                 }
             }
         }
-        Some("logout") => match claurst_core::oauth_config::clear_codex_tokens() {
+        Some("logout") => match mikmik_core::oauth_config::clear_codex_tokens() {
             Ok(_) => {
                 println!("Logged out of the active Codex account.");
                 std::process::exit(0);
@@ -6513,23 +6498,23 @@ async fn handle_codex_account_command(args: &[String]) -> anyhow::Result<()> {
             }
         },
         Some("list") | Some("ls") | Some("accounts") => {
-            print_account_list(claurst_core::ProviderId::CODEX, "Codex");
+            print_account_list(mikmik_core::ProviderId::CODEX, "Codex");
             std::process::exit(0);
         }
         Some("switch") | Some("use") => {
             let id = args.get(1).map(|s| s.as_str());
-            switch_account(claurst_core::ProviderId::CODEX, "Codex", id);
+            switch_account(mikmik_core::ProviderId::CODEX, "Codex", id);
         }
         Some("remove") | Some("rm") => {
             let id = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| {
                 eprintln!("Usage: claurst codex remove <profile-id>");
                 std::process::exit(1);
             });
-            remove_account(claurst_core::ProviderId::CODEX, "Codex", id);
+            remove_account(mikmik_core::ProviderId::CODEX, "Codex", id);
         }
         Some("status") => {
-            let store = claurst_core::AuthStore::load();
-            let accounts = store.accounts_for_protocol(claurst_core::ProviderId::CODEX);
+            let store = mikmik_core::AuthStore::load();
+            let accounts = store.accounts_for_protocol(mikmik_core::ProviderId::CODEX);
             if accounts.is_empty() {
                 println!("Not logged in to Codex.");
                 std::process::exit(1);
@@ -6575,7 +6560,7 @@ fn print_codex_usage() {
 
 fn handle_accounts_command(args: &[String]) {
     if args.iter().any(|a| a == "--json") {
-        let store = claurst_core::AuthStore::load();
+        let store = mikmik_core::AuthStore::load();
         let active = active_account();
         let accounts: Vec<serde_json::Value> = store
             .credentials
@@ -6597,13 +6582,13 @@ fn handle_accounts_command(args: &[String]) {
         return;
     }
 
-    print_account_list(claurst_core::ProviderId::ANTHROPIC, "Anthropic");
+    print_account_list(mikmik_core::ProviderId::ANTHROPIC, "Anthropic");
     println!();
-    print_account_list(claurst_core::ProviderId::CODEX, "Codex");
+    print_account_list(mikmik_core::ProviderId::CODEX, "Codex");
 }
 
 fn remove_account(provider: &str, display_name: &str, id: &str) -> ! {
-    let mut store = claurst_core::AuthStore::load();
+    let mut store = mikmik_core::AuthStore::load();
     if !store
         .accounts_for_protocol(provider)
         .iter()
@@ -6613,7 +6598,7 @@ fn remove_account(provider: &str, display_name: &str, id: &str) -> ! {
         std::process::exit(1);
     }
     store.remove(id);
-    match claurst_core::config::forget_account(id) {
+    match mikmik_core::config::forget_account(id) {
         Ok(()) => {
             println!("Removed {} account '{}'.", display_name, id);
             std::process::exit(0);
@@ -6674,14 +6659,14 @@ async fn auth_status(json_output: bool) {
         .provider_configs
         .get(active_provider)
         .filter(|provider| provider.enabled);
-    let auth_store = claurst_core::AuthStore::load();
+    let auth_store = mikmik_core::AuthStore::load();
     let oauth_tokens = if active_provider == "anthropic" {
-        claurst_core::oauth::OAuthTokens::load().await
+        mikmik_core::oauth::OAuthTokens::load().await
     } else {
         None
     };
 
-    let env_api_key_source = claurst_core::config::api_key_env_vars_for_provider(active_provider)
+    let env_api_key_source = mikmik_core::config::api_key_env_vars_for_provider(active_provider)
         .iter()
         .find_map(|env_var| {
             std::env::var(env_var)
@@ -6692,10 +6677,10 @@ async fn auth_status(json_output: bool) {
     let stored_api_key_source = provider_status_lookup_keys(active_provider)
         .into_iter()
         .find_map(|provider_id| match auth_store.get(provider_id) {
-            Some(claurst_core::StoredCredential::ApiKey { key }) if !key.is_empty() => {
+            Some(mikmik_core::StoredCredential::ApiKey { key }) if !key.is_empty() => {
                 Some("stored credential".to_string())
             }
-            Some(claurst_core::StoredCredential::OAuthToken {
+            Some(mikmik_core::StoredCredential::OAuthToken {
                 access, refresh, ..
             }) if active_provider == "github-copilot"
                 && (!access.is_empty() || !refresh.is_empty()) =>
@@ -6805,7 +6790,7 @@ async fn auth_status(json_output: bool) {
             let hint = if active_provider == "anthropic" {
                 "Run `claurst auth login` or set ANTHROPIC_API_KEY.".to_string()
             } else if let Some(env_var) =
-                claurst_core::config::primary_api_key_env_var_for_provider(active_provider)
+                mikmik_core::config::primary_api_key_env_var_for_provider(active_provider)
             {
                 format!(
                     "Set {} or store a credential for {}.",
@@ -6860,7 +6845,7 @@ async fn auth_logout() {
     let mut had_error = false;
 
     // Clear OAuth tokens
-    if let Err(e) = claurst_core::oauth::OAuthTokens::clear().await {
+    if let Err(e) = mikmik_core::oauth::OAuthTokens::clear().await {
         eprintln!("Warning: failed to clear OAuth tokens: {}", e);
         had_error = true;
     }
@@ -6957,11 +6942,11 @@ mod bare_mode_tests {
     }
 
     #[cfg(test)]
-    async fn registry_from(dir: &std::path::Path) -> claurst_plugins::PluginRegistry {
-        let mut registry = claurst_plugins::PluginRegistry::new();
-        let (plugins, errors) = claurst_plugins::discover_plugins(
+    async fn registry_from(dir: &std::path::Path) -> mikmik_plugins::PluginRegistry {
+        let mut registry = mikmik_plugins::PluginRegistry::new();
+        let (plugins, errors) = mikmik_plugins::discover_plugins(
             &[dir.to_path_buf()],
-            claurst_plugins::PluginSource::User,
+            mikmik_plugins::PluginSource::User,
         )
         .await;
         registry.extend(plugins, errors);
@@ -6975,7 +6960,7 @@ mod bare_mode_tests {
         write_contributing_plugin(tmp.path(), "beta");
 
         let before = registry_from(tmp.path()).await;
-        let mut config = claurst_core::Config::default();
+        let mut config = mikmik_core::Config::default();
         apply_plugin_contributions(&before, None, &mut config);
         assert_eq!(
             config.mcp_servers.len(),
@@ -6987,7 +6972,7 @@ mod bare_mode_tests {
         // A server that came from the settings file, not from a plugin.
         config
             .mcp_servers
-            .push(claurst_core::config::McpServerConfig {
+            .push(mikmik_core::config::McpServerConfig {
                 name: "from-settings".to_string(),
                 command: Some("true".to_string()),
                 args: Vec::new(),
@@ -6995,7 +6980,7 @@ mod bare_mode_tests {
                 url: None,
                 headers: std::collections::HashMap::new(),
                 server_type: "stdio".to_string(),
-                origin: claurst_core::config::McpServerOrigin::User,
+                origin: mikmik_core::config::McpServerOrigin::User,
             });
 
         std::fs::remove_dir_all(tmp.path().join("beta")).expect("remove plugin");
@@ -7026,7 +7011,7 @@ mod bare_mode_tests {
         write_contributing_plugin(tmp.path(), "alpha");
 
         let registry = registry_from(tmp.path()).await;
-        let mut config = claurst_core::Config::default();
+        let mut config = mikmik_core::Config::default();
         apply_plugin_contributions(&registry, None, &mut config);
         apply_plugin_contributions(&registry, None, &mut config);
 
@@ -7039,7 +7024,7 @@ mod bare_mode_tests {
         // In bare mode main() substitutes `PluginRegistry::new()` for
         // `load_plugins()`. Assert it contributes no plugins, commands, hooks,
         // or MCP servers downstream.
-        let registry = claurst_plugins::PluginRegistry::new();
+        let registry = mikmik_plugins::PluginRegistry::new();
         assert_eq!(registry.enabled_count(), 0, "no plugins enabled");
         assert!(registry.all_command_defs().is_empty(), "no plugin commands");
         let hook_count: usize = registry
@@ -7056,7 +7041,7 @@ mod bare_mode_tests {
 
     #[test]
     fn bare_mode_clears_hooks() {
-        use claurst_core::config::{HookEntry, HookEvent};
+        use mikmik_core::config::{HookEntry, HookEvent};
         // Simulate settings-derived hooks, then apply the bare-mode clear that
         // main() performs. Every `run_hooks` call site guards on
         // `config.hooks.is_empty()`, so an empty map means nothing executes.
@@ -7083,7 +7068,7 @@ mod goal_display_state_tests {
     //! store read. Before this, only the badge was fed and the muted variant
     //! could never trigger.
     use super::*;
-    use claurst_core::{Goal, GoalStatus};
+    use mikmik_core::{Goal, GoalStatus};
 
     fn goal(status: GoalStatus) -> Goal {
         Goal {
@@ -7141,22 +7126,22 @@ mod dump_system_prompt_tests {
     use super::*;
 
     fn rendered_prompt(advisor_model: Option<&str>) -> String {
-        let config = claurst_core::config::Config {
+        let config = mikmik_core::config::Config {
             advisor_model: advisor_model.map(str::to_string),
             ..Default::default()
         };
-        let model_registry = claurst_api::ModelRegistry::new();
+        let model_registry = mikmik_api::ModelRegistry::new();
         let mut dump_config =
-            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+            mikmik_query::QueryConfig::from_config_with_registry(&config, &model_registry);
         dump_config.enabled_tools = Some(
-            claurst_query::build_tool_roster(None, &config)
+            mikmik_query::build_tool_roster(None, &config)
                 .iter()
                 .map(|tool| tool.name().to_string())
                 .collect(),
         );
-        match claurst_query::build_system_prompt(&dump_config) {
-            claurst_api::SystemPrompt::Text(text) => text,
-            claurst_api::SystemPrompt::Blocks(blocks) => blocks
+        match mikmik_query::build_system_prompt(&dump_config) {
+            mikmik_api::SystemPrompt::Text(text) => text,
+            mikmik_api::SystemPrompt::Blocks(blocks) => blocks
                 .into_iter()
                 .map(|block| block.text)
                 .collect::<Vec<_>>()
@@ -7178,14 +7163,14 @@ mod dump_system_prompt_tests {
             custom_system_prompt: Some(contents),
             ..Default::default()
         };
-        let model_registry = claurst_api::ModelRegistry::new();
+        let model_registry = mikmik_api::ModelRegistry::new();
         let mut dump_config =
-            claurst_query::QueryConfig::from_config_with_registry(&config, &model_registry);
+            mikmik_query::QueryConfig::from_config_with_registry(&config, &model_registry);
         dump_config.system_prompt = config.custom_system_prompt.clone();
 
-        let rendered = match claurst_query::build_system_prompt(&dump_config) {
-            claurst_api::SystemPrompt::Text(text) => text,
-            claurst_api::SystemPrompt::Blocks(blocks) => blocks
+        let rendered = match mikmik_query::build_system_prompt(&dump_config) {
+            mikmik_api::SystemPrompt::Text(text) => text,
+            mikmik_api::SystemPrompt::Blocks(blocks) => blocks
                 .into_iter()
                 .map(|block| block.text)
                 .collect::<Vec<_>>()
@@ -7220,7 +7205,7 @@ mod remote_control_config_tests {
     //! The relay token is what stops an outsider from running tools on this
     //! machine, so a half-configured relay must not start the bridge.
     use super::*;
-    use claurst_core::config::{RemoteControlSettings, MIN_REMOTE_TOKEN_LEN};
+    use mikmik_core::config::{RemoteControlSettings, MIN_REMOTE_TOKEN_LEN};
     use std::sync::Mutex;
 
     // `resolve_bridge_config` reads process-global env.
@@ -7442,7 +7427,7 @@ mod remote_slash_routing_tests {
     /// than the "Unknown command" it would otherwise collect.
     #[test]
     fn a_view_with_no_command_still_answers() {
-        assert!(claurst_commands::find_command("survey").is_none());
+        assert!(mikmik_commands::find_command("survey").is_none());
         assert_eq!(
             super::terminal_only_notice("survey"),
             "/survey answers with a view on the terminal."
@@ -7453,7 +7438,7 @@ mod remote_slash_routing_tests {
 #[cfg(test)]
 mod bridge_usage_tests {
     use super::bridge_usage;
-    use claurst_core::types::UsageInfo;
+    use mikmik_core::types::UsageInfo;
 
     fn sample() -> UsageInfo {
         UsageInfo {
@@ -7483,11 +7468,11 @@ mod bridge_usage_tests {
     fn one_turn_costs_what_the_session_costs() {
         // On the first turn the two figures sit side by side on a phone. They
         // have to agree, or neither is believable.
-        let tracker = claurst_core::cost::CostTracker::new();
+        let tracker = mikmik_core::cost::CostTracker::new();
         let usage = sample();
         tracker.add_usage(
             "claude-haiku-4-5",
-            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_creation_input_tokens,
@@ -7511,13 +7496,13 @@ mod bridge_usage_tests {
 #[cfg(test)]
 mod session_snapshot_tests {
     use super::*;
-    use claurst_bridge::BridgeOutbound;
-    use claurst_core::types::Message;
+    use mikmik_bridge::BridgeOutbound;
+    use mikmik_core::types::Message;
 
-    fn app() -> claurst_tui::App {
-        claurst_tui::App::new(
-            claurst_core::config::Config::default(),
-            claurst_core::cost::CostTracker::new(),
+    fn app() -> mikmik_tui::App {
+        mikmik_tui::App::new(
+            mikmik_core::config::Config::default(),
+            mikmik_core::cost::CostTracker::new(),
         )
     }
 
@@ -7527,7 +7512,7 @@ mod session_snapshot_tests {
         // with no timeout, so a client that cannot see the card cannot get the
         // session moving again.
         let mut app = app();
-        app.permission_request = Some(claurst_tui::dialogs::PermissionRequest::standard(
+        app.permission_request = Some(mikmik_tui::dialogs::PermissionRequest::standard(
             "tool-1".into(),
             "Bash".into(),
             "rm -rf build".into(),
@@ -7605,7 +7590,7 @@ mod session_snapshot_tests {
     #[test]
     fn the_transcript_comes_before_the_prompt_it_would_wipe() {
         let mut app = app();
-        app.permission_request = Some(claurst_tui::dialogs::PermissionRequest::standard(
+        app.permission_request = Some(mikmik_tui::dialogs::PermissionRequest::standard(
             "tool-1".into(),
             "Bash".into(),
             "ls".into(),
@@ -7674,8 +7659,8 @@ mod session_snapshot_tests {
 #[cfg(test)]
 mod remote_attachment_tests {
     use super::*;
-    use claurst_bridge::BridgeAttachment;
-    use claurst_core::types::{ContentBlock, MessageContent};
+    use mikmik_bridge::BridgeAttachment;
+    use mikmik_core::types::{ContentBlock, MessageContent};
 
     fn attachment(name: &str, mime: &str, content: &str) -> BridgeAttachment {
         BridgeAttachment {
@@ -7685,7 +7670,7 @@ mod remote_attachment_tests {
         }
     }
 
-    fn blocks(message: &claurst_core::types::Message) -> Vec<ContentBlock> {
+    fn blocks(message: &mikmik_core::types::Message) -> Vec<ContentBlock> {
         match &message.content {
             MessageContent::Blocks(blocks) => blocks.clone(),
             MessageContent::Text(text) => vec![ContentBlock::Text { text: text.clone() }],
@@ -7760,7 +7745,7 @@ mod remote_attachment_tests {
 #[cfg(test)]
 mod bridge_history_tests {
     use super::*;
-    use claurst_core::types::{ContentBlock, Message, MessageContent};
+    use mikmik_core::types::{ContentBlock, Message, MessageContent};
 
     fn assistant_with_tool(text: &str, tool: &str) -> Message {
         let mut message = Message::assistant(String::new());
@@ -7829,7 +7814,7 @@ mod bridge_history_tests {
         let mut message = Message::user(String::new());
         message.content = MessageContent::Blocks(vec![ContentBlock::ToolResult {
             tool_use_id: "t1".to_string(),
-            content: claurst_core::types::ToolResultContent::Text("ok".to_string()),
+            content: mikmik_core::types::ToolResultContent::Text("ok".to_string()),
             is_error: None,
         }]);
         let messages = vec![message];
@@ -7845,11 +7830,11 @@ mod remote_permission_tests {
     fn pending(
         tool_use_id: &str,
     ) -> (
-        claurst_tools::PendingPermissionRequest,
-        tokio::sync::oneshot::Receiver<claurst_core::permissions::PermissionDecision>,
+        mikmik_tools::PendingPermissionRequest,
+        tokio::sync::oneshot::Receiver<mikmik_core::permissions::PermissionDecision>,
     ) {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let request = claurst_core::permissions::PermissionRequest {
+        let request = mikmik_core::permissions::PermissionRequest {
             tool_name: "Bash".to_string(),
             description: "run a command".to_string(),
             details: None,
@@ -7861,7 +7846,7 @@ mod remote_permission_tests {
             input: None,
         };
         (
-            claurst_tools::PendingPermissionRequest {
+            mikmik_tools::PendingPermissionRequest {
                 tool_use_id: tool_use_id.to_string(),
                 request,
                 reason: "needs approval".to_string(),
@@ -7874,11 +7859,11 @@ mod remote_permission_tests {
     fn store_with(
         id: &str,
     ) -> (
-        ParkingMutex<claurst_tools::PendingPermissionStore>,
-        tokio::sync::oneshot::Receiver<claurst_core::permissions::PermissionDecision>,
+        ParkingMutex<mikmik_tools::PendingPermissionStore>,
+        tokio::sync::oneshot::Receiver<mikmik_core::permissions::PermissionDecision>,
     ) {
         let (entry, rx) = pending(id);
-        let store = claurst_tools::PendingPermissionStore {
+        let store = mikmik_tools::PendingPermissionStore {
             waiting: std::collections::HashMap::from([(id.to_string(), entry)]),
             ..Default::default()
         };
@@ -7893,7 +7878,7 @@ mod remote_permission_tests {
 
         assert_eq!(
             rx.blocking_recv().ok(),
-            Some(claurst_core::permissions::PermissionDecision::Allow)
+            Some(mikmik_core::permissions::PermissionDecision::Allow)
         );
         assert!(store.lock().waiting.is_empty());
     }
@@ -7908,7 +7893,7 @@ mod remote_permission_tests {
 
         assert_eq!(
             rx.blocking_recv().ok(),
-            Some(claurst_core::permissions::PermissionDecision::Deny)
+            Some(mikmik_core::permissions::PermissionDecision::Deny)
         );
     }
 
@@ -7924,9 +7909,9 @@ mod remote_permission_tests {
     fn a_session_allow_is_recorded_on_the_manager() {
         let (store, _rx) = store_with("tool-4");
         let manager = Arc::new(std::sync::Mutex::new(
-            claurst_core::permissions::PermissionManager::new(
-                claurst_core::config::PermissionMode::Default,
-                &claurst_core::config::Settings::default(),
+            mikmik_core::permissions::PermissionManager::new(
+                mikmik_core::config::PermissionMode::Default,
+                &mikmik_core::config::Settings::default(),
             ),
         ));
 
@@ -7938,7 +7923,7 @@ mod remote_permission_tests {
             .ok();
         assert_eq!(
             decision,
-            Some(claurst_core::permissions::PermissionDecision::Allow)
+            Some(mikmik_core::permissions::PermissionDecision::Allow)
         );
     }
 }
@@ -7946,7 +7931,7 @@ mod remote_permission_tests {
 #[cfg(test)]
 mod plan_badge_tests {
     use super::*;
-    use claurst_core::config::PermissionMode;
+    use mikmik_core::config::PermissionMode;
 
     #[test]
     fn only_plan_mode_raises_the_badge() {
@@ -7980,36 +7965,36 @@ mod bang_command_tests {
     /// not consult it.
     struct DenyAll;
 
-    impl claurst_core::permissions::PermissionHandler for DenyAll {
+    impl mikmik_core::permissions::PermissionHandler for DenyAll {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Deny
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Deny
         }
 
         fn request_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Deny
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Deny
         }
     }
 
     fn ctx() -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: std::sync::Arc::new(DenyAll),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "bang-command-test".to_string(),
             file_history: std::sync::Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,
@@ -8027,14 +8012,14 @@ mod bang_command_tests {
 
         assert!(text.starts_with("$ echo hello\n"), "{text:?}");
         assert!(text.contains("hello"), "{text:?}");
-        assert_eq!(style, claurst_tui::app::SystemMessageStyle::Info);
+        assert_eq!(style, mikmik_tui::app::SystemMessageStyle::Info);
     }
 
     #[tokio::test]
     async fn a_failing_command_is_drawn_as_a_warning() {
         let (text, style) = run_bang_command("exit 3", &ctx()).await;
 
-        assert_eq!(style, claurst_tui::app::SystemMessageStyle::Warning);
+        assert_eq!(style, mikmik_tui::app::SystemMessageStyle::Warning);
         assert!(text.contains("exit 3"), "{text:?}");
     }
 

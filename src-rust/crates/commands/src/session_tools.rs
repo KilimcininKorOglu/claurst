@@ -35,7 +35,7 @@ impl SlashCommand for SkillsCommand {
         let mut found: Vec<String> = Vec::new();
         let dirs = [
             ctx.working_dir.join(".claurst").join("commands"),
-            claurst_core::config::Settings::config_dir().join("commands"),
+            mikmik_core::config::Settings::config_dir().join("commands"),
         ];
 
         for dir in &dirs {
@@ -59,7 +59,7 @@ impl SlashCommand for SkillsCommand {
         // so they are listed by the same route that can run them.
         //
         // Include discovered skills from .claurst/skills/ and configured paths/URLs.
-        let discovered = claurst_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
+        let discovered = mikmik_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
 
         let mut output = if found.is_empty() && discovered.is_empty() {
             return CommandResult::Message(
@@ -83,7 +83,7 @@ impl SlashCommand for SkillsCommand {
         };
 
         if !discovered.is_empty() {
-            let mut disc_list: Vec<(&String, &claurst_core::DiscoveredSkill)> =
+            let mut disc_list: Vec<(&String, &mikmik_core::DiscoveredSkill)> =
                 discovered.iter().collect();
             disc_list.sort_by_key(|(name, _)| name.as_str());
 
@@ -173,12 +173,12 @@ impl SlashCommand for RewindCommand {
 ///
 /// The number is how many messages would be kept, which is what `/rewind <n>`
 /// takes: rewinding to a message means keeping everything before it.
-fn rewind_listing(messages: &[claurst_core::types::Message]) -> String {
+fn rewind_listing(messages: &[mikmik_core::types::Message]) -> String {
     let mut out = String::from("Run /rewind <n> to keep the first n messages.\n");
     for (index, message) in messages.iter().enumerate() {
         let who = match message.role {
-            claurst_core::types::Role::User => "user",
-            claurst_core::types::Role::Assistant => "agent",
+            mikmik_core::types::Role::User => "user",
+            mikmik_core::types::Role::Assistant => "agent",
         };
         out.push_str(&format!(
             "\n{:>3}  {who:<6} {}",
@@ -193,7 +193,7 @@ fn rewind_listing(messages: &[claurst_core::types::Message]) -> String {
 const PREVIEW_CHARS: usize = 70;
 
 /// The first line of a message, short enough to sit in a list.
-fn message_preview(message: &claurst_core::types::Message) -> String {
+fn message_preview(message: &mikmik_core::types::Message) -> String {
     let text = message.get_all_text();
     let Some(line) = text.lines().find(|l| !l.trim().is_empty()) else {
         // A turn made only of tool calls has no text to show.
@@ -242,12 +242,12 @@ impl SlashCommand for StatsCommand {
         let user_turns = ctx
             .messages
             .iter()
-            .filter(|m| m.role == claurst_core::types::Role::User)
+            .filter(|m| m.role == mikmik_core::types::Role::User)
             .count();
         let assistant_turns = ctx
             .messages
             .iter()
-            .filter(|m| m.role == claurst_core::types::Role::Assistant)
+            .filter(|m| m.role == mikmik_core::types::Role::Assistant)
             .count();
 
         // Count tool-use invocations.
@@ -399,8 +399,8 @@ impl SlashCommand for RenameCommand {
                     return None;
                 }
                 let role = match m.role {
-                    claurst_core::types::Role::User => "User",
-                    claurst_core::types::Role::Assistant => "Assistant",
+                    mikmik_core::types::Role::User => "User",
+                    mikmik_core::types::Role::Assistant => "Assistant",
                 };
                 Some(format!(
                     "{}: {}",
@@ -424,7 +424,7 @@ impl SlashCommand for RenameCommand {
         // model.
         let rename_route = resolve_fast_model_route(&ctx.config);
         let provider =
-            match claurst_api::provider_for_account(&ctx.config, &rename_route.account).await {
+            match mikmik_api::provider_for_account(&ctx.config, &rename_route.account).await {
                 Ok(provider) => provider,
                 Err(e) => {
                     return CommandResult::Error(format!(
@@ -439,13 +439,13 @@ impl SlashCommand for RenameCommand {
             Examples: fix-login-bug, add-auth-feature, refactor-api-client. \
             Respond with ONLY the name, nothing else.";
 
-        let request = claurst_api::ProviderRequest {
+        let request = mikmik_api::ProviderRequest {
             model: rename_route.model.clone(),
             messages: vec![Message::user(format!(
                 "Conversation to name:\n\n{}",
                 &excerpt[..excerpt.len().min(2000)]
             ))],
-            system_prompt: Some(claurst_api::SystemPrompt::Text(system_prompt.to_string())),
+            system_prompt: Some(mikmik_api::SystemPrompt::Text(system_prompt.to_string())),
             tools: vec![],
             max_tokens: 64,
             temperature: None,
@@ -520,7 +520,7 @@ impl SlashCommand for EffortCommand {
             ));
         }
 
-        let Some(level) = claurst_core::effort::EffortLevel::from_str(args) else {
+        let Some(level) = mikmik_core::effort::EffortLevel::from_str(args) else {
             return CommandResult::Error(format!(
                 "Unknown effort level '{args}'. Use: none | minimal | low | medium | high | xhigh | max | ultracode"
             ));

@@ -5,10 +5,10 @@
 /// equivalent `AnthropicStreamEvent` so that the TUI stream consumer sees a
 /// single, consistent event type regardless of which provider produced it.
 pub(crate) fn map_to_anthropic_event(
-    evt: &claurst_api::StreamEvent,
-) -> Option<claurst_api::AnthropicStreamEvent> {
-    use claurst_api::streaming::{AnthropicStreamEvent, ContentDelta};
-    use claurst_api::StreamEvent;
+    evt: &mikmik_api::StreamEvent,
+) -> Option<mikmik_api::AnthropicStreamEvent> {
+    use mikmik_api::streaming::{AnthropicStreamEvent, ContentDelta};
+    use mikmik_api::StreamEvent;
 
     match evt {
         StreamEvent::MessageStart { id, model, usage } => {
@@ -69,16 +69,14 @@ pub(crate) fn map_to_anthropic_event(
             // Convert the unified StopReason to the string form used by
             // AnthropicStreamEvent::MessageDelta.
             let stop_reason_str = stop_reason.as_ref().map(|r| match r {
-                claurst_api::provider_types::StopReason::ToolUse => "tool_use".to_string(),
-                claurst_api::provider_types::StopReason::MaxTokens => "max_tokens".to_string(),
-                claurst_api::provider_types::StopReason::StopSequence => {
-                    "stop_sequence".to_string()
-                }
-                claurst_api::provider_types::StopReason::EndTurn => "end_turn".to_string(),
-                claurst_api::provider_types::StopReason::ContentFiltered => {
+                mikmik_api::provider_types::StopReason::ToolUse => "tool_use".to_string(),
+                mikmik_api::provider_types::StopReason::MaxTokens => "max_tokens".to_string(),
+                mikmik_api::provider_types::StopReason::StopSequence => "stop_sequence".to_string(),
+                mikmik_api::provider_types::StopReason::EndTurn => "end_turn".to_string(),
+                mikmik_api::provider_types::StopReason::ContentFiltered => {
                     "content_filtered".to_string()
                 }
-                claurst_api::provider_types::StopReason::Other(s) => s.clone(),
+                mikmik_api::provider_types::StopReason::Other(s) => s.clone(),
             });
             Some(AnthropicStreamEvent::MessageDelta {
                 stop_reason: stop_reason_str,

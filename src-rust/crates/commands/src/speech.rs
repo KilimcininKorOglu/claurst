@@ -2,14 +2,14 @@
 //
 // Personas used to be a bespoke "speech mode" mechanism that returned
 // `CommandResult::SpeechMode` and stored the prompt text in the TUI. They now
-// live in the output-style system (`claurst_core::output_styles`) as ordinary
+// live in the output-style system (`mikmik_core::output_styles`) as ordinary
 // built-in styles, so there is ONE place personas are defined. These commands
 // are thin wrappers that select the matching output style *persistently*
 // (exactly like `/output-style <name>`); `/normal` resets to `default`.
 //
 // The same personas are also reachable *transiently* by typing the single word
 // `caveman` / `rocky` / `normal` inline in a prompt (see
-// `claurst_core::keywords`) — that applies to one turn only.
+// `mikmik_core::keywords`) — that applies to one turn only.
 
 use super::*;
 use async_trait::async_trait;
@@ -103,10 +103,10 @@ mod tests {
     fn personas_map_to_builtin_output_styles() {
         // The command targets must exist as built-in output styles so
         // /output-style and the inline keywords resolve the same prompt text.
-        let styles = claurst_core::output_styles::builtin_styles();
+        let styles = mikmik_core::output_styles::builtin_styles();
         for name in ["caveman", "rocky"] {
             assert!(
-                claurst_core::output_styles::find_style(&styles, name).is_some(),
+                mikmik_core::output_styles::find_style(&styles, name).is_some(),
                 "persona command target '{name}' must be a built-in output style"
             );
         }

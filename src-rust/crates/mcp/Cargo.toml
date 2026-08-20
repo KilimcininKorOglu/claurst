@@ -1,10 +1,10 @@
 [package]
-name = "claurst-mcp"
+name = "mikmik-mcp"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-claurst-core = { workspace = true }
+mikmik-core = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

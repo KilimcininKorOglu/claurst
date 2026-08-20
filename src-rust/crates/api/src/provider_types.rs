@@ -4,7 +4,7 @@
 // These types form a provider-agnostic layer that every concrete provider
 // adapter (Anthropic, OpenAI, Google, …) maps to/from.
 
-use claurst_core::types::{ContentBlock, Message, ToolDefinition, UsageInfo};
+use mikmik_core::types::{ContentBlock, Message, ToolDefinition, UsageInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -54,8 +54,8 @@ pub struct ProviderRequest {
     /// provider handed that answers 400. Nothing in a `String` said which of
     /// the two it held, so the mistake kept coming back.
     ///
-    /// [`WireModel`]: claurst_core::config::WireModel
-    pub model: claurst_core::config::WireModel,
+    /// [`WireModel`]: mikmik_core::config::WireModel
+    pub model: mikmik_core::config::WireModel,
 
     /// The conversation history to send to the model.
     pub messages: Vec<Message>,

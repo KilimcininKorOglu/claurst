@@ -9,7 +9,7 @@ use crate::provider_error::ProviderError;
 use crate::provider_types::{ProviderRequest, ProviderResponse};
 use crate::providers::OpenAiProvider;
 use crate::transform::MessageTransformer;
-use claurst_core::provider_id::ProviderId;
+use mikmik_core::provider_id::ProviderId;
 
 // ---------------------------------------------------------------------------
 // OpenAiChatTransformer

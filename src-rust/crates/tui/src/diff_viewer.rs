@@ -4,7 +4,7 @@
 //! Shows a two-pane diff dialog: file list (left) + unified diff detail (right).
 //! Keyboard: ↑↓ navigate files, Tab switch pane, t toggle diff type, Esc close.
 
-use claurst_core::file_history::FileHistory;
+use mikmik_core::file_history::FileHistory;
 use once_cell::sync::Lazy;
 use ratatui::{
     buffer::Buffer,

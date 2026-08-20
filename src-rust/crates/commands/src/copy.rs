@@ -27,11 +27,11 @@ impl SlashCommand for CopyCommand {
         let n: usize = args.trim().parse().unwrap_or(1).max(1);
 
         // Find the Nth most recent assistant message
-        let assistant_msgs: Vec<&claurst_core::types::Message> = ctx
+        let assistant_msgs: Vec<&mikmik_core::types::Message> = ctx
             .messages
             .iter()
             .rev()
-            .filter(|m| m.role == claurst_core::types::Role::Assistant)
+            .filter(|m| m.role == mikmik_core::types::Role::Assistant)
             .take(n)
             .collect();
 

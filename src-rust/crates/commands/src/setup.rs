@@ -4,7 +4,7 @@
 
 use super::*;
 use async_trait::async_trait;
-use claurst_core::config::StatusLineConfig;
+use mikmik_core::config::StatusLineConfig;
 
 pub struct StatuslineCommand;
 pub struct SecurityReviewCommand;

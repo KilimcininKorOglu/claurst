@@ -14,7 +14,7 @@
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use agent_client_protocol_schema as acp;
 use async_trait::async_trait;
-use claurst_core::config::AcpAgentConfig;
+use mikmik_core::config::AcpAgentConfig;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::process::Stdio;
@@ -498,7 +498,7 @@ async fn run_agent(
     for (key, value) in &config.env {
         command.env(key, value);
     }
-    claurst_core::process_tree::spawn_in_own_group(&mut command);
+    mikmik_core::process_tree::spawn_in_own_group(&mut command);
 
     let mut child = command
         .spawn()
@@ -506,7 +506,7 @@ async fn run_agent(
 
     // `kill_on_drop` reaps the agent itself; whatever the agent started is
     // reachable only through its process tree.
-    let _tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+    let _tree_guard = mikmik_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill().await;
@@ -783,7 +783,7 @@ mod session_tests {
     //! permission bridge, both of which are ours.
     use super::*;
     use crate::test_support::allow_all_context;
-    use claurst_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
+    use mikmik_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
     use std::sync::Arc;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

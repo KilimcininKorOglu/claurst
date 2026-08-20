@@ -5,7 +5,7 @@ use crate::*;
 
 /// Build the system prompt from config.
 ///
-/// Delegates to `claurst_core::system_prompt::build_system_prompt` so that all
+/// Delegates to `mikmik_core::system_prompt::build_system_prompt` so that all
 /// default content (capabilities, safety guidelines, dynamic-boundary marker,
 /// etc.) is assembled in one place.  The `QueryConfig` fields map directly to
 /// `SystemPromptOptions`:
@@ -16,7 +16,7 @@ use crate::*;
 /// Public so `--dump-system-prompt` can print exactly what a run would send,
 /// rather than a second assembly that drifts from this one.
 pub fn build_system_prompt(config: &QueryConfig) -> SystemPrompt {
-    use claurst_core::system_prompt::SystemPromptOptions;
+    use mikmik_core::system_prompt::SystemPromptOptions;
 
     let opts = SystemPromptOptions {
         custom_system_prompt: config.system_prompt.clone(),
@@ -37,6 +37,6 @@ pub fn build_system_prompt(config: &QueryConfig) -> SystemPrompt {
         ..Default::default()
     };
 
-    let text = claurst_core::system_prompt::build_system_prompt(&opts);
+    let text = mikmik_core::system_prompt::build_system_prompt(&opts);
     SystemPrompt::Text(text)
 }

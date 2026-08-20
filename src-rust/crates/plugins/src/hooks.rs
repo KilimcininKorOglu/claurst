@@ -189,7 +189,7 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
         .env("CLAUDE_PLUGIN_ROOT", &hook.plugin_root)
         .env("CLAUDE_PLUGIN_NAME", &hook.plugin_name)
         .envs(crate::plugin_config_env(&hook.plugin_name));
-    claurst_core::process_tree::spawn_std_in_own_group(&mut builder);
+    mikmik_core::process_tree::spawn_std_in_own_group(&mut builder);
     let mut child = match builder.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -217,7 +217,7 @@ pub fn run_hook_sync(hook: &RegisteredHook, event_json: &str) -> HookOutcome {
                 if std::time::Instant::now() >= deadline {
                     // The shell is only the wrapper: killing it left whatever
                     // the hook started running past the limit it was given.
-                    claurst_core::process_tree::kill_tree(child.id());
+                    mikmik_core::process_tree::kill_tree(child.id());
                     let _ = child.kill();
                     let _ = child.wait();
                     let msg = format!(

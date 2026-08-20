@@ -54,7 +54,7 @@ impl SlashCommand for ProvidersCommand {
 
 impl ProvidersCommand {
     fn list_providers(&self) -> CommandResult {
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let all = registry.list_all();
 
         if all.is_empty() {
@@ -143,8 +143,8 @@ impl SlashCommand for AgentCommand {
         use std::collections::HashMap;
 
         // Merge built-in defaults with user-defined agents (user wins on collision).
-        let mut all_agents: HashMap<String, claurst_core::AgentDefinition> =
-            claurst_core::default_agents();
+        let mut all_agents: HashMap<String, mikmik_core::AgentDefinition> =
+            mikmik_core::default_agents();
         all_agents.extend(ctx.config.agents.clone());
 
         let agent_name = args.trim();

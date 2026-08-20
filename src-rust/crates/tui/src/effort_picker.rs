@@ -1,7 +1,7 @@
 // effort_picker.rs — horizontal, model-adaptive Effort selector for `/effort`.
 //
 // A horizontal "Faster → Smarter" track (issue #268). The selectable levels are
-// model-adaptive: they come from `claurst_api::supported_efforts(provider,
+// model-adaptive: they come from `mikmik_api::supported_efforts(provider,
 // model, registry)`, which returns the model's supported ladder (ascending) with
 // `Ultracode` always last. `Ultracode` is separated from the native levels by a
 // `│` divider and rendered specially.
@@ -90,7 +90,7 @@ impl EffortPickerState {
     }
 
     /// Open the picker for the `current` effort, using `levels` as the
-    /// model-adaptive ladder (as returned by `claurst_api::supported_efforts`).
+    /// model-adaptive ladder (as returned by `mikmik_api::supported_efforts`).
     ///
     /// If `levels` is empty a sane default ladder is used. The selection is
     /// placed on `current` if present, otherwise on the nearest level at or below

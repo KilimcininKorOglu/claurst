@@ -9,7 +9,7 @@
 //! Tests are async and require git to be on PATH.  They are skipped gracefully
 //! when git is unavailable.
 
-use claurst_core::snapshot::{Patch, ShadowSnapshot};
+use mikmik_core::snapshot::{Patch, ShadowSnapshot};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -410,10 +410,7 @@ async fn diff_full_sets_status() {
     assert_eq!(diffs.len(), 4);
 
     let added = diffs.iter().find(|d| d.file == "added.txt").expect("added");
-    assert_eq!(
-        added.status,
-        Some(claurst_core::snapshot::FileStatus::Added)
-    );
+    assert_eq!(added.status, Some(mikmik_core::snapshot::FileStatus::Added));
 
     let deleted = diffs
         .iter()
@@ -421,13 +418,13 @@ async fn diff_full_sets_status() {
         .expect("deleted");
     assert_eq!(
         deleted.status,
-        Some(claurst_core::snapshot::FileStatus::Deleted)
+        Some(mikmik_core::snapshot::FileStatus::Deleted)
     );
 
     let grow = diffs.iter().find(|d| d.file == "grow.txt").expect("grow");
     assert_eq!(
         grow.status,
-        Some(claurst_core::snapshot::FileStatus::Modified)
+        Some(mikmik_core::snapshot::FileStatus::Modified)
     );
     assert!(grow.additions > 0);
     assert_eq!(grow.deletions, 0);

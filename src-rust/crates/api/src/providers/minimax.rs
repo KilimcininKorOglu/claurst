@@ -5,9 +5,9 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::ProviderId;
-use claurst_core::types::{ContentBlock, UsageInfo};
 use futures::Stream;
+use mikmik_core::provider_id::ProviderId;
+use mikmik_core::types::{ContentBlock, UsageInfo};
 use reqwest::{header, Client};
 use serde_json::Value;
 
@@ -32,7 +32,7 @@ pub struct MinimaxProvider {
 impl MinimaxProvider {
     pub fn new(api_key: String) -> Self {
         let api_base = std::env::var("MINIMAX_BASE_URL")
-            .unwrap_or_else(|_| claurst_core::constants::MINIMAX_ANTHROPIC_API_BASE.to_string());
+            .unwrap_or_else(|_| mikmik_core::constants::MINIMAX_ANTHROPIC_API_BASE.to_string());
         let mut headers = header::HeaderMap::new();
         headers.insert(
             "X-Api-Key",
@@ -461,7 +461,7 @@ impl LlmProvider for MinimaxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::WireModel;
+    use mikmik_core::config::WireModel;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn default_base_builds_exact_messages_url() {
         assert_eq!(
-            MinimaxProvider::messages_url(claurst_core::constants::MINIMAX_ANTHROPIC_API_BASE),
+            MinimaxProvider::messages_url(mikmik_core::constants::MINIMAX_ANTHROPIC_API_BASE),
             "https://api.minimax.io/anthropic/v1/messages"
         );
         assert_eq!(

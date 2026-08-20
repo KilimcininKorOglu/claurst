@@ -35,7 +35,7 @@ fn default_num_results() -> usize {
 #[async_trait]
 impl Tool for WebSearchTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_WEB_SEARCH
+        mikmik_core::constants::TOOL_NAME_WEB_SEARCH
     }
 
     fn description(&self) -> &str {
@@ -415,8 +415,8 @@ fn urlencoding_simple(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::Config;
-    use claurst_core::permissions::AutoPermissionHandler;
+    use mikmik_core::config::Config;
+    use mikmik_core::permissions::AutoPermissionHandler;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
@@ -596,14 +596,14 @@ mod tests {
         };
         ToolContext {
             working_dir: std::path::PathBuf::from("."),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: Arc::new(AutoPermissionHandler {
-                mode: claurst_core::config::PermissionMode::Default,
+                mode: mikmik_core::config::PermissionMode::Default,
             }),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "test-web-search".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,

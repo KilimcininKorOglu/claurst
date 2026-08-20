@@ -56,15 +56,15 @@ pub use skill_prefetch::{
     format_skill_listing, prefetch_skills, SharedSkillIndex, SkillDefinition, SkillIndex,
 };
 
-use claurst_api::{
+use mikmik_api::{
     AnthropicStreamEvent, ApiMessage, ApiToolDefinition, CreateMessageRequest, StreamAccumulator,
     StreamHandler, SystemPrompt, ThinkingConfig,
 };
-use claurst_core::config::Config;
-use claurst_core::cost::CostTracker;
-use claurst_core::error::ClaudeError;
-use claurst_core::types::{ContentBlock, Message, Role, ToolResultContent, UsageInfo};
-use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
+use mikmik_core::config::Config;
+use mikmik_core::cost::CostTracker;
+use mikmik_core::error::ClaudeError;
+use mikmik_core::types::{ContentBlock, Message, Role, ToolResultContent, UsageInfo};
+use mikmik_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -110,7 +110,7 @@ pub struct QueryConfig {
     pub compact_threshold: u8,
     pub system_prompt: Option<String>,
     pub append_system_prompt: Option<String>,
-    pub output_style: claurst_core::system_prompt::OutputStyle,
+    pub output_style: mikmik_core::system_prompt::OutputStyle,
     pub output_style_prompt: Option<String>,
     pub working_directory: Option<String>,
     /// Every directory the session can reach, by name. Forwarded to the
@@ -126,7 +126,7 @@ pub struct QueryConfig {
     /// the effort level's `thinking_budget_tokens()` is used as the
     /// thinking budget.  Also provides a temperature override when the
     /// level specifies one.
-    pub effort_level: Option<claurst_core::effort::EffortLevel>,
+    pub effort_level: Option<mikmik_core::effort::EffortLevel>,
     /// T1-4: Optional shared command queue.
     ///
     /// When set, the query loop drains this queue before each API call and
@@ -150,16 +150,16 @@ pub struct QueryConfig {
     /// When `config.provider` is set to something other than "anthropic" and
     /// this registry contains that provider, the registry's provider is used
     /// instead of `AnthropicClient`.
-    pub provider_registry: Option<std::sync::Arc<claurst_api::ProviderRegistry>>,
+    pub provider_registry: Option<std::sync::Arc<mikmik_api::ProviderRegistry>>,
     /// Active agent name (e.g., "build", "plan", "explore", or None for default).
     pub agent_name: Option<String>,
     /// Resolved agent definition for the current session.
-    pub agent_definition: Option<claurst_core::AgentDefinition>,
+    pub agent_definition: Option<mikmik_core::AgentDefinition>,
     /// Optional shared model registry for dynamic provider and model resolution.
     /// When set, the query loop uses this instead of constructing a fresh registry.
-    pub model_registry: Option<std::sync::Arc<claurst_api::ModelRegistry>>,
+    pub model_registry: Option<std::sync::Arc<mikmik_api::ModelRegistry>>,
     /// Managed agent (manager-executor) configuration.
-    pub managed_agents: Option<claurst_core::ManagedAgentConfig>,
+    pub managed_agents: Option<mikmik_core::ManagedAgentConfig>,
     /// Names of the tools enabled for this session (issue #233).
     ///
     /// When populated, `build_system_prompt` forwards these to
@@ -197,16 +197,16 @@ pub struct QueryConfig {
 impl Default for QueryConfig {
     fn default() -> Self {
         Self {
-            model: claurst_core::constants::DEFAULT_MODEL.to_string(),
-            max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
-            max_turns: claurst_core::constants::MAX_TURNS_DEFAULT,
+            model: mikmik_core::constants::DEFAULT_MODEL.to_string(),
+            max_tokens: mikmik_core::constants::DEFAULT_MAX_TOKENS,
+            max_turns: mikmik_core::constants::MAX_TURNS_DEFAULT,
             degradation_summary: true,
             auto_poke: true,
             auto_compact: true,
-            compact_threshold: claurst_core::constants::DEFAULT_COMPACT_THRESHOLD,
+            compact_threshold: mikmik_core::constants::DEFAULT_COMPACT_THRESHOLD,
             system_prompt: None,
             append_system_prompt: None,
-            output_style: claurst_core::system_prompt::OutputStyle::Default,
+            output_style: mikmik_core::system_prompt::OutputStyle::Default,
             output_style_prompt: None,
             working_directory: None,
             workspace_roots: std::collections::BTreeMap::new(),
@@ -248,7 +248,7 @@ impl QueryConfig {
             effort_level: cfg.effective_effort_level(),
             max_turns: cfg
                 .max_turns
-                .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
+                .unwrap_or(mikmik_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
             auto_compact: cfg.effective_auto_compact(),
@@ -261,10 +261,10 @@ impl QueryConfig {
     ///
     /// Prefers the best model for the configured provider (from models.dev data)
     /// over the hardcoded defaults.
-    pub fn from_config_with_registry(cfg: &Config, registry: &claurst_api::ModelRegistry) -> Self {
+    pub fn from_config_with_registry(cfg: &Config, registry: &mikmik_api::ModelRegistry) -> Self {
         // We can't move the Arc here, but we need a clone for the query loop.
         // Callers typically wrap the registry in an Arc already.
-        let route = claurst_api::resolve_effective_route(cfg, registry);
+        let route = mikmik_api::resolve_effective_route(cfg, registry);
         Self {
             model: cfg.canonical_model(&route.account, &route.model),
             max_tokens: cfg.effective_max_tokens(),
@@ -275,7 +275,7 @@ impl QueryConfig {
             effort_level: cfg.effective_effort_level(),
             max_turns: cfg
                 .max_turns
-                .unwrap_or(claurst_core::constants::MAX_TURNS_DEFAULT),
+                .unwrap_or(mikmik_core::constants::MAX_TURNS_DEFAULT),
             degradation_summary: cfg.degradation_summary.unwrap_or(true),
             auto_poke: cfg.auto_poke.unwrap_or(true),
             auto_compact: cfg.effective_auto_compact(),
@@ -394,10 +394,10 @@ fn merge_provider_stream_usage(current: &mut UsageInfo, update: &UsageInfo) {
 /// rather than `config.model`, for the same reason `cost_tracker` is.
 fn cost_of_turn(
     model: &str,
-    pricing: claurst_core::cost::ModelPricing,
+    pricing: mikmik_core::cost::ModelPricing,
     usage: &UsageInfo,
-) -> claurst_core::types::MessageCost {
-    claurst_core::types::MessageCost {
+) -> mikmik_core::types::MessageCost {
+    mikmik_core::types::MessageCost {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
@@ -412,7 +412,7 @@ fn cost_of_turn(
     }
 }
 
-// Spinner verbs are imported from claurst_core::spinner
+// Spinner verbs are imported from mikmik_core::spinner
 
 /// Resolve the effective effort level for a turn.
 ///
@@ -424,14 +424,14 @@ fn cost_of_turn(
 /// unchanged. Checking only the *last* user message keeps the mode scoped to the
 /// turn that asked for it (a later plain turn deactivates it automatically).
 ///
-/// [`EffortLevel::Ultracode`]: claurst_core::effort::EffortLevel::Ultracode
+/// [`EffortLevel::Ultracode`]: mikmik_core::effort::EffortLevel::Ultracode
 fn effective_effort_for_turn(
-    config_effort: Option<claurst_core::effort::EffortLevel>,
+    config_effort: Option<mikmik_core::effort::EffortLevel>,
     messages: &[Message],
-) -> Option<claurst_core::effort::EffortLevel> {
+) -> Option<mikmik_core::effort::EffortLevel> {
     if let Some(last_user) = messages.iter().rev().find(|m| m.role == Role::User) {
-        if claurst_core::effort::text_triggers_ultracode(&last_user.get_all_text()) {
-            return Some(claurst_core::effort::EffortLevel::Ultracode);
+        if mikmik_core::effort::text_triggers_ultracode(&last_user.get_all_text()) {
+            return Some(mikmik_core::effort::EffortLevel::Ultracode);
         }
     }
     config_effort
@@ -452,23 +452,23 @@ fn effective_effort_for_turn(
 fn effective_output_style_for_turn(
     config: &QueryConfig,
     messages: &[Message],
-) -> (claurst_core::system_prompt::OutputStyle, Option<String>) {
+) -> (mikmik_core::system_prompt::OutputStyle, Option<String>) {
     if let Some(last_user) = messages.iter().rev().find(|m| m.role == Role::User) {
         if let Some(style_name) =
-            claurst_core::keywords::inline_persona_style(&last_user.get_all_text())
+            mikmik_core::keywords::inline_persona_style(&last_user.get_all_text())
         {
             // Inline `normal` (→ "default") resets the persona for this turn.
             if style_name == "default" {
-                return (claurst_core::system_prompt::OutputStyle::Default, None);
+                return (mikmik_core::system_prompt::OutputStyle::Default, None);
             }
             // Otherwise apply the named persona's prompt for this turn only.
-            let prompt = claurst_core::output_styles::find_style(
-                &claurst_core::output_styles::builtin_styles(),
+            let prompt = mikmik_core::output_styles::find_style(
+                &mikmik_core::output_styles::builtin_styles(),
                 style_name,
             )
             .map(|style| style.prompt.clone())
             .filter(|prompt| !prompt.trim().is_empty());
-            return (claurst_core::system_prompt::OutputStyle::Default, prompt);
+            return (mikmik_core::system_prompt::OutputStyle::Default, prompt);
         }
     }
     // No inline persona keyword — keep the persistent selection.
@@ -490,7 +490,7 @@ fn effective_output_style_for_turn(
 /// the loop returns from too many places to hook each one.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_query_loop(
-    client: &claurst_api::AnthropicClient,
+    client: &mikmik_api::AnthropicClient,
     messages: &mut Vec<Message>,
     tools: &[Box<dyn Tool>],
     tool_ctx: &ToolContext,
@@ -514,11 +514,11 @@ pub async fn run_query_loop(
     .await;
 
     let event = if matches!(outcome, QueryOutcome::Error(_)) {
-        claurst_plugins::HookEventKind::StopFailure
+        mikmik_plugins::HookEventKind::StopFailure
     } else {
-        claurst_plugins::HookEventKind::Stop
+        mikmik_plugins::HookEventKind::Stop
     };
-    claurst_plugins::run_global_hook(
+    mikmik_plugins::run_global_hook(
         event,
         None,
         serde_json::json!({
@@ -532,7 +532,7 @@ pub async fn run_query_loop(
 }
 
 async fn run_query_loop_inner(
-    client: &claurst_api::AnthropicClient,
+    client: &mikmik_api::AnthropicClient,
     messages: &mut Vec<Message>,
     tools: &[Box<dyn Tool>],
     tool_ctx: &ToolContext,
@@ -598,9 +598,9 @@ async fn run_query_loop_inner(
 
     // Shadow-git snapshot: capture the worktree state before any tools run so we
     // can produce a per-turn file-change patch when the turn ends.
-    let shadow_snap: Option<std::sync::Arc<claurst_core::snapshot::ShadowSnapshot>> =
+    let shadow_snap: Option<std::sync::Arc<mikmik_core::snapshot::ShadowSnapshot>> =
         if tool_ctx.config.auto_commits == Some(true) {
-            claurst_core::snapshot::get_or_create(&tool_ctx.working_dir)
+            mikmik_core::snapshot::get_or_create(&tool_ctx.working_dir)
         } else {
             None
         };
@@ -947,10 +947,10 @@ async fn run_query_loop_inner(
                 config.continuation,
                 crate::continuation::ContinuationMode::Goal
             ) {
-                if let Some(goal) = claurst_core::GoalStore::open_default()
+                if let Some(goal) = mikmik_core::GoalStore::open_default()
                     .and_then(|s| s.get_active_goal(&tool_ctx.session_id))
                 {
-                    let addendum = claurst_core::goal_system_prompt_addendum(&goal);
+                    let addendum = mikmik_core::goal_system_prompt_addendum(&goal);
                     patched.append_system_prompt =
                         Some(match patched.append_system_prompt.take() {
                             Some(existing) => format!("{}\n{}", existing, addendum),
@@ -966,8 +966,8 @@ async fn run_query_loop_inner(
             // The keyword also raises the effort to top reasoning (see the
             // budget / provider mapping below). Applied fresh each turn so it
             // deactivates naturally, and composes with goal mode.
-            if effective_effort_level == Some(claurst_core::effort::EffortLevel::Ultracode) {
-                let uc_addendum = claurst_core::effort::ultracode_system_prompt_addendum();
+            if effective_effort_level == Some(mikmik_core::effort::EffortLevel::Ultracode) {
+                let uc_addendum = mikmik_core::effort::ultracode_system_prompt_addendum();
                 patched.append_system_prompt = Some(match patched.append_system_prompt.take() {
                     Some(existing) => format!("{}\n{}", existing, uc_addendum),
                     None => uc_addendum,
@@ -1027,7 +1027,7 @@ async fn run_query_loop_inner(
             let tx = tx.clone();
             Arc::new(ChannelStreamHandler { tx })
         } else {
-            Arc::new(claurst_api::streaming::NullStreamHandler)
+            Arc::new(mikmik_api::streaming::NullStreamHandler)
         };
 
         // Switching to the fallback model is the same decision on either
@@ -1090,7 +1090,7 @@ async fn run_query_loop_inner(
 
                     // Notify TUI that we're calling the provider using a random spinner verb
                     if let Some(ref tx) = event_tx {
-                        use claurst_core::sample_spinner_verb;
+                        use mikmik_core::sample_spinner_verb;
                         let seed = provider_id_str.len() ^ model_id_str.as_str().len();
                         let verb = sample_spinner_verb(seed);
                         let _ = tx.send(QueryEvent::Status(format!("✳ {}…", verb)));
@@ -1114,33 +1114,33 @@ async fn run_query_loop_inner(
                     // Max-steps degradation (issue #230): dispatch the final
                     // summary turn with no tools so the provider can only emit
                     // text (opencode's `toolChoice:"none"` equivalent).
-                    let provider_tools: Vec<claurst_core::types::ToolDefinition> =
+                    let provider_tools: Vec<mikmik_core::types::ToolDefinition> =
                         if caps.tool_calling && !degradation_turn {
                             tools.iter().map(|t| t.to_definition()).collect()
                         } else {
                             Vec::new()
                         };
-                    let provider_messages: Vec<claurst_core::types::Message> = messages
+                    let provider_messages: Vec<mikmik_core::types::Message> = messages
                         .iter()
                         .map(|msg| {
                             let mut msg = msg.clone();
-                            if let claurst_core::types::MessageContent::Blocks(ref mut blocks) =
+                            if let mikmik_core::types::MessageContent::Blocks(ref mut blocks) =
                                 msg.content
                             {
                                 for block in blocks.iter_mut() {
                                     match block {
-                                        claurst_core::types::ContentBlock::Image { .. }
+                                        mikmik_core::types::ContentBlock::Image { .. }
                                             if !caps.image_input =>
                                         {
-                                            *block = claurst_core::types::ContentBlock::Text {
+                                            *block = mikmik_core::types::ContentBlock::Text {
                                                 text: "[Image not supported by this model]"
                                                     .to_string(),
                                             };
                                         }
-                                        claurst_core::types::ContentBlock::Document { .. }
+                                        mikmik_core::types::ContentBlock::Document { .. }
                                             if !caps.pdf_input =>
                                         {
-                                            *block = claurst_core::types::ContentBlock::Text {
+                                            *block = mikmik_core::types::ContentBlock::Text {
                                                 text: "[PDF not supported by this model]"
                                                     .to_string(),
                                             };
@@ -1153,7 +1153,7 @@ async fn run_query_loop_inner(
                         })
                         .collect();
 
-                    let provider_request = claurst_api::ProviderRequest {
+                    let provider_request = mikmik_api::ProviderRequest {
                         model: model_id_str.clone(),
                         messages: provider_messages,
                         system_prompt: Some(system_for_provider.clone()),
@@ -1164,7 +1164,7 @@ async fn run_query_loop_inner(
                         top_k: None,
                         stop_sequences: vec![],
                         thinking: if caps.thinking {
-                            effective_thinking_budget.map(claurst_api::ThinkingConfig::enabled)
+                            effective_thinking_budget.map(mikmik_api::ThinkingConfig::enabled)
                         } else {
                             None
                         },
@@ -1193,7 +1193,7 @@ async fn run_query_loop_inner(
                         Err(e) => {
                             try_fallback_model!(e);
                             error!(provider = %provider_id_str, error = %e, "Provider stream failed");
-                            return QueryOutcome::Error(claurst_core::error::ClaudeError::Api(
+                            return QueryOutcome::Error(mikmik_core::error::ClaudeError::Api(
                                 e.to_string(),
                             ));
                         }
@@ -1254,45 +1254,45 @@ async fn run_query_loop_inner(
 
                                         // Accumulate response data.
                                         match &evt {
-                                            claurst_api::StreamEvent::MessageStart { id, usage: u, .. } => {
+                                            mikmik_api::StreamEvent::MessageStart { id, usage: u, .. } => {
                                                 msg_id = id.clone();
                                                 merge_provider_stream_usage(&mut usage, u);
                                             }
-                                            claurst_api::StreamEvent::ContentBlockStart {
+                                            mikmik_api::StreamEvent::ContentBlockStart {
                                                 index,
                                                 content_block: ContentBlock::ToolUse { id, name, thought_signature, .. },
                                             } => {
                                                 tool_call_blocks.insert(*index, (id.clone(), name.clone(), String::new(), thought_signature.clone()));
                                             }
-                                            claurst_api::StreamEvent::TextDelta { text, .. } => {
+                                            mikmik_api::StreamEvent::TextDelta { text, .. } => {
                                                 text_chunks.push(text.clone());
                                             }
-                                            claurst_api::StreamEvent::ThinkingDelta { thinking, .. } => {
+                                            mikmik_api::StreamEvent::ThinkingDelta { thinking, .. } => {
                                                 thinking_chunks.push(thinking.clone());
                                             }
-                                            claurst_api::StreamEvent::ReasoningDelta { reasoning, .. } => {
+                                            mikmik_api::StreamEvent::ReasoningDelta { reasoning, .. } => {
                                                 thinking_chunks.push(reasoning.clone());
                                             }
-                                            claurst_api::StreamEvent::InputJsonDelta { index, partial_json } => {
+                                            mikmik_api::StreamEvent::InputJsonDelta { index, partial_json } => {
                                                 if let Some((_, _, buf, _)) = tool_call_blocks.get_mut(index) {
                                                     buf.push_str(partial_json);
                                                 }
                                             }
-                                            claurst_api::StreamEvent::MessageDelta { stop_reason, usage: u } => {
+                                            mikmik_api::StreamEvent::MessageDelta { stop_reason, usage: u } => {
                                                 stop_str = match stop_reason {
-                                                    Some(claurst_api::provider_types::StopReason::ToolUse) => "tool_use".to_string(),
-                                                    Some(claurst_api::provider_types::StopReason::MaxTokens) => "max_tokens".to_string(),
-                                                    Some(claurst_api::provider_types::StopReason::StopSequence) => "stop_sequence".to_string(),
-                                                    Some(claurst_api::provider_types::StopReason::ContentFiltered) => "content_filtered".to_string(),
-                                                    Some(claurst_api::provider_types::StopReason::EndTurn) => "end_turn".to_string(),
-                                                    Some(claurst_api::provider_types::StopReason::Other(s)) => s.clone(),
+                                                    Some(mikmik_api::provider_types::StopReason::ToolUse) => "tool_use".to_string(),
+                                                    Some(mikmik_api::provider_types::StopReason::MaxTokens) => "max_tokens".to_string(),
+                                                    Some(mikmik_api::provider_types::StopReason::StopSequence) => "stop_sequence".to_string(),
+                                                    Some(mikmik_api::provider_types::StopReason::ContentFiltered) => "content_filtered".to_string(),
+                                                    Some(mikmik_api::provider_types::StopReason::EndTurn) => "end_turn".to_string(),
+                                                    Some(mikmik_api::provider_types::StopReason::Other(s)) => s.clone(),
                                                     None => "end_turn".to_string(),
                                                 };
                                                 if let Some(u) = u {
                                                     merge_provider_stream_usage(&mut usage, u);
                                                 }
                                             }
-                                            claurst_api::StreamEvent::MessageStop => break,
+                                            mikmik_api::StreamEvent::MessageStop => break,
                                             _ => {}
                                         }
                                     }
@@ -1413,10 +1413,8 @@ async fn run_query_loop_inner(
                     }
 
                     let mut assistant_msg = Message {
-                        role: claurst_core::types::Role::Assistant,
-                        content: claurst_core::types::MessageContent::Blocks(
-                            content_blocks.clone(),
-                        ),
+                        role: mikmik_core::types::Role::Assistant,
+                        content: mikmik_core::types::MessageContent::Blocks(content_blocks.clone()),
                         uuid: Some(msg_id),
                         cost: None,
                         snapshot_patch: None,
@@ -1499,15 +1497,15 @@ async fn run_query_loop_inner(
                             }
                             tool_results.push(ContentBlock::ToolResult {
                                 tool_use_id: tool_id,
-                                content: claurst_core::types::ToolResultContent::Text(
+                                content: mikmik_core::types::ToolResultContent::Text(
                                     result.content,
                                 ),
                                 is_error: Some(result.is_error),
                             });
                         }
                         messages.push(Message {
-                            role: claurst_core::types::Role::User,
-                            content: claurst_core::types::MessageContent::Blocks(tool_results),
+                            role: mikmik_core::types::Role::User,
+                            content: mikmik_core::types::MessageContent::Blocks(tool_results),
                             uuid: None,
                             cost: None,
                             snapshot_patch: None,
@@ -1736,7 +1734,7 @@ async fn run_query_loop_inner(
         // Helper closure for firing the Stop hook.
         macro_rules! fire_stop_hook {
             ($msg:expr) => {{
-                let stop_ctx = claurst_core::hooks::HookContext {
+                let stop_ctx = mikmik_core::hooks::HookContext {
                     event: "Stop".to_string(),
                     tool_name: None,
                     tool_input: None,
@@ -1744,9 +1742,9 @@ async fn run_query_loop_inner(
                     is_error: None,
                     session_id: Some(tool_ctx.session_id.clone()),
                 };
-                claurst_core::hooks::run_hooks(
+                mikmik_core::hooks::run_hooks(
                     &tool_ctx.config.hooks,
-                    claurst_core::config::HookEvent::Stop,
+                    mikmik_core::config::HookEvent::Stop,
                     &stop_ctx,
                     &tool_ctx.working_dir,
                 )
@@ -1787,7 +1785,7 @@ async fn run_query_loop_inner(
 
                     tokio::spawn(async move {
                         let Some(provider) =
-                            claurst_api::provider_by_id(&config_clone, &route_clone.account).await
+                            mikmik_api::provider_by_id(&config_clone, &route_clone.account).await
                         else {
                             tracing::debug!(
                                 account = %route_clone.account,
@@ -1832,7 +1830,7 @@ async fn run_query_loop_inner(
                 // the spawn doesn't call run_query_loop recursively from within
                 // its own future (which would make the future !Send).
                 {
-                    let claurst_home = claurst_core::config::Settings::config_dir();
+                    let claurst_home = mikmik_core::config::Settings::config_dir();
                     let memory_dir = Some(claurst_home.join("memory"));
                     let conversations_dir = Some(claurst_home.join("conversations"));
                     if let (Some(mem), Some(conv)) = (memory_dir, conversations_dir) {
@@ -1854,7 +1852,7 @@ async fn run_query_loop_inner(
                             let ctx_for_dream = tool_ctx.clone();
                             tokio::spawn(async move {
                                 let agent = crate::agent_tool::AgentTool;
-                                let _result = claurst_tools::Tool::execute(
+                                let _result = mikmik_tools::Tool::execute(
                                     &agent,
                                     agent_input,
                                     &ctx_for_dream,
@@ -2106,19 +2104,19 @@ impl StreamHandler for ChannelStreamHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_api::SystemPrompt;
+    use mikmik_api::SystemPrompt;
 
     #[test]
     fn a_configured_effort_reaches_the_turn() {
         // Nothing else reads `config.effort`, so if this arm goes missing the
         // setting is written, listed, and silently ignored on every request.
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             effort: Some("xhigh".to_string()),
             ..Default::default()
         };
         assert_eq!(
             QueryConfig::from_config(&cfg).effort_level,
-            Some(claurst_core::effort::EffortLevel::XHigh)
+            Some(mikmik_core::effort::EffortLevel::XHigh)
         );
     }
 
@@ -2126,7 +2124,7 @@ mod tests {
     fn a_turn_carries_its_own_usage_and_price() {
         // `/stats` sums these off the stored messages, so a turn that recorded
         // nothing is a turn that spent nothing as far as every report goes.
-        let usage = claurst_core::types::UsageInfo {
+        let usage = mikmik_core::types::UsageInfo {
             input_tokens: 1_000,
             output_tokens: 500,
             cache_creation_input_tokens: 20,
@@ -2135,7 +2133,7 @@ mod tests {
 
         let cost = cost_of_turn(
             "claude-sonnet-4-5",
-            claurst_core::cost::ModelPricing::SONNET,
+            mikmik_core::cost::ModelPricing::SONNET,
             &usage,
         );
 
@@ -2148,7 +2146,7 @@ mod tests {
 
     #[test]
     fn no_configured_effort_leaves_the_turn_on_its_default() {
-        let cfg = claurst_core::config::Config::default();
+        let cfg = mikmik_core::config::Config::default();
         assert_eq!(QueryConfig::from_config(&cfg).effort_level, None);
     }
 
@@ -2156,7 +2154,7 @@ mod tests {
     fn both_turn_behaviour_toggles_default_to_on_when_unset() {
         // `None` must read as enabled, or upgrading would silently switch off
         // the summary turn and the todo reminder for every existing user.
-        let cfg = claurst_core::config::Config::default();
+        let cfg = mikmik_core::config::Config::default();
         let query = QueryConfig::from_config(&cfg);
         assert!(query.degradation_summary);
         assert!(query.auto_poke);
@@ -2166,7 +2164,7 @@ mod tests {
     fn switching_a_turn_behaviour_toggle_off_reaches_the_turn() {
         // Nothing else reads either field, so a missing arm here would leave
         // the setting written, documented, and ignored on every request.
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             degradation_summary: Some(false),
             auto_poke: Some(false),
             ..Default::default()
@@ -2178,16 +2176,16 @@ mod tests {
 
     #[test]
     fn a_configured_turn_limit_reaches_the_turn() {
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             max_turns: Some(25),
             ..Default::default()
         };
         assert_eq!(QueryConfig::from_config(&cfg).max_turns, 25);
 
-        let unset = claurst_core::config::Config::default();
+        let unset = mikmik_core::config::Config::default();
         assert_eq!(
             QueryConfig::from_config(&unset).max_turns,
-            claurst_core::constants::MAX_TURNS_DEFAULT
+            mikmik_core::constants::MAX_TURNS_DEFAULT
         );
     }
 
@@ -2196,13 +2194,13 @@ mod tests {
         // `/turns off` stores this value; the loop compares the turn counter
         // against it, so it has to survive the trip to the turn unchanged. A
         // value clamped on the way through would reinstate a limit.
-        let cfg = claurst_core::config::Config {
-            max_turns: Some(claurst_core::constants::MAX_TURNS_UNLIMITED),
+        let cfg = mikmik_core::config::Config {
+            max_turns: Some(mikmik_core::constants::MAX_TURNS_UNLIMITED),
             ..Default::default()
         };
         assert_eq!(
             QueryConfig::from_config(&cfg).max_turns,
-            claurst_core::constants::MAX_TURNS_UNLIMITED
+            mikmik_core::constants::MAX_TURNS_UNLIMITED
         );
     }
 
@@ -2211,12 +2209,12 @@ mod tests {
         // `from_config_with_registry` is a second, near-identical constructor;
         // a field added to one and not the other is silently dropped for every
         // caller that uses model discovery.
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             degradation_summary: Some(false),
             auto_poke: Some(false),
             ..Default::default()
         };
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         let query = QueryConfig::from_config_with_registry(&cfg, &registry);
         assert!(!query.degradation_summary);
         assert!(!query.auto_poke);
@@ -2228,8 +2226,8 @@ mod tests {
 
     #[test]
     fn a_busy_provider_is_worth_a_fallback() {
-        use claurst_api::provider_error::ProviderError;
-        use claurst_core::provider_id::ProviderId;
+        use mikmik_api::provider_error::ProviderError;
+        use mikmik_core::provider_id::ProviderId;
 
         assert!(ProviderError::RateLimited {
             provider: ProviderId::new("openai"),
@@ -2257,8 +2255,8 @@ mod tests {
 
     #[test]
     fn a_failure_the_fallback_would_share_is_not_worth_it() {
-        use claurst_api::provider_error::ProviderError;
-        use claurst_core::provider_id::ProviderId;
+        use mikmik_api::provider_error::ProviderError;
+        use mikmik_core::provider_id::ProviderId;
 
         // A bad key or a missing model fails the same way on the second model,
         // so switching only doubles the wait before the same error.
@@ -2326,10 +2324,10 @@ mod tests {
             degradation_summary: true,
             auto_poke: true,
             auto_compact: true,
-            compact_threshold: claurst_core::constants::DEFAULT_COMPACT_THRESHOLD,
+            compact_threshold: mikmik_core::constants::DEFAULT_COMPACT_THRESHOLD,
             system_prompt: sys.map(String::from),
             append_system_prompt: append.map(String::from),
-            output_style: claurst_core::system_prompt::OutputStyle::Default,
+            output_style: mikmik_core::system_prompt::OutputStyle::Default,
             output_style_prompt: None,
             working_directory: None,
             workspace_roots: std::collections::BTreeMap::new(),
@@ -2422,7 +2420,7 @@ mod tests {
                 text
             );
             assert!(
-                text.contains(claurst_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
+                text.contains(mikmik_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
                 "Default prompt must contain the dynamic boundary marker"
             );
         } else {
@@ -2460,7 +2458,7 @@ mod tests {
             assert!(text.contains("Additional context."));
             // append_system_prompt appears after the boundary
             let boundary_pos = text
-                .find(claurst_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+                .find(mikmik_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
                 .expect("boundary must exist");
             let append_pos = text.find("Additional context.").unwrap();
             assert!(
@@ -2484,7 +2482,7 @@ mod tests {
                 "Appended text must appear in the prompt"
             );
             let boundary_pos = text
-                .find(claurst_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+                .find(mikmik_core::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
                 .expect("boundary must exist");
             let append_pos = text.find("Appended text.").unwrap();
             assert!(
@@ -2528,7 +2526,7 @@ mod tests {
         let s = format!("{:?}", outcome);
         assert!(s.contains("Cancelled"));
 
-        let err_outcome = QueryOutcome::Error(claurst_core::error::ClaudeError::RateLimit);
+        let err_outcome = QueryOutcome::Error(mikmik_core::error::ClaudeError::RateLimit);
         let s2 = format!("{:?}", err_outcome);
         assert!(s2.contains("Error"));
     }
@@ -2538,7 +2536,7 @@ mod tests {
         let options = build_provider_options(
             "google",
             "gemini-3-flash-preview",
-            Some(claurst_core::effort::EffortLevel::High),
+            Some(mikmik_core::effort::EffortLevel::High),
             None,
             None,
         );
@@ -2557,7 +2555,7 @@ mod tests {
         let options = build_provider_options(
             "openrouter",
             "gpt-5.4",
-            Some(claurst_core::effort::EffortLevel::Medium),
+            Some(mikmik_core::effort::EffortLevel::Medium),
             None,
             None,
         );
@@ -2570,9 +2568,9 @@ mod tests {
     fn test_build_provider_options_codex_effort_ladder() {
         // Codex maps the lower tiers like any OpenAI reasoning model...
         for (level, expected) in [
-            (claurst_core::effort::EffortLevel::Low, "low"),
-            (claurst_core::effort::EffortLevel::Medium, "medium"),
-            (claurst_core::effort::EffortLevel::High, "high"),
+            (mikmik_core::effort::EffortLevel::Low, "low"),
+            (mikmik_core::effort::EffortLevel::Medium, "medium"),
+            (mikmik_core::effort::EffortLevel::High, "high"),
         ] {
             let options =
                 build_provider_options("openai-codex", "gpt-5.5", Some(level), None, None);
@@ -2582,7 +2580,7 @@ mod tests {
         let options = build_provider_options(
             "openai-codex",
             "gpt-5.5",
-            Some(claurst_core::effort::EffortLevel::Max),
+            Some(mikmik_core::effort::EffortLevel::Max),
             None,
             None,
         );
@@ -2593,7 +2591,7 @@ mod tests {
         let other = build_provider_options(
             "openrouter",
             "gpt-5.4",
-            Some(claurst_core::effort::EffortLevel::Max),
+            Some(mikmik_core::effort::EffortLevel::Max),
             None,
             None,
         );
@@ -2605,7 +2603,7 @@ mod tests {
         let options = build_provider_options(
             "amazon-bedrock",
             "anthropic.claude-sonnet-4-6-v1",
-            Some(claurst_core::effort::EffortLevel::High),
+            Some(mikmik_core::effort::EffortLevel::High),
             Some(10_000),
             None,
         );
@@ -2633,7 +2631,7 @@ mod tests {
         let options = build_provider_options(
             "my-gateway",
             "some-local-model",
-            Some(claurst_core::effort::EffortLevel::High),
+            Some(mikmik_core::effort::EffortLevel::High),
             None,
             Some(&account_options(&[
                 ("reasoningEffort", serde_json::json!("high")),
@@ -2651,7 +2649,7 @@ mod tests {
         let options = build_provider_options(
             "github-copilot",
             "gpt-5.2",
-            Some(claurst_core::effort::EffortLevel::Low),
+            Some(mikmik_core::effort::EffortLevel::Low),
             None,
             Some(&account_options(&[(
                 "reasoningEffort",
@@ -2690,14 +2688,14 @@ mod tests {
             build_provider_options(
                 "openrouter",
                 "gpt-5.4",
-                Some(claurst_core::effort::EffortLevel::Medium),
+                Some(mikmik_core::effort::EffortLevel::Medium),
                 None,
                 Some(&empty),
             ),
             build_provider_options(
                 "openrouter",
                 "gpt-5.4",
-                Some(claurst_core::effort::EffortLevel::Medium),
+                Some(mikmik_core::effort::EffortLevel::Medium),
                 None,
                 None,
             )
@@ -2824,19 +2822,19 @@ mod tests {
     /// Permission handler that denies everything (returns `Ask`, which in a
     /// non-interactive context surfaces as a hard denial).
     struct DenyAllHandler;
-    impl claurst_core::permissions::PermissionHandler for DenyAllHandler {
+    impl mikmik_core::permissions::PermissionHandler for DenyAllHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Ask {
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Ask {
                 reason: "denied by test handler".to_string(),
             }
         }
         fn request_permission(
             &self,
-            request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
+            request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
             self.check_permission(request)
         }
     }
@@ -2875,17 +2873,17 @@ mod tests {
     fn deny_all_context() -> ToolContext {
         ToolContext {
             working_dir: std::path::PathBuf::from("/workspace"),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: Arc::new(DenyAllHandler),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "backstop-test".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             non_interactive: true,
             mcp_manager: None,
-            config: claurst_core::config::Config::default(),
+            config: mikmik_core::config::Config::default(),
             managed_agent_config: None,
             completion_notifier: None,
             pending_permissions: None,
@@ -2986,7 +2984,7 @@ mod tests {
 
     /// Records the call the context described while it was executing.
     struct CallRecordingTool {
-        seen: Arc<parking_lot::Mutex<Option<claurst_tools::ActiveToolCall>>>,
+        seen: Arc<parking_lot::Mutex<Option<mikmik_tools::ActiveToolCall>>>,
     }
 
     #[async_trait::async_trait]
@@ -3136,7 +3134,7 @@ mod tests {
     /// empty (i.e. tools were disabled — the max-steps degradation turn) and
     /// replays a scripted response. Drives `run_query_loop` end-to-end.
     struct RecordingProvider {
-        id: claurst_core::provider_id::ProviderId,
+        id: mikmik_core::provider_id::ProviderId,
         /// One entry per request: `true` when its tool set was empty.
         tools_empty_per_request: Arc<StdMutex<Vec<bool>>>,
         /// When true, always end the turn with text (ignores tools). Otherwise
@@ -3146,8 +3144,8 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl claurst_api::LlmProvider for RecordingProvider {
-        fn id(&self) -> &claurst_core::provider_id::ProviderId {
+    impl mikmik_api::LlmProvider for RecordingProvider {
+        fn id(&self) -> &mikmik_core::provider_id::ProviderId {
             &self.id
         }
         fn name(&self) -> &str {
@@ -3156,26 +3154,26 @@ mod tests {
 
         async fn create_message(
             &self,
-            _request: claurst_api::ProviderRequest,
-        ) -> Result<claurst_api::ProviderResponse, claurst_api::ProviderError> {
+            _request: mikmik_api::ProviderRequest,
+        ) -> Result<mikmik_api::ProviderResponse, mikmik_api::ProviderError> {
             unimplemented!("these tests only use create_message_stream")
         }
 
         async fn create_message_stream(
             &self,
-            request: claurst_api::ProviderRequest,
+            request: mikmik_api::ProviderRequest,
         ) -> Result<
             std::pin::Pin<
                 Box<
                     dyn futures::Stream<
-                            Item = Result<claurst_api::StreamEvent, claurst_api::ProviderError>,
+                            Item = Result<mikmik_api::StreamEvent, mikmik_api::ProviderError>,
                         > + Send,
                 >,
             >,
-            claurst_api::ProviderError,
+            mikmik_api::ProviderError,
         > {
-            use claurst_api::provider_types::StopReason;
-            use claurst_api::StreamEvent;
+            use mikmik_api::provider_types::StopReason;
+            use mikmik_api::StreamEvent;
 
             let tools_empty = request.tools.is_empty();
             self.tools_empty_per_request
@@ -3186,7 +3184,7 @@ mod tests {
             let msg_id = uuid::Uuid::new_v4().to_string();
             let emit_tool_use = !self.always_end_turn && !tools_empty;
 
-            let events: Vec<Result<StreamEvent, claurst_api::ProviderError>> = if emit_tool_use {
+            let events: Vec<Result<StreamEvent, mikmik_api::ProviderError>> = if emit_tool_use {
                 let tool_id = uuid::Uuid::new_v4().to_string();
                 vec![
                     Ok(StreamEvent::MessageStart {
@@ -3237,12 +3235,12 @@ mod tests {
 
         async fn health_check(
             &self,
-        ) -> Result<claurst_api::ProviderStatus, claurst_api::ProviderError> {
-            Ok(claurst_api::ProviderStatus::Healthy)
+        ) -> Result<mikmik_api::ProviderStatus, mikmik_api::ProviderError> {
+            Ok(mikmik_api::ProviderStatus::Healthy)
         }
 
-        fn capabilities(&self) -> claurst_api::ProviderCapabilities {
-            claurst_api::ProviderCapabilities {
+        fn capabilities(&self) -> mikmik_api::ProviderCapabilities {
+            mikmik_api::ProviderCapabilities {
                 streaming: true,
                 tool_calling: true,
                 thinking: false,
@@ -3252,7 +3250,7 @@ mod tests {
                 video_input: false,
                 caching: false,
                 structured_output: false,
-                system_prompt_style: claurst_api::SystemPromptStyle::TopLevel,
+                system_prompt_style: mikmik_api::SystemPromptStyle::TopLevel,
             }
         }
     }
@@ -3288,15 +3286,15 @@ mod tests {
     ) -> (QueryOutcome, Vec<bool>, Vec<Message>) {
         let recorded = Arc::new(StdMutex::new(Vec::new()));
         let provider = Arc::new(RecordingProvider {
-            id: claurst_core::provider_id::ProviderId::new("mockprov"),
+            id: mikmik_core::provider_id::ProviderId::new("mockprov"),
             tools_empty_per_request: recorded.clone(),
             always_end_turn,
         });
-        let mut registry = claurst_api::ProviderRegistry::new();
+        let mut registry = mikmik_api::ProviderRegistry::new();
         registry.register(provider);
         let registry = Arc::new(registry);
 
-        let client = claurst_api::AnthropicClient::new(claurst_api::client::ClientConfig {
+        let client = mikmik_api::AnthropicClient::new(mikmik_api::client::ClientConfig {
             api_key: "test-key".to_string(),
             ..Default::default()
         })
@@ -3313,7 +3311,7 @@ mod tests {
         config.continuation = continuation;
         tweak(&mut config);
 
-        let cost = claurst_core::cost::CostTracker::new();
+        let cost = mikmik_core::cost::CostTracker::new();
         let cancel = tokio_util::sync::CancellationToken::new();
         let mut messages = vec![Message::user("start")];
 
@@ -3444,7 +3442,7 @@ mod tests {
         use crate::goal_loop::{decide_goal_continuation, GoalContinuation, StopReason};
 
         let store =
-            claurst_core::GoalStore::open(std::path::Path::new(":memory:")).expect("open store");
+            mikmik_core::GoalStore::open(std::path::Path::new(":memory:")).expect("open store");
 
         // Active goal, guards allow → continue with the goal continuation message.
         store.set_goal("live", "ship the feature", None).unwrap();
@@ -3471,26 +3469,26 @@ mod tests {
         }
         assert_eq!(
             store.get_goal("budget").unwrap().status,
-            claurst_core::GoalStatus::BudgetLimited,
+            mikmik_core::GoalStatus::BudgetLimited,
             "over-budget goal must be persisted as budget-limited"
         );
 
         // Runaway guard tripped → paused outcome (same as the cross-turn design).
         store.set_goal("runaway", "endless", None).unwrap();
-        for _ in 0..claurst_core::MAX_GOAL_TURNS {
+        for _ in 0..mikmik_core::MAX_GOAL_TURNS {
             store.record_turn("runaway", 0).unwrap();
         }
         match decide_goal_continuation(&store, "runaway", 0, 1) {
             GoalContinuation::Stop {
                 reason: StopReason::RunawayGuard { turns_used },
             } => {
-                assert_eq!(turns_used, claurst_core::MAX_GOAL_TURNS);
+                assert_eq!(turns_used, mikmik_core::MAX_GOAL_TURNS);
             }
             _ => panic!("a runaway goal must pause"),
         }
         assert_eq!(
             store.get_goal("runaway").unwrap().status,
-            claurst_core::GoalStatus::Paused,
+            mikmik_core::GoalStatus::Paused,
             "runaway goal must be persisted as paused"
         );
     }
@@ -3499,7 +3497,7 @@ mod tests {
 
     #[test]
     fn ultracode_keyword_raises_effort_to_ultracode() {
-        use claurst_core::effort::EffortLevel;
+        use mikmik_core::effort::EffortLevel;
         let msgs = vec![Message::user("please ultracode this refactor")];
         // Even with no configured effort, the keyword forces Ultracode.
         assert_eq!(
@@ -3515,7 +3513,7 @@ mod tests {
 
     #[test]
     fn no_keyword_keeps_configured_effort() {
-        use claurst_core::effort::EffortLevel;
+        use mikmik_core::effort::EffortLevel;
         let msgs = vec![Message::user("please refactor this module")];
         assert_eq!(effective_effort_for_turn(None, &msgs), None);
         assert_eq!(
@@ -3538,7 +3536,7 @@ mod tests {
 
     #[test]
     fn ultracode_addendum_flows_into_built_system_prompt() {
-        use claurst_core::effort::EffortLevel;
+        use mikmik_core::effort::EffortLevel;
         // Mirrors the loop wiring: when the effective effort is Ultracode the
         // procedure addendum is threaded through `append_system_prompt` into the
         // assembled system prompt.
@@ -3547,13 +3545,13 @@ mod tests {
             effective_effort_for_turn(None, &msgs),
             Some(EffortLevel::Ultracode)
         );
-        let addendum = claurst_core::effort::ultracode_system_prompt_addendum();
-        let opts = claurst_core::system_prompt::SystemPromptOptions {
+        let addendum = mikmik_core::effort::ultracode_system_prompt_addendum();
+        let opts = mikmik_core::system_prompt::SystemPromptOptions {
             append_system_prompt: Some(addendum),
             skip_env_info: true,
             ..Default::default()
         };
-        let prompt = claurst_core::system_prompt::build_system_prompt(&opts);
+        let prompt = mikmik_core::system_prompt::build_system_prompt(&opts);
         assert!(prompt.contains("Ultracode Mode"));
         assert!(prompt.contains("TeamCreate"));
 
@@ -3562,8 +3560,8 @@ mod tests {
             effective_effort_for_turn(None, &[Message::user("hi there")]),
             None
         );
-        let plain = claurst_core::system_prompt::build_system_prompt(
-            &claurst_core::system_prompt::SystemPromptOptions {
+        let plain = mikmik_core::system_prompt::build_system_prompt(
+            &mikmik_core::system_prompt::SystemPromptOptions {
                 skip_env_info: true,
                 ..Default::default()
             },
@@ -3629,7 +3627,7 @@ mod tests {
         let msgs = vec![Message::user("back to normal for this one please")];
         let (style, prompt) = effective_output_style_for_turn(&cfg, &msgs);
         assert!(prompt.is_none(), "inline normal should reset the persona");
-        assert_eq!(style, claurst_core::system_prompt::OutputStyle::Default);
+        assert_eq!(style, mikmik_core::system_prompt::OutputStyle::Default);
     }
 
     #[test]
@@ -3638,7 +3636,7 @@ mod tests {
         // transiently.
         let cfg = QueryConfig {
             output_style_prompt: Some(
-                claurst_core::output_styles::OutputStyleDef::builtin_caveman().prompt,
+                mikmik_core::output_styles::OutputStyleDef::builtin_caveman().prompt,
             ),
             ..QueryConfig::default()
         };

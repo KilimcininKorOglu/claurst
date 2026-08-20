@@ -8,7 +8,7 @@
 
 use super::*;
 use async_trait::async_trait;
-use claurst_buddy::{Companion, CompanionSoul};
+use mikmik_buddy::{Companion, CompanionSoul};
 
 pub struct BuddyCommand;
 
@@ -57,7 +57,7 @@ impl SlashCommand for BuddyCommand {
 fn set_enabled(ctx: &CommandContext, enabled: bool) -> CommandResult {
     // Load and save through the typed `Settings` path, so keys this struct
     // does not model survive the write.
-    let mut settings = match claurst_core::config::Settings::load_sync() {
+    let mut settings = match mikmik_core::config::Settings::load_sync() {
         Ok(settings) => settings,
         Err(e) => {
             return CommandResult::Error(format!(
@@ -91,7 +91,7 @@ fn set_enabled(ctx: &CommandContext, enabled: bool) -> CommandResult {
 /// Discard the stored soul. The bones are untouched because they are not
 /// stored in the first place.
 fn forget() -> CommandResult {
-    let path = claurst_core::claurst_home().join("companion.json");
+    let path = mikmik_core::claurst_home().join("companion.json");
     match std::fs::remove_file(&path) {
         Ok(()) => CommandResult::Message(
             "Companion forgotten. The next `/buddy` hatches it again, with the same body \
@@ -107,9 +107,9 @@ fn forget() -> CommandResult {
 
 /// Show the companion card, hatching it first if it has never been named.
 async fn show(ctx: &CommandContext) -> CommandResult {
-    let config_dir = claurst_core::claurst_home();
-    let identity = claurst_core::accounts::stable_identity();
-    let mut companion = claurst_buddy::get_companion(&identity, &config_dir);
+    let config_dir = mikmik_core::claurst_home();
+    let identity = mikmik_core::accounts::stable_identity();
+    let mut companion = mikmik_buddy::get_companion(&identity, &config_dir);
 
     // An unhatched companion is shown either way. The bones exist without the
     // model, so a provider that is not reachable costs the name, not the card.
@@ -118,7 +118,7 @@ async fn show(ctx: &CommandContext) -> CommandResult {
     if companion.soul.is_none() {
         match hatch(ctx, &companion).await {
             Ok(soul) => {
-                if let Err(e) = claurst_buddy::save_companion_soul(&config_dir, &soul) {
+                if let Err(e) = mikmik_buddy::save_companion_soul(&config_dir, &soul) {
                     note = format!("\n\nHatched, but could not save companion.json: {e}");
                 }
                 companion.soul = Some(soul);
@@ -152,7 +152,7 @@ fn card(companion: &Companion) -> String {
     // The sprite reserves a top row for a hat or for per-frame flourishes, and
     // pads every row to a fixed width. The card holds one still frame, so a
     // row of spaces there is just a gap.
-    let sprite = claurst_buddy::render(companion, 0);
+    let sprite = mikmik_buddy::render(companion, 0);
     let rows: Vec<&str> = sprite
         .lines()
         .skip_while(|row| row.trim().is_empty())
@@ -175,7 +175,7 @@ fn card(companion: &Companion) -> String {
         shiny
     ));
 
-    if bones.hat != claurst_buddy::Hat::None {
+    if bones.hat != mikmik_buddy::Hat::None {
         out.push_str(&format!("wearing: {}\n", hat_name(&bones.hat)));
     }
 
@@ -213,8 +213,8 @@ fn stat_bar(value: u8) -> String {
     )
 }
 
-fn hat_name(hat: &claurst_buddy::Hat) -> &'static str {
-    use claurst_buddy::Hat;
+fn hat_name(hat: &mikmik_buddy::Hat) -> &'static str {
+    use mikmik_buddy::Hat;
     match hat {
         Hat::None => "nothing",
         Hat::Crown => "a crown",
@@ -235,11 +235,11 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
     let bones = &companion.bones;
     let route = companion_route(&ctx.config);
 
-    let provider = claurst_api::provider_for_account(&ctx.config, &route.account)
+    let provider = mikmik_api::provider_for_account(&ctx.config, &route.account)
         .await
         .map_err(|e| format!("no provider is configured to hatch with: {e}"))?;
 
-    let request = claurst_api::ProviderRequest {
+    let request = mikmik_api::ProviderRequest {
         model: route.model.clone(),
         messages: vec![Message::user(format!(
             "Name this creature and describe it.\n\n\
@@ -257,7 +257,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
             bones.stats.wisdom,
             bones.stats.snark,
         ))],
-        system_prompt: Some(claurst_api::SystemPrompt::Text(
+        system_prompt: Some(mikmik_api::SystemPrompt::Text(
             "You name small imaginary creatures that live in a terminal. The name should \
              suit the body and the stats. Be specific and odd, never generic."
                 .to_string(),
@@ -279,7 +279,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
 
     ctx.cost_tracker.add_usage(
         route.model.as_str(),
-        claurst_api::pricing_for_route(&ctx.config, &claurst_api::ModelRegistry::new(), &route),
+        mikmik_api::pricing_for_route(&ctx.config, &mikmik_api::ModelRegistry::new(), &route),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,
@@ -308,17 +308,17 @@ pub async fn companion_reply(
         .ok_or("the companion has no name yet")?;
     let route = companion_route(config);
 
-    let provider = claurst_api::provider_for_account(config, &route.account)
+    let provider = mikmik_api::provider_for_account(config, &route.account)
         .await
         .map_err(|e| format!("no provider is configured: {e}"))?;
 
-    let request = claurst_api::ProviderRequest {
+    let request = mikmik_api::ProviderRequest {
         model: route.model.clone(),
         messages: vec![Message::user(format!(
             "The user just said:\n\n{}",
             truncate_for_bubble(user_message)
         ))],
-        system_prompt: Some(claurst_api::SystemPrompt::Text(format!(
+        system_prompt: Some(mikmik_api::SystemPrompt::Text(format!(
             "You are {}, a small {} sitting beside a programmer's terminal. You are \
              {}. The user said something to you. Answer in ONE short line, under 15 \
              words, lower case, no quotes and no preamble. You are not the coding \
@@ -344,7 +344,7 @@ pub async fn companion_reply(
 
     cost_tracker.add_usage(
         route.model.as_str(),
-        claurst_api::pricing_for_route(config, &claurst_api::ModelRegistry::new(), &route),
+        mikmik_api::pricing_for_route(config, &mikmik_api::ModelRegistry::new(), &route),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,
@@ -383,7 +383,7 @@ fn first_line(text: &str) -> Option<String> {
 /// (`"cheap_account/haiku"`) and the request has to reach that account with
 /// the prefix removed. It used to go out whole, to whichever account the
 /// session had selected.
-pub(crate) fn companion_route(config: &Config) -> claurst_core::config::Route {
+pub(crate) fn companion_route(config: &Config) -> mikmik_core::config::Route {
     match config
         .companion
         .as_ref()
@@ -435,7 +435,7 @@ fn parse_soul(text: &str) -> Option<CompanionSoul> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::cost::CostTracker;
+    use mikmik_core::cost::CostTracker;
 
     /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
     /// at a time and put it back afterwards. Async-aware because those tests
@@ -525,7 +525,7 @@ mod tests {
         };
         config.provider_configs.insert(
             "openai".to_string(),
-            claurst_core::config::ProviderConfig {
+            mikmik_core::config::ProviderConfig {
                 api_key: Some("sk-test".to_string()),
                 api_base: Some(base_url),
                 ..Default::default()
@@ -563,7 +563,7 @@ mod tests {
         let base_url = one_shot_openai("\"you broke it again\"\nand another line").await;
         let ctx = ctx_pointing_at(base_url);
 
-        let line = claurst_commands_reply(&ctx, &hatched("Mossback"), "mossback, thoughts?")
+        let line = mikmik_commands_reply(&ctx, &hatched("Mossback"), "mossback, thoughts?")
             .await
             .expect("the mock answers");
         // Quotes stripped, second line dropped: the bubble is one row and the
@@ -579,14 +579,14 @@ mod tests {
     async fn an_unhatched_companion_cannot_answer() {
         // No socket is opened: this must fail before any provider call.
         let ctx = ctx_pointing_at("http://127.0.0.1:1/v1".to_string());
-        let error = claurst_commands_reply(&ctx, &Companion::new("test-identity", None), "hello")
+        let error = mikmik_commands_reply(&ctx, &Companion::new("test-identity", None), "hello")
             .await
             .expect_err("nameless companions stay quiet");
         assert!(error.contains("no name"), "unhelpful error: {error}");
     }
 
     /// Thin wrapper so the tests read the same as the call site.
-    async fn claurst_commands_reply(
+    async fn mikmik_commands_reply(
         ctx: &CommandContext,
         companion: &Companion,
         said: &str,
@@ -644,7 +644,7 @@ mod tests {
             other => panic!("expected a config change, got {other:?}"),
         }
         // And the settings file, so the next launch sees it too.
-        let settings = claurst_core::config::Settings::load_sync().expect("read back");
+        let settings = mikmik_core::config::Settings::load_sync().expect("read back");
         assert!(settings.companion.expect("written to disk").enabled);
 
         match BuddyCommand.execute("off", &mut ctx).await {
@@ -653,7 +653,7 @@ mod tests {
             }
             other => panic!("expected a config change, got {other:?}"),
         }
-        let settings = claurst_core::config::Settings::load_sync().expect("read back");
+        let settings = mikmik_core::config::Settings::load_sync().expect("read back");
         assert!(!settings.companion.expect("written to disk").enabled);
     }
 

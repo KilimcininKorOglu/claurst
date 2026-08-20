@@ -7,7 +7,7 @@
 //! makes it testable.
 
 use agent_client_protocol_schema as acp;
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
 
 /// Every update needed to redraw `messages`, in the order they happened.
 pub fn updates_for(messages: &[Message]) -> Vec<acp::SessionUpdate> {
@@ -196,7 +196,7 @@ mod tests {
                 text: "what is this".to_string(),
             },
             ContentBlock::Image {
-                source: claurst_core::types::ImageSource {
+                source: mikmik_core::types::ImageSource {
                     source_type: "base64".to_string(),
                     media_type: Some("image/png".to_string()),
                     data: Some("base64data".to_string()),
@@ -225,7 +225,7 @@ mod tests {
         // A url the agent was given is not something to hand back as image
         // data, and an empty image block would render as a broken picture.
         let messages = vec![user_blocks(vec![ContentBlock::Image {
-            source: claurst_core::types::ImageSource {
+            source: mikmik_core::types::ImageSource {
                 source_type: "url".to_string(),
                 media_type: None,
                 data: None,

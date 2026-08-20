@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
-use claurst_api::streaming::{AnthropicStreamEvent, ContentDelta};
-use claurst_core::types::Message;
-use claurst_query::{QueryEvent, QueryOutcome};
-use claurst_tools::ToolContext;
+use mikmik_api::streaming::{AnthropicStreamEvent, ContentDelta};
+use mikmik_core::types::Message;
+use mikmik_query::{QueryEvent, QueryOutcome};
+use mikmik_tools::ToolContext;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
@@ -30,7 +30,7 @@ pub async fn handle(
     connection: Arc<Connection>,
     session: Arc<SessionState>,
     turn: crate::sessions::TurnGuard,
-    editor: Option<Arc<dyn claurst_tools::EditorHost>>,
+    editor: Option<Arc<dyn mikmik_tools::EditorHost>>,
     params: acp::PromptRequest,
 ) -> Result<acp::PromptResponse, acp::Error> {
     // Convert prompt content blocks → the user turn in Claurst's internal
@@ -78,7 +78,7 @@ pub async fn handle(
     crate::session_config::apply_overrides(&mut config, &overrides);
 
     // Build per-session ToolContext.
-    let permission_handler: Arc<dyn claurst_core::PermissionHandler> =
+    let permission_handler: Arc<dyn mikmik_core::PermissionHandler> =
         Arc::new(AcpPermissionHandler);
     let tool_ctx = ToolContext {
         working_dir: session.cwd.lock().clone(),
@@ -138,7 +138,7 @@ pub async fn handle(
     }
     let session_cwd = session.cwd.lock().clone();
     query_config.working_directory = Some(session_cwd.display().to_string());
-    query_config.workspace_roots = claurst_core::workspace::generate_root_names(
+    query_config.workspace_roots = mikmik_core::workspace::generate_root_names(
         &session_cwd,
         &config.additional_dirs,
         &config.workspace_paths,
@@ -148,7 +148,7 @@ pub async fn handle(
     .collect();
 
     // Run the query loop.
-    let outcome = claurst_query::run_query_loop(
+    let outcome = mikmik_query::run_query_loop(
         runtime.api_client.as_ref(),
         &mut messages,
         session_mcp
@@ -286,8 +286,8 @@ async fn run_command(
 ///
 /// Audio is still dropped, and `initialize` says so: the internal message type
 /// has no audio block, so there is nothing to carry it in.
-fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> Vec<claurst_core::types::ContentBlock> {
-    use claurst_core::types::{ContentBlock, ImageSource};
+fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> Vec<mikmik_core::types::ContentBlock> {
+    use mikmik_core::types::{ContentBlock, ImageSource};
 
     let mut rendered: Vec<ContentBlock> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
@@ -351,11 +351,11 @@ fn render_prompt_blocks(blocks: &[acp::ContentBlock]) -> Vec<claurst_core::types
 
 /// Everything the prompt said in words, for the checks that read words: is
 /// this a slash command, and did the client send anything at all.
-fn text_of(blocks: &[claurst_core::types::ContentBlock]) -> String {
+fn text_of(blocks: &[mikmik_core::types::ContentBlock]) -> String {
     blocks
         .iter()
         .filter_map(|block| match block {
-            claurst_core::types::ContentBlock::Text { text } => Some(text.as_str()),
+            mikmik_core::types::ContentBlock::Text { text } => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -370,7 +370,7 @@ fn text_of(blocks: &[claurst_core::types::ContentBlock]) -> String {
 async fn forward_events(
     connection: Arc<Connection>,
     session_id: acp::SessionId,
-    file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
+    file_history: Arc<parking_lot::Mutex<mikmik_core::file_history::FileHistory>>,
     mut rx: mpsc::UnboundedReceiver<QueryEvent>,
 ) {
     // Track tool calls so ToolEnd updates carry the right title and kind.
@@ -561,7 +561,7 @@ fn plan_from_todos(input: &serde_json::Value) -> Option<acp::Plan> {
 /// A binary change is skipped: the protocol's diff carries text, and there is
 /// nothing truthful to put in it.
 fn diffs_since(
-    file_history: &parking_lot::Mutex<claurst_core::file_history::FileHistory>,
+    file_history: &parking_lot::Mutex<mikmik_core::file_history::FileHistory>,
     from: usize,
 ) -> Vec<acp::ToolCallContent> {
     let history = file_history.lock();
@@ -644,11 +644,11 @@ pub(crate) fn tool_title(tool_name: &str, raw_input: Option<&serde_json::Value>)
 ///
 /// `Ok` says nothing: the loop emits it when usage falls back under the
 /// threshold, and an editor does not need a line for "still fine".
-fn token_warning_note(state: claurst_query::TokenWarningState, pct_used: f64) -> Option<String> {
+fn token_warning_note(state: mikmik_query::TokenWarningState, pct_used: f64) -> Option<String> {
     let severity = match state {
-        claurst_query::TokenWarningState::Ok => return None,
-        claurst_query::TokenWarningState::Warning => "context is filling up",
-        claurst_query::TokenWarningState::Critical => "context is nearly full",
+        mikmik_query::TokenWarningState::Ok => return None,
+        mikmik_query::TokenWarningState::Warning => "context is filling up",
+        mikmik_query::TokenWarningState::Critical => "context is nearly full",
     };
     Some(format!(
         "\n[{}: {:.0}% of the context window used]",
@@ -705,16 +705,16 @@ fn location_at(path: &str, input: &serde_json::Value) -> Option<acp::ToolCallLoc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::file_history::FileHistory;
+    use mikmik_core::file_history::FileHistory;
 
     #[test]
     fn a_context_warning_says_how_full_it_is() {
-        let note = token_warning_note(claurst_query::TokenWarningState::Warning, 0.83)
+        let note = token_warning_note(mikmik_query::TokenWarningState::Warning, 0.83)
             .expect("a warning is said out loud");
         assert!(note.contains("83%"), "{note}");
         assert!(note.contains("filling up"), "{note}");
 
-        let critical = token_warning_note(claurst_query::TokenWarningState::Critical, 0.96)
+        let critical = token_warning_note(mikmik_query::TokenWarningState::Critical, 0.96)
             .expect("a critical warning is said out loud");
         assert!(critical.contains("96%"), "{critical}");
         assert!(critical.contains("nearly full"), "{critical}");
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn nothing_is_said_while_the_context_is_fine() {
-        assert!(token_warning_note(claurst_query::TokenWarningState::Ok, 0.2).is_none());
+        assert!(token_warning_note(mikmik_query::TokenWarningState::Ok, 0.2).is_none());
     }
 
     #[test]
@@ -827,7 +827,7 @@ mod tests {
         let rendered = render_prompt_blocks(&blocks);
         assert_eq!(text_of(&rendered), "caption");
         match &rendered[1] {
-            claurst_core::types::ContentBlock::Image { source } => {
+            mikmik_core::types::ContentBlock::Image { source } => {
                 assert_eq!(source.source_type, "base64");
                 assert_eq!(source.media_type.as_deref(), Some("image/png"));
                 assert_eq!(source.data.as_deref(), Some("base64data"));
@@ -850,11 +850,11 @@ mod tests {
         assert_eq!(rendered.len(), 3);
         assert!(matches!(
             &rendered[0],
-            claurst_core::types::ContentBlock::Text { text } if text == "before"
+            mikmik_core::types::ContentBlock::Text { text } if text == "before"
         ));
         assert!(matches!(
             &rendered[2],
-            claurst_core::types::ContentBlock::Text { text } if text == "after"
+            mikmik_core::types::ContentBlock::Text { text } if text == "after"
         ));
     }
 

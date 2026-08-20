@@ -6,7 +6,7 @@
 //! natively instead of having to know anything about Claurst.
 
 use agent_client_protocol_schema as acp;
-use claurst_core::PermissionMode;
+use mikmik_core::PermissionMode;
 
 use crate::sessions::SessionSettings;
 
@@ -79,8 +79,8 @@ pub fn model_id_for_account(account: &str, model: &str) -> String {
 
 /// The accounts this session can be routed to: everything with a credential,
 /// everything configured by hand, and whatever is active right now.
-fn available_accounts(config: &claurst_core::config::Config) -> Vec<String> {
-    let mut accounts: Vec<String> = claurst_core::auth_store::AuthStore::load()
+fn available_accounts(config: &mikmik_core::config::Config) -> Vec<String> {
+    let mut accounts: Vec<String> = mikmik_core::auth_store::AuthStore::load()
         .credentials
         .keys()
         .cloned()
@@ -125,10 +125,10 @@ fn select(
 /// reporting the unresolved fallback would name a model the session is not
 /// using.
 pub fn config_options(
-    config: &claurst_core::config::Config,
-    registry: &claurst_api::ModelRegistry,
+    config: &mikmik_core::config::Config,
+    registry: &mikmik_api::ModelRegistry,
     model: &str,
-    effort: Option<claurst_core::effort::EffortLevel>,
+    effort: Option<mikmik_core::effort::EffortLevel>,
 ) -> Vec<acp::SessionConfigOption> {
     let account = config.selected_provider_id().to_string();
     let vendor = config.vendor_id_for_account(&account);
@@ -147,7 +147,7 @@ pub fn config_options(
 
     let current_effort = effort.map(|level| level.as_str()).unwrap_or("medium");
     let efforts: Vec<(String, String)> =
-        claurst_api::effort_support::supported_efforts(&vendor, &model, Some(registry))
+        mikmik_api::effort_support::supported_efforts(&vendor, &model, Some(registry))
             .into_iter()
             .map(|level| (level.as_str().to_string(), level.label().to_string()))
             .collect();
@@ -170,8 +170,8 @@ pub fn config_options(
 /// in the schema, and a client that does not know them still needs a way to
 /// pick a model.
 pub fn model_state(
-    config: &claurst_core::config::Config,
-    registry: &claurst_api::ModelRegistry,
+    config: &mikmik_core::config::Config,
+    registry: &mikmik_api::ModelRegistry,
     model: &str,
 ) -> acp::SessionModelState {
     let account = config.selected_provider_id().to_string();
@@ -211,8 +211,8 @@ pub fn model_state(
 /// what was asked.
 pub fn apply_config_option(
     overrides: &mut SessionSettings,
-    config: &claurst_core::config::Config,
-    registry: &claurst_api::ModelRegistry,
+    config: &mikmik_core::config::Config,
+    registry: &mikmik_api::ModelRegistry,
     option_id: &str,
     value: &str,
 ) -> Result<(), String> {
@@ -236,16 +236,16 @@ pub fn apply_config_option(
             // `resolve_route` reads that namespace as an account prefix and
             // sends the session to Anthropic instead of to the account the
             // client just picked.
-            let probe = claurst_core::config::Config {
+            let probe = mikmik_core::config::Config {
                 provider: Some(value.to_string()),
                 provider_configs: config.provider_configs.clone(),
                 ..Default::default()
             };
-            let route = claurst_api::resolve_effective_route(&probe, registry);
+            let route = mikmik_api::resolve_effective_route(&probe, registry);
             overrides.model = Some(probe.canonical_model(&route.account, &route.model));
             Ok(())
         }
-        OPTION_EFFORT => match claurst_core::effort::EffortLevel::from_str(value) {
+        OPTION_EFFORT => match mikmik_core::effort::EffortLevel::from_str(value) {
             Some(level) => {
                 overrides.effort = Some(level);
                 Ok(())
@@ -260,7 +260,7 @@ pub fn apply_config_option(
 ///
 /// The turn reads the account and the model from this `Config`, so an
 /// override that stops here never reaches the request.
-pub fn apply_overrides(config: &mut claurst_core::config::Config, overrides: &SessionSettings) {
+pub fn apply_overrides(config: &mut mikmik_core::config::Config, overrides: &SessionSettings) {
     if let Some(mode) = &overrides.permission_mode {
         config.permission_mode = *mode;
     }
@@ -329,8 +329,8 @@ mod tests {
         }
     }
 
-    fn anthropic_config() -> claurst_core::config::Config {
-        claurst_core::config::Config {
+    fn anthropic_config() -> mikmik_core::config::Config {
+        mikmik_core::config::Config {
             model: Some("claude-opus-5".to_string()),
             provider: Some("anthropic".to_string()),
             ..Default::default()
@@ -345,7 +345,7 @@ mod tests {
 
         let options = config_options(
             &anthropic_config(),
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             "claude-opus-5",
             None,
         );
@@ -373,7 +373,7 @@ mod tests {
         // offers another.
         let options = config_options(
             &anthropic_config(),
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             "claude-opus-5",
             None,
         );
@@ -396,7 +396,7 @@ mod tests {
 
         let state = model_state(
             &anthropic_config(),
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             "anthropic/claude-opus-5",
         );
 
@@ -423,7 +423,7 @@ mod tests {
         // override, so a client showing both cannot see them disagree.
         let mut overrides = SessionSettings::default();
         let config = anthropic_config();
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
         apply_config_option(&mut overrides, &config, &registry, OPTION_MODEL, "gpt-5")
             .expect("a model can be chosen");
 
@@ -472,7 +472,7 @@ mod tests {
         apply_config_option(
             &mut overrides,
             &config,
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             OPTION_PROVIDER,
             "openai",
         )
@@ -514,7 +514,7 @@ mod tests {
         let error = apply_config_option(
             &mut overrides,
             &anthropic_config(),
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             OPTION_PROVIDER,
             "openai",
         )
@@ -528,13 +528,13 @@ mod tests {
     fn an_effort_is_taken_by_name_and_refused_when_unknown() {
         let mut overrides = SessionSettings::default();
         let config = anthropic_config();
-        let registry = claurst_api::ModelRegistry::new();
+        let registry = mikmik_api::ModelRegistry::new();
 
         apply_config_option(&mut overrides, &config, &registry, OPTION_EFFORT, "xhigh")
             .expect("a known level is accepted");
         assert_eq!(
             overrides.effort,
-            Some(claurst_core::effort::EffortLevel::XHigh)
+            Some(mikmik_core::effort::EffortLevel::XHigh)
         );
 
         apply_config_option(
@@ -547,7 +547,7 @@ mod tests {
         .expect_err("an unknown level is refused");
         assert_eq!(
             overrides.effort,
-            Some(claurst_core::effort::EffortLevel::XHigh),
+            Some(mikmik_core::effort::EffortLevel::XHigh),
             "a refused value must not disturb the one already set"
         );
     }
@@ -558,7 +558,7 @@ mod tests {
         apply_config_option(
             &mut overrides,
             &anthropic_config(),
-            &claurst_api::ModelRegistry::new(),
+            &mikmik_api::ModelRegistry::new(),
             "temperature",
             "0.7",
         )
@@ -604,7 +604,7 @@ mod tests {
 
     #[test]
     fn a_session_without_overrides_runs_the_runtime_configuration() {
-        let mut config = claurst_core::config::Config {
+        let mut config = mikmik_core::config::Config {
             model: Some("claude-opus-5".to_string()),
             provider: Some("anthropic".to_string()),
             ..Default::default()
@@ -620,7 +620,7 @@ mod tests {
     fn an_override_reaches_the_configuration_the_turn_reads() {
         // The account and the model are resolved from this Config, so an
         // override that never lands here changes nothing about the request.
-        let mut config = claurst_core::config::Config {
+        let mut config = mikmik_core::config::Config {
             model: Some("claude-opus-5".to_string()),
             provider: Some("anthropic".to_string()),
             ..Default::default()

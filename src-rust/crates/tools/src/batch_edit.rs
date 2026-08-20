@@ -36,7 +36,7 @@ impl Tool for BatchEditTool {
     }
 
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_BATCH_EDIT
+        mikmik_core::constants::TOOL_NAME_BATCH_EDIT
     }
 
     fn description(&self) -> &str {

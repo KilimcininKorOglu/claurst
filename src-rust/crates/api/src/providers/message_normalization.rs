@@ -1,4 +1,4 @@
-use claurst_core::types::{ContentBlock, Message, MessageContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent};
 
 pub(crate) fn remove_empty_messages(messages: &[Message]) -> Vec<Message> {
     messages.iter().filter_map(remove_empty_message).collect()
@@ -75,7 +75,7 @@ fn remove_empty_block(block: &ContentBlock) -> Option<ContentBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::{Message, Role, ToolResultContent};
+    use mikmik_core::types::{Message, Role, ToolResultContent};
     use serde_json::json;
 
     #[test]

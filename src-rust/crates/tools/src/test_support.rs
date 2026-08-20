@@ -8,19 +8,19 @@ use std::sync::Arc;
 /// Permission handler that approves everything, so `execute` runs unattended.
 pub(crate) struct AllowAllHandler;
 
-impl claurst_core::permissions::PermissionHandler for AllowAllHandler {
+impl mikmik_core::permissions::PermissionHandler for AllowAllHandler {
     fn check_permission(
         &self,
-        _request: &claurst_core::permissions::PermissionRequest,
-    ) -> claurst_core::permissions::PermissionDecision {
-        claurst_core::permissions::PermissionDecision::Allow
+        _request: &mikmik_core::permissions::PermissionRequest,
+    ) -> mikmik_core::permissions::PermissionDecision {
+        mikmik_core::permissions::PermissionDecision::Allow
     }
 
     fn request_permission(
         &self,
-        _request: &claurst_core::permissions::PermissionRequest,
-    ) -> claurst_core::permissions::PermissionDecision {
-        claurst_core::permissions::PermissionDecision::Allow
+        _request: &mikmik_core::permissions::PermissionRequest,
+    ) -> mikmik_core::permissions::PermissionDecision {
+        mikmik_core::permissions::PermissionDecision::Allow
     }
 }
 
@@ -28,17 +28,17 @@ impl claurst_core::permissions::PermissionHandler for AllowAllHandler {
 pub(crate) fn allow_all_context(working_dir: PathBuf) -> ToolContext {
     ToolContext {
         working_dir,
-        permission_mode: claurst_core::config::PermissionMode::Default,
+        permission_mode: mikmik_core::config::PermissionMode::Default,
         permission_handler: Arc::new(AllowAllHandler),
-        cost_tracker: claurst_core::cost::CostTracker::new(),
+        cost_tracker: mikmik_core::cost::CostTracker::new(),
         session_id: "eol-test".to_string(),
         file_history: Arc::new(parking_lot::Mutex::new(
-            claurst_core::file_history::FileHistory::new(),
+            mikmik_core::file_history::FileHistory::new(),
         )),
         current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         non_interactive: true,
         mcp_manager: None,
-        config: claurst_core::config::Config::default(),
+        config: mikmik_core::config::Config::default(),
         managed_agent_config: None,
         completion_notifier: None,
         pending_permissions: None,

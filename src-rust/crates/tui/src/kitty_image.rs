@@ -17,7 +17,7 @@
 // Sixel escape sequence:
 //   ESC P q ... ESC \
 
-use claurst_core::ImageSource;
+use mikmik_core::ImageSource;
 use std::io::Write;
 
 /// Maximum bytes per Kitty APC chunk.

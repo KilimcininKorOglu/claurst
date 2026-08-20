@@ -64,7 +64,7 @@ impl MemoryFileSelectorState {
         self.files.clear();
 
         // User-level: ~/.claurst/AGENTS.md
-        let user_path = claurst_core::config::Settings::config_dir().join("AGENTS.md");
+        let user_path = mikmik_core::config::Settings::config_dir().join("AGENTS.md");
         let user_display = {
             let home = dirs::home_dir().unwrap_or_default();
             let rel = user_path.strip_prefix(&home).unwrap_or(&user_path);

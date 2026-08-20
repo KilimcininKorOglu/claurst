@@ -33,7 +33,7 @@ impl SlashCommand for RemoteControlCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let settings = match claurst_core::config::Settings::load().await {
+        let settings = match mikmik_core::config::Settings::load().await {
             Ok(s) => s,
             Err(e) => return CommandResult::Error(format!("Failed to load settings: {}", e)),
         };
@@ -69,7 +69,7 @@ impl SlashCommand for RemoteControlCommand {
                 };
 
                 // Device fingerprint (first 12 chars are enough for display)
-                let fingerprint = claurst_bridge::device_fingerprint();
+                let fingerprint = mikmik_bridge::device_fingerprint();
                 let fp_short = &fingerprint[..fingerprint.len().min(12)];
 
                 let permission_note = permission_note(&ctx.config.permission_mode);
@@ -154,8 +154,8 @@ impl SlashCommand for RemoteControlCommand {
 /// There is no separate remote permission policy: once a tool asks, the answer
 /// may come from the keyboard or the remote client. What varies is whether
 /// anything asks at all, which the session's own `permission_mode` decides.
-fn permission_note(session_mode: &claurst_core::config::PermissionMode) -> &'static str {
-    use claurst_core::config::PermissionMode;
+fn permission_note(session_mode: &mikmik_core::config::PermissionMode) -> &'static str {
+    use mikmik_core::config::PermissionMode;
 
     match session_mode {
         PermissionMode::BypassPermissions => {
@@ -171,7 +171,7 @@ fn permission_note(session_mode: &claurst_core::config::PermissionMode) -> &'sta
 /// Mirrors the CLI's own resolution order so the status screen cannot claim
 /// one thing while the bridge does another: an environment override wins, then
 /// the `remoteControl` block, then the built-in default.
-fn resolved_relay(settings: &claurst_core::config::Settings) -> (String, String) {
+fn resolved_relay(settings: &mikmik_core::config::Settings) -> (String, String) {
     let env_url = std::env::var("CLAURST_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .ok()
@@ -305,7 +305,7 @@ impl SlashCommand for RemoteEnvCommand {
 #[cfg(test)]
 mod resolved_relay_tests {
     use super::*;
-    use claurst_core::config::{RemoteControlSettings, Settings};
+    use mikmik_core::config::{RemoteControlSettings, Settings};
 
     /// The environment variables are process-wide, so these tests share a lock
     /// and clear what they set.
@@ -351,7 +351,7 @@ mod resolved_relay_tests {
 
         let (url, token) = resolved_relay(&settings_with(
             "https://relay.example/",
-            &"a".repeat(claurst_core::config::MIN_REMOTE_TOKEN_LEN),
+            &"a".repeat(mikmik_core::config::MIN_REMOTE_TOKEN_LEN),
         ));
 
         assert_eq!(url, "https://relay.example (from settings.json)");
@@ -380,7 +380,7 @@ mod resolved_relay_tests {
 
         let (url, token) = resolved_relay(&settings_with(
             "https://relay.example",
-            &"a".repeat(claurst_core::config::MIN_REMOTE_TOKEN_LEN),
+            &"a".repeat(mikmik_core::config::MIN_REMOTE_TOKEN_LEN),
         ));
 
         clear_env();
@@ -393,7 +393,7 @@ mod resolved_relay_tests {
 #[cfg(test)]
 mod permission_note_tests {
     use super::*;
-    use claurst_core::config::PermissionMode;
+    use mikmik_core::config::PermissionMode;
 
     #[test]
     fn bypass_permissions_says_the_token_alone_runs_tools() {

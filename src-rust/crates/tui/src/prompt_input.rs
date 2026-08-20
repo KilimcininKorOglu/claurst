@@ -1802,9 +1802,9 @@ pub fn handle_paste(content: &str, paste_counter: &mut u32) -> (String, Option<S
         return (content.to_string(), None);
     }
     *paste_counter += 1;
-    let num_lines = claurst_core::prompt_history::get_pasted_text_ref_num_lines(content);
+    let num_lines = mikmik_core::prompt_history::get_pasted_text_ref_num_lines(content);
     let placeholder =
-        claurst_core::prompt_history::format_pasted_text_ref(*paste_counter, num_lines);
+        mikmik_core::prompt_history::format_pasted_text_ref(*paste_counter, num_lines);
     (placeholder, Some(content.to_string()))
 }
 
@@ -3135,7 +3135,7 @@ impl PromptInputState {
         if self.paste_contents.is_empty() {
             return out;
         }
-        let refs = claurst_core::prompt_history::parse_references_with_positions(&self.text);
+        let refs = mikmik_core::prompt_history::parse_references_with_positions(&self.text);
         for (id, matched, start) in refs.into_iter().rev() {
             if !matched.starts_with("[Pasted text #") {
                 continue;
@@ -3153,7 +3153,7 @@ impl PromptInputState {
         if self.paste_contents.is_empty() {
             return false;
         }
-        claurst_core::prompt_history::parse_references_with_positions(&self.text)
+        mikmik_core::prompt_history::parse_references_with_positions(&self.text)
             .iter()
             .any(|(id, matched, _)| {
                 matched.starts_with("[Pasted text #") && self.paste_contents.contains_key(id)
@@ -3168,7 +3168,7 @@ impl PromptInputState {
         if self.mode == InputMode::Readonly {
             return false;
         }
-        let refs = claurst_core::prompt_history::parse_references_with_positions(&self.text);
+        let refs = mikmik_core::prompt_history::parse_references_with_positions(&self.text);
         for (id, matched, start) in refs {
             if !matched.starts_with("[Pasted text #") {
                 continue;
@@ -3193,7 +3193,7 @@ impl PromptInputState {
     /// `expand_paste_ref_at`) together with its stored body, without mutating
     /// the buffer — used by the read-only paste viewer.
     pub fn paste_ref_at(&self, offset: usize) -> Option<(u32, String)> {
-        let refs = claurst_core::prompt_history::parse_references_with_positions(&self.text);
+        let refs = mikmik_core::prompt_history::parse_references_with_positions(&self.text);
         for (id, matched, start) in refs {
             if !matched.starts_with("[Pasted text #") {
                 continue;
@@ -3216,7 +3216,7 @@ impl PromptInputState {
         if self.expand_paste_ref_at(self.cursor) {
             return true;
         }
-        let first = claurst_core::prompt_history::parse_references_with_positions(&self.text)
+        let first = mikmik_core::prompt_history::parse_references_with_positions(&self.text)
             .into_iter()
             .find(|(id, matched, _)| {
                 matched.starts_with("[Pasted text #") && self.paste_contents.contains_key(id)
@@ -3650,14 +3650,14 @@ pub(crate) fn styled_spans_with_keyword_gradient(
 ) -> Vec<Span<'static>> {
     // Collect (start, end, gradient) for every gradient-bearing keyword.
     let mut matches: Vec<(usize, usize, KeywordGradient)> = Vec::new();
-    for kw in claurst_core::keywords::INLINE_KEYWORDS {
+    for kw in mikmik_core::keywords::INLINE_KEYWORDS {
         if !kw.gradient {
             continue;
         }
         let Some(grad) = keyword_gradient_for(kw.keyword) else {
             continue;
         };
-        for (start, end) in claurst_core::keywords::keyword_match_ranges(text, kw.keyword) {
+        for (start, end) in mikmik_core::keywords::keyword_match_ranges(text, kw.keyword) {
             matches.push((start, end, grad));
         }
     }

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 /// declared transport, workspace folder, timeout or restart policy has nowhere
 /// to go; a transport that is not stdio is reported rather than dropped in
 /// silence.
-fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> claurst_core::lsp::LspServerConfig {
+fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> mikmik_core::lsp::LspServerConfig {
     if server.transport != "stdio" {
         tracing::warn!(
             server = %server.name,
@@ -21,7 +21,7 @@ fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> claurst_core::ls
             "Plugin LSP server declares a transport the LSP manager does not speak; starting it over stdio"
         );
     }
-    claurst_core::lsp::LspServerConfig {
+    mikmik_core::lsp::LspServerConfig {
         name: server.name.clone(),
         command: server.command.clone(),
         args: server.args.clone(),
@@ -39,13 +39,13 @@ fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> claurst_core::ls
 /// repository, so its server is project-scoped and has to pass the same
 /// approval as one declared in the repository's settings file. Everything else
 /// is on the machine because someone put it there.
-fn mcp_origin_for(source: &PluginSource) -> claurst_core::config::McpServerOrigin {
+fn mcp_origin_for(source: &PluginSource) -> mikmik_core::config::McpServerOrigin {
     match source {
-        PluginSource::Project => claurst_core::config::McpServerOrigin::Project,
+        PluginSource::Project => mikmik_core::config::McpServerOrigin::Project,
         PluginSource::User
         | PluginSource::Extra(_)
         | PluginSource::Inline
-        | PluginSource::Builtin => claurst_core::config::McpServerOrigin::User,
+        | PluginSource::Builtin => mikmik_core::config::McpServerOrigin::User,
     }
 }
 
@@ -227,11 +227,11 @@ impl PluginRegistry {
     }
 
     /// Collect all MCP server configs contributed by enabled plugins.
-    pub fn all_mcp_servers(&self) -> Vec<claurst_core::config::McpServerConfig> {
-        let mut servers: Vec<claurst_core::config::McpServerConfig> = Vec::new();
+    pub fn all_mcp_servers(&self) -> Vec<mikmik_core::config::McpServerConfig> {
+        let mut servers: Vec<mikmik_core::config::McpServerConfig> = Vec::new();
         for plugin in self.enabled() {
             for mcp in &plugin.manifest.mcp_servers {
-                servers.push(claurst_core::config::McpServerConfig {
+                servers.push(mikmik_core::config::McpServerConfig {
                     name: mcp.name.clone(),
                     command: mcp.command.clone(),
                     args: mcp.args.clone(),
@@ -248,8 +248,8 @@ impl PluginRegistry {
 
     /// Collect all LSP server configs contributed by enabled plugins, in the
     /// shape the LSP manager consumes.
-    pub fn all_lsp_servers(&self) -> Vec<claurst_core::lsp::LspServerConfig> {
-        let mut servers: Vec<claurst_core::lsp::LspServerConfig> = Vec::new();
+    pub fn all_lsp_servers(&self) -> Vec<mikmik_core::lsp::LspServerConfig> {
+        let mut servers: Vec<mikmik_core::lsp::LspServerConfig> = Vec::new();
         for plugin in self.enabled() {
             for lsp in &plugin.manifest.lsp_servers {
                 servers.push(lsp_config_for(lsp));
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn a_project_plugin_server_needs_approval_but_a_user_one_does_not() {
-        use claurst_core::config::McpServerOrigin;
+        use mikmik_core::config::McpServerOrigin;
 
         let mut reg = PluginRegistry::new();
 
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn every_plugin_source_off_the_machine_stays_trusted() {
-        use claurst_core::config::McpServerOrigin;
+        use mikmik_core::config::McpServerOrigin;
 
         for source in [
             PluginSource::User,

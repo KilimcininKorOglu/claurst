@@ -15,7 +15,7 @@
 
 use crate::model_registry::canonical_snapshot_key;
 use crate::ModelRegistry;
-use claurst_core::effort::EffortLevel;
+use mikmik_core::effort::EffortLevel;
 
 /// opencode's ultimate fallback npm when neither the model nor its provider
 /// declares one (`... ?? "@ai-sdk/openai-compatible"`).

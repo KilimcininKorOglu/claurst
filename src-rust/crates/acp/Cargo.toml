@@ -1,17 +1,17 @@
 [package]
-name = "claurst-acp"
+name = "mikmik-acp"
 version.workspace = true
 edition.workspace = true
 description = "Agent Client Protocol (ACP) server for Claurst — JSON-RPC 2.0 over stdio"
 
 [dependencies]
-claurst-core = { workspace = true }
-claurst-api = { workspace = true }
-claurst-tools = { workspace = true }
-claurst-query = { workspace = true }
-claurst-commands = { workspace = true }
-claurst-mcp = { workspace = true }
-claurst-plugins = { workspace = true }
+mikmik-core = { workspace = true }
+mikmik-api = { workspace = true }
+mikmik-tools = { workspace = true }
+mikmik-query = { workspace = true }
+mikmik-commands = { workspace = true }
+mikmik-mcp = { workspace = true }
+mikmik-plugins = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }

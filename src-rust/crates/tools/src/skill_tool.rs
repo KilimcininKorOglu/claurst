@@ -114,7 +114,7 @@ impl Tool for SkillTool {
         }
 
         // Strip YAML frontmatter if present (--- ... ---)
-        let content = claurst_core::strip_frontmatter(&raw);
+        let content = mikmik_core::strip_frontmatter(&raw);
 
         // Substitute $ARGUMENTS
         let prompt = if let Some(args) = &params.args {
@@ -138,7 +138,7 @@ impl Tool for SkillTool {
 
 fn skill_search_dirs(ctx: &ToolContext) -> Vec<PathBuf> {
     let mut dirs = vec![ctx.working_dir.join(".claurst").join("commands")];
-    dirs.push(claurst_core::config::Settings::config_dir().join("commands"));
+    dirs.push(mikmik_core::config::Settings::config_dir().join("commands"));
     dirs
 }
 
@@ -210,7 +210,7 @@ async fn read_skill_description(path: &std::path::Path) -> String {
     let Ok(content) = tokio::fs::read_to_string(path).await else {
         return "(no description)".to_string();
     };
-    let body = claurst_core::strip_frontmatter(&content);
+    let body = mikmik_core::strip_frontmatter(&content);
     // First non-empty, non-heading line
     for line in body.lines() {
         let t = line.trim().trim_start_matches('#').trim();

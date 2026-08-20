@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use claurst_core::ProviderId;
+use mikmik_core::ProviderId;
 
 use crate::client::ClientConfig;
 use crate::provider::LlmProvider;
@@ -53,7 +53,7 @@ fn canonical_local_provider_id(provider_id: &str) -> &str {
 /// without the `/v1` its OpenAI-compatible endpoint lives under, and an
 /// `openai` one kept a `/v1` that `OpenAiProvider` appends again.
 pub fn resolve_provider_api_base(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     provider_id: &str,
 ) -> Option<String> {
     let base = config.resolve_provider_api_base(provider_id)?;
@@ -114,15 +114,15 @@ fn provider_from_key(provider_id: &str, key: String) -> Option<Arc<dyn LlmProvid
 /// Returns `None` only if *no* catalog entry has a configured key — a single
 /// key is enough to run, and more is better.
 pub fn build_free_provider() -> Option<Arc<dyn LlmProvider>> {
-    let auth_store = claurst_core::AuthStore::load();
+    let auth_store = mikmik_core::AuthStore::load();
     let mut chain: Vec<FreeEntry> = Vec::new();
 
     for upstream in FREE_CATALOG {
         let key = match upstream.id {
             // OpenCode Zen and Go share `OPENCODE_API_KEY`; accept either slot.
             "opencode-zen" => auth_store
-                .api_key_for(claurst_core::ProviderId::OPENCODE_ZEN)
-                .or_else(|| auth_store.api_key_for(claurst_core::ProviderId::OPENCODE_GO)),
+                .api_key_for(mikmik_core::ProviderId::OPENCODE_ZEN)
+                .or_else(|| auth_store.api_key_for(mikmik_core::ProviderId::OPENCODE_GO)),
             other => auth_store.api_key_for(other),
         }
         .filter(|k| !k.trim().is_empty());
@@ -171,18 +171,18 @@ pub fn custom_anthropic_provider() -> Option<Arc<dyn LlmProvider>> {
 /// is only built when it holds Anthropic OAuth tokens, because then it is a
 /// login to the real Anthropic rather than a gateway with nothing to point at.
 pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvider>> {
-    let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+    let settings = mikmik_core::config::Settings::load_sync().unwrap_or_default();
     let entry = settings.providers.get(account_id);
     if entry.is_some_and(|provider| !provider.enabled) {
         return None;
     }
 
-    let store = claurst_core::AuthStore::load();
+    let store = mikmik_core::AuthStore::load();
     let base_url = entry
         .and_then(|provider| provider.api_base.clone())
         .filter(|url| !url.trim().is_empty())
         .or_else(|| {
-            claurst_core::config::api_base_env_var_for_provider(account_id)
+            mikmik_core::config::api_base_env_var_for_provider(account_id)
                 .and_then(|name| std::env::var(name).ok())
         })
         .filter(|url| !url.trim().is_empty());
@@ -202,7 +202,7 @@ pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvide
         Some(url) => url,
         // No endpoint of its own: only an OAuth login belongs on Anthropic's.
         None if tokens.is_some() => {
-            claurst_core::config::default_api_base_for_provider(ProviderId::ANTHROPIC)?.to_string()
+            mikmik_core::config::default_api_base_for_provider(ProviderId::ANTHROPIC)?.to_string()
         }
         None => return None,
     };
@@ -224,7 +224,7 @@ pub fn anthropic_account_provider(account_id: &str) -> Option<Arc<dyn LlmProvide
 /// These are the accounts the built-in per-vendor registration cannot know
 /// about, because they are named by the user.
 pub fn user_named_accounts() -> Vec<(String, String)> {
-    let settings = claurst_core::config::Settings::load_sync().unwrap_or_default();
+    let settings = mikmik_core::config::Settings::load_sync().unwrap_or_default();
     settings
         .providers
         .iter()
@@ -247,7 +247,7 @@ fn normalize_protocol(protocol: &str) -> &str {
 }
 
 pub fn provider_from_config(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     provider_id: &str,
 ) -> Option<Arc<dyn LlmProvider>> {
     let provider_cfg = config.provider_configs.get(provider_id);
@@ -424,7 +424,7 @@ pub fn runtime_provider_for(provider_id: &str) -> Option<Arc<dyn LlmProvider>> {
         _ => {}
     }
 
-    let auth_store = claurst_core::AuthStore::load();
+    let auth_store = mikmik_core::AuthStore::load();
     let key = auth_store.api_key_for(provider_id)?;
     if key.is_empty() {
         return None;
@@ -528,7 +528,7 @@ impl ProviderRegistry {
     }
 
     pub fn from_config(
-        config: &claurst_core::config::Config,
+        config: &mikmik_core::config::Config,
         anthropic_config: ClientConfig,
     ) -> Self {
         // Apply the user-configured request timeout (issue #175) before any
@@ -671,17 +671,17 @@ impl ProviderRegistry {
     /// `from_environment` for providers that only support env-var config, and
     /// adds any extra providers that have keys in the auth store.
     ///
-    /// [`AuthStore`]: claurst_core::AuthStore
+    /// [`AuthStore`]: mikmik_core::AuthStore
     pub fn from_environment_with_auth_store(anthropic_config: ClientConfig) -> Self {
         // Start with env-based registration.
         let mut registry = Self::from_environment(anthropic_config);
 
         // Now check the auth store for providers that weren't registered from
         // env vars.
-        let auth_store = claurst_core::AuthStore::load();
+        let auth_store = mikmik_core::AuthStore::load();
 
         for provider_id in auth_store.credentials.keys() {
-            let pid = claurst_core::ProviderId::new(provider_id.as_str());
+            let pid = mikmik_core::ProviderId::new(provider_id.as_str());
             // Skip if already registered from env vars.
             if registry.get(&pid).is_some() {
                 continue;
@@ -722,7 +722,7 @@ impl ProviderRegistry {
         // protocol it already knows works here too. Hand-rolling one protocol
         // silently dropped the rest, and an account that is never registered
         // cannot be asked what models it serves.
-        let account_config = claurst_core::config::Settings::load_sync()
+        let account_config = mikmik_core::config::Settings::load_sync()
             .unwrap_or_default()
             .effective_config();
         for (account_id, _protocol) in user_named_accounts() {
@@ -954,7 +954,7 @@ pub fn provider_lookup_ids(provider_id: &str) -> Vec<&str> {
 /// Anthropic auth is resolved first because the registry needs it to construct
 /// the Anthropic client even when the caller wants a different provider.
 pub async fn provider_by_id(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     provider_id: &str,
 ) -> Option<Arc<dyn LlmProvider>> {
     let anthropic_auth = config.resolve_anthropic_auth_async().await;
@@ -1024,17 +1024,17 @@ impl std::error::Error for ProviderResolveError {}
 /// authenticates as this account instead of the active one. Everything else
 /// goes through the ordinary lookup.
 pub async fn provider_for_account(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     account_id: &str,
 ) -> Result<Arc<dyn LlmProvider>, ProviderResolveError> {
-    let store = claurst_core::AuthStore::load();
+    let store = mikmik_core::AuthStore::load();
     let missing = || ProviderResolveError::AccountCredentialsMissing {
         account_id: account_id.to_string(),
     };
 
     if store.anthropic_tokens(account_id).is_some() {
         let (credential, use_bearer_auth) =
-            claurst_core::oauth::resolve_auth_for_account(account_id)
+            mikmik_core::oauth::resolve_auth_for_account(account_id)
                 .await
                 .ok_or_else(missing)?;
         return Ok(Arc::new(AnthropicProvider::from_config(
@@ -1106,11 +1106,11 @@ mod tests {
         account: &str,
         protocol: Option<&str>,
         api_base: &str,
-    ) -> claurst_core::config::Config {
-        let mut config = claurst_core::config::Config::default();
+    ) -> mikmik_core::config::Config {
+        let mut config = mikmik_core::config::Config::default();
         config.provider_configs.insert(
             account.to_string(),
-            claurst_core::config::ProviderConfig {
+            mikmik_core::config::ProviderConfig {
                 api_base: Some(api_base.to_string()),
                 protocol: protocol.map(str::to_string),
                 ..Default::default()
@@ -1216,12 +1216,12 @@ mod profile_resolution_tests {
     /// An account exists exactly when it holds a credential, so there is no
     /// registration step separate from storing one.
     fn register(id: &str, access_token: &str) {
-        let mut store = claurst_core::AuthStore::load();
+        let mut store = mikmik_core::AuthStore::load();
         store.set_anthropic_tokens(
             id,
-            claurst_core::oauth::OAuthTokens {
+            mikmik_core::oauth::OAuthTokens {
                 access_token: access_token.to_string(),
-                scopes: vec![claurst_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
+                scopes: vec![mikmik_core::oauth::CLAUDE_AI_INFERENCE_SCOPE.to_string()],
                 ..Default::default()
             },
         );
@@ -1231,7 +1231,7 @@ mod profile_resolution_tests {
     async fn a_provider_without_accounts_rejects_a_profile() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
 
         let error = provider_for_account(&config, "personal")
             .await
@@ -1252,7 +1252,7 @@ mod profile_resolution_tests {
         let _home = HomeGuard::new();
         register("work", "work-token");
         register("personal", "personal-token");
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
 
         let error = provider_for_account(&config, "missing")
             .await
@@ -1273,7 +1273,7 @@ mod profile_resolution_tests {
         let _home = HomeGuard::new();
         // Stored, but the token is empty, so there is nothing to present.
         register("work", "");
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
 
         let error = provider_for_account(&config, "work")
             .await
@@ -1293,7 +1293,7 @@ mod profile_resolution_tests {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
         register("personal", "personal-token");
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
 
         let provider = provider_for_account(&config, "personal")
             .await
@@ -1306,7 +1306,7 @@ mod profile_resolution_tests {
     async fn an_unknown_name_is_an_unknown_account() {
         let _lock = ENV_LOCK.lock().await;
         let _home = HomeGuard::new();
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
 
         // There is one kind of failure now, because there is one kind of
         // thing to name.
@@ -1370,7 +1370,7 @@ mod custom_anthropic_tests {
     }
 
     fn write_settings(body: &str) {
-        let path = claurst_core::config::Settings::global_settings_path();
+        let path = mikmik_core::config::Settings::global_settings_path();
         std::fs::create_dir_all(path.parent().expect("settings dir")).expect("mkdir");
         std::fs::write(&path, body).expect("write settings");
     }
@@ -1449,7 +1449,7 @@ mod account_registration_tests {
     //! that name, or the `/model` picker and `"<account>/<model>"` routing
     //! never see accounts whose implementation reports a vendor id.
     use super::*;
-    use claurst_core::config::{Config, ProviderConfig};
+    use mikmik_core::config::{Config, ProviderConfig};
     use std::sync::Mutex as StdMutex;
 
     static ENV_LOCK: StdMutex<()> = StdMutex::new(());
@@ -1493,11 +1493,11 @@ mod account_registration_tests {
         };
         let _home = HomeGuard::new();
 
-        let tokens = claurst_core::oauth_config::CodexTokens {
+        let tokens = mikmik_core::oauth_config::CodexTokens {
             access_token: "codex-token".to_string(),
             ..Default::default()
         };
-        claurst_core::oauth_config::save_codex_tokens_for_account(&tokens, "chatgpt")
+        mikmik_core::oauth_config::save_codex_tokens_for_account(&tokens, "chatgpt")
             .expect("store tokens");
 
         let mut config = Config::default();
@@ -1523,11 +1523,11 @@ mod account_registration_tests {
         };
         let _home = HomeGuard::new();
 
-        let mut store = claurst_core::AuthStore::load();
+        let mut store = mikmik_core::AuthStore::load();
         for (account_id, key) in [("day-job", "gho_day"), ("side-project", "gho_side")] {
             store.set(
                 account_id,
-                claurst_core::auth_store::StoredCredential::ApiKey {
+                mikmik_core::auth_store::StoredCredential::ApiKey {
                     key: key.to_string(),
                 },
             );

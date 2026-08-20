@@ -128,7 +128,7 @@ struct TaskCreateInput {
 #[async_trait]
 impl Tool for TaskCreateTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_CREATE
+        mikmik_core::constants::TOOL_NAME_TASK_CREATE
     }
     fn description(&self) -> &str {
         "Create a new task to track work items. Returns the task ID."
@@ -162,8 +162,8 @@ impl Tool for TaskCreateTool {
         debug!(task_id = %task_id, subject = %params.subject, "Creating task");
         TASK_STORE.insert(task_id.clone(), task);
 
-        claurst_plugins::run_global_hook(
-            claurst_plugins::HookEventKind::TaskCreated,
+        mikmik_plugins::run_global_hook(
+            mikmik_plugins::HookEventKind::TaskCreated,
             None,
             json!({ "task_id": task_id, "subject": params.subject }),
         )
@@ -194,7 +194,7 @@ struct TaskGetInput {
 #[async_trait]
 impl Tool for TaskGetTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_GET
+        mikmik_core::constants::TOOL_NAME_TASK_GET
     }
     fn description(&self) -> &str {
         "Get full details of a task by ID."
@@ -261,7 +261,7 @@ struct TaskUpdateInput {
 #[async_trait]
 impl Tool for TaskUpdateTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_UPDATE
+        mikmik_core::constants::TOOL_NAME_TASK_UPDATE
     }
     fn description(&self) -> &str {
         "Update a task's properties (status, subject, description, etc.)."
@@ -365,8 +365,8 @@ impl Tool for TaskUpdateTool {
         }
 
         if task_status == TaskStatus::Completed {
-            claurst_plugins::run_global_hook(
-                claurst_plugins::HookEventKind::TaskCompleted,
+            mikmik_plugins::run_global_hook(
+                mikmik_plugins::HookEventKind::TaskCompleted,
                 None,
                 json!({ "task_id": task_id }),
             )
@@ -393,7 +393,7 @@ pub struct TaskListTool;
 #[async_trait]
 impl Tool for TaskListTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_LIST
+        mikmik_core::constants::TOOL_NAME_TASK_LIST
     }
     fn description(&self) -> &str {
         "List all active tasks (excluding deleted/completed)."
@@ -452,7 +452,7 @@ struct TaskStopInput {
 #[async_trait]
 impl Tool for TaskStopTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_STOP
+        mikmik_core::constants::TOOL_NAME_TASK_STOP
     }
     fn description(&self) -> &str {
         "Stop a running background task."
@@ -520,7 +520,7 @@ fn default_block() -> bool {
 #[async_trait]
 impl Tool for TaskOutputTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TASK_OUTPUT
+        mikmik_core::constants::TOOL_NAME_TASK_OUTPUT
     }
     fn description(&self) -> &str {
         "Get the output of a task."

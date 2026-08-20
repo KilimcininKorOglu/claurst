@@ -181,8 +181,8 @@ mod tests {
 
     fn ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::Config::default(),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            config: mikmik_core::Config::default(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),
             session_id: "test-session".to_string(),
@@ -197,7 +197,7 @@ mod tests {
     }
 
     fn saved_auto_poke() -> Option<bool> {
-        claurst_core::Settings::load_sync()
+        mikmik_core::Settings::load_sync()
             .expect("settings load")
             .config
             .auto_poke

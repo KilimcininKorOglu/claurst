@@ -8,9 +8,9 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::{ModelId, ProviderId};
-use claurst_core::types::ContentBlock;
 use futures::Stream;
+use mikmik_core::provider_id::{ModelId, ProviderId};
+use mikmik_core::types::ContentBlock;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -317,10 +317,10 @@ impl OpenAiCompatProvider {
     /// the API ignores it anyway and skipping saves tokens.
     fn inject_reasoning_for_tool_turns(
         json_messages: &mut [Value],
-        original_messages: &[claurst_core::types::Message],
+        original_messages: &[mikmik_core::types::Message],
         field: &str,
     ) {
-        use claurst_core::types::{MessageContent, Role};
+        use mikmik_core::types::{MessageContent, Role};
 
         // Collect reasoning texts from assistant messages that have both
         // Thinking blocks and ToolUse blocks, preserving order.

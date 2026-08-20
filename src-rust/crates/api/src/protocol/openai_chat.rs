@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use claurst_core::types::{ContentBlock, UsageInfo};
+use mikmik_core::types::{ContentBlock, UsageInfo};
 use serde_json::{json, Value};
 use tracing::debug;
 

@@ -177,7 +177,7 @@ pub struct OAuthConfig {
 // Anthropic's auth server accepts Claude Pro/Max tokens through Claurst.
 // The matching request-time impersonation (user-agent, x-app, anthropic-beta,
 // and the Claude Code system-prompt prefix) is wired up in
-// `claurst_api::client::AnthropicClient` and is required for these tokens to
+// `mikmik_api::client::AnthropicClient` and is required for these tokens to
 // be honoured by the API.
 //
 // Billing note (verified live 2026-06-03, Claude Pro account, extra-usage

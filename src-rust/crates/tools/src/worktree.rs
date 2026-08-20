@@ -58,10 +58,10 @@ async fn run_post_create(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    claurst_core::process_tree::spawn_in_own_group(&mut builder);
+    mikmik_core::process_tree::spawn_in_own_group(&mut builder);
 
     let child = builder.spawn().map_err(PostCreateError::Failed)?;
-    let mut tree_guard = claurst_core::process_tree::ProcessTreeKillGuard::new(child.id());
+    let mut tree_guard = mikmik_core::process_tree::ProcessTreeKillGuard::new(child.id());
 
     match tokio::time::timeout(POST_CREATE_TIMEOUT, child.wait_with_output()).await {
         Ok(result) => {
@@ -270,8 +270,8 @@ impl Tool for EnterWorktreeTool {
                     original_head,
                 });
 
-                claurst_plugins::run_global_hook(
-                    claurst_plugins::HookEventKind::WorktreeCreate,
+                mikmik_plugins::run_global_hook(
+                    mikmik_plugins::HookEventKind::WorktreeCreate,
                     None,
                     json!({
                         "path": worktree_path.display().to_string(),
@@ -289,8 +289,8 @@ impl Tool for EnterWorktreeTool {
                 // hard-block Critical-risk commands, and prompt with the ACTUAL
                 // command text so the user sees exactly what will run.
                 let post_create_output = if let Some(cmd) = params.post_create_command {
-                    let risk = claurst_core::bash_classifier::classify_bash_command(&cmd);
-                    if risk == claurst_core::bash_classifier::BashRiskLevel::Critical {
+                    let risk = mikmik_core::bash_classifier::classify_bash_command(&cmd);
+                    if risk == mikmik_core::bash_classifier::BashRiskLevel::Critical {
                         format!(
                             "\nPost-create command '{}' was BLOCKED: classified as Critical risk \
                              and never executed. Re-create the worktree without it, or run a safer command.",
@@ -515,8 +515,8 @@ impl Tool for ExitWorktreeTool {
                     let _ = run_git(&session.original_cwd, &["branch", "-D", branch]).await;
                 }
 
-                claurst_plugins::run_global_hook(
-                    claurst_plugins::HookEventKind::WorktreeRemove,
+                mikmik_plugins::run_global_hook(
+                    mikmik_plugins::HookEventKind::WorktreeRemove,
                     None,
                     json!({
                         "path": session.worktree_path.display().to_string(),
@@ -567,7 +567,7 @@ async fn run_git(cwd: &std::path::Path, args: &[&str]) -> Result<String, String>
 mod tests {
     use super::*;
     use crate::test_support::allow_all_context;
-    use claurst_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
+    use mikmik_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
 
     /// Handler that allows worktree creation but denies (via `Ask`) any request
     /// whose description mentions the post-create command.

@@ -149,8 +149,8 @@ impl Default for CommandQueue {
 /// Commands that are handled purely by the TUI/app layer (Compact, Clear,
 /// SetModel, TriggerSkill) are silently dropped here — the query loop does
 /// not need to act on them directly.
-pub fn drain_command_queue(queue: &CommandQueue) -> Vec<claurst_core::types::Message> {
-    use claurst_core::types::Message;
+pub fn drain_command_queue(queue: &CommandQueue) -> Vec<mikmik_core::types::Message> {
+    use mikmik_core::types::Message;
 
     let commands = queue.drain();
     let mut messages = Vec::new();

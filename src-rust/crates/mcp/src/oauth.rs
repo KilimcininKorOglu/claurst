@@ -50,7 +50,7 @@ fn token_store_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("CLAURST_MCP_TOKENS_DIR") {
         return PathBuf::from(dir);
     }
-    claurst_core::config::Settings::config_dir().join("mcp-tokens")
+    mikmik_core::config::Settings::config_dir().join("mcp-tokens")
 }
 
 /// Path to the token store for a given MCP server.

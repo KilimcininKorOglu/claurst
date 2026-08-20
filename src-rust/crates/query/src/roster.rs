@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use claurst_tools::Tool;
+use mikmik_tools::Tool;
 use tracing::debug;
 
 /// Built-in tools, the sub-agent tool, the advisor when a model backs it, the
@@ -18,10 +18,10 @@ use tracing::debug;
 /// of the tools are already conditional and threading one more derived value
 /// through six call sites buys nothing.
 pub fn build_tool_roster(
-    mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
-    config: &claurst_core::Config,
+    mcp_manager: Option<Arc<mikmik_mcp::McpManager>>,
+    config: &mikmik_core::Config,
 ) -> Arc<Vec<Box<dyn Tool>>> {
-    let mut tools: Vec<Box<dyn Tool>> = claurst_tools::all_tools();
+    let mut tools: Vec<Box<dyn Tool>> = mikmik_tools::all_tools();
     tools.push(Box::new(crate::AgentTool));
 
     // Offer the advisor only when a model backs it, so a session without one
@@ -31,18 +31,18 @@ pub fn build_tool_roster(
         .as_deref()
         .is_some_and(|model| !model.trim().is_empty())
     {
-        tools.push(Box::new(claurst_tools::AdvisorTool));
+        tools.push(Box::new(mikmik_tools::AdvisorTool));
     }
 
     // Same reasoning for the ACP bridge: without a configured agent the tool
     // could only ever answer "nothing is configured", so offering it would
     // spend schema tokens to advertise a dead end.
     if !config.acp_agents.is_empty() {
-        tools.push(Box::new(claurst_tools::AcpAgentTool));
+        tools.push(Box::new(mikmik_tools::AcpAgentTool));
     }
 
     if let Some(manager) = &mcp_manager {
-        tools.extend(claurst_tools::mcp_tools(manager));
+        tools.extend(mikmik_tools::mcp_tools(manager));
         debug!(total_tools = tools.len(), "MCP tools registered");
     }
 
@@ -53,7 +53,7 @@ pub fn build_tool_roster(
 mod tests {
     use super::*;
 
-    use claurst_core::Config;
+    use mikmik_core::Config;
 
     fn names(tools: &[Box<dyn Tool>]) -> Vec<&str> {
         tools.iter().map(|t| t.name()).collect()
@@ -96,7 +96,7 @@ mod tests {
         let mut configured = Config::default();
         configured.acp_agents.insert(
             "cursor".to_string(),
-            claurst_core::AcpAgentConfig {
+            mikmik_core::AcpAgentConfig {
                 command: "agent".to_string(),
                 args: vec!["--force".to_string(), "acp".to_string()],
                 env: Default::default(),

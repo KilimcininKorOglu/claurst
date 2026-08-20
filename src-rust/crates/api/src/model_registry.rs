@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use claurst_core::provider_id::{ModelId, ProviderId};
+use mikmik_core::provider_id::{ModelId, ProviderId};
 
 use crate::provider::ModelInfo;
 
@@ -781,7 +781,7 @@ pub struct ModelRegistry {
     /// User-supplied metadata overrides, keyed by `"provider/model"`. Re-applied
     /// after every catalog merge so they stay authoritative across cache reloads
     /// and network refreshes (issue #309).
-    overrides: HashMap<String, claurst_core::config::ModelOverride>,
+    overrides: HashMap<String, mikmik_core::config::ModelOverride>,
 }
 
 impl ModelRegistry {
@@ -1227,10 +1227,10 @@ impl ModelRegistry {
     /// Keys without a `'/'` separator are skipped: the registry is keyed by
     /// `"provider/model"` and a bare id cannot be placed unambiguously.
     ///
-    /// [`ModelOverride`]: claurst_core::config::ModelOverride
+    /// [`ModelOverride`]: mikmik_core::config::ModelOverride
     pub fn apply_model_overrides(
         &mut self,
-        overrides: &HashMap<String, claurst_core::config::ModelOverride>,
+        overrides: &HashMap<String, mikmik_core::config::ModelOverride>,
     ) {
         for (key, ov) in overrides {
             self.overrides.insert(key.clone(), ov.clone());
@@ -1254,7 +1254,7 @@ impl ModelRegistry {
 /// Malformed keys (no `'/'`, or an empty half) and empty overrides are skipped.
 fn apply_overrides_to_entries(
     entries: &mut HashMap<String, ModelEntry>,
-    overrides: &HashMap<String, claurst_core::config::ModelOverride>,
+    overrides: &HashMap<String, mikmik_core::config::ModelOverride>,
 ) {
     for (key, ov) in overrides {
         if ov.is_empty() {
@@ -1558,9 +1558,9 @@ fn small_patterns_for(provider_id: &str) -> &'static [&'static str] {
 /// catalogue and would otherwise fall through to the Claude-shaped default
 /// table.
 pub fn resolve_effective_route(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     registry: &ModelRegistry,
-) -> claurst_core::config::Route {
+) -> mikmik_core::config::Route {
     if config.model.is_some() {
         return config.effective_route();
     }
@@ -1588,11 +1588,11 @@ pub fn resolve_effective_route(
 /// A model the catalogue does not cover falls back to the name heuristic,
 /// which is at least a guess rather than nothing.
 pub fn pricing_for_route(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     registry: &ModelRegistry,
-    route: &claurst_core::config::Route,
-) -> claurst_core::cost::ModelPricing {
-    let fallback = || claurst_core::cost::ModelPricing::for_model(route.model.as_str());
+    route: &mikmik_core::config::Route,
+) -> mikmik_core::cost::ModelPricing {
+    let fallback = || mikmik_core::cost::ModelPricing::for_model(route.model.as_str());
 
     let vendor = config.vendor_id_for_account(&route.account);
     let Some(entry) = registry.get(&vendor, route.model.as_str()) else {
@@ -1608,7 +1608,7 @@ pub fn pricing_for_route(
         return fallback();
     };
 
-    claurst_core::cost::ModelPricing {
+    mikmik_core::cost::ModelPricing {
         input_per_mtk: input,
         output_per_mtk: output,
         // Cache tiers are often absent even where the base rates are there.
@@ -1639,9 +1639,9 @@ pub fn pricing_for_route(
 /// of them came to be a hardcoded `claude-haiku-4-5` that only Anthropic
 /// sessions could reach.
 pub fn resolve_small_model_route(
-    config: &claurst_core::config::Config,
+    config: &mikmik_core::config::Config,
     registry: &ModelRegistry,
-) -> claurst_core::config::Route {
+) -> mikmik_core::config::Route {
     let account = config.selected_provider_id();
     crate::provider_lookup_ids(&config.vendor_id_for_account(account))
         .into_iter()
@@ -2043,7 +2043,7 @@ mod tests {
         );
 
         // The single resolver agrees when only the provider (no model) is set.
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             provider: Some("qwen".to_string()),
             model: None,
             ..Default::default()
@@ -2060,14 +2060,14 @@ mod tests {
     #[test]
     fn an_explicit_selection_routes_by_its_own_prefix() {
         let reg = ModelRegistry::new();
-        let mut cfg = claurst_core::config::Config {
+        let mut cfg = mikmik_core::config::Config {
             provider: Some("openai".to_string()),
             model: Some("anthropic/claude-sonnet-5".to_string()),
             ..Default::default()
         };
         cfg.provider_configs.insert(
             "openai".to_string(),
-            claurst_core::config::ProviderConfig::default(),
+            mikmik_core::config::ProviderConfig::default(),
         );
 
         let route = resolve_effective_route(&cfg, &reg);
@@ -2082,16 +2082,16 @@ mod tests {
         // ships models with those words in their names, so every other
         // vendor's turn was billed at Anthropic's list price.
         let reg = ModelRegistry::new();
-        let cfg = claurst_core::config::Config {
+        let cfg = mikmik_core::config::Config {
             provider: Some("google".to_string()),
             ..Default::default()
         };
         let route = cfg.route_for_account("google", "gemini-2.5-flash");
 
-        let heuristic = claurst_core::cost::ModelPricing::for_model(route.model.as_str());
+        let heuristic = mikmik_core::cost::ModelPricing::for_model(route.model.as_str());
         assert_eq!(
             heuristic,
-            claurst_core::cost::ModelPricing::SONNET,
+            mikmik_core::cost::ModelPricing::SONNET,
             "the heuristic is what this test exists to replace"
         );
 
@@ -2110,12 +2110,12 @@ mod tests {
     #[test]
     fn a_model_the_catalogue_does_not_cover_keeps_the_heuristic() {
         let reg = ModelRegistry::new();
-        let cfg = claurst_core::config::Config::default();
+        let cfg = mikmik_core::config::Config::default();
         let route = cfg.route_for_account("anthropic", "claude-opus-there-is-no-such-model");
 
         assert_eq!(
             pricing_for_route(&cfg, &reg, &route),
-            claurst_core::cost::ModelPricing::OPUS
+            mikmik_core::cost::ModelPricing::OPUS
         );
     }
 
@@ -2126,14 +2126,14 @@ mod tests {
         // to the Claude-shaped default table. Ask about the protocol it speaks
         // and keep the account's own name on the route.
         let reg = ModelRegistry::new();
-        let mut cfg = claurst_core::config::Config {
+        let mut cfg = mikmik_core::config::Config {
             provider: Some("work_openai".to_string()),
             model: None,
             ..Default::default()
         };
         cfg.provider_configs.insert(
             "work_openai".to_string(),
-            claurst_core::config::ProviderConfig {
+            mikmik_core::config::ProviderConfig {
                 protocol: Some("openai".to_string()),
                 ..Default::default()
             },
@@ -2212,7 +2212,7 @@ mod tests {
 
     // ---- model overrides (issue #309) --------------------------------------
 
-    use claurst_core::config::ModelOverride;
+    use mikmik_core::config::ModelOverride;
 
     fn overrides(pairs: Vec<(&str, ModelOverride)>) -> HashMap<String, ModelOverride> {
         pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()

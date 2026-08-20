@@ -60,7 +60,7 @@ pub(crate) async fn execute_tool(
             // Concurrent calls each get their own, so nothing is shared that
             // one call could read as another's.
             let ctx = &ToolContext {
-                current_call: Some(std::sync::Arc::new(claurst_tools::ActiveToolCall {
+                current_call: Some(std::sync::Arc::new(mikmik_tools::ActiveToolCall {
                     id: tool_id.to_string(),
                     input: input.clone(),
                 })),
@@ -127,7 +127,7 @@ where
 /// Load persisted todos for `session_id` and return a nudge string if any are
 /// incomplete (status != "completed"). Returns empty string otherwise.
 pub(crate) fn build_todo_nudge(session_id: &str) -> String {
-    let todos = claurst_tools::todo_write::load_todos(session_id);
+    let todos = mikmik_tools::todo_write::load_todos(session_id);
     let incomplete_count = todos
         .iter()
         .filter(|t| t["status"].as_str() != Some("completed"))

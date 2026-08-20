@@ -100,7 +100,7 @@ pub struct RmcpClientBackend {
 
 impl RmcpClientBackend {
     pub async fn connect_stdio(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
     ) -> anyhow::Result<Self> {
         let command = config.command.clone().ok_or_else(|| {
             anyhow::anyhow!("MCP server '{}' has no command configured", config.name)
@@ -129,7 +129,7 @@ impl RmcpClientBackend {
     /// much later and says nothing about the header. The value never reaches
     /// the error: it is usually a token.
     fn headers_of(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
     ) -> anyhow::Result<HashMap<reqwest::header::HeaderName, reqwest::header::HeaderValue>> {
         let mut headers = HashMap::with_capacity(config.headers.len());
         for (name, value) in &config.headers {
@@ -153,7 +153,7 @@ impl RmcpClientBackend {
     }
 
     pub async fn connect_http(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
         auth_token: Option<String>,
         protocol_version: rmcp_model::ProtocolVersion,
     ) -> anyhow::Result<Self> {
@@ -177,7 +177,7 @@ impl RmcpClientBackend {
     }
 
     pub async fn connect_legacy_sse(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
         auth_token: Option<String>,
     ) -> anyhow::Result<Self> {
         // Legacy SSE servers still expose the real POST endpoint via
@@ -189,7 +189,7 @@ impl RmcpClientBackend {
     }
 
     async fn connect_with_transport<T, E, A>(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
         transport: T,
         client_info: rmcp_model::ClientInfo,
         transport_label: &str,
@@ -228,8 +228,8 @@ fn build_client_info(protocol_version: rmcp_model::ProtocolVersion) -> rmcp_mode
         list_changed: Some(false),
     });
     client_info.client_info = rmcp_model::Implementation::new(
-        claurst_core::constants::APP_NAME,
-        claurst_core::constants::APP_VERSION,
+        mikmik_core::constants::APP_NAME,
+        mikmik_core::constants::APP_VERSION,
     );
     client_info
 }
@@ -253,7 +253,7 @@ struct LegacySseRmcpTransport {
 
 impl LegacySseRmcpTransport {
     async fn connect(
-        config: &claurst_core::config::McpServerConfig,
+        config: &mikmik_core::config::McpServerConfig,
         auth_token: Option<String>,
     ) -> anyhow::Result<Self> {
         let sse_url = config
@@ -659,7 +659,7 @@ impl McpClientBackend for RmcpClientBackend {
 }
 
 async fn build_snapshot(
-    config: &claurst_core::config::McpServerConfig,
+    config: &mikmik_core::config::McpServerConfig,
     peer: &rmcp::Peer<RoleClient>,
 ) -> anyhow::Result<McpClientSnapshot> {
     let server_info = peer.peer_info().map(|info| (*info).clone());
@@ -882,7 +882,7 @@ fn json_value_to_object(value: Value) -> anyhow::Result<rmcp_model::JsonObject> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::McpServerConfig;
+    use mikmik_core::config::McpServerConfig;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::time::{timeout, Duration};
@@ -1027,10 +1027,10 @@ mod tests {
             info.protocol_version,
             rmcp_model::ProtocolVersion::V_2024_11_05
         );
-        assert_eq!(info.client_info.name, claurst_core::constants::APP_NAME);
+        assert_eq!(info.client_info.name, mikmik_core::constants::APP_NAME);
         assert_eq!(
             info.client_info.version,
-            claurst_core::constants::APP_VERSION
+            mikmik_core::constants::APP_VERSION
         );
         assert_eq!(
             info.capabilities

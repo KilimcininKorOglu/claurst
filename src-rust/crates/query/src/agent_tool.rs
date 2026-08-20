@@ -16,10 +16,10 @@
 //     Use the `monitor` tool to check completion status/output.
 
 use async_trait::async_trait;
-use claurst_api::client::ClientConfig;
-use claurst_api::{AnthropicClient, ModelRegistry, ProviderRegistry};
-use claurst_core::types::Message;
-use claurst_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
+use mikmik_api::client::ClientConfig;
+use mikmik_api::{AnthropicClient, ModelRegistry, ProviderRegistry};
+use mikmik_core::types::Message;
+use mikmik_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ fn resolve_subagent_model(params: &AgentInput, ctx: &ToolContext) -> String {
 
 /// Split out from [`resolve_subagent_model`] so it can be tested against a
 /// bare `Config`; building a whole `ToolContext` proves nothing about routing.
-fn subagent_model_for(config: &claurst_core::Config, chosen: Option<&str>) -> String {
+fn subagent_model_for(config: &mikmik_core::Config, chosen: Option<&str>) -> String {
     let route = match chosen {
         Some(model) => config.resolve_route(model),
         // No override: whatever the parent session resolved to, fallbacks and
@@ -205,7 +205,7 @@ struct AgentInput {
 #[async_trait]
 impl Tool for AgentTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_AGENT
+        mikmik_core::constants::TOOL_NAME_AGENT
     }
 
     fn description(&self) -> &str {
@@ -297,14 +297,14 @@ impl Tool for AgentTool {
 
         // Build the tool list for the sub-agent.
         // Always exclude AgentTool itself to prevent unbounded recursion.
-        let all = claurst_tools::all_tools();
+        let all = mikmik_tools::all_tools();
         let agent_tools: Vec<Box<dyn Tool>> = if let Some(ref allowed) = params.tools {
             all.into_iter()
                 .filter(|t| allowed.contains(&t.name().to_string()))
                 .collect()
         } else {
             all.into_iter()
-                .filter(|t| t.name() != claurst_core::constants::TOOL_NAME_AGENT)
+                .filter(|t| t.name() != mikmik_core::constants::TOOL_NAME_AGENT)
                 .collect()
         };
 
@@ -318,7 +318,7 @@ impl Tool for AgentTool {
 
             // Append plugin-contributed agent definitions so the sub-agent
             // is aware of any specialised agents declared by plugins.
-            let agent_defs = claurst_plugins::global_plugin_registry()
+            let agent_defs = mikmik_plugins::global_plugin_registry()
                 .map(|registry| plugin_agent_definitions(&registry.all_agent_paths()))
                 .unwrap_or_default();
             if !agent_defs.is_empty() {
@@ -384,7 +384,7 @@ impl Tool for AgentTool {
 
         let query_config = QueryConfig {
             model,
-            max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
+            max_tokens: mikmik_core::constants::DEFAULT_MAX_TOKENS,
             max_turns: resolved_max_turns,
             // A sub-agent answers its parent, so both settings follow the
             // session it was spawned from.
@@ -398,7 +398,7 @@ impl Tool for AgentTool {
             output_style_prompt: ctx.config.resolve_output_style_prompt(),
             // A sub-agent may run in a worktree of its own, so its roots are
             // named from its working directory rather than the parent's.
-            workspace_roots: claurst_core::workspace::generate_root_names(
+            workspace_roots: mikmik_core::workspace::generate_root_names(
                 std::path::Path::new(&working_dir_str),
                 &ctx.config.additional_dirs,
                 &ctx.config.workspace_paths,
@@ -434,7 +434,7 @@ impl Tool for AgentTool {
         // Background mode: spawn and return agent_id immediately.
         // -----------------------------------------------------------------------
         if params.run_in_background {
-            let mut task = claurst_core::tasks::BackgroundTask::new(format!(
+            let mut task = mikmik_core::tasks::BackgroundTask::new(format!(
                 "subagent: {}",
                 params.description
             ));
@@ -447,12 +447,12 @@ impl Tool for AgentTool {
             // the registry can still cancel this sub-agent independently (#218).
             let cancel = ctx.cancel_token.child_token();
             task.cancel_token = Some(cancel.clone());
-            let _ = claurst_core::tasks::global_registry().register(task);
+            let _ = mikmik_core::tasks::global_registry().register(task);
 
             // Re-create the tool list inside the closure so it is owned and Send.
-            let agent_tools_bg: Vec<Box<dyn Tool>> = claurst_tools::all_tools()
+            let agent_tools_bg: Vec<Box<dyn Tool>> = mikmik_tools::all_tools()
                 .into_iter()
-                .filter(|t| t.name() != claurst_core::constants::TOOL_NAME_AGENT)
+                .filter(|t| t.name() != mikmik_core::constants::TOOL_NAME_AGENT)
                 .collect();
 
             let client_bg = client.clone();
@@ -485,24 +485,24 @@ impl Tool for AgentTool {
 
                 // Respect a prior external cancellation mark from monitor cancel.
                 let cancelled = matches!(
-                    claurst_core::tasks::global_registry()
+                    mikmik_core::tasks::global_registry()
                         .get(&agent_id_bg)
                         .map(|t| t.status),
-                    Some(claurst_core::tasks::TaskStatus::Cancelled)
+                    Some(mikmik_core::tasks::TaskStatus::Cancelled)
                 );
 
                 let result_text = format_outcome(outcome);
-                claurst_core::tasks::global_registry().append_output(&agent_id_bg, &result_text);
+                mikmik_core::tasks::global_registry().append_output(&agent_id_bg, &result_text);
 
                 if !cancelled {
                     let status = if result_text.starts_with("[Agent error:")
                         || result_text.starts_with("[Agent stopped:")
                     {
-                        claurst_core::tasks::TaskStatus::Failed(result_text.clone())
+                        mikmik_core::tasks::TaskStatus::Failed(result_text.clone())
                     } else {
-                        claurst_core::tasks::TaskStatus::Completed
+                        mikmik_core::tasks::TaskStatus::Completed
                     };
-                    claurst_core::tasks::global_registry().update_status(&agent_id_bg, status);
+                    mikmik_core::tasks::global_registry().update_status(&agent_id_bg, status);
                 }
 
                 debug!(
@@ -533,8 +533,8 @@ impl Tool for AgentTool {
         // cancel propagates into this sub-agent's own run_query_loop (issue #218).
         let cancel = ctx.cancel_token.child_token();
 
-        claurst_plugins::run_global_hook(
-            claurst_plugins::HookEventKind::SubagentStart,
+        mikmik_plugins::run_global_hook(
+            mikmik_plugins::HookEventKind::SubagentStart,
             None,
             serde_json::json!({
                 "description": params.description,
@@ -562,8 +562,8 @@ impl Tool for AgentTool {
             remove_worktree(&root, &wt).await;
         }
 
-        claurst_plugins::run_global_hook(
-            claurst_plugins::HookEventKind::SubagentStop,
+        mikmik_plugins::run_global_hook(
+            mikmik_plugins::HookEventKind::SubagentStop,
             None,
             serde_json::json!({
                 "description": params.description,
@@ -643,19 +643,19 @@ fn format_outcome(outcome: QueryOutcome) -> String {
 /// # Panics
 /// Panics if the runner was already registered.
 pub fn init_team_swarm_runner() {
-    let runner: claurst_tools::AgentRunFn = Arc::new(
+    let runner: mikmik_tools::AgentRunFn = Arc::new(
         |description: String,
          prompt: String,
          tools: Option<Vec<String>>,
          system: Option<String>,
          max_turns: Option<u32>,
-         ctx: Arc<claurst_tools::ToolContext>| {
+         ctx: Arc<mikmik_tools::ToolContext>| {
             // We must return a Pin<Box<dyn Future<...> + Send>>.
             Box::pin(async move {
                 let anthropic_key = ctx.config.resolve_anthropic_api_key().unwrap_or_default();
                 let anthropic_base = ctx.config.resolve_anthropic_api_base();
                 let client =
-                    match claurst_api::AnthropicClient::new(claurst_api::client::ClientConfig {
+                    match mikmik_api::AnthropicClient::new(mikmik_api::client::ClientConfig {
                         api_key: anthropic_key.clone(),
                         api_base: anthropic_base,
                         ..Default::default()
@@ -671,7 +671,7 @@ pub fn init_team_swarm_runner() {
 
                 let provider_registry = ProviderRegistry::from_config(
                     &ctx.config,
-                    claurst_api::client::ClientConfig {
+                    mikmik_api::client::ClientConfig {
                         api_key: anthropic_key,
                         api_base: ctx.config.resolve_anthropic_api_base(),
                         ..Default::default()
@@ -680,17 +680,17 @@ pub fn init_team_swarm_runner() {
                 let model_registry = Arc::new(build_model_registry());
 
                 // Build the tool list, filtering to the allowlist if provided.
-                let all = claurst_tools::all_tools();
-                let agent_tools: Vec<Box<dyn claurst_tools::Tool>> =
-                    if let Some(ref allowed) = tools {
-                        all.into_iter()
-                            .filter(|t| allowed.contains(&t.name().to_string()))
-                            .collect()
-                    } else {
-                        all.into_iter()
-                            .filter(|t| t.name() != claurst_core::constants::TOOL_NAME_AGENT)
-                            .collect()
-                    };
+                let all = mikmik_tools::all_tools();
+                let agent_tools: Vec<Box<dyn mikmik_tools::Tool>> = if let Some(ref allowed) = tools
+                {
+                    all.into_iter()
+                        .filter(|t| allowed.contains(&t.name().to_string()))
+                        .collect()
+                } else {
+                    all.into_iter()
+                        .filter(|t| t.name() != mikmik_core::constants::TOOL_NAME_AGENT)
+                        .collect()
+                };
 
                 let model = resolve_subagent_model(
                     &AgentInput {
@@ -714,7 +714,7 @@ pub fn init_team_swarm_runner() {
 
                 let query_config = crate::QueryConfig {
                     model,
-                    max_tokens: claurst_core::constants::DEFAULT_MAX_TOKENS,
+                    max_tokens: mikmik_core::constants::DEFAULT_MAX_TOKENS,
                     max_turns: max_turns.unwrap_or(10),
                     system_prompt: Some(system_prompt),
                     working_directory: Some(ctx.working_dir.display().to_string()),
@@ -731,7 +731,7 @@ pub fn init_team_swarm_runner() {
                 // Child of the parent's token so a parent cancel propagates into
                 // this team sub-agent as well (issue #218).
                 let cancel = ctx.cancel_token.child_token();
-                let mut messages = vec![claurst_core::types::Message::user(prompt)];
+                let mut messages = vec![mikmik_core::types::Message::user(prompt)];
                 let outcome = crate::run_query_loop(
                     client.as_ref(),
                     &mut messages,
@@ -750,7 +750,7 @@ pub fn init_team_swarm_runner() {
         },
     );
 
-    claurst_tools::register_agent_runner(runner);
+    mikmik_tools::register_agent_runner(runner);
 }
 
 #[cfg(test)]
@@ -776,14 +776,14 @@ mod tests {
         assert!(defs.is_empty());
     }
 
-    fn config_on(account: &str) -> claurst_core::Config {
-        let mut config = claurst_core::Config {
+    fn config_on(account: &str) -> mikmik_core::Config {
+        let mut config = mikmik_core::Config {
             provider: Some(account.to_string()),
             ..Default::default()
         };
         config.provider_configs.insert(
             account.to_string(),
-            claurst_core::config::ProviderConfig::default(),
+            mikmik_core::config::ProviderConfig::default(),
         );
         config
     }
@@ -822,7 +822,7 @@ mod tests {
         let mut config = config_on("my_gateway");
         config.provider_configs.insert(
             "other_gateway".to_string(),
-            claurst_core::config::ProviderConfig::default(),
+            mikmik_core::config::ProviderConfig::default(),
         );
         assert_eq!(
             subagent_model_for(&config, Some("other_gateway/some-model")),

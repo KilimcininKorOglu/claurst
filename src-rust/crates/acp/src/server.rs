@@ -358,7 +358,7 @@ impl AgentServer {
             }
         }
 
-        let listing = claurst_core::history::list_sessions().await;
+        let listing = mikmik_core::history::list_sessions().await;
         for failure in &listing.unreadable {
             warn!(
                 path = %failure.path.display(),
@@ -723,7 +723,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::types::Message;
+    use mikmik_core::types::Message;
     use std::path::{Path, PathBuf};
 
     #[derive(serde::Deserialize, Debug, PartialEq)]
@@ -847,7 +847,7 @@ mod tests {
         );
         *source.messages.lock() = vec![Message::user("one"), Message::assistant("two")];
         source.settings.lock().model = Some("claude-opus-4".to_string());
-        source.settings.lock().permission_mode = Some(claurst_core::PermissionMode::AcceptEdits);
+        source.settings.lock().permission_mode = Some(mikmik_core::PermissionMode::AcceptEdits);
 
         let forked = fork_from(&sessions, &source, PathBuf::from("/tmp/fork"), "m");
 
@@ -859,7 +859,7 @@ mod tests {
         );
         assert_eq!(
             forked.settings.lock().permission_mode,
-            Some(claurst_core::PermissionMode::AcceptEdits)
+            Some(mikmik_core::PermissionMode::AcceptEdits)
         );
         assert_eq!(
             forked.forked_from,

@@ -28,7 +28,7 @@ pub fn todos_path(session_id: &str) -> anyhow::Result<PathBuf> {
 
 /// Directory holding persisted todo lists (`<claurst home>/todos`).
 fn todos_dir() -> PathBuf {
-    claurst_core::config::Settings::config_dir().join("todos")
+    mikmik_core::config::Settings::config_dir().join("todos")
 }
 
 /// Load the persisted todo list for `session_id`. Returns an empty vec if the
@@ -242,7 +242,7 @@ fn validate_transition(
 #[async_trait]
 impl Tool for TodoWriteTool {
     fn name(&self) -> &str {
-        claurst_core::constants::TOOL_NAME_TODO_WRITE
+        mikmik_core::constants::TOOL_NAME_TODO_WRITE
     }
 
     fn description(&self) -> &str {
@@ -482,7 +482,7 @@ mod tests {
         // Route the assertion through the same canonical resolver instead of
         // hardcoding `.claurst`: the todos file must live under the resolved
         // claurst home (which may be ~/.claurst, $CLAURST_HOME, or the XDG dir).
-        let home = claurst_core::config::Settings::config_dir();
+        let home = mikmik_core::config::Settings::config_dir();
         assert!(
             path.starts_with(home.join("todos")),
             "todos_path should be under the claurst home"

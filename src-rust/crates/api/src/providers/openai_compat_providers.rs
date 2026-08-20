@@ -6,8 +6,8 @@
 // variable is absent or empty the provider is still constructed but
 // `health_check()` will return `ProviderStatus::Unavailable`.
 
-use claurst_core::config::Settings;
-use claurst_core::provider_id::ProviderId;
+use mikmik_core::config::Settings;
+use mikmik_core::provider_id::ProviderId;
 
 use super::openai_compat::{OpenAiCompatProvider, ProviderQuirks};
 

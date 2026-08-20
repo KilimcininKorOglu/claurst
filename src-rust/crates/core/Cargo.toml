@@ -1,5 +1,5 @@
 [package]
-name = "claurst-core"
+name = "mikmik-core"
 version.workspace = true
 edition.workspace = true
 

@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use crate::overlays::centered_rect;
 use chrono;
-use claurst_tools::TaskStatus;
+use mikmik_tools::TaskStatus;
 
 // ---------------------------------------------------------------------------
 // Helper functions for TaskStatus (defined in cc_tools)
@@ -109,7 +109,7 @@ impl TasksOverlay {
     /// overlay in sync with the global task state.
     pub fn refresh_tasks(
         &mut self,
-        task_store: &Arc<dashmap::DashMap<String, claurst_tools::Task>>,
+        task_store: &Arc<dashmap::DashMap<String, mikmik_tools::Task>>,
     ) {
         self.tasks.clear();
 
@@ -201,7 +201,7 @@ impl TasksOverlay {
             let new_status = next_status(&task.status);
 
             // Update the global task store
-            if let Some(mut global_task) = claurst_tools::TASK_STORE.get_mut(&task_id) {
+            if let Some(mut global_task) = mikmik_tools::TASK_STORE.get_mut(&task_id) {
                 global_task.status = new_status.clone();
                 global_task.updated_at = chrono::Utc::now();
             }

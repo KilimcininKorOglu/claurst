@@ -86,7 +86,7 @@ impl SlashCommand for SessionCommand {
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
         match args.trim() {
             "list" => {
-                let listing = claurst_core::history::list_sessions().await;
+                let listing = mikmik_core::history::list_sessions().await;
                 let sessions = listing.sessions;
                 if sessions.is_empty() && listing.unreadable.is_empty() {
                     CommandResult::Message("No saved sessions found.".to_string())
@@ -128,7 +128,7 @@ impl SlashCommand for SessionCommand {
                     ))
                 } else {
                     // Show current session info + recent sessions list.
-                    let listing = claurst_core::history::list_sessions().await;
+                    let listing = mikmik_core::history::list_sessions().await;
                     let sessions = listing.sessions;
                     let mut output = format!(
                         "Current session\n\
@@ -183,7 +183,7 @@ impl SlashCommand for SessionCommand {
 ///
 /// Without it a session that will not parse is simply absent from the list,
 /// which reads as "you have no such session" rather than "this one is broken".
-fn unreadable_note(unreadable: &[claurst_core::history::UnreadableSession]) -> String {
+fn unreadable_note(unreadable: &[mikmik_core::history::UnreadableSession]) -> String {
     if unreadable.is_empty() {
         return String::new();
     }
@@ -227,7 +227,7 @@ impl SlashCommand for ForkCommand {
         let fork_at = fork_index.unwrap_or(messages.len()).min(messages.len());
         let forked_messages: Vec<_> = messages[..fork_at].to_vec();
 
-        let mut new_session = claurst_core::history::ConversationSession::new(
+        let mut new_session = mikmik_core::history::ConversationSession::new(
             ctx.config.effective_model().to_string(),
         );
         new_session.messages = forked_messages;
@@ -240,7 +240,7 @@ impl SlashCommand for ForkCommand {
         new_session.working_dir = Some(ctx.working_dir.to_string_lossy().to_string());
 
         let new_id = new_session.id.clone();
-        match claurst_core::history::save_session(&new_session).await {
+        match mikmik_core::history::save_session(&new_session).await {
             Ok(()) => CommandResult::Message(format!(
                 "Session forked at message {}. New session: {}\nUse /resume {} to switch to it.",
                 fork_at, new_id, new_id

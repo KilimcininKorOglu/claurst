@@ -54,7 +54,7 @@ impl SlashCommand for GoalCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        if !claurst_core::goals_enabled() {
+        if !mikmik_core::goals_enabled() {
             return CommandResult::Message(
                 "Goals are disabled. Unset CLAURST_GOALS=0 (or remove it) to re-enable."
                     .to_string(),
@@ -77,17 +77,17 @@ impl SlashCommand for GoalCommand {
                 };
                 match store.get_goal(session_id) {
                     None => return CommandResult::Message("No active goal.".to_string()),
-                    Some(g) if g.status == claurst_core::GoalStatus::Complete => {
+                    Some(g) if g.status == mikmik_core::GoalStatus::Complete => {
                         return CommandResult::Message("Goal is already complete.".to_string());
                     }
-                    Some(g) if g.status == claurst_core::GoalStatus::Paused => {
+                    Some(g) if g.status == mikmik_core::GoalStatus::Paused => {
                         return CommandResult::Message(
                             "Goal is already paused. Use /goal resume to continue.".to_string(),
                         );
                     }
                     _ => {}
                 }
-                if let Err(e) = store.set_status(session_id, claurst_core::GoalStatus::Paused) {
+                if let Err(e) = store.set_status(session_id, mikmik_core::GoalStatus::Paused) {
                     return CommandResult::Error(format!("Failed to pause goal: {}", e));
                 }
                 return CommandResult::Message(
@@ -101,17 +101,17 @@ impl SlashCommand for GoalCommand {
                 };
                 match store.get_goal(session_id) {
                     None => return CommandResult::Message("No goal to resume.".to_string()),
-                    Some(g) if g.status == claurst_core::GoalStatus::Active => {
+                    Some(g) if g.status == mikmik_core::GoalStatus::Active => {
                         return CommandResult::Message("Goal is already active.".to_string());
                     }
-                    Some(g) if g.status == claurst_core::GoalStatus::Complete => {
+                    Some(g) if g.status == mikmik_core::GoalStatus::Complete => {
                         return CommandResult::Message(
                             "Goal is complete. Use /goal <objective> to set a new one.".to_string(),
                         );
                     }
                     _ => {}
                 }
-                if let Err(e) = store.set_status(session_id, claurst_core::GoalStatus::Active) {
+                if let Err(e) = store.set_status(session_id, mikmik_core::GoalStatus::Active) {
                     return CommandResult::Error(format!("Failed to resume goal: {}", e));
                 }
                 return CommandResult::Message(
@@ -170,7 +170,7 @@ impl SlashCommand for GoalCommand {
         };
 
         match store.set_goal(session_id, objective, token_budget) {
-            Err(claurst_core::GoalError::ObjectiveTooLong { len, max }) => CommandResult::Error(
+            Err(mikmik_core::GoalError::ObjectiveTooLong { len, max }) => CommandResult::Error(
                 format!("Objective too long ({} chars). Max {} chars.", len, max),
             ),
             Err(e) => CommandResult::Error(format!("Failed to set goal: {}", e)),
@@ -178,7 +178,7 @@ impl SlashCommand for GoalCommand {
                 // Return UserMessage so the query loop fires immediately and the
                 // model begins working toward the goal without user needing to
                 // send another message.
-                CommandResult::UserMessage(claurst_core::goal_kickoff_message(&goal))
+                CommandResult::UserMessage(mikmik_core::goal_kickoff_message(&goal))
             }
         }
     }
@@ -218,8 +218,8 @@ fn goal_usage() -> CommandResult {
     )
 }
 
-fn open_goal_store() -> Option<claurst_core::GoalStore> {
-    claurst_core::GoalStore::open_default()
+fn open_goal_store() -> Option<mikmik_core::GoalStore> {
+    mikmik_core::GoalStore::open_default()
 }
 
 fn goal_status(session_id: &str) -> CommandResult {

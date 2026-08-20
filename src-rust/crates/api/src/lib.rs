@@ -9,10 +9,10 @@
 // - Rate-limit (429) and overloaded (529) retry with exponential back-off
 // - Authentication via API key from env or config
 
-use claurst_core::constants::{ANTHROPIC_API_VERSION, ANTHROPIC_BETA_HEADER};
-use claurst_core::error::ClaudeError;
-use claurst_core::types::{ContentBlock, Message, MessageContent, Role, ToolDefinition, UsageInfo};
 use futures::StreamExt;
+use mikmik_core::constants::{ANTHROPIC_API_VERSION, ANTHROPIC_BETA_HEADER};
+use mikmik_core::error::ClaudeError;
+use mikmik_core::types::{ContentBlock, Message, MessageContent, Role, ToolDefinition, UsageInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -129,8 +129,8 @@ pub use providers::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Default total request timeout in seconds when the user has not configured
-/// one. Kept in sync with [`claurst_core::config::DEFAULT_REQUEST_TIMEOUT_SECS`].
-pub use claurst_core::config::DEFAULT_REQUEST_TIMEOUT_SECS;
+/// one. Kept in sync with [`mikmik_core::config::DEFAULT_REQUEST_TIMEOUT_SECS`].
+pub use mikmik_core::config::DEFAULT_REQUEST_TIMEOUT_SECS;
 
 /// Process-wide total request timeout (seconds) applied to provider HTTP
 /// clients that are constructed lazily without access to the user `Config`
@@ -200,7 +200,7 @@ pub mod types {
         /// reach the request body. That is the defect this type exists to
         /// stop: the provider answers 400 for a model it has never heard of,
         /// and nothing upstream said which of the two a `String` held.
-        pub model: claurst_core::config::WireModel,
+        pub model: mikmik_core::config::WireModel,
         pub max_tokens: u32,
         pub messages: Vec<ApiMessage>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -588,7 +588,7 @@ pub mod client {
         fn default() -> Self {
             Self {
                 api_key: String::new(),
-                api_base: claurst_core::constants::ANTHROPIC_API_BASE.to_string(),
+                api_base: mikmik_core::constants::ANTHROPIC_API_BASE.to_string(),
                 api_version: ANTHROPIC_API_VERSION.to_string(),
                 beta_features: ANTHROPIC_BETA_HEADER.to_string(),
                 max_retries: 5,
@@ -672,12 +672,11 @@ pub mod client {
                 text,
                 cache_control: None,
             };
-            let billing_block = text_block(claurst_core::oauth_config::claude_code_billing_header(
+            let billing_block = text_block(mikmik_core::oauth_config::claude_code_billing_header(
                 &first_user_text,
             ));
-            let identity_block = text_block(
-                claurst_core::oauth_config::CLAUDE_CODE_SYSTEM_PROMPT_PREFIX.to_string(),
-            );
+            let identity_block =
+                text_block(mikmik_core::oauth_config::CLAUDE_CODE_SYSTEM_PROMPT_PREFIX.to_string());
 
             // Drop a leading "You are Claurst…" / "You are a Claude agent…" line:
             // the injected official identity must be the only one the server sees.
@@ -714,7 +713,7 @@ pub mod client {
                             first.text = strip_attr(&first.text);
                         }
                         let has_identity = blocks.first().is_some_and(|b| {
-                            b.text == claurst_core::oauth_config::CLAUDE_CODE_SYSTEM_PROMPT_PREFIX
+                            b.text == mikmik_core::oauth_config::CLAUDE_CODE_SYSTEM_PROMPT_PREFIX
                         });
                         if !has_identity {
                             blocks.insert(0, identity_block);
@@ -739,7 +738,7 @@ pub mod client {
         }
 
         /// Convenience constructor that resolves the key from config/env.
-        pub fn from_config(cfg: &claurst_core::config::Config) -> anyhow::Result<Self> {
+        pub fn from_config(cfg: &mikmik_core::config::Config) -> anyhow::Result<Self> {
             let api_key = cfg
                 .resolve_api_key()
                 .ok_or_else(|| anyhow::anyhow!("No API key found"))?;
@@ -992,11 +991,11 @@ pub mod client {
                 req = req
                     .header(
                         "anthropic-beta",
-                        claurst_core::oauth_config::OAUTH_BETA_FLAGS.join(","),
+                        mikmik_core::oauth_config::OAUTH_BETA_FLAGS.join(","),
                     )
                     .header(
                         "user-agent",
-                        claurst_core::oauth_config::claude_code_user_agent(),
+                        mikmik_core::oauth_config::claude_code_user_agent(),
                     )
                     .header("x-app", "cli")
                     .header("Authorization", format!("Bearer {}", self.config.api_key));
@@ -1037,7 +1036,7 @@ pub mod client {
                 use tokio::sync::OnceCell;
                 static CACHE: OnceCell<Option<(String, bool)>> = OnceCell::const_new();
                 CACHE
-                    .get_or_init(claurst_core::oauth::current_anthropic_account_meta)
+                    .get_or_init(mikmik_core::oauth::current_anthropic_account_meta)
                     .await
                     .clone()
                     .unwrap_or_default()
@@ -1092,7 +1091,7 @@ pub mod client {
 
             // Account-tier `anthropic-beta` set (Pro vs Max), stable across retries.
             let anthropic_beta = if use_oauth {
-                let mut s = claurst_core::oauth_config::oauth_beta_flags(has_premium).join(",");
+                let mut s = mikmik_core::oauth_config::oauth_beta_flags(has_premium).join(",");
                 if !self.config.beta_features.is_empty() {
                     if !s.is_empty() {
                         s.push(',');
@@ -1137,7 +1136,7 @@ pub mod client {
                     req = req
                         .header(
                             "user-agent",
-                            claurst_core::oauth_config::claude_code_user_agent(),
+                            mikmik_core::oauth_config::claude_code_user_agent(),
                         )
                         .header("x-app", "cli")
                         .header("anthropic-dangerous-direct-browser-access", "true")
@@ -1373,7 +1372,7 @@ pub mod client {
 impl CreateMessageRequest {
     /// Create a minimal request builder.
     pub fn builder(
-        model: &claurst_core::config::WireModel,
+        model: &mikmik_core::config::WireModel,
         max_tokens: u32,
     ) -> CreateMessageRequestBuilder {
         CreateMessageRequestBuilder {
@@ -1392,7 +1391,7 @@ impl CreateMessageRequest {
 }
 
 pub struct CreateMessageRequestBuilder {
-    model: claurst_core::config::WireModel,
+    model: mikmik_core::config::WireModel,
     max_tokens: u32,
     messages: Vec<ApiMessage>,
     system: Option<SystemPrompt>,
@@ -1646,7 +1645,7 @@ impl StreamAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claurst_core::config::WireModel;
+    use mikmik_core::config::WireModel;
 
     #[test]
     fn test_sse_parser_basic() {

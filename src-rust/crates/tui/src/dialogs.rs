@@ -85,7 +85,7 @@ impl PermissionRequest {
     }
 
     /// Build with a richer description derived from the full permission reason
-    /// text produced by `claurst_core::format_permission_reason`.
+    /// text produced by `mikmik_core::format_permission_reason`.
     ///
     /// The `reason` string may contain a newline splitting the one-liner from
     /// the danger explanation — this constructor splits on the first `\n` and

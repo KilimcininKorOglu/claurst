@@ -9,7 +9,7 @@
 
 use super::{CommandContext, CommandResult, SlashCommand};
 use async_trait::async_trait;
-use claurst_core::config::PermissionMode;
+use mikmik_core::config::PermissionMode;
 
 pub struct YoloCommand;
 
@@ -238,8 +238,8 @@ mod tests {
 
     fn ctx() -> CommandContext {
         CommandContext {
-            config: claurst_core::Config::default(),
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            config: mikmik_core::Config::default(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             messages: vec![],
             working_dir: std::path::PathBuf::from("."),
             session_id: "test-session".to_string(),
@@ -254,7 +254,7 @@ mod tests {
     }
 
     fn saved_mode() -> PermissionMode {
-        claurst_core::Settings::load_sync()
+        mikmik_core::Settings::load_sync()
             .expect("settings load")
             .config
             .permission_mode

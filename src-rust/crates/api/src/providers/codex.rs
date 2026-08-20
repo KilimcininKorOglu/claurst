@@ -18,16 +18,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::codex_oauth::{
+use futures::{Stream, StreamExt};
+use mikmik_core::codex_oauth::{
     CODEX_API_ENDPOINT, CODEX_MODELS, CODEX_TOKEN_URL, DEFAULT_CODEX_MODEL,
 };
-use claurst_core::oauth_config::{
+use mikmik_core::oauth_config::{
     get_codex_tokens, load_codex_tokens_for_account, save_codex_tokens,
     save_codex_tokens_for_account, CodexTokens,
 };
-use claurst_core::provider_id::{ModelId, ProviderId};
-use claurst_core::types::UsageInfo;
-use futures::{Stream, StreamExt};
+use mikmik_core::provider_id::{ModelId, ProviderId};
+use mikmik_core::types::UsageInfo;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
@@ -153,7 +153,7 @@ impl CodexProvider {
     async fn refresh_token(&self, refresh_token: &str) -> Result<String, ProviderError> {
         let body = json!({
             "grant_type": "refresh_token",
-            "client_id": claurst_core::codex_oauth::CODEX_CLIENT_ID,
+            "client_id": mikmik_core::codex_oauth::CODEX_CLIENT_ID,
             "refresh_token": refresh_token,
         });
 
@@ -447,7 +447,7 @@ impl CodexProvider {
         provider_id: &ProviderId,
         json_val: &Value,
     ) -> Result<ProviderResponse, ProviderError> {
-        use claurst_core::types::ContentBlock;
+        use mikmik_core::types::ContentBlock;
 
         let id = json_val
             .get("id")
@@ -739,7 +739,7 @@ impl LlmProvider for CodexProvider {
                                             if open_blocks.insert(output_index) {
                                                 yield Ok(StreamEvent::ContentBlockStart {
                                                     index: output_index,
-                                                    content_block: claurst_core::types::ContentBlock::ToolUse {
+                                                    content_block: mikmik_core::types::ContentBlock::ToolUse {
                                                         id: call_id,
                                                         name,
                                                         input: json!({}),
@@ -770,7 +770,7 @@ impl LlmProvider for CodexProvider {
                                         if open_blocks.insert(output_index) {
                                             yield Ok(StreamEvent::ContentBlockStart {
                                                 index: output_index,
-                                                content_block: claurst_core::types::ContentBlock::Text {
+                                                content_block: mikmik_core::types::ContentBlock::Text {
                                                     text: String::new(),
                                                 },
                                             });
@@ -798,7 +798,7 @@ impl LlmProvider for CodexProvider {
                                 if open_blocks.insert(output_index) {
                                     yield Ok(StreamEvent::ContentBlockStart {
                                         index: output_index,
-                                        content_block: claurst_core::types::ContentBlock::Text {
+                                        content_block: mikmik_core::types::ContentBlock::Text {
                                             text: String::new(),
                                         },
                                     });
@@ -939,7 +939,7 @@ impl LlmProvider for CodexProvider {
     }
 
     async fn discover_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        use claurst_core::codex_oauth::codex_limit_override;
+        use mikmik_core::codex_oauth::codex_limit_override;
         let models = CODEX_MODELS
             .iter()
             .map(|(id, name)| {
@@ -997,7 +997,7 @@ mod account_tests {
     //! A refreshed token has to go back to the account it came from. Writing it
     //! through the active-account path would overwrite a different account.
     use super::*;
-    use claurst_core::oauth_config::save_codex_tokens_and_register;
+    use mikmik_core::oauth_config::save_codex_tokens_and_register;
     use std::sync::Mutex as StdMutex;
 
     // `Settings::config_dir()` reads process-global env. Serialise every test
@@ -1056,7 +1056,7 @@ mod account_tests {
 
         assert_eq!(stored, "token-for-personal");
         assert_eq!(
-            claurst_core::config::Settings::load_sync()
+            mikmik_core::config::Settings::load_sync()
                 .expect("settings")
                 .provider
                 .as_deref(),

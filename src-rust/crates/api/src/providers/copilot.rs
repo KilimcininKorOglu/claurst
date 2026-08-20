@@ -22,11 +22,11 @@ use std::pin::Pin;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use claurst_core::provider_id::{ModelId, ProviderId};
-use claurst_core::types::{
+use futures::Stream;
+use mikmik_core::provider_id::{ModelId, ProviderId};
+use mikmik_core::types::{
     ContentBlock, ImageSource, MessageContent, Role, ToolResultContent, UsageInfo,
 };
-use futures::Stream;
 use serde_json::{json, Value};
 use tracing::debug;
 

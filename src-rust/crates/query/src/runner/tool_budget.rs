@@ -9,9 +9,9 @@ use crate::*;
 pub(crate) fn total_tool_result_chars(messages: &[Message]) -> usize {
     messages
         .iter()
-        .filter(|m| m.role == claurst_core::types::Role::User)
+        .filter(|m| m.role == mikmik_core::types::Role::User)
         .flat_map(|m| match &m.content {
-            claurst_core::types::MessageContent::Blocks(blocks) => blocks.as_slice(),
+            mikmik_core::types::MessageContent::Blocks(blocks) => blocks.as_slice(),
             _ => &[],
         })
         .filter_map(|b| {
@@ -59,11 +59,11 @@ pub(crate) fn apply_tool_result_budget(
     let mut result = messages;
 
     'outer: for msg in result.iter_mut() {
-        if msg.role != claurst_core::types::Role::User {
+        if msg.role != mikmik_core::types::Role::User {
             continue;
         }
         let blocks = match &mut msg.content {
-            claurst_core::types::MessageContent::Blocks(b) => b,
+            mikmik_core::types::MessageContent::Blocks(b) => b,
             _ => continue,
         };
         for block in blocks.iter_mut() {

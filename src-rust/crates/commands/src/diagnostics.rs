@@ -88,7 +88,7 @@ impl SlashCommand for CtxVizCommand {
             ctx.messages.iter().fold((0, 0), |(conv, tool), msg| {
                 let text = msg.get_all_text();
                 // Heuristic: if the message looks like a tool result, count separately
-                if msg.role == claurst_core::types::Role::User && text.starts_with('[') {
+                if msg.role == mikmik_core::types::Role::User && text.starts_with('[') {
                     (conv, tool + text.len())
                 } else {
                     (conv + text.len(), tool)
@@ -211,11 +211,11 @@ impl SlashCommand for InsightsCommand {
         // Count turns (user / assistant pairs)
         let user_turns: usize = messages
             .iter()
-            .filter(|m| matches!(m.role, claurst_core::types::Role::User))
+            .filter(|m| matches!(m.role, mikmik_core::types::Role::User))
             .count();
         let assistant_turns: usize = messages
             .iter()
-            .filter(|m| matches!(m.role, claurst_core::types::Role::Assistant))
+            .filter(|m| matches!(m.role, mikmik_core::types::Role::Assistant))
             .count();
         let total_turns = user_turns.min(assistant_turns);
 
@@ -224,7 +224,7 @@ impl SlashCommand for InsightsCommand {
             std::collections::HashMap::new();
         for msg in messages {
             for block in msg.get_tool_use_blocks() {
-                if let claurst_core::types::ContentBlock::ToolUse { name, .. } = block {
+                if let mikmik_core::types::ContentBlock::ToolUse { name, .. } = block {
                     *tool_counts.entry(name.clone()).or_insert(0) += 1;
                 }
             }

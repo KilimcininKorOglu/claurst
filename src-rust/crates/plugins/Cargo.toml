@@ -1,5 +1,5 @@
 [package]
-name = "claurst-plugins"
+name = "mikmik-plugins"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 description = "Plugin runtime for the Claurst CLI"
 
 [dependencies]
-claurst-core = { workspace = true }
+mikmik-core = { workspace = true }
 
 # Async
 tokio = { workspace = true }

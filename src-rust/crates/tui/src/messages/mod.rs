@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use crate::app::TurnMetadata;
 use crate::kitty_image::render_image;
 use crate::transcript_turn::reasoning_heading;
-use claurst_core::format_utils::format_message_time;
-use claurst_core::types::{ContentBlock, Message, Role, ToolResultContent};
+use mikmik_core::format_utils::format_message_time;
+use mikmik_core::types::{ContentBlock, Message, Role, ToolResultContent};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

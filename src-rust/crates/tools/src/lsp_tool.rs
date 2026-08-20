@@ -92,7 +92,7 @@ impl Tool for LspTool {
         let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
         // --- Seed the global LSP manager with configs from current session ---
-        let lsp_manager_arc = claurst_core::lsp::global_lsp_manager();
+        let lsp_manager_arc = mikmik_core::lsp::global_lsp_manager();
         {
             let mut manager = lsp_manager_arc.lock().await;
             manager.seed_from_config(&ctx.config.lsp_servers);
@@ -210,7 +210,7 @@ impl Tool for LspTool {
                     ));
                 }
 
-                let output = claurst_core::lsp::LspManager::format_diagnostics(&diagnostics);
+                let output = mikmik_core::lsp::LspManager::format_diagnostics(&diagnostics);
                 ToolResult::success(output)
             }
 

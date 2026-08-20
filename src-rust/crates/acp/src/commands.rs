@@ -16,7 +16,7 @@ use crate::sessions::SessionState;
 /// Hidden commands are left out: they exist for compatibility or for tests,
 /// and a client offering them would be advertising things nobody should type.
 pub fn available_commands() -> Vec<acp::AvailableCommand> {
-    claurst_commands::all_commands()
+    mikmik_commands::all_commands()
         .iter()
         .filter(|command| !command.hidden())
         .map(|command| {
@@ -60,7 +60,7 @@ pub fn split_command(text: &str) -> Option<(String, String)> {
         Some((name, arguments)) => (name, arguments.trim()),
         None => (rest, ""),
     };
-    claurst_commands::find_command(name)?;
+    mikmik_commands::find_command(name)?;
     Some((name.to_string(), arguments.to_string()))
 }
 
@@ -106,7 +106,7 @@ pub async fn run(
     name: &str,
     arguments: &str,
 ) -> Outcome {
-    let Some(command) = claurst_commands::find_command(name) else {
+    let Some(command) = mikmik_commands::find_command(name) else {
         return Outcome::failed(format!("There is no /{name}."));
     };
 
@@ -114,7 +114,7 @@ pub async fn run(
     let mut config = runtime.config.clone();
     crate::session_config::apply_overrides(&mut config, &overrides);
     let before = config.clone();
-    let mut ctx = claurst_commands::CommandContext {
+    let mut ctx = mikmik_commands::CommandContext {
         config,
         cost_tracker: session.cost_tracker.clone(),
         messages: session.messages.lock().clone(),
@@ -146,10 +146,10 @@ async fn apply(
     runtime: &Arc<AgentRuntime>,
     session: &Arc<SessionState>,
     notes: &mpsc::UnboundedSender<String>,
-    before: &claurst_core::config::Config,
-    result: claurst_commands::CommandResult,
+    before: &mikmik_core::config::Config,
+    result: mikmik_commands::CommandResult,
 ) -> Outcome {
-    use claurst_commands::CommandResult as R;
+    use mikmik_commands::CommandResult as R;
 
     match result {
         R::Message(text) => Outcome::said(text),
@@ -196,14 +196,14 @@ async fn apply(
             // and the client can go on reading the conversation while it runs.
             let current = session.messages.lock().clone();
             let before = current.len();
-            let route = claurst_api::resolve_effective_route(
+            let route = mikmik_api::resolve_effective_route(
                 &runtime.config,
                 runtime.model_registry.as_ref(),
             );
 
             // The compact model applies here too. "Always that one" has to
             // hold on every surface, or the setting means "usually".
-            let run = claurst_query::compact::compact_on_demand(
+            let run = mikmik_query::compact::compact_on_demand(
                 &route,
                 &runtime.config,
                 Some(runtime.provider_registry.as_ref()),
@@ -295,7 +295,7 @@ async fn apply(
                 runtime,
                 notes,
                 crate::runtime::LoginRequest {
-                    provider: claurst_core::ProviderId::ANTHROPIC.to_string(),
+                    provider: mikmik_core::ProviderId::ANTHROPIC.to_string(),
                     login_with_claude_ai,
                     label: None,
                 },
@@ -321,14 +321,14 @@ async fn apply(
 
         R::ReloadPlugins => {
             let cwd = session.cwd.lock().clone();
-            let previous = claurst_plugins::global_plugin_registry();
-            let registry = claurst_plugins::load_plugins(&cwd, &[]).await;
+            let previous = mikmik_plugins::global_plugin_registry();
+            let registry = mikmik_plugins::load_plugins(&cwd, &[]).await;
             let diff = previous
                 .as_ref()
                 .map(|old| registry.diff_against(old))
                 .unwrap_or_default();
-            claurst_plugins::set_global_hooks(registry.build_hook_registry());
-            Outcome::said(claurst_plugins::format_reload_summary(&registry, &diff))
+            mikmik_plugins::set_global_hooks(registry.build_hook_registry());
+            Outcome::said(mikmik_plugins::format_reload_summary(&registry, &diff))
         }
 
         R::SyncAccountModels { accounts, force } => {
@@ -336,7 +336,7 @@ async fn apply(
         }
 
         R::RefreshProviderState => {
-            match claurst_api::provider_state::clear_saved_provider_state().await {
+            match mikmik_api::provider_state::clear_saved_provider_state().await {
                 Ok(()) => Outcome::said(
                     "Saved provider state cleared. The agent reads it at startup, so restart it \
                  and run /connect to sign in again.",
@@ -363,8 +363,8 @@ async fn apply(
 fn adopt(
     overrides: &mut crate::sessions::SessionSettings,
     current_model: &str,
-    before: &claurst_core::config::Config,
-    after: &claurst_core::config::Config,
+    before: &mikmik_core::config::Config,
+    after: &mikmik_core::config::Config,
 ) -> String {
     let mut changed: Vec<String> = Vec::new();
 
@@ -391,7 +391,7 @@ fn adopt(
         if let Some(level) = after
             .effort
             .as_deref()
-            .and_then(claurst_core::effort::EffortLevel::from_str)
+            .and_then(mikmik_core::effort::EffortLevel::from_str)
         {
             changed.push(format!("effort {}", level.as_str()));
             overrides.effort = Some(level);
@@ -502,7 +502,7 @@ async fn sync_models(
     for account in targets {
         let provider = runtime
             .provider_registry
-            .get(&claurst_core::ProviderId::new(&account))
+            .get(&mikmik_core::ProviderId::new(&account))
             .cloned();
         let Some(provider) = provider else {
             lines.push(format!("{account}: no provider is configured for it."));
@@ -510,9 +510,9 @@ async fn sync_models(
         };
         match provider.discover_models().await {
             Ok(models) if !models.is_empty() => {
-                match claurst_api::model_sync::persist_account_models(&account, &models, force) {
+                match mikmik_api::model_sync::persist_account_models(&account, &models, force) {
                     Ok(outcome) => {
-                        lines.push(claurst_api::model_sync::describe_model_sync(
+                        lines.push(mikmik_api::model_sync::describe_model_sync(
                             &account, &outcome,
                         ));
                     }
@@ -529,11 +529,11 @@ async fn sync_models(
 /// Run an MCP authentication in the background and say how it went.
 fn mcp_auth_runner(
     notes: mpsc::UnboundedSender<String>,
-) -> Arc<dyn Fn(claurst_mcp::oauth::McpAuthSession) + Send + Sync> {
+) -> Arc<dyn Fn(mikmik_mcp::oauth::McpAuthSession) + Send + Sync> {
     Arc::new(move |session| {
         let notes = notes.clone();
         tokio::spawn(async move {
-            let text = match claurst_mcp::oauth::run_mcp_auth_session(session).await {
+            let text = match mikmik_mcp::oauth::run_mcp_auth_session(session).await {
                 Ok(result) => format!("Authenticated with '{}'.", result.server_name),
                 Err(e) => format!("MCP authentication failed: {e}"),
             };
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn the_offered_commands_are_the_ones_the_terminal_runs() {
         let offered = available_commands();
-        let expected = claurst_commands::all_commands()
+        let expected = mikmik_commands::all_commands()
             .iter()
             .filter(|c| !c.hidden())
             .count();
@@ -562,7 +562,7 @@ mod tests {
     fn a_hidden_command_is_not_offered() {
         // Offering one would put a command in the client's list that nobody
         // is meant to type.
-        let hidden: Vec<String> = claurst_commands::all_commands()
+        let hidden: Vec<String> = mikmik_commands::all_commands()
             .iter()
             .filter(|c| c.hidden())
             .map(|c| c.name().to_string())
@@ -610,11 +610,11 @@ mod tests {
 
     #[test]
     fn a_command_that_changed_the_model_changes_it_for_this_session_only() {
-        let before = claurst_core::config::Config {
+        let before = mikmik_core::config::Config {
             model: Some("claude-opus-5".to_string()),
             ..Default::default()
         };
-        let after = claurst_core::config::Config {
+        let after = mikmik_core::config::Config {
             model: Some("gpt-5".to_string()),
             ..before.clone()
         };
@@ -628,9 +628,9 @@ mod tests {
 
     #[test]
     fn a_command_that_changed_the_mode_changes_it_for_this_session_only() {
-        let before = claurst_core::config::Config::default();
-        let after = claurst_core::config::Config {
-            permission_mode: claurst_core::PermissionMode::AcceptEdits,
+        let before = mikmik_core::config::Config::default();
+        let after = mikmik_core::config::Config {
+            permission_mode: mikmik_core::PermissionMode::AcceptEdits,
             ..Default::default()
         };
         let mut overrides = crate::sessions::SessionSettings::default();
@@ -639,7 +639,7 @@ mod tests {
 
         assert_eq!(
             overrides.permission_mode,
-            Some(claurst_core::PermissionMode::AcceptEdits)
+            Some(mikmik_core::PermissionMode::AcceptEdits)
         );
         assert!(said.contains("acceptEdits"), "{said}");
     }
@@ -648,7 +648,7 @@ mod tests {
     fn a_command_that_changed_nothing_a_session_holds_says_so() {
         // Reporting a change would be false, and saying nothing at all reads
         // as a command that failed.
-        let config = claurst_core::config::Config::default();
+        let config = mikmik_core::config::Config::default();
         let mut overrides = crate::sessions::SessionSettings::default();
 
         let said = adopt(&mut overrides, "claude-opus-5", &config, &config);

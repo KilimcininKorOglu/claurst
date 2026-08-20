@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use agent_client_protocol_schema as acp;
-use claurst_core::history::ConversationSession;
+use mikmik_core::history::ConversationSession;
 
 /// How many sessions one page carries.
 const PAGE_SIZE: usize = 50;

@@ -6757,8 +6757,8 @@ pub mod oauth {
     // ---- Production OAuth endpoints & constants ----
 
     // Claude Code client ID, used in stealth-impersonation mode (see
-    // `claurst_core::oauth_config` for the matching request-time headers and
-    // system-prompt prefix wired into `claurst_api::AnthropicClient`).
+    // `mikmik_core::oauth_config` for the matching request-time headers and
+    // system-prompt prefix wired into `mikmik_api::AnthropicClient`).
     pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     pub const CONSOLE_AUTHORIZE_URL: &str = "https://platform.claude.com/oauth/authorize";
     pub const CLAUDE_AI_AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";

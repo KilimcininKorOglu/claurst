@@ -5,7 +5,7 @@
 //! because every front end needs the same thing to happen, and a second copy
 //! would be a second set of rules for the same file.
 
-use claurst_core::config::{Config, ModelOverride, Settings};
+use mikmik_core::config::{Config, ModelOverride, Settings};
 
 /// What a sync did, so the caller can say it rather than guess, and apply the
 /// same change to the running configuration.
@@ -127,7 +127,7 @@ pub fn describe_model_sync(account_id: &str, outcome: &ModelSyncOutcome) -> Stri
 mod tests {
     use super::*;
     use crate::ModelInfo;
-    use claurst_core::provider_id::{ModelId, ProviderId};
+    use mikmik_core::provider_id::{ModelId, ProviderId};
 
     /// `CLAURST_HOME` is process-wide, so the tests that move it run one at a
     /// time and put it back when they are done.

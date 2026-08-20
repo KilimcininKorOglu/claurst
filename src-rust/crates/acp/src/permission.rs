@@ -12,9 +12,9 @@
 use std::sync::Arc;
 
 use agent_client_protocol_schema as acp;
-use claurst_core::permissions::{PermissionDecision, PermissionRequest};
-use claurst_core::PermissionHandler;
-use claurst_tools::{PendingPermissionRequest, PendingPermissionStore};
+use mikmik_core::permissions::{PermissionDecision, PermissionRequest};
+use mikmik_core::PermissionHandler;
+use mikmik_tools::{PendingPermissionRequest, PendingPermissionStore};
 use tracing::{debug, warn};
 
 use crate::connection::Connection;

@@ -120,7 +120,7 @@ impl CustomProviderDialogState {
 
     /// Whether the typed account name can be stored and addressed.
     pub fn account_name_is_valid(&self) -> bool {
-        claurst_core::config::account_name_is_valid(&self.account_input)
+        mikmik_core::config::account_name_is_valid(&self.account_input)
     }
 
     pub fn can_submit(&self) -> bool {

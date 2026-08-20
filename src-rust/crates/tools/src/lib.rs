@@ -8,10 +8,10 @@
 #![allow(clippy::type_complexity)]
 
 use async_trait::async_trait;
-use claurst_core::config::PermissionMode;
-use claurst_core::cost::CostTracker;
-use claurst_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
-use claurst_core::types::ToolDefinition;
+use mikmik_core::config::PermissionMode;
+use mikmik_core::cost::CostTracker;
+use mikmik_core::permissions::{PermissionDecision, PermissionHandler, PermissionRequest};
+use mikmik_core::types::ToolDefinition;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -214,7 +214,7 @@ pub(crate) fn ignore_aware_walk(root: &std::path::Path, include_ignored: bool) -
 #[derive(Debug)]
 pub struct PendingPermissionRequest {
     pub tool_use_id: String,
-    pub request: claurst_core::permissions::PermissionRequest,
+    pub request: mikmik_core::permissions::PermissionRequest,
     pub reason: String,
     pub decision_tx: Option<tokio::sync::oneshot::Sender<PermissionDecision>>,
 }
@@ -270,13 +270,13 @@ pub fn clear_session_shell_state(session_id: &str) {
 /// Returns `None` when git is unavailable or the directory is not in a git repo.
 pub fn session_shadow(
     working_dir: &std::path::Path,
-) -> Option<Arc<claurst_core::snapshot::ShadowSnapshot>> {
-    claurst_core::snapshot::get_or_create(working_dir)
+) -> Option<Arc<mikmik_core::snapshot::ShadowSnapshot>> {
+    mikmik_core::snapshot::get_or_create(working_dir)
 }
 
 /// Drop the cached shadow snapshot for `working_dir` (e.g. when a session ends).
 pub fn clear_session_shadow(working_dir: &std::path::Path) {
-    claurst_core::snapshot::remove(working_dir);
+    mikmik_core::snapshot::remove(working_dir);
 }
 
 /// Write `contents` to `path` atomically: write to a temp file in the same
@@ -340,16 +340,16 @@ pub struct ToolContext {
     pub permission_handler: Arc<dyn PermissionHandler>,
     pub cost_tracker: Arc<CostTracker>,
     pub session_id: String,
-    pub file_history: Arc<parking_lot::Mutex<claurst_core::file_history::FileHistory>>,
+    pub file_history: Arc<parking_lot::Mutex<mikmik_core::file_history::FileHistory>>,
     pub current_turn: Arc<AtomicUsize>,
     /// If true, suppress interactive prompts (batch / CI mode).
     pub non_interactive: bool,
     /// Optional MCP manager for ListMcpResources / ReadMcpResource tools.
-    pub mcp_manager: Option<Arc<claurst_mcp::McpManager>>,
+    pub mcp_manager: Option<Arc<mikmik_mcp::McpManager>>,
     /// Configured event hooks (PreToolUse, PostToolUse, etc.).
-    pub config: claurst_core::config::Config,
+    pub config: mikmik_core::config::Config,
     /// Managed agent (manager-executor) configuration, if active.
-    pub managed_agent_config: Option<claurst_core::config::ManagedAgentConfig>,
+    pub managed_agent_config: Option<mikmik_core::config::ManagedAgentConfig>,
     /// Optional notifier for injecting completion messages into the next agent turn.
     /// Set when the query loop has a command queue wired up.
     pub completion_notifier: Option<CompletionNotifier>,
@@ -357,7 +357,7 @@ pub struct ToolContext {
     pub pending_permissions: Option<Arc<parking_lot::Mutex<PendingPermissionStore>>>,
     /// Shared permission manager so the interactive loop can record session/persistent approvals.
     pub permission_manager:
-        Option<Arc<std::sync::Mutex<claurst_core::permissions::PermissionManager>>>,
+        Option<Arc<std::sync::Mutex<mikmik_core::permissions::PermissionManager>>>,
     /// Channel for the `AskUserQuestion` tool to send questions to the TUI and
     /// receive the user's typed answer.  `None` in headless / non-interactive mode.
     pub user_question_tx: Option<tokio::sync::mpsc::UnboundedSender<UserQuestionEvent>>,
@@ -382,7 +382,7 @@ impl ToolContext {
     /// Derived from the working directory and the configured extra directories
     /// rather than stored, so it cannot drift from either.
     pub fn workspace_roots(&self) -> std::collections::BTreeMap<String, PathBuf> {
-        claurst_core::workspace::generate_root_names(
+        mikmik_core::workspace::generate_root_names(
             &self.working_dir,
             &self.config.additional_dirs,
             &self.config.workspace_paths,
@@ -400,7 +400,7 @@ impl ToolContext {
     /// that does not exist, so a mistyped root does not silently turn into a
     /// file the session was never pointed at.
     pub fn resolve_path(&self, path: &str) -> Result<PathBuf, String> {
-        use claurst_core::workspace::RootRef;
+        use mikmik_core::workspace::RootRef;
 
         if PathBuf::from(path).is_absolute() {
             return Ok(PathBuf::from(path));
@@ -418,7 +418,7 @@ impl ToolContext {
             )
         };
 
-        match claurst_core::workspace::parse_root_ref(path, &roots) {
+        match mikmik_core::workspace::parse_root_ref(path, &roots) {
             RootRef::Root { name, relative } => match roots.get(name) {
                 Some(root) if relative.is_empty() => Ok(root.clone()),
                 Some(root) => Ok(root.join(relative)),
@@ -494,13 +494,13 @@ impl ToolContext {
     fn request_permission_inner(
         &self,
         request: PermissionRequest,
-    ) -> Result<(), claurst_core::error::ClaudeError> {
+    ) -> Result<(), mikmik_core::error::ClaudeError> {
         let interactive_reason = request.details.clone();
         let decision = self.permission_handler.request_permission(&request);
         match decision {
             PermissionDecision::Allow | PermissionDecision::AllowPermanently => Ok(()),
             PermissionDecision::Ask { reason } if self.non_interactive => {
-                Err(claurst_core::error::ClaudeError::PermissionDenied(format!(
+                Err(mikmik_core::error::ClaudeError::PermissionDenied(format!(
                     "Permission denied for tool '{}': {}",
                     request.tool_name,
                     interactive_reason.unwrap_or(reason)
@@ -508,7 +508,7 @@ impl ToolContext {
             }
             PermissionDecision::Ask { reason } => {
                 let Some(queue) = &self.pending_permissions else {
-                    return Err(claurst_core::error::ClaudeError::PermissionDenied(format!(
+                    return Err(mikmik_core::error::ClaudeError::PermissionDenied(format!(
                         "Permission denied for tool '{}'",
                         request.tool_name
                     )));
@@ -529,12 +529,12 @@ impl ToolContext {
                 let decision = tokio::task::block_in_place(|| rx.blocking_recv());
                 match decision {
                     Ok(PermissionDecision::Allow | PermissionDecision::AllowPermanently) => Ok(()),
-                    _ => Err(claurst_core::error::ClaudeError::PermissionDenied(
+                    _ => Err(mikmik_core::error::ClaudeError::PermissionDenied(
                         "Permission denied by user".to_string(),
                     )),
                 }
             }
-            _ => Err(claurst_core::error::ClaudeError::PermissionDenied(format!(
+            _ => Err(mikmik_core::error::ClaudeError::PermissionDenied(format!(
                 "Permission denied for tool '{}'",
                 request.tool_name
             ))),
@@ -547,7 +547,7 @@ impl ToolContext {
         tool_name: &str,
         description: &str,
         is_read_only: bool,
-    ) -> Result<(), claurst_core::error::ClaudeError> {
+    ) -> Result<(), mikmik_core::error::ClaudeError> {
         let request =
             self.build_permission_request(tool_name, description, None, is_read_only, None);
         self.request_permission_inner(request)
@@ -559,7 +559,7 @@ impl ToolContext {
         description: &str,
         path: PathBuf,
         is_read_only: bool,
-    ) -> Result<(), claurst_core::error::ClaudeError> {
+    ) -> Result<(), mikmik_core::error::ClaudeError> {
         let request =
             self.build_permission_request(tool_name, description, None, is_read_only, Some(path));
         self.request_permission_inner(request)
@@ -573,7 +573,7 @@ impl ToolContext {
         description: &str,
         details: &str,
         is_read_only: bool,
-    ) -> Result<(), claurst_core::error::ClaudeError> {
+    ) -> Result<(), mikmik_core::error::ClaudeError> {
         let request = self.build_permission_request(
             tool_name,
             description,
@@ -582,7 +582,7 @@ impl ToolContext {
             None,
         );
         self.request_permission_inner(request).map_err(|_| {
-            claurst_core::error::ClaudeError::PermissionDenied(format!(
+            mikmik_core::error::ClaudeError::PermissionDenied(format!(
                 "Permission denied for tool '{}': {}",
                 tool_name, details
             ))
@@ -609,7 +609,7 @@ impl ToolContext {
         details: &str,
         path: PathBuf,
         is_read_only: bool,
-    ) -> Result<(), claurst_core::error::ClaudeError> {
+    ) -> Result<(), mikmik_core::error::ClaudeError> {
         let request = self.build_permission_request(
             tool_name,
             description,
@@ -618,7 +618,7 @@ impl ToolContext {
             Some(path),
         );
         self.request_permission_inner(request).map_err(|_| {
-            claurst_core::error::ClaudeError::PermissionDenied(format!(
+            mikmik_core::error::ClaudeError::PermissionDenied(format!(
                 "Permission denied for tool '{}': {}",
                 tool_name, details
             ))
@@ -649,7 +649,7 @@ impl ToolContext {
 /// The trait every tool must implement.
 #[async_trait]
 pub trait Tool: Send + Sync {
-    /// Human-readable name (matches the constant in claurst_core::constants).
+    /// Human-readable name (matches the constant in mikmik_core::constants).
     fn name(&self) -> &str;
 
     /// One-line description shown to the LLM.
@@ -774,37 +774,37 @@ mod tests {
         reason: String,
     }
 
-    impl claurst_core::permissions::PermissionHandler for AskPermissionHandler {
+    impl mikmik_core::permissions::PermissionHandler for AskPermissionHandler {
         fn check_permission(
             &self,
-            _request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
-            claurst_core::permissions::PermissionDecision::Ask {
+            _request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
+            mikmik_core::permissions::PermissionDecision::Ask {
                 reason: self.reason.clone(),
             }
         }
 
         fn request_permission(
             &self,
-            request: &claurst_core::permissions::PermissionRequest,
-        ) -> claurst_core::permissions::PermissionDecision {
+            request: &mikmik_core::permissions::PermissionRequest,
+        ) -> mikmik_core::permissions::PermissionDecision {
             self.check_permission(request)
         }
     }
 
     fn test_tool_context(
-        handler: Arc<dyn claurst_core::permissions::PermissionHandler>,
+        handler: Arc<dyn mikmik_core::permissions::PermissionHandler>,
     ) -> ToolContext {
-        use claurst_core::config::Config;
+        use mikmik_core::config::Config;
 
         ToolContext {
             working_dir: PathBuf::from("/workspace"),
-            permission_mode: claurst_core::config::PermissionMode::Default,
+            permission_mode: mikmik_core::config::PermissionMode::Default,
             permission_handler: handler,
-            cost_tracker: claurst_core::cost::CostTracker::new(),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
             session_id: "test".to_string(),
             file_history: Arc::new(parking_lot::Mutex::new(
-                claurst_core::file_history::FileHistory::new(),
+                mikmik_core::file_history::FileHistory::new(),
             )),
             current_turn: Arc::new(AtomicUsize::new(0)),
             non_interactive: true,
@@ -945,10 +945,10 @@ mod tests {
 
     #[test]
     fn test_resolve_path_absolute() {
-        use claurst_core::permissions::AutoPermissionHandler;
+        use mikmik_core::permissions::AutoPermissionHandler;
 
         let handler = Arc::new(AutoPermissionHandler {
-            mode: claurst_core::config::PermissionMode::Default,
+            mode: mikmik_core::config::PermissionMode::Default,
         });
         let ctx = test_tool_context(handler);
 
@@ -959,10 +959,10 @@ mod tests {
 
     #[test]
     fn test_resolve_path_relative() {
-        use claurst_core::permissions::AutoPermissionHandler;
+        use mikmik_core::permissions::AutoPermissionHandler;
 
         let handler = Arc::new(AutoPermissionHandler {
-            mode: claurst_core::config::PermissionMode::Default,
+            mode: mikmik_core::config::PermissionMode::Default,
         });
         let ctx = test_tool_context(handler);
 
@@ -972,10 +972,10 @@ mod tests {
     }
 
     fn context_with_extra_dir() -> ToolContext {
-        use claurst_core::permissions::AutoPermissionHandler;
+        use mikmik_core::permissions::AutoPermissionHandler;
 
         let handler = Arc::new(AutoPermissionHandler {
-            mode: claurst_core::config::PermissionMode::Default,
+            mode: mikmik_core::config::PermissionMode::Default,
         });
         let mut ctx = test_tool_context(handler);
         ctx.config.additional_dirs = vec![PathBuf::from("/elsewhere/docs")];
@@ -1023,10 +1023,10 @@ mod tests {
 
     #[test]
     fn without_extra_directories_only_main_exists() {
-        use claurst_core::permissions::AutoPermissionHandler;
+        use mikmik_core::permissions::AutoPermissionHandler;
 
         let handler = Arc::new(AutoPermissionHandler {
-            mode: claurst_core::config::PermissionMode::Default,
+            mode: mikmik_core::config::PermissionMode::Default,
         });
         let ctx = test_tool_context(handler);
 

@@ -37,7 +37,7 @@ impl SlashCommand for ManagedAgentsCommand {
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        use claurst_core::{builtin_managed_agent_presets, BudgetSplitPolicy, ManagedAgentConfig};
+        use mikmik_core::{builtin_managed_agent_presets, BudgetSplitPolicy, ManagedAgentConfig};
 
         let args = args.trim();
 

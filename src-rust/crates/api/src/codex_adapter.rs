@@ -5,7 +5,7 @@
 //! are translated back to Anthropic's CreateMessageResponse format.
 
 use super::types::{CreateMessageRequest, CreateMessageResponse, SystemPrompt};
-use claurst_core::types::UsageInfo;
+use mikmik_core::types::UsageInfo;
 use serde_json::{json, Value};
 
 /// OpenAI Codex API endpoint for responses
@@ -155,7 +155,7 @@ pub fn build_anthropic_response(
 mod tests {
     use super::*;
     use crate::types::{ApiMessage, SystemPrompt};
-    use claurst_core::config::WireModel;
+    use mikmik_core::config::WireModel;
 
     #[test]
     fn test_anthropic_to_openai_request_basic() {
