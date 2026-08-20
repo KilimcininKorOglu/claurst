@@ -1368,8 +1368,16 @@ pub mod config {
         /// Stated in the positive so the default survives `Config::default()`,
         /// which derives every `bool` as `false`. A `respect_gitignore` field
         /// would silently start out disabled there.
-        #[serde(default, rename = "includeIgnoredFiles")]
-        pub include_ignored_files: bool,
+        ///
+        /// `Option` rather than `bool` so the merge can tell "the project file
+        /// did not mention this" from "the project file set it to false". Read
+        /// it through [`Config::effective_include_ignored_files`].
+        #[serde(
+            default,
+            rename = "includeIgnoredFiles",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub include_ignored_files: Option<bool>,
         /// Whether WebSearch tries another backend when the SearXNG instance
         /// named by `SEARXNG_URL` cannot be reached. Defaults to false, so an
         /// instance going down surfaces as an error instead of quietly sending
@@ -2120,6 +2128,12 @@ pub mod config {
             self.auto_compact.unwrap_or(true)
         }
 
+        /// Whether tool traversal ignores `.gitignore`. Unset means it respects
+        /// it, so nothing a repository ignores is read without being asked for.
+        pub fn effective_include_ignored_files(&self) -> bool {
+            self.include_ignored_files.unwrap_or(false)
+        }
+
         /// Resolve the effective compact threshold (0.0 - 1.0).
         pub fn effective_compact_threshold(&self) -> f32 {
             if self.compact_threshold > 0.0 {
@@ -2858,7 +2872,9 @@ pub mod config {
                 } else {
                     base.config.compact_threshold
                 },
-                verbose: over.config.verbose || base.config.verbose,
+                // How much the session logs is the user's business, like the
+                // interface preferences below.
+                verbose: base.config.verbose,
                 // Same reset as `theme`.
                 output_format: base.config.output_format,
                 mcp_servers: {
@@ -2901,8 +2917,11 @@ pub mod config {
                 // anything, on the user's machine and with the user's tools.
                 custom_system_prompt: base.config.custom_system_prompt,
                 append_system_prompt: base.config.append_system_prompt,
-                disable_claude_mds: over.config.disable_claude_mds
-                    || base.config.disable_claude_mds,
+                // SECURITY: the mirror image of the two above. This suppresses
+                // every AGENTS.md, including the user's own global one, so a
+                // repository able to set it would silence the standing
+                // instructions the user wrote for the agent.
+                disable_claude_mds: base.config.disable_claude_mds,
                 project_dir: over.config.project_dir.or(base.config.project_dir),
                 // SECURITY: both widen which directories the tools may read
                 // and write. A repository that could add one would reach
@@ -2989,10 +3008,18 @@ pub mod config {
                     .config
                     .file_injection_max_size
                     .or(base.config.file_injection_max_size),
-                include_ignored_files: over.config.include_ignored_files
-                    || base.config.include_ignored_files,
-                web_search_fallback: over.config.web_search_fallback
-                    || base.config.web_search_fallback,
+                // A repository knows which of its own files are worth reading,
+                // so it may say so — but it has to say so. `Option` keeps
+                // "not mentioned" apart from "set to false".
+                include_ignored_files: over
+                    .config
+                    .include_ignored_files
+                    .or(base.config.include_ignored_files),
+                // SECURITY: turning the fallback on sends the model's search
+                // query to Brave or DuckDuckGo instead of the configured
+                // SearXNG instance. That is the same stream `searxng_url` below
+                // protects, so it answers to the same person.
+                web_search_fallback: base.config.web_search_fallback,
                 // Whether the timeline panel is on is a layout preference, so
                 // it follows `cursor_blink_enabled` above.
                 timeline_enabled: base.config.timeline_enabled,
@@ -3626,6 +3653,72 @@ pub mod config {
             assert_eq!(settings.effective_config().auto_compact, Some(true));
         }
 
+        /// `disableClaudeMds` suppresses every AGENTS.md the loader would read,
+        /// the user's own global one included. A repository able to set it
+        /// would silence the standing instructions the user wrote for the
+        /// agent, which is what `customSystemPrompt` beside it already guards
+        /// from the other direction.
+        #[test]
+        fn a_project_settings_file_cannot_silence_the_users_memory_files() {
+            let user = Settings::default();
+            let project = Settings {
+                config: Config {
+                    disable_claude_mds: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+            assert!(!merged.config.disable_claude_mds);
+        }
+
+        /// The search fallback sends the model's query to Brave or DuckDuckGo
+        /// instead of the configured SearXNG instance — the same stream
+        /// `searxngUrl` is base-only to protect.
+        #[test]
+        fn a_project_settings_file_cannot_redirect_the_search_query() {
+            let user = Settings::default();
+            let project = Settings {
+                config: Config {
+                    web_search_fallback: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+            assert!(!merged.config.web_search_fallback);
+        }
+
+        /// A repository knows which of its own files are worth reading, so it
+        /// may say so. It has to say so: an unnamed key leaves the user's
+        /// answer standing.
+        #[test]
+        fn a_project_settings_file_decides_its_own_ignored_files() {
+            let user = Settings::default();
+            let project: Settings =
+                serde_json::from_str(r#"{"config":{"includeIgnoredFiles":true}}"#)
+                    .expect("project settings");
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+            assert!(merged.config.effective_include_ignored_files());
+
+            let user = Settings {
+                config: Config {
+                    include_ignored_files: Some(true),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let silent: Settings =
+                serde_json::from_str(r#"{"theme":"dark"}"#).expect("project settings");
+            let merged = Settings::merge_with(user, silent, ProjectRunnables::Deny);
+            assert!(
+                merged.config.effective_include_ignored_files(),
+                "a project file that says nothing must not reset the user's answer"
+            );
+        }
+
         /// The refused list is derived by running the merge, so the key has to
         /// show up there without anyone adding it to a list by hand.
         #[test]
@@ -3951,8 +4044,10 @@ pub mod config {
             );
         }
 
+        /// Only the user's own settings turn the fallback on: it decides which
+        /// third party receives the model's search query.
         #[test]
-        fn either_side_of_a_merge_can_turn_the_setting_on() {
+        fn only_the_user_can_turn_the_setting_on() {
             let mut enabled = Settings::default();
             enabled.config.web_search_fallback = true;
 
@@ -3962,7 +4057,7 @@ pub mod config {
                     .web_search_fallback
             );
             assert!(
-                Settings::merge_with(Settings::default(), enabled, ProjectRunnables::Deny)
+                !Settings::merge_with(Settings::default(), enabled, ProjectRunnables::Deny)
                     .config
                     .web_search_fallback
             );
