@@ -1259,8 +1259,22 @@ mod tests {
     #[test]
     fn the_model_breakdown_lines_up_in_columns() {
         let tracker = claurst_core::CostTracker::new();
-        tracker.add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
-        tracker.add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            4000,
+            2000,
+            0,
+            0,
+        );
+        tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            0,
+            0,
+        );
 
         let block = by_model_block(&tracker);
         let lines: Vec<&str> = block.lines().collect();
@@ -1282,8 +1296,22 @@ mod tests {
     fn one_cost_column_uses_one_number_format() {
         // Per-value precision printed "$3.00" beside "$0.7200" in one column.
         let tracker = claurst_core::CostTracker::new();
-        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
-        tracker.add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 0);
+        tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            100_000,
+            20_000,
+            0,
+            0,
+        );
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            500_000,
+            80_000,
+            0,
+            0,
+        );
 
         let block = by_model_block(&tracker);
         for line in block.lines().skip(2) {
@@ -1299,8 +1327,22 @@ mod tests {
     #[test]
     fn a_row_too_small_for_four_places_widens_the_whole_column() {
         let tracker = claurst_core::CostTracker::new();
-        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
-        tracker.add_usage("claude-haiku-4-5", 1, 0, 0, 0);
+        tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            100_000,
+            20_000,
+            0,
+            0,
+        );
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            1,
+            0,
+            0,
+            0,
+        );
 
         let block = by_model_block(&tracker);
         assert!(

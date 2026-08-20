@@ -7484,6 +7484,7 @@ mod bridge_usage_tests {
         let usage = sample();
         tracker.add_usage(
             "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_creation_input_tokens,

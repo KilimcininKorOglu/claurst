@@ -1575,6 +1575,58 @@ pub fn resolve_effective_route(
     config.effective_route()
 }
 
+/// What one model actually costs, from the catalogue.
+///
+/// `ModelPricing::for_model` reads a model name for `opus`, `haiku` or `free`
+/// and prices everything else as Claude Sonnet. Only Anthropic ships models
+/// with those words in their names, so every Gemini, GPT, Llama and Qwen turn
+/// was billed at another vendor's list price, sometimes off by an order of
+/// magnitude. The registry has carried the real per-million figures all along.
+///
+/// The lookup asks about the account's protocol, because the catalogue is
+/// keyed by vendor and an account the user named appears in no catalogue.
+/// A model the catalogue does not cover falls back to the name heuristic,
+/// which is at least a guess rather than nothing.
+pub fn pricing_for_route(
+    config: &claurst_core::config::Config,
+    registry: &ModelRegistry,
+    route: &claurst_core::config::Route,
+) -> claurst_core::cost::ModelPricing {
+    let fallback = || claurst_core::cost::ModelPricing::for_model(route.model.as_str());
+
+    let vendor = config.vendor_id_for_account(&route.account);
+    let Some(entry) = registry.get(&vendor, route.model.as_str()) else {
+        return fallback();
+    };
+
+    // The full breakdown first, then the top-level mirrors it is kept in step
+    // with. A catalogue entry with no input price is one that never had a
+    // price filled in, not a free model: free models carry an explicit zero.
+    let input = entry.cost.input.or(entry.cost_input);
+    let output = entry.cost.output.or(entry.cost_output);
+    let (Some(input), Some(output)) = (input, output) else {
+        return fallback();
+    };
+
+    claurst_core::cost::ModelPricing {
+        input_per_mtk: input,
+        output_per_mtk: output,
+        // Cache tiers are often absent even where the base rates are there.
+        // Anthropic's own ratios are the least wrong stand-in: a cache write
+        // costs a quarter more than input, a cache read a tenth of it.
+        cache_creation_per_mtk: entry
+            .cost
+            .cache_write
+            .or(entry.cost_cache_write)
+            .unwrap_or(input * 1.25),
+        cache_read_per_mtk: entry
+            .cost
+            .cache_read
+            .or(entry.cost_cache_read)
+            .unwrap_or(input * 0.1),
+    }
+}
+
 /// The cheapest model the active account serves, and that account.
 ///
 /// For the work a session does beside the conversation: naming itself,
@@ -2021,6 +2073,50 @@ mod tests {
         let route = resolve_effective_route(&cfg, &reg);
         assert_eq!(route.account, "anthropic");
         assert_eq!(route.model, "claude-sonnet-5");
+    }
+
+    #[test]
+    fn a_gemini_turn_is_not_billed_at_claude_sonnet_rates() {
+        // `ModelPricing::for_model` reads a model id for "opus", "haiku" or
+        // "free" and prices everything else as Claude Sonnet. Only Anthropic
+        // ships models with those words in their names, so every other
+        // vendor's turn was billed at Anthropic's list price.
+        let reg = ModelRegistry::new();
+        let cfg = claurst_core::config::Config {
+            provider: Some("google".to_string()),
+            ..Default::default()
+        };
+        let route = cfg.route_for_account("google", "gemini-2.5-flash");
+
+        let heuristic = claurst_core::cost::ModelPricing::for_model(route.model.as_str());
+        assert_eq!(
+            heuristic,
+            claurst_core::cost::ModelPricing::SONNET,
+            "the heuristic is what this test exists to replace"
+        );
+
+        let priced = pricing_for_route(&cfg, &reg, &route);
+        assert_ne!(
+            priced, heuristic,
+            "a Gemini model still came back at Claude Sonnet rates"
+        );
+        assert!(
+            priced.input_per_mtk > 0.0 && priced.input_per_mtk < heuristic.input_per_mtk,
+            "expected a real, cheaper input rate, got {}",
+            priced.input_per_mtk
+        );
+    }
+
+    #[test]
+    fn a_model_the_catalogue_does_not_cover_keeps_the_heuristic() {
+        let reg = ModelRegistry::new();
+        let cfg = claurst_core::config::Config::default();
+        let route = cfg.route_for_account("anthropic", "claude-opus-there-is-no-such-model");
+
+        assert_eq!(
+            pricing_for_route(&cfg, &reg, &route),
+            claurst_core::cost::ModelPricing::OPUS
+        );
     }
 
     #[test]

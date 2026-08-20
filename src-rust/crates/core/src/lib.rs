@@ -6221,13 +6221,29 @@ pub mod cost {
         pub cache_savings: f64,
     }
 
-    /// Tokens accumulated for one model.
-    #[derive(Debug, Clone, Copy, Default)]
+    /// Tokens accumulated for one model, at the rates it was billed at.
+    #[derive(Debug, Clone, Copy)]
     struct Totals {
         input: u64,
         output: u64,
         cache_creation: u64,
         cache_read: u64,
+        /// Recorded when the first usage arrives rather than looked up on
+        /// read, because the catalogue that knows a provider's real rates
+        /// lives in `claurst-api`, which this crate cannot reach.
+        pricing: ModelPricing,
+    }
+
+    impl Totals {
+        fn empty(pricing: ModelPricing) -> Self {
+            Self {
+                input: 0,
+                output: 0,
+                cache_creation: 0,
+                cache_read: 0,
+                pricing,
+            }
+        }
     }
 
     /// Thread-safe cost tracker that accumulates token usage per model.
@@ -6249,14 +6265,21 @@ pub mod cost {
             Arc::new(Self::default())
         }
 
-        /// Record what one model spent.
+        /// Record what one model spent, and at what rates.
         ///
         /// The model is named at the call site rather than remembered here,
         /// because a stored "current model" is wrong the moment two models run
         /// in the same session.
+        ///
+        /// The rates come from the call site too. `ModelPricing::for_model`
+        /// reads a model name for `opus`, `haiku` or `free` and prices
+        /// everything else as Claude Sonnet, so a Gemini or a Llama turn was
+        /// billed at another vendor's list price. A caller holding the
+        /// models.dev registry passes the real figures instead.
         pub fn add_usage(
             &self,
             model: &str,
+            pricing: ModelPricing,
             input: u64,
             output: u64,
             cache_creation: u64,
@@ -6270,7 +6293,9 @@ pub mod cost {
                 .fetch_add(cache_read, Ordering::Relaxed);
 
             let mut per_model = self.per_model.write();
-            let totals = per_model.entry(model.to_string()).or_default();
+            let totals = per_model
+                .entry(model.to_string())
+                .or_insert_with(|| Totals::empty(pricing));
             totals.input += input;
             totals.output += output;
             totals.cache_creation += cache_creation;
@@ -6280,9 +6305,9 @@ pub mod cost {
         pub fn total_cost_usd(&self) -> f64 {
             self.per_model
                 .read()
-                .iter()
-                .map(|(model, totals)| {
-                    ModelPricing::for_model(model).cost_of(
+                .values()
+                .map(|totals| {
+                    totals.pricing.cost_of(
                         totals.input,
                         totals.output,
                         totals.cache_creation,
@@ -6307,7 +6332,7 @@ pub mod cost {
                         + totals.output
                         + totals.cache_creation
                         + totals.cache_read,
-                    cost_usd: ModelPricing::for_model(model).cost_of(
+                    cost_usd: totals.pricing.cost_of(
                         totals.input,
                         totals.output,
                         totals.cache_creation,
@@ -6332,8 +6357,8 @@ pub mod cost {
         /// can show the rows and the total together without them disagreeing.
         pub fn cost_by_category(&self) -> CostByCategory {
             let mut split = CostByCategory::default();
-            for (model, totals) in self.per_model.read().iter() {
-                let pricing = ModelPricing::for_model(model);
+            for totals in self.per_model.read().values() {
+                let pricing = totals.pricing;
                 split.input += totals.input as f64 * pricing.input_per_mtk / 1_000_000.0;
                 split.output += totals.output as f64 * pricing.output_per_mtk / 1_000_000.0;
                 split.cache_creation +=
@@ -7439,7 +7464,14 @@ mod tests {
     #[test]
     fn test_cost_tracker() {
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 200, 100);
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            1000,
+            500,
+            200,
+            100,
+        );
         assert_eq!(tracker.input_tokens(), 1000);
         assert_eq!(tracker.output_tokens(), 500);
         assert!(tracker.total_cost_usd() > 0.0);
@@ -8085,8 +8117,22 @@ mod tests {
     #[test]
     fn test_cost_tracker_cumulative() {
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 100, 50);
-        tracker.add_usage("claude-sonnet-4-5", 200, 100, 0, 0);
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            1000,
+            500,
+            100,
+            50,
+        );
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            200,
+            100,
+            0,
+            0,
+        );
         assert_eq!(tracker.input_tokens(), 1200);
         assert_eq!(tracker.output_tokens(), 600);
     }
@@ -8107,7 +8153,14 @@ mod tests {
         let tracker = CostTracker::new();
         let sample =
             cost::ModelPricing::for_model("claude-sonnet-4-5").cost_of(1000, 500, 200, 100);
-        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 200, 100);
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            1000,
+            500,
+            200,
+            100,
+        );
         assert_eq!(sample, tracker.total_cost_usd());
     }
 
@@ -8122,7 +8175,14 @@ mod tests {
     #[test]
     fn test_cost_tracker_free_model() {
         let tracker = CostTracker::new();
-        tracker.add_usage("deepseek-v4-flash-free", 1000, 500, 200, 100);
+        tracker.add_usage(
+            "deepseek-v4-flash-free",
+            cost::ModelPricing::for_model("deepseek-v4-flash-free"),
+            1000,
+            500,
+            200,
+            100,
+        );
         // Free models should have zero cost even with token usage
         assert_eq!(tracker.total_cost_usd(), 0.0);
     }
@@ -8140,8 +8200,22 @@ mod tests {
         // The regression: a Haiku advisor call inside an Opus session used to
         // be billed at Opus rates, which inflated the session figure.
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-opus-4-6", 1000, 500, 200, 100);
-        tracker.add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+        tracker.add_usage(
+            "claude-opus-4-6",
+            cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            200,
+            100,
+        );
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            cost::ModelPricing::for_model("claude-haiku-4-5"),
+            4000,
+            2000,
+            0,
+            0,
+        );
 
         let expected = cost::ModelPricing::for_model("claude-opus-4-6")
             .cost_of(1000, 500, 200, 100)
@@ -8161,8 +8235,22 @@ mod tests {
         // The regression: /cost prints these four as rows with the total
         // underneath. Priced at one model's rates they disagreed with it.
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-opus-4-6", 100_000, 20_000, 5_000, 40_000);
-        tracker.add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 10_000);
+        tracker.add_usage(
+            "claude-opus-4-6",
+            cost::ModelPricing::for_model("claude-opus-4-6"),
+            100_000,
+            20_000,
+            5_000,
+            40_000,
+        );
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            cost::ModelPricing::for_model("claude-haiku-4-5"),
+            500_000,
+            80_000,
+            0,
+            10_000,
+        );
 
         let split = tracker.cost_by_category();
         let rows = split.input + split.output + split.cache_creation + split.cache_read;
@@ -8186,8 +8274,22 @@ mod tests {
     #[test]
     fn cache_savings_use_each_model_s_own_gap() {
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-opus-4-6", 0, 0, 0, 40_000);
-        tracker.add_usage("claude-haiku-4-5", 0, 0, 0, 10_000);
+        tracker.add_usage(
+            "claude-opus-4-6",
+            cost::ModelPricing::for_model("claude-opus-4-6"),
+            0,
+            0,
+            0,
+            40_000,
+        );
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            cost::ModelPricing::for_model("claude-haiku-4-5"),
+            0,
+            0,
+            0,
+            10_000,
+        );
 
         let opus = cost::ModelPricing::for_model("claude-opus-4-6");
         let haiku = cost::ModelPricing::for_model("claude-haiku-4-5");
@@ -8199,8 +8301,22 @@ mod tests {
     #[test]
     fn by_model_lists_the_dearest_first() {
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
-        tracker.add_usage("claude-opus-4-6", 1000, 500, 0, 0);
+        tracker.add_usage(
+            "claude-haiku-4-5",
+            cost::ModelPricing::for_model("claude-haiku-4-5"),
+            1000,
+            500,
+            0,
+            0,
+        );
+        tracker.add_usage(
+            "claude-opus-4-6",
+            cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            0,
+            0,
+        );
 
         let rows = tracker.by_model();
         assert_eq!(rows.len(), 2);
@@ -8212,8 +8328,22 @@ mod tests {
     #[test]
     fn by_model_folds_repeat_use_of_one_model_into_one_row() {
         let tracker = CostTracker::new();
-        tracker.add_usage("claude-sonnet-4-5", 1000, 500, 0, 0);
-        tracker.add_usage("claude-sonnet-4-5", 200, 100, 0, 0);
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            1000,
+            500,
+            0,
+            0,
+        );
+        tracker.add_usage(
+            "claude-sonnet-4-5",
+            cost::ModelPricing::for_model("claude-sonnet-4-5"),
+            200,
+            100,
+            0,
+            0,
+        );
 
         let rows = tracker.by_model();
         assert_eq!(rows.len(), 1);

@@ -2106,10 +2106,22 @@ mod tests {
     #[tokio::test]
     async fn cost_lists_every_model_that_spent() {
         let mut ctx = make_ctx();
-        ctx.cost_tracker
-            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
-        ctx.cost_tracker
-            .add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+        ctx.cost_tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            0,
+            0,
+        );
+        ctx.cost_tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            4000,
+            2000,
+            0,
+            0,
+        );
 
         let cmd = find_command("cost").expect("the command exists");
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
@@ -2127,10 +2139,22 @@ mod tests {
     #[tokio::test]
     async fn stats_lists_every_model_that_spent() {
         let mut ctx = make_ctx();
-        ctx.cost_tracker
-            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
-        ctx.cost_tracker
-            .add_usage("claude-haiku-4-5", 4000, 2000, 0, 0);
+        ctx.cost_tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            0,
+            0,
+        );
+        ctx.cost_tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            4000,
+            2000,
+            0,
+            0,
+        );
 
         let cmd = find_command("stats").expect("the command exists");
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
@@ -2148,10 +2172,22 @@ mod tests {
     #[tokio::test]
     async fn cost_rows_add_up_to_the_total_across_models() {
         let mut ctx = make_ctx();
-        ctx.cost_tracker
-            .add_usage("claude-opus-4-6", 100_000, 20_000, 0, 0);
-        ctx.cost_tracker
-            .add_usage("claude-haiku-4-5", 500_000, 80_000, 0, 0);
+        ctx.cost_tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            100_000,
+            20_000,
+            0,
+            0,
+        );
+        ctx.cost_tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            500_000,
+            80_000,
+            0,
+            0,
+        );
 
         let cmd = find_command("cost").expect("the command exists");
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
@@ -2187,10 +2223,22 @@ mod tests {
     #[tokio::test]
     async fn one_rate_card_is_only_shown_when_one_model_spent() {
         let mut ctx = make_ctx();
-        ctx.cost_tracker
-            .add_usage("claude-opus-4-6", 1000, 500, 0, 0);
-        ctx.cost_tracker
-            .add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
+        ctx.cost_tracker.add_usage(
+            "claude-opus-4-6",
+            claurst_core::cost::ModelPricing::for_model("claude-opus-4-6"),
+            1000,
+            500,
+            0,
+            0,
+        );
+        ctx.cost_tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            1000,
+            500,
+            0,
+            0,
+        );
 
         let cmd = find_command("cost").expect("the command exists");
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {
@@ -2207,8 +2255,14 @@ mod tests {
         // The single spender need not be the session model; only an advisor
         // may have run.
         let mut ctx = make_ctx();
-        ctx.cost_tracker
-            .add_usage("claude-haiku-4-5", 1000, 500, 0, 0);
+        ctx.cost_tracker.add_usage(
+            "claude-haiku-4-5",
+            claurst_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
+            1000,
+            500,
+            0,
+            0,
+        );
 
         let cmd = find_command("cost").expect("the command exists");
         let CommandResult::Message(text) = cmd.execute("", &mut ctx).await else {

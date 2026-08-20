@@ -91,22 +91,41 @@ pub fn provider_for_turn(
 pub(crate) fn record_turn_usage(
     assistant_msg: &mut Message,
     model: &str,
+    pricing: claurst_core::cost::ModelPricing,
     usage: &claurst_core::types::UsageInfo,
     cost_tracker: &claurst_core::cost::CostTracker,
     session_id: &str,
 ) {
     cost_tracker.add_usage(
         model,
+        pricing,
         usage.input_tokens,
         usage.output_tokens,
         usage.cache_creation_input_tokens,
         usage.cache_read_input_tokens,
     );
-    assistant_msg.cost = Some(crate::cost_of_turn(model, usage));
+    assistant_msg.cost = Some(crate::cost_of_turn(model, pricing, usage));
     // `total_input()` is input + cache-read + cache-creation: what the model
     // actually saw. Session-scoped, not loop-scoped, because every user message
     // starts a fresh turn loop and a local would be zero at every boundary.
     compact::record_context_tokens(session_id, usage.total_input());
+}
+
+/// What this turn's model costs, from the catalogue where there is one.
+///
+/// The name heuristic behind `ModelPricing::for_model` reads a model id for
+/// `opus`, `haiku` or `free` and prices everything else as Claude Sonnet, so a
+/// session on any other vendor was billed at Anthropic's list price. It stays
+/// only as the answer for a turn with no registry loaded.
+pub(crate) fn pricing_for_turn(
+    config: &QueryConfig,
+    core_config: &claurst_core::Config,
+    route: &claurst_core::config::Route,
+) -> claurst_core::cost::ModelPricing {
+    match config.model_registry.as_deref() {
+        Some(registry) => claurst_api::pricing_for_route(core_config, registry, route),
+        None => claurst_core::cost::ModelPricing::for_model(route.model.as_str()),
+    }
 }
 
 /// What one pass over the context boundary did.
@@ -665,7 +684,14 @@ mod tests {
         };
         let tracker = claurst_core::cost::CostTracker::new();
 
-        record_turn_usage(&mut msg, "claude-opus-4-5", &usage, &tracker, session);
+        record_turn_usage(
+            &mut msg,
+            "claude-opus-4-5",
+            claurst_core::cost::ModelPricing::OPUS,
+            &usage,
+            &tracker,
+            session,
+        );
 
         assert!(msg.cost.is_some(), "the turn is priced on the message");
         assert!(tracker.total_tokens() > 0, "the tracker saw the turn");

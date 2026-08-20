@@ -307,7 +307,14 @@ mod tests {
         let first = SessionState::new(acp::SessionId::new("a"), PathBuf::from("/tmp/a"));
         let second = SessionState::new(acp::SessionId::new("b"), PathBuf::from("/tmp/b"));
 
-        first.cost_tracker.add_usage("m", 100, 20, 0, 0);
+        first.cost_tracker.add_usage(
+            "m",
+            claurst_core::cost::ModelPricing::for_model("m"),
+            100,
+            20,
+            0,
+            0,
+        );
 
         assert_eq!(first.cost_tracker.input_tokens(), 100);
         assert_eq!(

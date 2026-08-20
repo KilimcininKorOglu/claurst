@@ -391,13 +391,17 @@ fn merge_provider_stream_usage(current: &mut UsageInfo, update: &UsageInfo) {
 /// from: a session whose messages carry no cost reports zero tokens and zero
 /// dollars however much it actually spent. Priced from `effective_model`
 /// rather than `config.model`, for the same reason `cost_tracker` is.
-fn cost_of_turn(model: &str, usage: &UsageInfo) -> claurst_core::types::MessageCost {
+fn cost_of_turn(
+    model: &str,
+    pricing: claurst_core::cost::ModelPricing,
+    usage: &UsageInfo,
+) -> claurst_core::types::MessageCost {
     claurst_core::types::MessageCost {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens,
-        cost_usd: claurst_core::cost::ModelPricing::for_model(model).cost_of(
+        cost_usd: pricing.cost_of(
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_creation_input_tokens,
@@ -1406,6 +1410,7 @@ async fn run_query_loop_inner(
                     runner::record_turn_usage(
                         &mut assistant_msg,
                         &effective_model,
+                        runner::pricing_for_turn(config, &tool_ctx.config, &route),
                         &usage,
                         cost_tracker.as_ref(),
                         &tool_ctx.session_id,
@@ -1621,6 +1626,7 @@ async fn run_query_loop_inner(
         runner::record_turn_usage(
             &mut assistant_msg,
             &effective_model,
+            runner::pricing_for_turn(config, &tool_ctx.config, &route),
             &usage,
             cost_tracker.as_ref(),
             &tool_ctx.session_id,
@@ -2111,7 +2117,11 @@ mod tests {
             cache_read_input_tokens: 300,
         };
 
-        let cost = cost_of_turn("claude-sonnet-4-5", &usage);
+        let cost = cost_of_turn(
+            "claude-sonnet-4-5",
+            claurst_core::cost::ModelPricing::SONNET,
+            &usage,
+        );
 
         assert_eq!(cost.input_tokens, 1_000);
         assert_eq!(cost.output_tokens, 500);

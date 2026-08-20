@@ -157,6 +157,7 @@ impl Tool for AdvisorTool {
             ));
         }
 
+        let registry = claurst_api::ModelRegistry::new();
         let account = route.account.as_str();
         debug!(account, model = route.model.as_str(), "Consulting advisor");
 
@@ -198,6 +199,7 @@ impl Tool for AdvisorTool {
         // model's own rates.
         ctx.cost_tracker.add_usage(
             route.model.as_str(),
+            claurst_api::pricing_for_route(&ctx.config, &registry, &route),
             response.usage.input_tokens,
             response.usage.output_tokens,
             response.usage.cache_creation_input_tokens,

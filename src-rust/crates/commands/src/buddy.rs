@@ -279,6 +279,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
 
     ctx.cost_tracker.add_usage(
         route.model.as_str(),
+        claurst_api::pricing_for_route(&ctx.config, &claurst_api::ModelRegistry::new(), &route),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,
@@ -343,6 +344,7 @@ pub async fn companion_reply(
 
     cost_tracker.add_usage(
         route.model.as_str(),
+        claurst_api::pricing_for_route(config, &claurst_api::ModelRegistry::new(), &route),
         response.usage.input_tokens,
         response.usage.output_tokens,
         response.usage.cache_creation_input_tokens,

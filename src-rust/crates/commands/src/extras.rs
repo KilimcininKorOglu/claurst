@@ -163,6 +163,11 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
         Ok(response) => {
             ctx.cost_tracker.add_usage(
                 model,
+                claurst_api::pricing_for_route(
+                    &ctx.config,
+                    &claurst_api::ModelRegistry::new(),
+                    &route,
+                ),
                 response.usage.input_tokens,
                 response.usage.output_tokens,
                 response.usage.cache_creation_input_tokens,
