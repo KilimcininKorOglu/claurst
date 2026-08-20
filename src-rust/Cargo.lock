@@ -691,45 +691,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "claurst"
-version = "0.1.7"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "chrono",
- "clap",
- "crossterm 0.29.0",
- "dirs",
- "mikmik-acp",
- "mikmik-api",
- "mikmik-bridge",
- "mikmik-buddy",
- "mikmik-commands",
- "mikmik-core",
- "mikmik-mcp",
- "mikmik-plugins",
- "mikmik-query",
- "mikmik-tools",
- "mikmik-tui",
- "nix 0.29.0",
- "open",
- "parking_lot",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "url",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2438,6 +2399,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a5a03cefb0d953ec0be133036f14e109412fa594edc2f77227249db66cc3ed"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "mikmik"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "clap",
+ "crossterm 0.29.0",
+ "dirs",
+ "mikmik-acp",
+ "mikmik-api",
+ "mikmik-bridge",
+ "mikmik-buddy",
+ "mikmik-commands",
+ "mikmik-core",
+ "mikmik-mcp",
+ "mikmik-plugins",
+ "mikmik-query",
+ "mikmik-tools",
+ "mikmik-tui",
+ "nix 0.29.0",
+ "open",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]

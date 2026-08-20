@@ -5,14 +5,14 @@
 //! This guards the wire-format and capability surface that registry-listed
 //! ACP clients (Zed, Neovim, JetBrains, …) rely on. Runs against the
 //! debug binary produced by `cargo build` — Cargo provides the path via
-//! `CARGO_BIN_EXE_claurst`.
+//! `CARGO_BIN_EXE_mikmik`.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 fn binary_path() -> String {
-    env!("CARGO_BIN_EXE_claurst").to_string()
+    env!("CARGO_BIN_EXE_mikmik").to_string()
 }
 
 fn run_with_input(stdin: &str, timeout: Duration) -> (String, String) {

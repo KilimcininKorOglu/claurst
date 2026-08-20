@@ -1,15 +1,15 @@
 {
-  "name": "claurst",
+  "name": "mikmik",
   "version": "0.1.7",
   "description": "Open-source, multi-provider terminal coding agent built in Rust",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KilimcininKorOglu/claurst.git"
+    "url": "git+https://github.com/KilimcininKorOglu/mikmik.git"
   },
-  "homepage": "https://kilimcininkoroglu.github.io/claurst",
+  "homepage": "https://kilimcininkoroglu.github.io/mikmik",
   "bugs": {
-    "url": "https://github.com/KilimcininKorOglu/claurst/issues"
+    "url": "https://github.com/KilimcininKorOglu/mikmik/issues"
   },
   "keywords": [
     "ai",
@@ -22,7 +22,7 @@
   ],
   "author": "Kuber Mehta",
   "bin": {
-    "claurst": "bin/claurst"
+    "mikmik": "bin/mikmik"
   },
   "scripts": {
     "postinstall": "node install.js"

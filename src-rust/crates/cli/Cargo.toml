@@ -1,10 +1,10 @@
 [package]
-name = "claurst"
+name = "mikmik"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "claurst"
+name = "mikmik"
 path = "src/main.rs"
 
 [features]
