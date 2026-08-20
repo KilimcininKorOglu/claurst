@@ -196,11 +196,10 @@ async fn apply(
             // and the client can go on reading the conversation while it runs.
             let current = session.messages.lock().clone();
             let before = current.len();
-            let model = claurst_api::effective_model_for_config(
+            let route = claurst_api::resolve_effective_route(
                 &runtime.config,
                 runtime.model_registry.as_ref(),
             );
-            let route = runtime.config.resolve_route(&model);
 
             let provider = claurst_query::compact::dispatches_through_provider(
                 &route.account,

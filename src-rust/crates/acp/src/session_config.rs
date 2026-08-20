@@ -64,11 +64,13 @@ pub const OPTION_MODEL: &str = "model";
 pub const OPTION_PROVIDER: &str = "provider";
 pub const OPTION_EFFORT: &str = "effort";
 
-/// A model id with its account prefix stripped.
+/// A model id with one named account's prefix stripped, for catalogue lookup.
 ///
-/// A model may be written as `account/model`, and the catalog is keyed by the
-/// bare id, so matching the prefixed form against it finds nothing.
-pub fn wire_model(account: &str, model: &str) -> String {
+/// Not `Config::resolve_route`: this answers "how does the catalogue for
+/// *this* account spell it", so another account's prefix is deliberately left
+/// in place, where it shows the client that the current selection belongs
+/// somewhere else. Nothing here reaches the wire.
+pub fn model_id_for_account(account: &str, model: &str) -> String {
     model
         .strip_prefix(&format!("{account}/"))
         .unwrap_or(model)
@@ -130,7 +132,7 @@ pub fn config_options(
 ) -> Vec<acp::SessionConfigOption> {
     let account = config.selected_provider_id().to_string();
     let vendor = config.vendor_id_for_account(&account);
-    let model = wire_model(&account, model);
+    let model = model_id_for_account(&account, model);
 
     let models: Vec<(String, String)> = registry
         .list_visible_by_provider(&vendor)
@@ -174,7 +176,7 @@ pub fn model_state(
 ) -> acp::SessionModelState {
     let account = config.selected_provider_id().to_string();
     let vendor = config.vendor_id_for_account(&account);
-    let current = wire_model(&account, model);
+    let current = model_id_for_account(&account, model);
 
     let mut models: Vec<acp::ModelInfo> = registry
         .list_visible_by_provider(&vendor)
@@ -226,19 +228,21 @@ pub fn apply_config_option(
             overrides.provider = Some(value.to_string());
             // The old model belongs to the old account. Carrying it over would
             // send an id the new account has never heard of.
-            let vendor = config.vendor_id_for_account(value);
-            overrides.model = Some(registry.best_model_for_provider(&vendor).unwrap_or_else(
-                || {
-                    // An account the catalog does not cover still needs a model,
-                    // and leaving the override unset would silently keep the old
-                    // account's one.
-                    let probe = claurst_core::config::Config {
-                        provider: Some(vendor.clone()),
-                        ..Default::default()
-                    };
-                    probe.effective_model().to_string()
-                },
-            ));
+            // An account the catalogue does not cover still needs a model,
+            // and leaving the override unset would silently keep the old
+            // account's one. Canonical, because several of the per-provider
+            // fallbacks are slashed ids of their own
+            // (`"anthropic/claude-sonnet-4"` for OpenRouter): stored bare,
+            // `resolve_route` reads that namespace as an account prefix and
+            // sends the session to Anthropic instead of to the account the
+            // client just picked.
+            let probe = claurst_core::config::Config {
+                provider: Some(value.to_string()),
+                provider_configs: config.provider_configs.clone(),
+                ..Default::default()
+            };
+            let route = claurst_api::resolve_effective_route(&probe, registry);
+            overrides.model = Some(probe.canonical_model(&route.account, &route.model));
             Ok(())
         }
         OPTION_EFFORT => match claurst_core::effort::EffortLevel::from_str(value) {
@@ -439,13 +443,16 @@ mod tests {
         // The catalog is keyed by the bare id, so "anthropic/claude-opus-5"
         // would match nothing in it.
         assert_eq!(
-            wire_model("anthropic", "anthropic/claude-opus-5"),
+            model_id_for_account("anthropic", "anthropic/claude-opus-5"),
             "claude-opus-5"
         );
-        assert_eq!(wire_model("anthropic", "claude-opus-5"), "claude-opus-5");
+        assert_eq!(
+            model_id_for_account("anthropic", "claude-opus-5"),
+            "claude-opus-5"
+        );
         // Another account's prefix is not this account's to strip.
         assert_eq!(
-            wire_model("openai", "anthropic/claude-opus-5"),
+            model_id_for_account("openai", "anthropic/claude-opus-5"),
             "anthropic/claude-opus-5"
         );
     }
@@ -480,10 +487,21 @@ mod tests {
             .as_deref()
             .expect("the new account needs a model");
         assert_ne!(model, "claude-opus-5");
+
+        // Stored canonically, so the override names the account it came from
+        // even before `apply_overrides` gets to the provider half.
+        let mut applied = config.clone();
+        applied.model = Some(model.to_string());
+        let route = applied.effective_route();
+        assert_eq!(route.account, "openai");
         assert!(
-            model.starts_with("gpt"),
-            "expected an openai model, got {model}"
+            route.model.as_str().starts_with("gpt"),
+            "expected an openai model, got {}",
+            route.model
         );
+
+        // And the option list still shows the bare catalogue id.
+        assert!(model_id_for_account("openai", model).starts_with("gpt"));
     }
 
     #[test]
