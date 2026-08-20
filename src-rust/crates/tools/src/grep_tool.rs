@@ -203,7 +203,9 @@ impl Tool for GrepTool {
         let mut results: Vec<String> = Vec::new();
         let mut match_count = 0usize;
 
-        for entry in crate::ignore_aware_walk(&search_path, ctx.config.include_ignored_files) {
+        for entry in
+            crate::ignore_aware_walk(&search_path, ctx.config.effective_include_ignored_files())
+        {
             let entry = match entry {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -404,7 +406,7 @@ mod tests {
 
     fn ctx_for(root: &Path, include_ignored: bool) -> ToolContext {
         let config = Config {
-            include_ignored_files: include_ignored,
+            include_ignored_files: Some(include_ignored),
             ..Default::default()
         };
         ToolContext {

@@ -171,7 +171,10 @@ impl SettingsScreen {
         self.show_git_branch = self.settings_snapshot.show_git_branch;
         self.compact_threshold = self.settings_snapshot.config.compact_threshold.to_string();
         self.auto_commits = self.settings_snapshot.config.auto_commits.unwrap_or(false);
-        self.include_ignored_files = self.settings_snapshot.config.include_ignored_files;
+        self.include_ignored_files = self
+            .settings_snapshot
+            .config
+            .effective_include_ignored_files();
         self.web_search_fallback = self.settings_snapshot.config.web_search_fallback;
         self.timeline_enabled = self.settings_snapshot.config.timeline_enabled;
         self.searxng_url = self
@@ -1191,8 +1194,8 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                     }
                     "include_ignored_files" => {
                         screen.include_ignored_files = new_value;
-                        screen.settings_snapshot.config.include_ignored_files = new_value;
-                        config.include_ignored_files = new_value;
+                        screen.settings_snapshot.config.include_ignored_files = Some(new_value);
+                        config.include_ignored_files = Some(new_value);
                     }
                     "searxng" => {
                         if new_value {
@@ -1559,7 +1562,7 @@ mod tests {
         let cases: Vec<ToggleCase> = vec![
             ("Verbose logging", |config| config.verbose),
             ("Search ignored files", |config| {
-                config.include_ignored_files
+                config.include_ignored_files.unwrap_or(false)
             }),
             ("Web search fallback", |config| config.web_search_fallback),
             ("Execution timeline", |config| config.timeline_enabled),

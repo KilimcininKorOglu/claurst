@@ -109,7 +109,9 @@ impl Tool for GlobTool {
         };
 
         let mut entries: Vec<PathBuf> = Vec::new();
-        for entry in crate::ignore_aware_walk(&base_dir, ctx.config.include_ignored_files) {
+        for entry in
+            crate::ignore_aware_walk(&base_dir, ctx.config.effective_include_ignored_files())
+        {
             let Ok(entry) = entry else { continue };
             let path = entry.path();
             if !pattern.matches_path_with(path, options) {
@@ -205,7 +207,7 @@ mod tests {
 
     fn ctx_for(root: &Path, include_ignored: bool) -> ToolContext {
         let config = Config {
-            include_ignored_files: include_ignored,
+            include_ignored_files: Some(include_ignored),
             ..Default::default()
         };
         ToolContext {
