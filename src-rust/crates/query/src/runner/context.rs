@@ -76,6 +76,39 @@ pub fn provider_for_turn(
     provider
 }
 
+/// Book a finished turn's usage: its cost, its price on the message, and the
+/// prompt size the next request boundary will size the context from.
+///
+/// One function because the two dispatch arms each finish their own turn, and
+/// three separate copies of this is how they came to disagree: the provider
+/// arm recorded neither the cost nor, later, the prompt size, so a session
+/// served through the registry priced itself at zero and then sized every
+/// context from a chars/4 estimate that ignores the system prompt, the tool
+/// schemas and the cache. Measured: it never compacted at all.
+///
+/// `model` must be `effective_model`, which follows an agent override and a
+/// fallback switch; `config.model` does not.
+pub(crate) fn record_turn_usage(
+    assistant_msg: &mut Message,
+    model: &str,
+    usage: &claurst_core::types::UsageInfo,
+    cost_tracker: &claurst_core::cost::CostTracker,
+    session_id: &str,
+) {
+    cost_tracker.add_usage(
+        model,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_creation_input_tokens,
+        usage.cache_read_input_tokens,
+    );
+    assistant_msg.cost = Some(crate::cost_of_turn(model, usage));
+    // `total_input()` is input + cache-read + cache-creation: what the model
+    // actually saw. Session-scoped, not loop-scoped, because every user message
+    // starts a fresh turn loop and a local would be zero at every boundary.
+    compact::record_context_tokens(session_id, usage.total_input());
+}
+
 /// What one pass over the context boundary did.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContextPass {
@@ -97,10 +130,8 @@ pub(crate) struct ContextPassInput<'a> {
     pub model: &'a str,
     /// The account the model is served through.
     pub provider: &'a str,
-    /// The session, which owns the auto-compact circuit breaker.
+    /// The session, which owns the circuit breaker and the last prompt size.
     pub session_id: &'a str,
-    /// The previous turn's `usage.total_input()`, or 0 before the first one.
-    pub last_context_tokens: u64,
 }
 
 /// Size the context, warn about it, and compact when it is nearly full.
@@ -129,10 +160,9 @@ pub(crate) async fn compact_before_request(
     // turn (input + cache-read + cache-creation = what the model saw) over the
     // chars/4 estimate. With prompt caching the bare `input_tokens` field
     // undercounts badly. Estimate only before the first response. (#231)
-    let context_tokens = compact::estimate_context_tokens(
-        messages,
-        (input.last_context_tokens > 0).then_some(input.last_context_tokens),
-    );
+    let last_reported = compact::compact_state_for(input.session_id).last_context_tokens;
+    let context_tokens =
+        compact::estimate_context_tokens(messages, (last_reported > 0).then_some(last_reported));
 
     let before = messages.len();
     let mut pass = ContextPass {
@@ -194,10 +224,21 @@ pub(crate) async fn compact_before_request(
     )
     .await
     {
-        pass.after = new_msgs.len();
-        pass.tokens_after = compact::estimate_tokens_for_messages(&new_msgs) as u64;
-        pass.compacted = true;
-        *messages = new_msgs;
+        // A conversation already inside the keep-recent budget comes back
+        // unchanged: the threshold was crossed by a prompt whose bulk is the
+        // system prompt and the tool schemas, not by the turns. Reporting that
+        // as a compaction would put "Compacted 0 messages" on screen and reset
+        // the recorded size to an estimate that ignores everything the
+        // provider counted.
+        if new_msgs.len() != messages.len() {
+            pass.after = new_msgs.len();
+            pass.tokens_after = compact::estimate_tokens_for_messages(&new_msgs) as u64;
+            pass.compacted = true;
+            *messages = new_msgs;
+            // The recorded size described the conversation that was just
+            // replaced, so leaving it would compact again on the next request.
+            compact::record_context_tokens(input.session_id, pass.tokens_after);
+        }
     }
 
     pass
@@ -253,6 +294,7 @@ async fn run_reactive(
             pass.after = messages.len();
             pass.tokens_after = compact::estimate_tokens_for_messages(messages) as u64;
             pass.compacted = true;
+            compact::record_context_tokens(input.session_id, pass.tokens_after);
         }
         Err(claurst_core::error::ClaudeError::Cancelled) => {
             warn!("{label} was cancelled; conversation preserved");
@@ -316,13 +358,23 @@ mod tests {
         ]
     }
 
+    /// Over the keep-recent budget so a cut really happens, but far under the
+    /// window by the chars/4 estimate, so only a reported figure can push it
+    /// past the threshold.
+    fn a_cuttable_conversation() -> Vec<Message> {
+        vec![
+            Message::user("x".repeat(60_000)),
+            Message::assistant("y".repeat(60_000)),
+            Message::user("and now the next thing"),
+        ]
+    }
+
     fn input<'a>(backend: &'a StubBackend, model: &'a str) -> ContextPassInput<'a> {
         ContextPassInput {
             backend,
             model,
             provider: "anthropic",
             session_id: "context-pass-tests",
-            last_context_tokens: 0,
         }
     }
 
@@ -436,7 +488,6 @@ mod tests {
                 model: "claude-opus-4-5",
                 provider: "anthropic",
                 session_id: "context-pass-threshold",
-                last_context_tokens: 0,
             },
             None,
             &CancellationToken::new(),
@@ -456,7 +507,6 @@ mod tests {
                 model: "claude-opus-4-5",
                 provider: "anthropic",
                 session_id: "context-pass-threshold",
-                last_context_tokens: 0,
             },
             None,
             &CancellationToken::new(),
@@ -464,6 +514,134 @@ mod tests {
         .await;
         assert!(lowered.compacted, "a threshold of 20 acts on the same size");
         compact::forget_compact_state("context-pass-threshold");
+    }
+
+    /// The provider's reported prompt size survives from one user message to
+    /// the next.
+    ///
+    /// Measured against a stub reporting 180k of a 200k window: with the
+    /// figure held in a turn-loop local it was zero at every boundary that
+    /// mattered, because each user message starts a fresh loop. The threshold
+    /// then fell back to the chars/4 estimate of three short strings and
+    /// nothing was ever compacted.
+    #[tokio::test]
+    async fn a_reported_prompt_size_reaches_the_next_prompts_boundary() {
+        let session = "context-pass-carry";
+        compact::forget_compact_state(session);
+
+        // The turn loop's record, made at the end of one user message.
+        compact::record_context_tokens(session, 180_000);
+
+        // Big enough to cut, but only ~16% of the window by the chars/4
+        // estimate, so nothing but the reported figure can trigger this.
+        let mut messages = a_cuttable_conversation();
+        let backend = StubBackend::answering("Short.");
+
+        let pass = compact_before_request(
+            &mut messages,
+            &QueryConfig::default(),
+            ContextPassInput {
+                backend: &backend,
+                model: "claude-opus-4-5",
+                provider: "anthropic",
+                session_id: session,
+            },
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert!(
+            pass.compacted,
+            "the reported 180k of a 200k window is over the threshold"
+        );
+        compact::forget_compact_state(session);
+    }
+
+    /// A compaction replaces the recorded size too, or the very next request
+    /// would compact the summary it just wrote.
+    #[tokio::test]
+    async fn compacting_replaces_the_recorded_size() {
+        let session = "context-pass-rerecord";
+        compact::forget_compact_state(session);
+        compact::record_context_tokens(session, 190_000);
+
+        let mut messages = a_cuttable_conversation();
+        let backend = StubBackend::answering("Short.");
+        let input = || ContextPassInput {
+            backend: &backend,
+            model: "claude-opus-4-5",
+            provider: "anthropic",
+            session_id: session,
+        };
+
+        let first = compact_before_request(
+            &mut messages,
+            &QueryConfig::default(),
+            input(),
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(first.compacted);
+
+        let second = compact_before_request(
+            &mut messages,
+            &QueryConfig::default(),
+            input(),
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(
+            !second.compacted,
+            "the stale 190k figure did not survive the compaction"
+        );
+        compact::forget_compact_state(session);
+    }
+
+    /// Booking a turn feeds all three consumers, so a provider arm that
+    /// forgets one of them cannot exist: there is only the one call.
+    #[test]
+    fn booking_a_turn_prices_it_and_records_its_prompt_size() {
+        let session = "record-turn-usage";
+        compact::forget_compact_state(session);
+
+        let mut msg = Message::assistant("done");
+        let usage = claurst_core::types::UsageInfo {
+            input_tokens: 30_000,
+            output_tokens: 500,
+            cache_read_input_tokens: 120_000,
+            cache_creation_input_tokens: 10_000,
+        };
+        let tracker = claurst_core::cost::CostTracker::new();
+
+        record_turn_usage(&mut msg, "claude-opus-4-5", &usage, &tracker, session);
+
+        assert!(msg.cost.is_some(), "the turn is priced on the message");
+        assert!(tracker.total_tokens() > 0, "the tracker saw the turn");
+        assert_eq!(
+            compact::compact_state_for(session).last_context_tokens,
+            160_000,
+            "input + cache-read + cache-creation, not the output"
+        );
+        compact::forget_compact_state(session);
+    }
+
+    /// Both dispatch arms book their turn through that one function.
+    ///
+    /// The provider arm silently skipped it once already, which is how a
+    /// registry-served session came to run uncompacted while the Anthropic one
+    /// behaved. A grep is the only thing that can tell the two call sites apart
+    /// without running a live turn against each provider.
+    #[test]
+    fn both_dispatch_arms_book_their_turn() {
+        const LOOP_SRC: &str = include_str!("../lib.rs");
+        let calls = LOOP_SRC.matches("runner::record_turn_usage(").count();
+        assert_eq!(
+            calls, 2,
+            "the provider arm and the raw Anthropic arm each book exactly once"
+        );
     }
 
     /// A summariser that fails leaves the conversation whole (#213).
@@ -482,7 +660,6 @@ mod tests {
                 model: "claude-opus-4-5",
                 provider: "anthropic",
                 session_id: "context-pass-failure",
-                last_context_tokens: 0,
             },
             None,
             &CancellationToken::new(),

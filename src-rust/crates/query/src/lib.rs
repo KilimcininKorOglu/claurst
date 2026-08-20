@@ -541,9 +541,6 @@ async fn run_query_loop_inner(
     let tool_ctx = &loop_ctx;
 
     let mut turn = 0u32;
-    // The previous turn's real prompt size, read at the next request
-    // boundary. Zero before the first response, where the estimate stands in.
-    let mut last_context_tokens: u64 = 0;
     // Tracks how many consecutive max_tokens recoveries we've attempted so
     // we don't loop forever on a model that can't finish within any budget.
     let mut max_tokens_recovery_count: u32 = 0;
@@ -817,14 +814,12 @@ async fn run_query_loop_inner(
                 model: &effective_model,
                 provider: &route.account,
                 session_id: &tool_ctx.session_id,
-                last_context_tokens,
             },
             event_tx.as_ref(),
             &cancel_token,
         )
         .await;
         if context_pass.compacted {
-            last_context_tokens = context_pass.tokens_after;
             if let Some(ref tx) = event_tx {
                 let _ = tx.send(QueryEvent::Compacted {
                     messages_before: context_pass.before,
@@ -1403,14 +1398,13 @@ async fn run_query_loop_inner(
                         timestamp: Some(chrono::Utc::now().to_rfc3339()),
                     };
 
-                    cost_tracker.add_usage(
+                    runner::record_turn_usage(
+                        &mut assistant_msg,
                         &effective_model,
-                        usage.input_tokens,
-                        usage.output_tokens,
-                        usage.cache_creation_input_tokens,
-                        usage.cache_read_input_tokens,
+                        &usage,
+                        cost_tracker.as_ref(),
+                        &tool_ctx.session_id,
                     );
-                    assistant_msg.cost = Some(cost_of_turn(&effective_model, &usage));
 
                     messages.push(assistant_msg.clone());
 
@@ -1619,18 +1613,13 @@ async fn run_query_loop_inner(
 
         let (mut assistant_msg, usage, stop_reason) = accumulator.finish();
 
-        // Priced at the model that actually ran: `effective_model` follows an
-        // agent override and a fallback switch, which `config.model` does not.
-        cost_tracker.add_usage(
+        runner::record_turn_usage(
+            &mut assistant_msg,
             &effective_model,
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cache_creation_input_tokens,
-            usage.cache_read_input_tokens,
+            &usage,
+            cost_tracker.as_ref(),
+            &tool_ctx.session_id,
         );
-        // Both arms, or the same session reports its cost differently
-        // depending on which provider served it.
-        assistant_msg.cost = Some(cost_of_turn(&effective_model, &usage));
 
         // Budget guard: abort the loop if the configured USD cap is exceeded.
         if let Some(limit) = config.max_budget_usd {
@@ -1707,11 +1696,6 @@ async fn run_query_loop_inner(
                 }
             }
         }
-
-        // The turn's real prompt size, carried to the next request boundary
-        // where compaction decides whether to act on it. `total_input()` is
-        // input + cache-read + cache-creation: what the model actually saw.
-        last_context_tokens = usage.total_input();
 
         if let Some(ref tx) = event_tx {
             let _ = tx.send(QueryEvent::TurnComplete {

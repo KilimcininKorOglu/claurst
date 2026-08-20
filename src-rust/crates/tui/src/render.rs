@@ -5046,6 +5046,33 @@ mod effort_dock_tests {
         out
     }
 
+    /// The compaction boundary reaches the screen, not just `App` state.
+    ///
+    /// A user whose history is replaced mid-session has to be able to see
+    /// where that happened; the transcript is otherwise indistinguishable
+    /// from one where the earlier turns were simply never sent.
+    #[test]
+    fn a_compaction_boundary_is_drawn_in_the_transcript() {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        app.push_message(claurst_core::types::Message::user("do the thing"));
+        app.push_message(claurst_core::types::Message::assistant("done"));
+
+        let before = render_screen(&app);
+        assert!(!before.contains("Compacted"));
+
+        app.handle_query_event(claurst_query::QueryEvent::Compacted {
+            messages_before: 40,
+            messages_after: 6,
+            tokens_after: 18_000,
+        });
+
+        let after = render_screen(&app);
+        assert!(
+            after.contains("Compacted 34 message"),
+            "the boundary is on screen, not only in App state"
+        );
+    }
+
     #[test]
     fn effort_picker_replaces_prompt_box_when_open() {
         let mut app = App::new(Config::default(), CostTracker::new());
