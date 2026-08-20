@@ -5327,8 +5327,15 @@ impl App {
                 }
                 KeybindingResult::Pending => return false,
                 KeybindingResult::NoMatch if had_pending_chord => return false,
-                KeybindingResult::Unbound | KeybindingResult::NoMatch => {
-                    // Fall through to hardcoded keybinding handlers
+                // A chord the user explicitly set to `null` in
+                // keybindings.json. Swallow it: falling through would run the
+                // hardcoded arm for the same key and quietly overrule the
+                // unbind, so a key could not be turned off at all.
+                KeybindingResult::Unbound => return false,
+                KeybindingResult::NoMatch => {
+                    // No binding names this chord. Fall through to the
+                    // hardcoded handlers, which own the keys the default
+                    // bindings do not cover.
                 }
             }
         } else {
@@ -5613,14 +5620,9 @@ impl App {
                 self.help_overlay.toggle();
             }
 
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.prompt_input.kill_line_backward();
-                self.refresh_prompt_input();
-            }
-            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.prompt_input.kill_word_backward();
-                self.refresh_prompt_input();
-            }
+            // ctrl+u and ctrl+w resolve to killToStart / killWord above, which
+            // do the same thing; arms for them here could only run by
+            // overruling an explicit unbind.
             KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.prompt_input.yank();
                 self.refresh_prompt_input();
@@ -5631,10 +5633,7 @@ impl App {
                 self.prompt_input.yank_pop();
                 self.refresh_prompt_input();
             }
-            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.delete_word_backward();
-                self.refresh_prompt_input();
-            }
+            // alt+backspace resolves to killWord above.
             KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.prompt_input.delete_word_backward();
                 self.refresh_prompt_input();
@@ -5651,10 +5650,7 @@ impl App {
                 self.prompt_input.move_word_forward();
                 self.sync_legacy_prompt_fields();
             }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::ALT) => {
-                self.prompt_input.delete_word_at_cursor();
-                self.refresh_prompt_input();
-            }
+            // alt+d resolves to deleteWord above.
 
             // ---- Text entry (allowed while streaming so users can queue
             // the next message; submission queues via Enter at the CLI layer).
@@ -5679,24 +5675,15 @@ impl App {
                 self.prompt_input.delete_word_forward();
                 self.refresh_prompt_input();
             }
+            // Only the unmodified arrows reach here: ctrl+left/ctrl+right
+            // resolve to moveWordBackward / moveWordForward and cmd+left /
+            // cmd+right to goLineStart / goLineEnd.
             KeyCode::Left => {
-                if key.modifiers.contains(KeyModifiers::SUPER) {
-                    self.prompt_input.cursor = 0;
-                } else if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.prompt_input.move_word_backward();
-                } else {
-                    self.prompt_input.move_left();
-                }
+                self.prompt_input.move_left();
                 self.sync_legacy_prompt_fields();
             }
             KeyCode::Right => {
-                if key.modifiers.contains(KeyModifiers::SUPER) {
-                    self.prompt_input.cursor = self.prompt_input.text.len();
-                } else if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.prompt_input.move_word_forward();
-                } else {
-                    self.prompt_input.move_right();
-                }
+                self.prompt_input.move_right();
                 self.sync_legacy_prompt_fields();
             }
             KeyCode::Home => {
@@ -5761,11 +5748,13 @@ impl App {
                 self.refresh_prompt_input();
             }
             KeyCode::Enter if !self.is_streaming => {
-                // Fallback Enter handling for when the keybinding layer doesn't
-                // claim Enter (e.g. it's been unbound); the default path is the
-                // "submit" keybinding action. If a typeahead popup is open, let
-                // the shared helper decide whether to complete a suggestion or
-                // also run it (issue #183).
+                // Fallback Enter handling for when no binding names Enter at
+                // all; the default path is the "submit" keybinding action.
+                // Setting Enter to `null` in keybindings.json is an unbind, not
+                // a gap, and stops here rather than reaching this arm — an
+                // unbind that submitted anyway would not be an unbind. If a
+                // typeahead popup is open, let the shared helper decide whether
+                // to complete a suggestion or also run it (issue #183).
                 if !self.prompt_input.suggestions.is_empty()
                     && self.prompt_input.suggestion_index.is_some()
                     && !self.accept_suggestion_for_submit()
@@ -6276,7 +6265,9 @@ impl App {
                 self.history_search = Some(hs);
                 false
             }
-            "openSearch" => {
+            // `openSearch` has no default chord; `globalSearch` is what
+            // ctrl+shift+f resolves to. Same overlay, so same body.
+            "openSearch" | "globalSearch" => {
                 self.global_search.open();
                 self.refresh_global_search();
                 false
@@ -6353,6 +6344,16 @@ impl App {
             "killWord" => {
                 self.prompt_input.kill_word_backward();
                 self.refresh_prompt_input();
+                false
+            }
+            "moveWordBackward" => {
+                self.prompt_input.move_word_backward();
+                self.sync_legacy_prompt_fields();
+                false
+            }
+            "moveWordForward" => {
+                self.prompt_input.move_word_forward();
+                self.sync_legacy_prompt_fields();
                 false
             }
             "expandPaste" => {
@@ -9930,6 +9931,80 @@ mod tests {
             );
             assert!(!app.should_exit, "{code:?} started an exit");
         }
+    }
+
+    /// The resolver claims a bound chord and returns, so a chord bound to an
+    /// action with no arm is a dead key. ctrl+left / ctrl+right were exactly
+    /// that: bound to moveWordBackward / moveWordForward, which nothing
+    /// implemented, while the raw arrow arm that used to do the work could no
+    /// longer be reached.
+    #[test]
+    fn ctrl_arrows_move_the_cursor_by_a_word() {
+        let mut app = make_app();
+        app.prompt_input.text = "alpha beta gamma".to_string();
+        app.prompt_input.cursor = app.prompt_input.text.len();
+
+        app.handle_key_event(press_key(KeyCode::Left, KeyModifiers::CONTROL));
+        assert_eq!(app.prompt_input.cursor, 11, "Ctrl+Left did not move a word");
+
+        app.handle_key_event(press_key(KeyCode::Right, KeyModifiers::CONTROL));
+        assert_eq!(
+            app.prompt_input.cursor, 16,
+            "Ctrl+Right did not move a word"
+        );
+
+        // The unmodified arrow still moves one character.
+        app.handle_key_event(press_key(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(app.prompt_input.cursor, 15);
+    }
+
+    /// `ctrl+shift+f` resolves to `globalSearch`, which had no arm; only the
+    /// unbound alias `openSearch` did, so the chord opened nothing.
+    #[test]
+    fn global_search_opens_from_its_bound_action() {
+        let mut app = make_app();
+        assert!(!app.global_search.visible);
+
+        // `open()` clears the query, so the ripgrep call returns immediately.
+        app.handle_keybinding_action("globalSearch");
+
+        assert!(app.global_search.visible);
+    }
+
+    /// Unbinding a chord has to actually disable it. The hardcoded arms run
+    /// only when *no* binding names the chord; treating an explicit `null` the
+    /// same way let them overrule the user's own keybindings.json. Ten bound
+    /// chords still carry such an arm — enter, up, down, home, end, pageup,
+    /// pagedown, tab, shift+tab, ctrl+r — so this is the whole class.
+    #[test]
+    fn an_explicit_unbind_disables_the_key() {
+        let unbind = |chord: &str| {
+            let user = claurst_core::keybindings::UserKeybindings::from_json_str(&format!(
+                r#"{{"bindings": [{{"chord": "{chord}", "action": null, "context": "chat"}}]}}"#
+            ));
+            claurst_core::keybindings::KeybindingResolver::new(&user)
+        };
+
+        // Baseline: bound, Up recalls the previous prompt.
+        let mut bound = make_app();
+        bound.prompt_input.history = vec!["earlier prompt".to_string()];
+        bound.handle_key_event(press_key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(
+            bound.prompt_input.text, "earlier prompt",
+            "Up stopped recalling history"
+        );
+
+        // Unbound: the raw KeyCode::Up arm must not step in.
+        let mut app = make_app();
+        app.keybindings = unbind("up");
+        app.prompt_input.history = vec!["earlier prompt".to_string()];
+
+        app.handle_key_event(press_key(KeyCode::Up, KeyModifiers::NONE));
+
+        assert!(
+            app.prompt_input.text.is_empty(),
+            "an unbound Up still recalled history"
+        );
     }
 
     /// Typing a queued message is allowed while a turn streams, so editing it
