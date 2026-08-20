@@ -78,6 +78,15 @@ pub struct AutoCompactState {
     pub consecutive_failures: u32,
     /// Whether the circuit breaker is open (too many failures).
     pub disabled: bool,
+    /// The prompt size the provider last reported, in tokens.
+    ///
+    /// Session-scoped for the same reason the breaker is: every user message
+    /// starts a fresh turn loop, so a value living in that loop is always zero
+    /// at the request boundary and the threshold falls back to the chars/4
+    /// estimate, which does not see the system prompt, the tool schemas or the
+    /// cache. Measured: a session the provider reported at 90% of its window
+    /// was not compacted at all.
+    pub last_context_tokens: u64,
 }
 
 impl AutoCompactState {
@@ -117,6 +126,14 @@ pub fn compact_state_for(session_id: &str) -> AutoCompactState {
         .get(session_id)
         .cloned()
         .unwrap_or_default()
+}
+
+/// Record the prompt size the provider reported for a session's last turn.
+pub fn record_context_tokens(session_id: &str, tokens: u64) {
+    if tokens == 0 {
+        return;
+    }
+    update_compact_state(session_id, |state| state.last_context_tokens = tokens);
 }
 
 /// Apply `f` to one session's auto-compact state, creating it if absent.
