@@ -127,7 +127,7 @@ claurst
 claurst -p "explain this codebase"
 ```
 
-Claurst stores everything it persists under one directory: `$CLAURST_HOME` if set, otherwise an existing `~/.claurst`, otherwise `$XDG_CONFIG_HOME/claurst` (`~/.config/claurst`). Settings, sessions, credentials and memory all live there.
+Claurst stores everything it persists under one directory: `$MIKMIK_HOME` if set, otherwise `$XDG_CONFIG_HOME/mikmik` (`~/.config/mikmik`). Settings, sessions, credentials and memory all live there.
 
 ## Devcontainer setup
 

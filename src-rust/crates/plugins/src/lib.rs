@@ -788,7 +788,7 @@ mod tests {
         assert_eq!(registry.enabled_count(), 0);
     }
 
-    /// `CLAURST_HOME` is process-global, so the tests that point it somewhere
+    /// `MIKMIK_HOME` is process-global, so the tests that point it somewhere
     /// cannot run at the same time.
     static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -801,10 +801,10 @@ mod tests {
         fn with_settings(body: &str) -> Self {
             let dir = tempfile::tempdir().expect("tmp home");
             std::fs::write(dir.path().join("settings.json"), body).expect("settings");
-            let previous = std::env::var_os("CLAURST_HOME");
+            let previous = std::env::var_os("MIKMIK_HOME");
             // SAFETY: HOME_LOCK serialises every test that touches this
             // variable, and no other thread reads it meanwhile.
-            unsafe { std::env::set_var("CLAURST_HOME", dir.path()) };
+            unsafe { std::env::set_var("MIKMIK_HOME", dir.path()) };
             Self {
                 previous,
                 _dir: dir,
@@ -816,8 +816,8 @@ mod tests {
         fn drop(&mut self) {
             match self.previous.take() {
                 // SAFETY: same as above.
-                Some(value) => unsafe { std::env::set_var("CLAURST_HOME", value) },
-                None => unsafe { std::env::remove_var("CLAURST_HOME") },
+                Some(value) => unsafe { std::env::set_var("MIKMIK_HOME", value) },
+                None => unsafe { std::env::remove_var("MIKMIK_HOME") },
             }
         }
     }

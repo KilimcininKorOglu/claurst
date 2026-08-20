@@ -328,8 +328,8 @@ mod tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::TempDir::new().expect("temp dir");
-            let previous = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let previous = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self {
                 previous,
                 _dir: dir,
@@ -340,8 +340,8 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match self.previous.take() {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

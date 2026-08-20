@@ -289,7 +289,7 @@ mod tests {
     use super::*;
     use crate::test_support::allow_all_context;
 
-    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// `MIKMIK_HOME` is process-global, so the tests that redirect it run one
     /// at a time and put it back afterwards.
     static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -299,8 +299,8 @@ mod tests {
 
     impl HomeGuard {
         fn pointing_at(dir: &std::path::Path) -> Self {
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir);
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir);
             Self { saved }
         }
     }
@@ -308,8 +308,8 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

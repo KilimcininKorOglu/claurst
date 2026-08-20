@@ -48,7 +48,7 @@ pub fn unique_account_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
 }
 
 /// The canonical claurst home directory.
-pub fn claurst_dir() -> PathBuf {
+pub fn mikmik_dir() -> PathBuf {
     crate::config::Settings::config_dir()
 }
 
@@ -312,7 +312,7 @@ mod tests {
 
     /// End-to-end: the real codex token save path lands in an owner-only
     /// `auth.json` under an owner-only config dir. Redirects the config root
-    /// via a temp `CLAURST_HOME`, serialized against any other env-mutating
+    /// via a temp `MIKMIK_HOME`, serialized against any other env-mutating
     /// test in this binary.
     #[cfg(unix)]
     #[test]
@@ -323,8 +323,8 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let tmp = tempfile::tempdir().unwrap();
-        let prev_home = std::env::var_os("CLAURST_HOME");
-        std::env::set_var("CLAURST_HOME", tmp.path());
+        let prev_home = std::env::var_os("MIKMIK_HOME");
+        std::env::set_var("MIKMIK_HOME", tmp.path());
 
         let tokens = crate::oauth_config::CodexTokens {
             access_token: "access-secret".into(),
@@ -345,8 +345,8 @@ mod tests {
         // Restore the config root before asserting so a failure can't leak the
         // override into the rest of the test binary.
         match prev_home {
-            Some(v) => std::env::set_var("CLAURST_HOME", v),
-            None => std::env::remove_var("CLAURST_HOME"),
+            Some(v) => std::env::set_var("MIKMIK_HOME", v),
+            None => std::env::remove_var("MIKMIK_HOME"),
         }
 
         save_res.unwrap();

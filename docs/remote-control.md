@@ -54,7 +54,7 @@ curl http://127.0.0.1:8350/healthz     # -> ok
 
 ## 2. Point claurst at it
 
-In your user settings file (`~/.claurst/settings.json`, or wherever `CLAURST_HOME` points):
+In your user settings file (`~/.config/mikmik/settings.json`, or wherever `MIKMIK_HOME` points):
 
 ```json
 {

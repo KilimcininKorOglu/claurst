@@ -117,7 +117,7 @@ pub mod skill_discovery;
 pub use cost::CostTracker;
 pub use feature_flags::FeatureFlagManager;
 pub use history::ConversationSession;
-pub use paths::claurst_home;
+pub use paths::mikmik_home;
 pub use permissions::{
     format_permission_reason, AutoPermissionHandler, InteractivePermissionHandler,
     ManagedAutoPermissionHandler, ManagedInteractivePermissionHandler, PermissionAction,
@@ -2662,18 +2662,18 @@ pub mod config {
         /// accounts, skills, …). Every subdirectory (`config_dir().join("sessions")`,
         /// `.join("accounts")`, …) lives under this one root.
         ///
-        /// Resolution precedence (see issue #207 — XDG Base Directory support,
-        /// kept fully back-compatible so existing installs are untouched):
+        /// Resolution precedence (XDG Base Directory support, issue #207):
         ///
-        /// 1. **`$CLAURST_HOME`** — if set and non-empty, used verbatim.
-        /// 2. **Legacy `~/.claurst`** — if that directory already exists, it is
-        ///    reused so existing users need no migration.
-        /// 3. **XDG** — `$XDG_CONFIG_HOME/claurst` when `$XDG_CONFIG_HOME` is set
-        ///    (and absolute, per the spec), otherwise `~/.config/claurst`. Fresh
-        ///    installs land here.
+        /// 1. **`$MIKMIK_HOME`** — if set and non-empty, used verbatim.
+        /// 2. **XDG** — `$XDG_CONFIG_HOME/mikmik` when `$XDG_CONFIG_HOME` is set
+        ///    (and absolute, per the spec), otherwise `~/.config/mikmik`.
+        ///
+        /// There is no fallback to the old name. A directory left behind by the
+        /// previous name is not read, so its settings, credentials and sessions
+        /// have to be moved by hand.
         pub fn config_dir() -> PathBuf {
             // 1. Explicit override wins, used verbatim.
-            if let Some(explicit) = std::env::var_os("CLAURST_HOME") {
+            if let Some(explicit) = std::env::var_os("MIKMIK_HOME") {
                 if !explicit.is_empty() {
                     return PathBuf::from(explicit);
                 }
@@ -2681,21 +2681,15 @@ pub mod config {
 
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
 
-            // 2. Back-compat: an existing legacy `~/.claurst` is used as-is.
-            let legacy = home.join(".claurst");
-            if legacy.is_dir() {
-                return legacy;
-            }
-
-            // 3. XDG config location for fresh installs.
+            // 2. XDG config location.
             if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
                 let xdg = PathBuf::from(xdg);
                 // Per the XDG spec a relative $XDG_CONFIG_HOME must be ignored.
                 if xdg.is_absolute() {
-                    return xdg.join("claurst");
+                    return xdg.join("mikmik");
                 }
             }
-            home.join(".config").join("claurst")
+            home.join(".config").join("mikmik")
         }
 
         /// Full path to the global settings JSON file.
@@ -4645,7 +4639,6 @@ pub mod constants {
     pub const CLAUDE_MD_FILENAME: &str = "AGENTS.md";
     pub const SETTINGS_FILENAME: &str = "settings.json";
     pub const HISTORY_FILENAME: &str = "conversations";
-    pub const CONFIG_DIR_NAME: &str = ".claurst";
 
     // Tool names
     pub const TOOL_NAME_BASH: &str = "Bash";
@@ -8614,8 +8607,8 @@ mod credential_storage_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, _dir: dir }
         }
     }
@@ -8623,8 +8616,8 @@ mod credential_storage_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }
@@ -9823,8 +9816,8 @@ mod session_listing_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, dir }
         }
     }
@@ -9832,8 +9825,8 @@ mod session_listing_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }
@@ -9924,8 +9917,8 @@ mod project_settings_boundary_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, dir }
         }
 
@@ -9938,8 +9931,8 @@ mod project_settings_boundary_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

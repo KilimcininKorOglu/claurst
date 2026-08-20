@@ -1196,8 +1196,8 @@ mod profile_resolution_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, _dir: dir }
         }
     }
@@ -1205,8 +1205,8 @@ mod profile_resolution_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }
@@ -1344,9 +1344,9 @@ mod custom_anthropic_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved_home = std::env::var_os("CLAURST_HOME");
+            let saved_home = std::env::var_os("MIKMIK_HOME");
             let saved_base = std::env::var_os("CUSTOM_ANTHROPIC_BASE_URL");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            std::env::set_var("MIKMIK_HOME", dir.path());
             std::env::remove_var("CUSTOM_ANTHROPIC_BASE_URL");
             Self {
                 saved_home,
@@ -1359,8 +1359,8 @@ mod custom_anthropic_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved_home {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
             match &self.saved_base {
                 Some(value) => std::env::set_var("CUSTOM_ANTHROPIC_BASE_URL", value),
@@ -1462,8 +1462,8 @@ mod account_registration_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, _dir: dir }
         }
     }
@@ -1471,8 +1471,8 @@ mod account_registration_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

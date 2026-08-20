@@ -481,7 +481,7 @@ mod tests {
         );
         // Route the assertion through the same canonical resolver instead of
         // hardcoding `.claurst`: the todos file must live under the resolved
-        // claurst home (which may be ~/.claurst, $CLAURST_HOME, or the XDG dir).
+        // claurst home (which may be ~/.claurst, $MIKMIK_HOME, or the XDG dir).
         let home = mikmik_core::config::Settings::config_dir();
         assert!(
             path.starts_with(home.join("todos")),

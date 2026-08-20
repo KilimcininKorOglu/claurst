@@ -91,7 +91,7 @@ fn set_enabled(ctx: &CommandContext, enabled: bool) -> CommandResult {
 /// Discard the stored soul. The bones are untouched because they are not
 /// stored in the first place.
 fn forget() -> CommandResult {
-    let path = mikmik_core::claurst_home().join("companion.json");
+    let path = mikmik_core::mikmik_home().join("companion.json");
     match std::fs::remove_file(&path) {
         Ok(()) => CommandResult::Message(
             "Companion forgotten. The next `/buddy` hatches it again, with the same body \
@@ -107,7 +107,7 @@ fn forget() -> CommandResult {
 
 /// Show the companion card, hatching it first if it has never been named.
 async fn show(ctx: &CommandContext) -> CommandResult {
-    let config_dir = mikmik_core::claurst_home();
+    let config_dir = mikmik_core::mikmik_home();
     let identity = mikmik_core::accounts::stable_identity();
     let mut companion = mikmik_buddy::get_companion(&identity, &config_dir);
 
@@ -437,7 +437,7 @@ mod tests {
     use super::*;
     use mikmik_core::cost::CostTracker;
 
-    /// `CLAURST_HOME` is process-global, so the tests that redirect it run one
+    /// `MIKMIK_HOME` is process-global, so the tests that redirect it run one
     /// at a time and put it back afterwards. Async-aware because those tests
     /// hold it across the model call.
     static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -448,8 +448,8 @@ mod tests {
 
     impl HomeGuard {
         fn pointing_at(dir: &std::path::Path) -> Self {
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir);
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir);
             Self { saved }
         }
     }
@@ -457,8 +457,8 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

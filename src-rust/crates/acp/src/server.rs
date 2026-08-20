@@ -731,7 +731,7 @@ mod tests {
         name: String,
     }
 
-    /// `CLAURST_HOME` is process-wide, so the tests that move it run one at a
+    /// `MIKMIK_HOME` is process-wide, so the tests that move it run one at a
     /// time and put it back when they are done.
     static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -743,8 +743,8 @@ mod tests {
     impl HomeGuard {
         fn set() -> Self {
             let dir = tempfile::tempdir().expect("temp dir");
-            let previous = std::env::var_os("CLAURST_HOME");
-            unsafe { std::env::set_var("CLAURST_HOME", dir.path()) };
+            let previous = std::env::var_os("MIKMIK_HOME");
+            unsafe { std::env::set_var("MIKMIK_HOME", dir.path()) };
             Self {
                 previous,
                 _dir: dir,
@@ -755,8 +755,8 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.previous {
-                Some(v) => unsafe { std::env::set_var("CLAURST_HOME", v) },
-                None => unsafe { std::env::remove_var("CLAURST_HOME") },
+                Some(v) => unsafe { std::env::set_var("MIKMIK_HOME", v) },
+                None => unsafe { std::env::remove_var("MIKMIK_HOME") },
             }
         }
     }

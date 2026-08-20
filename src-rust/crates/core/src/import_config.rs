@@ -33,12 +33,12 @@ impl ImportPaths {
     pub fn detect() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let claude_dir = home.join(".claude");
-        let claurst_dir = Settings::config_dir();
+        let mikmik_dir = Settings::config_dir();
         Self {
             source_claude_md: claude_dir.join("CLAUDE.md"),
             source_settings_json: claude_dir.join("settings.json"),
-            target_claude_md: claurst_dir.join("CLAUDE.md"),
-            target_settings_json: claurst_dir.join("settings.json"),
+            target_claude_md: mikmik_dir.join("CLAUDE.md"),
+            target_settings_json: mikmik_dir.join("settings.json"),
         }
     }
 }
@@ -925,9 +925,9 @@ mod tests {
         // with every other test reading the home dir in parallel.
         let tmp = TempDir::new().unwrap();
         let claude_dir = tmp.path().join(".claude");
-        let claurst_dir = tmp.path().join(".claurst");
+        let mikmik_dir = tmp.path().join(".claurst");
         std::fs::create_dir_all(&claude_dir).unwrap();
-        std::fs::create_dir_all(&claurst_dir).unwrap();
+        std::fs::create_dir_all(&mikmik_dir).unwrap();
         std::fs::write(claude_dir.join("CLAUDE.md"), "hello\nworld").unwrap();
         std::fs::write(
             claude_dir.join("settings.json"),
@@ -951,8 +951,8 @@ mod tests {
         let paths = ImportPaths {
             source_claude_md: claude_dir.join("CLAUDE.md"),
             source_settings_json: claude_dir.join("settings.json"),
-            target_claude_md: claurst_dir.join("CLAUDE.md"),
-            target_settings_json: claurst_dir.join("settings.json"),
+            target_claude_md: mikmik_dir.join("CLAUDE.md"),
+            target_settings_json: mikmik_dir.join("settings.json"),
         };
 
         let preview = build_import_preview_with_paths(ImportSelection::Both, paths).unwrap();

@@ -2692,7 +2692,7 @@ impl App {
             return;
         }
         let identity = mikmik_core::accounts::stable_identity();
-        let companion = mikmik_buddy::get_companion(&identity, &mikmik_core::claurst_home());
+        let companion = mikmik_buddy::get_companion(&identity, &mikmik_core::mikmik_home());
         if companion.soul.is_some() {
             self.companion = Some(companion);
         }
@@ -11106,7 +11106,7 @@ mod background_pump_tests {
 mod clipboard_hint_tests {
     use super::*;
 
-    /// `CLAURST_HOME` is not involved, but the env is process-global, so the
+    /// `MIKMIK_HOME` is not involved, but the env is process-global, so the
     /// two cases cannot run at once.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -11307,8 +11307,8 @@ mod project_trust_decision_tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, dir }
         }
 
@@ -11320,8 +11320,8 @@ mod project_trust_decision_tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }

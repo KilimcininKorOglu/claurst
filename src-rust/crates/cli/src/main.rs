@@ -685,7 +685,7 @@ async fn main() -> anyhow::Result<()> {
         // this output silently omits a block a real run sends.
         if config.companion.as_ref().is_some_and(|c| c.enabled) {
             let identity = mikmik_core::accounts::stable_identity();
-            let companion = mikmik_buddy::get_companion(&identity, &mikmik_core::claurst_home());
+            let companion = mikmik_buddy::get_companion(&identity, &mikmik_core::mikmik_home());
             dump_config.companion_addendum = mikmik_buddy::intro_for(&companion);
         }
 

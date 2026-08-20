@@ -1681,7 +1681,7 @@ mod tests {
         assert!(matches!(entry.kind, SettingKind::Bool));
     }
 
-    /// `CLAURST_HOME` is process-global and `toggle_or_cycle_current` saves, so
+    /// `MIKMIK_HOME` is process-global and `toggle_or_cycle_current` saves, so
     /// the toggle test needs the config root to itself.
     static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1693,8 +1693,8 @@ mod tests {
     impl HomeGuard {
         fn new() -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let saved = std::env::var_os("CLAURST_HOME");
-            std::env::set_var("CLAURST_HOME", dir.path());
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
             Self { saved, _dir: dir }
         }
     }
@@ -1702,8 +1702,8 @@ mod tests {
     impl Drop for HomeGuard {
         fn drop(&mut self) {
             match &self.saved {
-                Some(value) => std::env::set_var("CLAURST_HOME", value),
-                None => std::env::remove_var("CLAURST_HOME"),
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
             }
         }
     }
@@ -1717,8 +1717,8 @@ mod tests {
             Err(poisoned) => poisoned.into_inner(),
         };
         let _home = HomeGuard::new();
-        let path = mikmik_core::claurst_home().join("settings.json");
-        std::fs::create_dir_all(mikmik_core::claurst_home()).expect("mkdir");
+        let path = mikmik_core::mikmik_home().join("settings.json");
+        std::fs::create_dir_all(mikmik_core::mikmik_home()).expect("mkdir");
         std::fs::write(&path, r#"{"config":{"model":"x",}}"#).expect("write");
 
         let mut screen = SettingsScreen::new();
@@ -1832,7 +1832,7 @@ mod tests {
         assert_eq!(screen.searxng_url, "http://searx.lan:9000");
         assert_eq!(config.searxng_url.as_deref(), Some("http://searx.lan:9000"));
 
-        let written = std::fs::read_to_string(mikmik_core::claurst_home().join("settings.json"))
+        let written = std::fs::read_to_string(mikmik_core::mikmik_home().join("settings.json"))
             .expect("settings.json");
         assert!(
             written.contains("\"searxngUrl\": \"http://searx.lan:9000\""),
