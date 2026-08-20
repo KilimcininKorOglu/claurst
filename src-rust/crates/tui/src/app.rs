@@ -5753,10 +5753,9 @@ impl App {
             // live in claurst_core::keybindings (shift+enter, alt+enter, ctrl+j
             // → newline; enter → submit) and are handled above at the resolver.
             KeyCode::Enter
-                if !self.is_streaming
-                    && (key.modifiers.contains(KeyModifiers::SHIFT)
-                        || key.modifiers.contains(KeyModifiers::ALT)
-                        || key.modifiers.contains(KeyModifiers::CONTROL)) =>
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.prompt_input.insert_newline();
                 self.refresh_prompt_input();
@@ -6333,32 +6332,27 @@ impl App {
                 }
                 false
             }
+            // Line editing stays live while a turn streams: character entry
+            // already is, so the user can type the next message but could not
+            // fix a typo in it. See the note above `queued_messages`.
             "goLineStart" => {
-                if !self.is_streaming {
-                    self.prompt_input.cursor = 0;
-                    self.sync_legacy_prompt_fields();
-                }
+                self.prompt_input.cursor = 0;
+                self.sync_legacy_prompt_fields();
                 false
             }
             "goLineEnd" => {
-                if !self.is_streaming {
-                    self.prompt_input.cursor = self.prompt_input.text.len();
-                    self.sync_legacy_prompt_fields();
-                }
+                self.prompt_input.cursor = self.prompt_input.text.len();
+                self.sync_legacy_prompt_fields();
                 false
             }
             "killToStart" => {
-                if !self.is_streaming {
-                    self.prompt_input.kill_line_backward();
-                    self.refresh_prompt_input();
-                }
+                self.prompt_input.kill_line_backward();
+                self.refresh_prompt_input();
                 false
             }
             "killWord" => {
-                if !self.is_streaming {
-                    self.prompt_input.kill_word_backward();
-                    self.refresh_prompt_input();
-                }
+                self.prompt_input.kill_word_backward();
+                self.refresh_prompt_input();
                 false
             }
             "expandPaste" => {
@@ -6457,19 +6451,15 @@ impl App {
             // ========== NEW KEYBINDING ACTIONS (Phase 1) ==========
             "clearLine" => {
                 // Ctrl+L: Clear the current input line (like bash Ctrl+L)
-                if !self.is_streaming {
-                    self.prompt_input.text.clear();
-                    self.prompt_input.cursor = 0;
-                    self.refresh_prompt_input();
-                }
+                self.prompt_input.text.clear();
+                self.prompt_input.cursor = 0;
+                self.refresh_prompt_input();
                 false
             }
             "deleteCharBefore" => {
                 // Ctrl+H: Delete character before cursor (backspace equivalent)
-                if !self.is_streaming {
-                    self.prompt_input.backspace();
-                    self.refresh_prompt_input();
-                }
+                self.prompt_input.backspace();
+                self.refresh_prompt_input();
                 false
             }
             "previousMessage" => {
@@ -6546,34 +6536,32 @@ impl App {
             }
             "deleteWord" => {
                 // Alt+D: Delete word forward
-                if !self.is_streaming {
-                    self.prompt_input.delete_word_at_cursor();
-                    self.refresh_prompt_input();
-                }
+                self.prompt_input.delete_word_at_cursor();
+                self.refresh_prompt_input();
                 false
             }
             "newline" => {
-                // Shift+Enter: insert a literal newline into the prompt.
-                if !self.is_streaming {
-                    self.prompt_input.insert_newline();
-                    self.refresh_prompt_input();
-                }
+                // Shift+Enter: insert a literal newline into the prompt. Live
+                // while streaming so a queued message can be multi-line; the
+                // CLI loop only queues on a *bare* Enter, so this cannot send.
+                self.prompt_input.insert_newline();
+                self.refresh_prompt_input();
                 false
             }
             "indent" => {
                 // Tab: cycle agent mode when prompt is empty, accept
                 // slash-command suggestion otherwise.
-                if !self.is_streaming {
-                    if !self.prompt_input.suggestions.is_empty() {
-                        if self.prompt_input.suggestion_index.is_none() {
-                            self.prompt_input.suggestion_index = Some(0);
-                        }
-                        self.prompt_input.accept_suggestion();
-                        self.refresh_prompt_input();
-                    } else if self.prompt_input.is_empty() {
-                        self.cycle_agent_mode();
-                        self.mikmik_look_down();
+                if !self.prompt_input.suggestions.is_empty() {
+                    if self.prompt_input.suggestion_index.is_none() {
+                        self.prompt_input.suggestion_index = Some(0);
                     }
+                    self.prompt_input.accept_suggestion();
+                    self.refresh_prompt_input();
+                } else if self.prompt_input.is_empty() && !self.is_streaming {
+                    // Agent mode belongs to the turn in flight, so leave it
+                    // alone until that turn is done.
+                    self.cycle_agent_mode();
+                    self.mikmik_look_down();
                 }
                 false
             }
@@ -9942,6 +9930,83 @@ mod tests {
             );
             assert!(!app.should_exit, "{code:?} started an exit");
         }
+    }
+
+    /// Typing a queued message is allowed while a turn streams, so editing it
+    /// has to be allowed too. Each of these was gated on `!is_streaming` and
+    /// left the user able to write a typo but not to fix it.
+    #[test]
+    fn a_queued_message_stays_editable_while_a_turn_streams() {
+        let cases: &[(&str, &str, usize, &str)] = &[
+            ("killWord", "alpha beta", 10, "alpha "),
+            ("killToStart", "alpha beta", 10, ""),
+            ("clearLine", "alpha beta", 10, ""),
+            ("deleteCharBefore", "alpha beta", 10, "alpha bet"),
+            ("deleteWord", "alpha beta", 6, "alpha "),
+            ("newline", "alpha", 5, "alpha\n"),
+        ];
+
+        for (action, text, cursor, expected) in cases {
+            let mut app = make_app();
+            app.is_streaming = true;
+            app.prompt_input.text = (*text).to_string();
+            app.prompt_input.cursor = *cursor;
+
+            app.handle_keybinding_action(action);
+
+            assert_eq!(
+                app.prompt_input.text, *expected,
+                "{action} did nothing while streaming"
+            );
+        }
+
+        // Cursor moves have no text to compare, so check them separately.
+        let mut app = make_app();
+        app.is_streaming = true;
+        app.prompt_input.text = "alpha beta".to_string();
+        app.prompt_input.cursor = 4;
+        app.handle_keybinding_action("goLineEnd");
+        assert_eq!(app.prompt_input.cursor, 10, "goLineEnd did not move");
+        app.handle_keybinding_action("goLineStart");
+        assert_eq!(app.prompt_input.cursor, 0, "goLineStart did not move");
+    }
+
+    /// Tab still accepts a suggestion mid-turn, but the agent mode it would
+    /// otherwise cycle belongs to the turn in flight.
+    #[test]
+    fn tab_leaves_the_agent_mode_alone_while_a_turn_streams() {
+        let mut app = make_app();
+        app.is_streaming = true;
+        app.prompt_input.text.clear();
+        let before = app.agent_mode.clone();
+
+        app.handle_keybinding_action("indent");
+
+        assert_eq!(app.agent_mode, before);
+    }
+
+    /// The CLI loop queues on a bare Enter only, so a modified Enter must stay
+    /// a newline while streaming rather than being swallowed.
+    #[test]
+    fn a_modified_enter_still_inserts_a_newline_while_streaming() {
+        let mut app = make_app();
+        app.is_streaming = true;
+        app.prompt_input.text = "alpha".to_string();
+        app.prompt_input.cursor = 5;
+
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::CONTROL));
+
+        assert_eq!(app.prompt_input.text, "alpha\n");
+    }
+
+    /// Submitting stays the CLI loop's job: `App` must not send mid-turn.
+    #[test]
+    fn submit_is_still_refused_while_a_turn_streams() {
+        let mut app = make_app();
+        app.is_streaming = true;
+        app.prompt_input.text = "alpha".to_string();
+
+        assert!(!app.handle_keybinding_action("submit"));
     }
 
     #[test]
