@@ -2965,8 +2965,12 @@ pub mod config {
                 config: merged_config,
                 version: over.version.or(base.version),
                 projects: merge_map(base.projects, over.projects),
-                remote_control_at_startup: over.remote_control_at_startup
-                    || base.remote_control_at_startup,
+                // SECURITY: this opens the remote-control bridge at startup, so
+                // it belongs with `remote_control` below. A project settings
+                // file that could set it would turn a user who configured a
+                // relay and deliberately left startup off back on by cloning a
+                // repository.
+                remote_control_at_startup: base.remote_control_at_startup,
                 // SECURITY: only the user's global settings may point the
                 // bridge at a relay. A project settings file that could set
                 // this would gain a channel for driving the agent on the
@@ -3405,6 +3409,49 @@ pub mod config {
 
             let merged = Settings::merge_with(user, Settings::default(), ProjectRunnables::Deny);
             assert!(merged.remote_control.is_some());
+        }
+
+        /// Opening the bridge at startup is the same decision as configuring
+        /// it. A user who set up a relay and left startup off must not have
+        /// that reversed by cloning a repository.
+        #[test]
+        fn a_project_settings_file_cannot_open_the_bridge_at_startup() {
+            let user = Settings {
+                remote_control: Some(configured()),
+                remote_control_at_startup: false,
+                ..Default::default()
+            };
+            let project = Settings {
+                remote_control_at_startup: true,
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, project, ProjectRunnables::Deny);
+            assert!(!merged.remote_control_at_startup);
+        }
+
+        #[test]
+        fn the_users_own_startup_choice_survives_the_merge() {
+            let user = Settings {
+                remote_control: Some(configured()),
+                remote_control_at_startup: true,
+                ..Default::default()
+            };
+
+            let merged = Settings::merge_with(user, Settings::default(), ProjectRunnables::Deny);
+            assert!(merged.remote_control_at_startup);
+        }
+
+        /// The refused list is derived by running the merge, so the key has to
+        /// show up there without anyone adding it to a list by hand.
+        #[test]
+        fn the_startup_key_is_reported_as_refused() {
+            let raw = serde_json::json!({ "remoteControlAtStartup": true });
+            let refused = Settings::refused_project_keys(&raw);
+            assert!(
+                refused.iter().any(|k| k == "remoteControlAtStartup"),
+                "refused keys were {refused:?}"
+            );
         }
     }
 
