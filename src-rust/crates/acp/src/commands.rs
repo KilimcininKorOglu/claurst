@@ -201,42 +201,34 @@ async fn apply(
                 runtime.model_registry.as_ref(),
             );
 
-            let provider = claurst_query::compact::dispatches_through_provider(
-                &route.account,
+            // The compact model applies here too. "Always that one" has to
+            // hold on every surface, or the setting means "usually".
+            let run = claurst_query::compact::compact_on_demand(
+                &route,
                 &runtime.config,
+                Some(runtime.provider_registry.as_ref()),
                 runtime.api_client.as_ref(),
-            )
-            .then(|| {
-                claurst_query::compact::provider_for_turn(
-                    runtime.provider_registry.as_ref(),
-                    &runtime.config,
-                    &route.account,
-                )
-            })
-            .flatten();
-
-            let backend: Box<dyn claurst_query::compact::CompactBackend> = match provider {
-                Some(provider) => Box::new(claurst_query::compact::ProviderBackend(provider)),
-                None => Box::new(claurst_query::compact::AnthropicBackend(
-                    runtime.api_client.as_ref(),
-                )),
-            };
-
-            match claurst_query::compact::compact_conversation(
-                backend.as_ref(),
                 &current,
-                &route.model,
                 instruction.as_deref(),
+                session.session_id.0.as_ref(),
             )
-            .await
-            {
+            .await;
+
+            match run.result {
                 Ok(compacted) => {
                     let removed = before.saturating_sub(compacted.len());
                     *session.messages.lock() = compacted;
-                    Outcome::said(format!(
+                    let mut said = format!(
                         "Compacted {removed} message{} into a summary.",
                         if removed == 1 { "" } else { "s" }
-                    ))
+                    );
+                    // The chosen compact model could not write it and the
+                    // turn's own did, which the client has to be told.
+                    if let Some(note) = run.note {
+                        said.push('\n');
+                        said.push_str(&note);
+                    }
+                    Outcome::said(said)
                 }
                 // The conversation was never replaced, so it is intact.
                 Err(e) => Outcome::failed(format!("Could not compact: {e}")),

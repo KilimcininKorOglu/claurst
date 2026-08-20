@@ -845,7 +845,9 @@ pub fn should_auto_compact_for_window(
 // beside the turn loop in `runner::context` and re-exported here, because a
 // caller compacting on demand has to pick the same backend the next turn will
 // dispatch through.
-pub use crate::runner::context::{dispatches_through_provider, provider_for_turn};
+pub use crate::runner::context::{
+    backend_for, compact_on_demand, dispatches_through_provider, provider_for_turn,
+};
 
 /// One model call, no tools, no streaming to anyone.
 ///
@@ -1268,11 +1270,12 @@ pub async fn attempt_compaction(
     backend: &dyn CompactBackend,
     messages: &[Message],
     model: &WireModel,
+    instruction: Option<&str>,
     session_id: &str,
 ) -> Result<Vec<Message>, ClaudeError> {
     info!(model = %model, count = messages.len(), "Compaction attempt");
 
-    match compact_conversation(backend, messages, model, None).await {
+    match compact_conversation(backend, messages, model, instruction).await {
         Ok(new_msgs) => {
             update_compact_state(session_id, AutoCompactState::on_success);
             info!(
@@ -1287,6 +1290,93 @@ pub async fn attempt_compaction(
             update_compact_state(session_id, AutoCompactState::on_failure);
             Err(e)
         }
+    }
+}
+
+/// A summariser that cannot be reached, so the fallback runs and says why.
+///
+/// An account with no usable credential is a summariser that will fail. Saying
+/// so as a backend keeps one code path instead of two: the caller does not
+/// have to decide separately whether to skip the attempt.
+pub struct UnreachableBackend;
+
+#[async_trait::async_trait]
+impl CompactBackend for UnreachableBackend {
+    async fn summarise(
+        &self,
+        _system: &str,
+        _user: &str,
+        _model: &WireModel,
+        _max_tokens: u32,
+    ) -> Result<String, ClaudeError> {
+        Err(ClaudeError::Other("no usable credential".to_string()))
+    }
+}
+
+/// Who writes a summary, and over which endpoint.
+pub struct Summariser<'a> {
+    pub backend: &'a dyn CompactBackend,
+    pub route: &'a claurst_core::config::Route,
+}
+
+/// What one compaction came to, and what to tell the user about it.
+pub struct CompactionRun {
+    pub result: Result<Vec<Message>, ClaudeError>,
+    /// Set when the chosen summariser could not be used and the fallback
+    /// wrote the summary instead.
+    pub note: Option<String>,
+}
+
+/// Summarise on `chosen`, falling back once to `fallback` and saying so.
+///
+/// One place rather than three, because every surface that compacts has the
+/// same decision to make. A compact model that cannot answer must not mean no
+/// compaction at all: the context still has to come down, and a session that
+/// stops compacting over a mistyped setting fails in a way nobody sees until
+/// the provider refuses the prompt. Equally, honouring a setting that does not
+/// work is not honouring it, so the substitution is reported.
+///
+/// `fallback` is `None` when `chosen` is already the turn's own model, which
+/// leaves nothing to fall back to.
+pub async fn compact_with_fallback(
+    chosen: Summariser<'_>,
+    fallback: Option<Summariser<'_>>,
+    messages: &[Message],
+    instruction: Option<&str>,
+    session_id: &str,
+) -> CompactionRun {
+    let first = attempt_compaction(
+        chosen.backend,
+        messages,
+        &chosen.route.model,
+        instruction,
+        session_id,
+    )
+    .await;
+
+    let (Err(error), Some(fallback)) = (&first, fallback) else {
+        return CompactionRun {
+            result: first,
+            note: None,
+        };
+    };
+
+    let note = format!(
+        "Compact model '{}' on account '{}' is unavailable ({error}); \
+         summarised with '{}' instead.",
+        chosen.route.model, chosen.route.account, fallback.route.model
+    );
+
+    CompactionRun {
+        result: attempt_compaction(
+            fallback.backend,
+            messages,
+            &fallback.route.model,
+            instruction,
+            session_id,
+        )
+        .await,
+        note: Some(note),
     }
 }
 

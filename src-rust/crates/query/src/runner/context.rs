@@ -81,21 +81,69 @@ pub fn provider_for_turn(
 /// The same pair the dispatch arm asks, so a turn cannot be summarised by one
 /// endpoint and answered by another, and the compact model reaches its own
 /// account rather than the session's.
-pub(crate) fn backend_for<'a>(
+pub fn backend_for<'a>(
     route: &claurst_core::config::Route,
-    config: &'a QueryConfig,
+    registry: Option<&claurst_api::ProviderRegistry>,
     core_config: &claurst_core::Config,
     client: &'a claurst_api::AnthropicClient,
 ) -> Box<dyn CompactBackend + 'a> {
-    match config
-        .provider_registry
-        .as_ref()
+    match registry
         .filter(|_| dispatches_through_provider(&route.account, core_config, client))
         .and_then(|registry| provider_for_turn(registry, core_config, &route.account))
     {
         Some(provider) => Box::new(compact::ProviderBackend(provider)),
         None => Box::new(compact::AnthropicBackend(client)),
     }
+}
+
+/// Summarise a conversation on demand, honouring the compact model.
+///
+/// `/compact` and the ACP command both do exactly this and nothing else, so
+/// they share it: two surfaces writing the same wiring twice is how one of them
+/// ends up not honouring the setting. The turn loop keeps its own wiring
+/// because it needs the turn's backend for micro-compaction as well.
+pub async fn compact_on_demand(
+    turn: &claurst_core::config::Route,
+    config: &claurst_core::Config,
+    registry: Option<&claurst_api::ProviderRegistry>,
+    client: &claurst_api::AnthropicClient,
+    messages: &[Message],
+    instruction: Option<&str>,
+    session_id: &str,
+) -> compact::CompactionRun {
+    let compact_route = config.resolve_compact_route(turn);
+    let turn_backend = backend_for(turn, registry, config, client);
+
+    // An unreachable summariser is not an error here: it is the case the
+    // fallback exists for, so it has to reach `compact_with_fallback` as a
+    // failing backend rather than short-circuit into the turn's model silently.
+    let unreachable = compact::UnreachableBackend;
+    let compact_backend: Box<dyn CompactBackend> =
+        if config.reject_unserved_model(&compact_route).is_none() {
+            backend_for(&compact_route, registry, config, client)
+        } else {
+            Box::new(unreachable)
+        };
+
+    let uses_a_separate_summariser = compact_route != *turn;
+    compact::compact_with_fallback(
+        compact::Summariser {
+            backend: if uses_a_separate_summariser {
+                compact_backend.as_ref()
+            } else {
+                turn_backend.as_ref()
+            },
+            route: &compact_route,
+        },
+        uses_a_separate_summariser.then_some(compact::Summariser {
+            backend: turn_backend.as_ref(),
+            route: turn,
+        }),
+        messages,
+        instruction,
+        session_id,
+    )
+    .await
 }
 
 /// Book a finished turn's usage: its cost, its price on the message, and the
@@ -307,63 +355,40 @@ pub(crate) async fn compact_before_request(
 /// Write the summary, on the chosen model where that works and on the turn's
 /// own where it does not.
 ///
-/// A compact model that cannot answer must not mean no compaction at all: the
-/// context still has to come down, and a session that stops compacting because
-/// of a mistyped setting fails in a way the user cannot see until the provider
-/// refuses the prompt. So it falls back once, and says so, rather than either
-/// failing quietly or pretending the setting was honoured.
+/// The policy itself lives in `compact::compact_with_fallback`, because
+/// `/compact` and the ACP command arm face the same decision. This adds the
+/// only part that belongs to the turn loop: the substitution reaches the user
+/// as a `Status` event.
 async fn summarise_with_fallback(
     input: &ContextPassInput<'_>,
     messages: &[Message],
     event_tx: Option<&mpsc::UnboundedSender<QueryEvent>>,
 ) -> Option<Vec<Message>> {
-    let note = |text: String| {
-        if let Some(tx) = event_tx {
-            let _ = tx.send(QueryEvent::Status(text));
-        }
+    // An account with no usable credential is a summariser that will fail,
+    // so it is expressed as one: a backend that answers with why.
+    let unreachable = compact::UnreachableBackend;
+    let chosen = compact::Summariser {
+        backend: match input.compact_backend {
+            Some(backend) => backend,
+            None if input.uses_a_separate_summariser() => &unreachable,
+            None => input.turn_backend,
+        },
+        route: input.compact_route,
     };
+    let fallback = input
+        .uses_a_separate_summariser()
+        .then_some(compact::Summariser {
+            backend: input.turn_backend,
+            route: input.route,
+        });
 
-    if !input.uses_a_separate_summariser() {
-        return compact::attempt_compaction(
-            input.turn_backend,
-            messages,
-            &input.route.model,
-            input.session_id,
-        )
-        .await
-        .ok();
+    let run =
+        compact::compact_with_fallback(chosen, fallback, messages, None, input.session_id).await;
+
+    if let (Some(note), Some(tx)) = (run.note, event_tx) {
+        let _ = tx.send(QueryEvent::Status(note));
     }
-
-    let fall_back_to_the_turn = |reason: String| async move {
-        note(format!(
-            "Compact model '{}' on account '{}' is unavailable ({reason});              summarised with '{}' instead.",
-            input.compact_route.model, input.compact_route.account, input.route.model
-        ));
-        compact::attempt_compaction(
-            input.turn_backend,
-            messages,
-            &input.route.model,
-            input.session_id,
-        )
-        .await
-        .ok()
-    };
-
-    let Some(backend) = input.compact_backend else {
-        return fall_back_to_the_turn("no usable credential".to_string()).await;
-    };
-
-    match compact::attempt_compaction(
-        backend,
-        messages,
-        &input.compact_route.model,
-        input.session_id,
-    )
-    .await
-    {
-        Ok(new_msgs) => Some(new_msgs),
-        Err(e) => fall_back_to_the_turn(e.to_string()).await,
-    }
+    run.result.ok()
 }
 
 /// The gated reactive path: emergency collapse first, then a normal compact.

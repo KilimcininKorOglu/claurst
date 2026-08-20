@@ -2320,29 +2320,21 @@ async fn run_compaction(
     messages: &[claurst_core::types::Message],
     model: &str,
     instruction: Option<&str>,
+    session_id: &str,
     config: &claurst_core::Config,
     client: &claurst_api::AnthropicClient,
     provider_registry: Option<&std::sync::Arc<claurst_api::ProviderRegistry>>,
-) -> Result<Vec<claurst_core::types::Message>, claurst_core::error::ClaudeError> {
-    let route = config.resolve_route(model);
-    let provider = provider_registry
-        .filter(|_| {
-            claurst_query::compact::dispatches_through_provider(&route.account, config, client)
-        })
-        .and_then(|registry| {
-            claurst_query::compact::provider_for_turn(registry, config, &route.account)
-        });
-
-    let backend: Box<dyn claurst_query::compact::CompactBackend> = match provider {
-        Some(provider) => Box::new(claurst_query::compact::ProviderBackend(provider)),
-        None => Box::new(claurst_query::compact::AnthropicBackend(client)),
-    };
-
-    claurst_query::compact::compact_conversation(
-        backend.as_ref(),
+) -> claurst_query::compact::CompactionRun {
+    // `/compact` honours the compact model too. "Always that one" has to hold
+    // on every surface, or the setting means "usually".
+    claurst_query::compact::compact_on_demand(
+        &config.resolve_route(model),
+        config,
+        provider_registry.map(|registry| registry.as_ref()),
+        client,
         messages,
-        &route.model,
         instruction,
+        session_id,
     )
     .await
 }
@@ -3812,16 +3804,27 @@ async fn run_interactive(
                                         session_model_string(&cmd_ctx.config, &model_registry);
                                     app.status_message =
                                         Some("Compacting the conversation…".to_string());
-                                    match run_compaction(
+                                    let run = run_compaction(
                                         &messages,
                                         &model,
                                         instruction.as_deref(),
+                                        &tool_ctx.session_id,
                                         &cmd_ctx.config,
                                         client.as_ref(),
                                         base_query_config.provider_registry.as_ref(),
                                     )
-                                    .await
-                                    {
+                                    .await;
+                                    // The chosen compact model could not write
+                                    // it and the turn's own did. Said before the
+                                    // outcome, so the reason arrives with it.
+                                    if let Some(note) = run.note {
+                                        app.push_notification(
+                                            claurst_tui::NotificationKind::Warning,
+                                            note,
+                                            None,
+                                        );
+                                    }
+                                    match run.result {
                                         Ok(new_msgs) => {
                                             messages = new_msgs.clone();
                                             app.replace_messages(new_msgs);
