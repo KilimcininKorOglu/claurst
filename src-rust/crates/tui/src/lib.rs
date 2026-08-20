@@ -166,6 +166,8 @@ pub mod tasks_overlay;
 pub mod theme_colors;
 /// Theme picker overlay.
 pub mod theme_screen;
+/// Find-in-transcript and go-to-message bar state.
+pub mod transcript_find;
 /// Turn-aware transcript grouping and metadata helpers.
 pub mod transcript_turn;
 /// Virtual scrollable list for efficient message rendering.

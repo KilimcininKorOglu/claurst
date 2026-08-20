@@ -646,12 +646,17 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     };
     let status_line_height = status_line_rows.len() as u16;
 
+    // The find bar takes one row directly above the prompt so the transcript it
+    // is searching stays on screen.
+    let find_bar_height = u16::from(app.transcript_find.visible);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
             Constraint::Length(separator_height),
             Constraint::Length(status_height),
+            Constraint::Length(find_bar_height),
             Constraint::Length(prompt_height),
             Constraint::Length(suggestions_height),
             Constraint::Length(status_line_height),
@@ -671,6 +676,9 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     if status_height > 0 {
         render_status_row(frame, app, chunks[2]);
     }
+    if find_bar_height > 0 {
+        render_find_bar(frame, app, chunks[3]);
+    }
     // The `/effort` selector replaces the prompt box while open: render it into
     // the input area (full width) and SKIP the prompt input. The prompt returns
     // when the picker closes on confirm/cancel.
@@ -678,20 +686,20 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         crate::effort_picker::render_effort_picker(
             frame,
             &app.effort_picker,
-            chunks[3],
+            chunks[4],
             app.frame_count,
         );
     } else {
-        render_input(frame, app, chunks[3], prompt_focused);
+        render_input(frame, app, chunks[4], prompt_focused);
     }
-    app.last_input_area.set(chunks[3]);
+    app.last_input_area.set(chunks[4]);
     if suggestions_height > 0 {
-        render_prompt_suggestions(frame, app, chunks[4]);
+        render_prompt_suggestions(frame, app, chunks[5]);
     }
     if status_line_height > 0 {
-        frame.render_widget(Paragraph::new(status_line_rows), chunks[5]);
+        frame.render_widget(Paragraph::new(status_line_rows), chunks[6]);
     }
-    render_footer(frame, app, chunks[6]);
+    render_footer(frame, app, chunks[7]);
 
     // Overlays (rendered on top in Z-order)
 
@@ -1283,24 +1291,70 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
 
     let lines = render_message_items(app, msg_area.width);
 
-    // Highlight search matches in transcript when global search is active
-    let lines = if app.global_search.visible && !app.global_search.query.is_empty() {
-        let query_lc = app.global_search.query.to_lowercase();
+    // Which rows the find bar's query matches. Worked out here because this is
+    // the only place the transcript exists wrapped to the current width; the
+    // key handler reads the result back off `App` the way it reads
+    // `last_max_scroll`.
+    let find_query = app
+        .transcript_find
+        .is_searching()
+        .then(|| app.transcript_find.query.to_lowercase());
+    if let Some(ref q) = find_query {
+        *app.find_match_rows.borrow_mut() = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.search_text.to_lowercase().contains(q.as_str()))
+            .map(|(idx, _)| idx)
+            .collect();
+    } else {
+        app.find_match_rows.borrow_mut().clear();
+    }
+
+    // The first row of each message, so `goToLine` can reach a message that is
+    // nowhere near the viewport (`message_row_map` only covers visible rows).
+    {
+        let mut first_rows = app.message_first_row.borrow_mut();
+        first_rows.clear();
+        for (idx, item) in lines.iter().enumerate() {
+            if let Some(message_index) = item.message_index {
+                first_rows.entry(message_index).or_insert(idx);
+            }
+        }
+    }
+
+    // Highlight matches in the transcript for whichever search is live. The
+    // find bar and the global-search overlay are never open at once, so one
+    // query wins and the two cannot fight over the same spans.
+    let highlight_query = find_query.or_else(|| {
+        (app.global_search.visible && !app.global_search.query.is_empty())
+            .then(|| app.global_search.query.to_lowercase())
+    });
+    // The row the user last stepped to, painted brighter than the rest so it
+    // is findable among its neighbours.
+    let current_row = app
+        .transcript_find
+        .current
+        .and_then(|i| app.find_match_rows.borrow().get(i).copied());
+    let lines = if let Some(query_lc) = highlight_query {
         lines
             .into_iter()
-            .map(|mut item| {
+            .enumerate()
+            .map(|(idx, mut item)| {
                 if item.search_text.to_lowercase().contains(query_lc.as_str()) {
-                    // Re-render the line with yellow highlight on matching spans
+                    let is_current = current_row == Some(idx);
+                    let (bg, fg) = if is_current {
+                        (Color::Rgb(120, 100, 0), Color::Rgb(255, 255, 220))
+                    } else {
+                        (Color::Rgb(60, 50, 0), Color::Yellow)
+                    };
+                    // Re-render the line with the highlight on matching spans
                     let highlighted_spans: Vec<Span<'static>> = item
                         .line
                         .spans
                         .into_iter()
                         .map(|span| {
                             if span.content.to_lowercase().contains(query_lc.as_str()) {
-                                Span::styled(
-                                    span.content,
-                                    span.style.bg(Color::Rgb(60, 50, 0)).fg(Color::Yellow),
-                                )
+                                Span::styled(span.content, span.style.bg(bg).fg(fg))
                             } else {
                                 span
                             }
@@ -3856,6 +3910,35 @@ fn pad_and_clip(line: Line<'static>, padding: usize, max_width: usize) -> Line<'
     Line::from(spans)
 }
 
+/// One-row find / go-to-message bar, drawn directly above the prompt.
+///
+/// The match count comes from `find_match_rows`, which the transcript render
+/// filled earlier in the same frame, so the counter can never describe a
+/// different wrap than the highlight the user is looking at.
+fn render_find_bar(frame: &mut Frame, app: &App, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    let match_count = app.find_match_rows.borrow().len();
+    let label = app.transcript_find.label(match_count);
+    let hint = match app.transcript_find.mode {
+        crate::transcript_find::FindMode::Search => "  Enter/F3 next · Shift+F3 prev · Esc close",
+        crate::transcript_find::FindMode::GoToMessage => "  Enter go · Esc close",
+    };
+
+    let line = Line::from(vec![
+        Span::styled("  ".to_string(), Style::default()),
+        Span::styled(
+            label,
+            Style::default()
+                .fg(CLAUDE_ORANGE)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(hint.to_string(), Style::default().fg(Color::DarkGray)),
+    ]);
+    frame.render_widget(Paragraph::new(vec![line]), area);
+}
+
 fn render_prompt_suggestions(frame: &mut Frame, app: &App, area: Rect) {
     let suggestions = &app.prompt_input.suggestions;
     if suggestions.is_empty() || area.height == 0 {
@@ -4998,6 +5081,213 @@ mod effort_dock_tests {
         assert!(
             !open.contains(PROMPT_POINTER),
             "prompt input must NOT be drawn while the picker is open"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Find-in-transcript
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod find_bar_tests {
+    use super::*;
+    use crate::app::App;
+    use crate::transcript_find::FindMode;
+    use claurst_core::config::Config;
+    use claurst_core::cost::CostTracker;
+    use claurst_core::types::Message;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn render_screen(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| render_app(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn app_with_transcript() -> App {
+        let mut app = App::new(Config::default(), CostTracker::new());
+        for i in 0..12 {
+            app.messages.push(Message::user(format!("question {i}")));
+            app.messages
+                .push(Message::assistant(format!("answer about apples {i}")));
+        }
+        app
+    }
+
+    #[test]
+    fn the_bar_draws_only_while_it_is_open() {
+        let mut app = app_with_transcript();
+        assert!(!render_screen(&app).contains("Find:"));
+
+        app.transcript_find.open(FindMode::Search);
+        assert!(render_screen(&app).contains("Find:"));
+
+        app.transcript_find.open(FindMode::GoToMessage);
+        let screen = render_screen(&app);
+        assert!(screen.contains("Go to message #"));
+        assert!(!screen.contains("Find:"));
+    }
+
+    /// The renderer is what knows how the transcript wraps, so it is what
+    /// works out which rows match. Nothing is collected until a query is live.
+    #[test]
+    fn the_render_pass_reports_the_matching_rows() {
+        let mut app = app_with_transcript();
+        render_screen(&app);
+        assert!(app.find_match_rows.borrow().is_empty());
+
+        app.transcript_find.open(FindMode::Search);
+        app.transcript_find.push_char('a');
+        app.transcript_find.push_char('p');
+        app.transcript_find.push_char('p');
+        render_screen(&app);
+
+        let rows = app.find_match_rows.borrow().clone();
+        assert_eq!(rows.len(), 12, "one row per assistant answer");
+        assert!(rows.windows(2).all(|w| w[0] < w[1]), "rows must ascend");
+
+        // A query nothing matches leaves an empty list rather than a stale one.
+        app.transcript_find.push_char('z');
+        render_screen(&app);
+        assert!(app.find_match_rows.borrow().is_empty());
+    }
+
+    /// `goToLine` needs a row for a message the viewport is nowhere near, which
+    /// `message_row_map` (visible rows only) cannot give.
+    #[test]
+    fn the_render_pass_reports_the_first_row_of_every_message() {
+        let app = app_with_transcript();
+        render_screen(&app);
+
+        let first_rows = app.message_first_row.borrow();
+        assert_eq!(first_rows.len(), app.messages.len());
+
+        // A later message starts further down, and no two share a first row.
+        let rows: Vec<usize> = (0..app.messages.len())
+            .map(|i| *first_rows.get(&i).expect("every message has a row"))
+            .collect();
+        assert!(
+            rows.windows(2).all(|w| w[0] < w[1]),
+            "message rows must ascend with message index: {rows:?}"
+        );
+    }
+
+    /// While the bar is docked it takes typing, so a query cannot leak into
+    /// the prompt the user is composing.
+    #[test]
+    fn the_bar_takes_typing_instead_of_the_prompt() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let press = |c: char| KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut app = app_with_transcript();
+        app.transcript_find.open(FindMode::Search);
+
+        app.handle_key_event(press('a'));
+        app.handle_key_event(press('p'));
+
+        assert_eq!(app.transcript_find.query, "ap");
+        assert!(
+            app.prompt_input.text.is_empty(),
+            "the query landed in the prompt"
+        );
+
+        // A paste burst belongs to the query too, not to the prompt behind it.
+        app.handle_paste_data("ple pie\nsecond line".to_string());
+        assert_eq!(app.transcript_find.query, "apple pie");
+        assert!(app.prompt_input.text.is_empty());
+
+        app.handle_key_event(KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+        assert!(!app.transcript_find.visible);
+
+        // Closed again, the same keys go back to the prompt.
+        app.handle_key_event(press('a'));
+        assert_eq!(app.prompt_input.text, "a");
+    }
+
+    /// Message numbers are 1-based on screen. A number past the end names no
+    /// message, so the bar stays open with a note instead of jumping somewhere.
+    #[test]
+    fn go_to_message_scrolls_and_refuses_a_number_with_no_message() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        let press = |code: KeyCode| KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut app = app_with_transcript();
+        render_screen(&app);
+        let max_scroll = app.last_max_scroll.get();
+        let third_row = *app.message_first_row.borrow().get(&2).unwrap();
+
+        app.transcript_find.open(FindMode::GoToMessage);
+        app.handle_key_event(press(KeyCode::Char('3')));
+        app.handle_key_event(press(KeyCode::Enter));
+
+        assert!(
+            !app.transcript_find.visible,
+            "the bar should close on a hit"
+        );
+        assert_eq!(app.scroll_offset, max_scroll.saturating_sub(third_row));
+
+        app.transcript_find.open(FindMode::GoToMessage);
+        app.handle_key_event(press(KeyCode::Char('9')));
+        app.handle_key_event(press(KeyCode::Char('9')));
+        app.handle_key_event(press(KeyCode::Enter));
+
+        assert!(
+            app.transcript_find.visible,
+            "the bar should stay open for a correction"
+        );
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.contains("No message #99")));
+    }
+
+    #[test]
+    fn stepping_scrolls_to_the_match_and_wraps() {
+        let mut app = app_with_transcript();
+        app.transcript_find.open(FindMode::Search);
+        for c in "apples".chars() {
+            app.transcript_find.push_char(c);
+        }
+        render_screen(&app);
+        let rows = app.find_match_rows.borrow().clone();
+        let max_scroll = app.last_max_scroll.get();
+
+        app.step_find_match(true);
+        assert_eq!(app.transcript_find.current, Some(0));
+        assert_eq!(app.scroll_offset, max_scroll.saturating_sub(rows[0]));
+        assert!(!app.auto_scroll, "stepping must stop following the tail");
+
+        app.step_find_match(false);
+        assert_eq!(
+            app.transcript_find.current,
+            Some(rows.len() - 1),
+            "stepping back from the first match must wrap to the last"
         );
     }
 }

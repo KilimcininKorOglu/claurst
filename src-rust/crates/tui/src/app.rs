@@ -1053,6 +1053,10 @@ fn key_event_to_keystroke(key: &KeyEvent) -> Option<ParsedKeystroke> {
         KeyCode::Tab => "tab".to_string(),
         KeyCode::Up => "up".to_string(),
         KeyCode::BackTab => "tab".to_string(),
+        // Function keys spell as `f1`..`f12`, matching `normalize_key`. Without
+        // this arm every `fN` binding is unreachable, which is how f3 /
+        // shift+f3 (findNext / findPrev) never fired.
+        KeyCode::F(n) => format!("f{n}"),
         KeyCode::Char(' ') => "space".to_string(),
         KeyCode::Char(c) => {
             // For modifier-key combos (Ctrl/Alt + letter), normalize to the
@@ -1651,6 +1655,16 @@ pub struct App {
     /// is known; read back on the next scroll event to clamp `scroll_offset` so
     /// scrolling up past the top can't inflate it unboundedly (#223).
     pub last_max_scroll: Cell<usize>,
+    /// Find-in-transcript / go-to-message bar, docked above the prompt.
+    pub transcript_find: crate::transcript_find::TranscriptFindState,
+    /// Virtual row indices matching the find query, ascending. Written by the
+    /// renderer for the same reason as `last_max_scroll`: only the render pass
+    /// knows how the transcript wraps at the current width.
+    pub find_match_rows: RefCell<Vec<usize>>,
+    /// Maps a transcript message index to its first virtual row, so `goToLine`
+    /// can scroll to a message the viewport is nowhere near. Also written by
+    /// the renderer.
+    pub message_first_row: RefCell<std::collections::HashMap<usize, usize>>,
 
     // ---- Text selection state --------------------------------------------
     /// Selection drag anchor (col, row) — set on mouse-down.
@@ -2018,6 +2032,9 @@ impl App {
             total_message_lines: Cell::new(0),
             last_render_scroll_offset: Cell::new(0),
             last_max_scroll: Cell::new(0),
+            transcript_find: crate::transcript_find::TranscriptFindState::default(),
+            find_match_rows: RefCell::new(Vec::new()),
+            message_first_row: RefCell::new(std::collections::HashMap::new()),
             selection_anchor: None,
             selection_focus: None,
             selection_text: RefCell::new(String::new()),
@@ -3263,6 +3280,10 @@ impl App {
             || self.elicitation.visible
             || self.model_picker.visible
             || self.effort_picker.visible
+            // The find bar captures typing, so the paste-burst detector and
+            // the CLI's Enter handling both have to treat it as a modal or a
+            // fast burst lands in the prompt behind it.
+            || self.transcript_find.visible
             || self.session_browser.visible
             || self.session_branching.visible
             || self.export_dialog.visible
@@ -5177,6 +5198,13 @@ impl App {
             return self.handle_global_search_key(key);
         }
 
+        // The find bar owns typing while it is docked, so a query never lands
+        // in the prompt. It deliberately does not claim F3 and friends: they
+        // reach the resolver below, which is where stepping lives.
+        if self.transcript_find.visible && self.handle_find_bar_key(key) {
+            return false;
+        }
+
         // Legacy history-search mode intercepts most keys
         if self.history_search.is_some() {
             return self.handle_history_search_key(key);
@@ -6272,6 +6300,24 @@ impl App {
                 self.refresh_global_search();
                 false
             }
+            "findInMessage" => {
+                self.transcript_find
+                    .open(crate::transcript_find::FindMode::Search);
+                false
+            }
+            "goToLine" => {
+                self.transcript_find
+                    .open(crate::transcript_find::FindMode::GoToMessage);
+                false
+            }
+            "findNext" => {
+                self.step_find_match(true);
+                false
+            }
+            "findPrev" => {
+                self.step_find_match(false);
+                false
+            }
             "submit" => {
                 if !self.is_streaming {
                     if !self.prompt_input.suggestions.is_empty()
@@ -6851,6 +6897,92 @@ impl App {
         self.message_row_map.borrow().get(&row).copied()
     }
 
+    /// Keys the docked find bar consumes. Returns whether it took the key.
+    ///
+    /// Stepping keys are left out on purpose: they are bound actions, so they
+    /// work whether or not the bar is open.
+    fn handle_find_bar_key(&mut self, key: KeyEvent) -> bool {
+        // Any modifier other than Shift means a chord, not typing.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            || key.modifiers.contains(KeyModifiers::ALT)
+            || key.modifiers.contains(KeyModifiers::SUPER)
+        {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.transcript_find.close();
+                true
+            }
+            KeyCode::Enter => {
+                self.commit_find_bar();
+                true
+            }
+            KeyCode::Backspace => {
+                self.transcript_find.pop_char();
+                true
+            }
+            KeyCode::Char(c) => {
+                self.transcript_find.push_char(c);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Act on what the find bar holds: step to the first match, or scroll to
+    /// the message a go-to bar names.
+    fn commit_find_bar(&mut self) {
+        match self.transcript_find.mode {
+            crate::transcript_find::FindMode::Search => {
+                self.step_find_match(true);
+            }
+            crate::transcript_find::FindMode::GoToMessage => {
+                let target = self.transcript_find.target_message();
+                // Numbering is 1-based on screen; a 0 or a number past the end
+                // names no message, so the bar stays open for a correction.
+                let row = target
+                    .and_then(|n| n.checked_sub(1))
+                    .and_then(|idx| self.message_first_row.borrow().get(&idx).copied());
+                if let Some(row) = row {
+                    self.scroll_to_virtual_row(row);
+                    self.transcript_find.close();
+                } else {
+                    self.status_message = Some(match target {
+                        Some(n) => format!("No message #{n} in this session."),
+                        None => "Type a message number.".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Move to the next (or previous) find match and scroll it into view.
+    ///
+    /// The match rows come from the last render, so this is a no-op until the
+    /// transcript has been drawn once with the query live.
+    pub fn step_find_match(&mut self, forward: bool) {
+        let total = self.find_match_rows.borrow().len();
+        let Some(index) = self.transcript_find.step(total, forward) else {
+            return;
+        };
+        let Some(row) = self.find_match_rows.borrow().get(index).copied() else {
+            return;
+        };
+        self.scroll_to_virtual_row(row);
+    }
+
+    /// Put virtual row `row` on screen.
+    ///
+    /// `scroll_offset` counts lines above the bottom, so it is the distance
+    /// from the last scroll position the renderer reported back.
+    fn scroll_to_virtual_row(&mut self, row: usize) {
+        let max_scroll = self.last_max_scroll.get();
+        self.auto_scroll = false;
+        self.scroll_offset = max_scroll.saturating_sub(row);
+        self.new_messages_while_scrolled = 0;
+    }
+
     fn clear_selection(&mut self) {
         self.selection_anchor = None;
         self.selection_focus = None;
@@ -7002,6 +7134,17 @@ impl App {
     pub fn handle_paste_data(&mut self, data: String) {
         use crate::image_paste::PastedImage;
         use crate::prompt_input::detect_pasted_path;
+
+        // A paste while the find bar is docked belongs to the query the user
+        // is typing, not to the prompt sitting behind it. Newlines would end
+        // the query, so take the first line only.
+        if self.transcript_find.visible {
+            let line = data.lines().next().unwrap_or_default();
+            for c in line.chars() {
+                self.transcript_find.push_char(c);
+            }
+            return;
+        }
 
         if let Some(path) = detect_pasted_path(&data) {
             let ext = path
@@ -9956,6 +10099,105 @@ mod tests {
         // The unmodified arrow still moves one character.
         app.handle_key_event(press_key(KeyCode::Left, KeyModifiers::NONE));
         assert_eq!(app.prompt_input.cursor, 15);
+    }
+
+    /// The body of `handle_keybinding_action`, for the drift test below.
+    fn handle_keybinding_action_src() -> &'static str {
+        const SRC: &str = include_str!("app.rs");
+        let start = SRC
+            .find("fn handle_keybinding_action(&mut self, action: &str) -> bool {")
+            .expect("handle_keybinding_action moved or was renamed");
+        let rest = &SRC[start..];
+        let end = rest
+            .find("\n            _ => false,")
+            .expect("handle_keybinding_action lost its fallback arm");
+        &rest[..end]
+    }
+
+    /// Every action a default Chat or Global binding names has to have an arm
+    /// in `handle_keybinding_action`.
+    ///
+    /// The resolver claims a bound chord and returns, so an action with no arm
+    /// is a key that silently does nothing — how ctrl+left, ctrl+right,
+    /// ctrl+shift+f, ctrl+f, ctrl+g, f3 and shift+f3 all came to be dead. The
+    /// dialog contexts are excluded: their keys are handled by the dialog
+    /// blocks that return before the resolver runs.
+    #[test]
+    fn every_bound_chat_action_has_a_handler() {
+        use claurst_core::keybindings::{default_bindings, KeyContext};
+
+        let mut missing: Vec<String> = Vec::new();
+        for binding in default_bindings() {
+            if !matches!(binding.context, KeyContext::Chat | KeyContext::Global) {
+                continue;
+            }
+            let Some(action) = binding.action.as_deref() else {
+                continue;
+            };
+            // A real arm and the `_` fallback both return a bool, so calling
+            // the function cannot tell them apart. Read the arm list out of the
+            // source instead, which stays true without a second copy of it.
+            let arm = format!("\"{action}\"");
+            if !handle_keybinding_action_src().contains(&arm) {
+                missing.push(action.to_string());
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "bound Chat/Global actions with no arm: {missing:?}"
+        );
+    }
+
+    /// A chord in `default_bindings` is only reachable if a real key event can
+    /// spell it. Function keys fell into the catch-all that returns `None`, so
+    /// every `fN` binding — f3 and shift+f3 among them — was unreachable no
+    /// matter which action it named.
+    #[test]
+    fn every_default_chord_can_be_produced_by_a_key_event() {
+        use claurst_core::keybindings::default_bindings;
+
+        // Spellings a key event can actually produce.
+        let mut spellable: std::collections::HashSet<String> = [
+            "backspace",
+            "delete",
+            "down",
+            "end",
+            "enter",
+            "escape",
+            "home",
+            "left",
+            "pagedown",
+            "pageup",
+            "right",
+            "tab",
+            "up",
+            "space",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        for n in 1..=12u8 {
+            spellable.insert(format!("f{n}"));
+        }
+        // Any single character is spellable as itself.
+        let unreachable: Vec<String> = default_bindings()
+            .iter()
+            .flat_map(|b| b.chord.iter())
+            .map(|ks| ks.key.clone())
+            .filter(|key| key.chars().count() > 1 && !spellable.contains(key))
+            .collect();
+
+        assert!(
+            unreachable.is_empty(),
+            "chords no key event can spell: {unreachable:?}"
+        );
+
+        // And the mapping really produces the function-key spelling.
+        let ks = key_event_to_keystroke(&press_key(KeyCode::F(3), KeyModifiers::NONE))
+            .expect("F3 produced no keystroke");
+        assert_eq!(ks.key, "f3");
     }
 
     /// `ctrl+shift+f` resolves to `globalSearch`, which had no arm; only the
