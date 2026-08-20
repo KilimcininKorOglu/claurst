@@ -1338,6 +1338,13 @@ pub async fn compact_conversation(
     )
     .await;
 
+    // Free what can be freed without asking a model anything. Re-reads of the
+    // same file and repeated search results are the two cheapest wins in a
+    // long session, and shrinking them first means the same keep-recent budget
+    // holds more real conversation.
+    let messages = collapse_search_results(collapse_read_tool_results(messages.to_vec()));
+    let messages = messages.as_slice();
+
     // Token-budget keep: summarise everything older than the most recent
     // ~KEEP_RECENT_TOKENS worth of messages, cut on a pairing-safe boundary.
     let split_at = compute_keep_split_index(messages, KEEP_RECENT_TOKENS);
@@ -1974,6 +1981,83 @@ mod tests {
                 .get_all_text()
                 .contains("Summary of the earlier work."),
             "the summary leads the new conversation"
+        );
+    }
+
+    /// Three reads of one file, sized so the raw conversation is over the
+    /// keep-recent budget and the collapsed one is under it.
+    fn a_file_read_three_times() -> Vec<Message> {
+        let body = filler(30_000);
+        let mut messages = vec![make_user("read that file a few times")];
+        for id in ["t1", "t2", "t3"] {
+            messages.push(assistant_tool_use(
+                id,
+                "Read",
+                serde_json::json!({ "file_path": "/a.rs" }),
+            ));
+            messages.push(Message::user_blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: ToolResultContent::Text(body.clone()),
+                is_error: Some(false),
+            }]));
+        }
+        messages.push(make_user("now carry on"));
+        messages
+    }
+
+    /// Re-reads of the same file are collapsed before anything reaches a
+    /// model. It costs no API call, and the same keep-recent budget then holds
+    /// more real conversation.
+    ///
+    /// Sized so the point is unambiguous: uncollapsed the conversation is over
+    /// the budget and would be summarised, collapsed it fits and no summary is
+    /// asked for at all.
+    #[tokio::test]
+    async fn repeated_reads_are_collapsed_before_summarising() {
+        let messages = a_file_read_three_times();
+
+        // Without the collapse the head would have to be summarised.
+        assert!(
+            compute_keep_split_index(&messages, KEEP_RECENT_TOKENS) > 0,
+            "the raw conversation is over the keep-recent budget"
+        );
+
+        let backend = RecordingBackend::new("never asked for");
+        let out = compact_conversation(&backend, &messages, "some-model", None)
+            .await
+            .expect("compaction succeeds");
+
+        assert!(
+            backend.seen.lock().is_none(),
+            "collapsing alone brought it under budget, so no summary was needed"
+        );
+        assert_eq!(out.len(), messages.len(), "every turn is still there");
+
+        let kept: String = out
+            .iter()
+            .filter_map(|m| match &m.content {
+                MessageContent::Blocks(blocks) => Some(
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            ContentBlock::ToolResult {
+                                content: ToolResultContent::Text(t),
+                                ..
+                            } => Some(t.clone()),
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            kept.contains("[Content shown"),
+            "the earlier reads were replaced by a marker"
+        );
+        assert!(
+            estimate_tokens_for_messages(&out) < estimate_tokens_for_messages(&messages),
+            "the conversation got smaller"
         );
     }
 
