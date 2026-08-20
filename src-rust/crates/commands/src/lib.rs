@@ -107,6 +107,16 @@ pub enum CommandResult {
     /// Open the rewind/message-selector overlay in the TUI.
     /// The TUI will call SetMessages when the user confirms.
     OpenRewindOverlay,
+    /// Summarise the conversation now, replacing its head with the summary.
+    ///
+    /// Carried out by the session loop, which owns the API client and the
+    /// transcript. `SetMessages` would not do: it is `/rewind`'s outcome and
+    /// reports itself as one, and the compaction has to happen before the
+    /// message list is known.
+    RunCompaction {
+        /// What the user asked the summary to preserve, when they said.
+        instruction: Option<String>,
+    },
     /// Open the hooks configuration browser overlay in the TUI.
     /// Falls back to a text listing in non-TUI contexts.
     OpenHooksOverlay,
@@ -651,21 +661,20 @@ impl SlashCommand for CompactCommand {
         "Compact the conversation to reduce token usage"
     }
 
-    async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let msg_count = ctx.messages.len();
-        let instruction = if args.is_empty() {
-            "Provide a detailed summary of our conversation so far, preserving all \
-             key technical details, decisions made, file paths mentioned, and current \
-             task status."
-                .to_string()
-        } else {
-            args.to_string()
-        };
+    fn help(&self) -> &str {
+        "Usage: /compact [instruction]\n\n\
+         Replaces the older part of the conversation with a summary, keeping \
+         the most recent turns verbatim. The cut never splits a tool call from \
+         its result.\n\n\
+         An instruction is passed to the summariser, e.g. \
+         `/compact keep every file path and command`."
+    }
 
-        CommandResult::UserMessage(format!(
-            "[Compact requested ({} messages). Instruction: {}]",
-            msg_count, instruction
-        ))
+    async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {
+        let trimmed = args.trim();
+        CommandResult::RunCompaction {
+            instruction: (!trimmed.is_empty()).then(|| trimmed.to_string()),
+        }
     }
 }
 
@@ -1834,6 +1843,37 @@ mod tests {
             matches!(result, CommandResult::Error(_)),
             "expected a refusal, got {result:?}"
         );
+    }
+
+    /// `/compact` asks the session loop to summarise. It used to answer with
+    /// `UserMessage("[Compact requested (N messages)...]")`, which appended a
+    /// paragraph to the conversation and so made the context larger.
+    #[tokio::test]
+    async fn compact_asks_for_a_real_compaction() {
+        let mut ctx = make_ctx();
+        ctx.messages = vec![Message::user("one"), Message::assistant("two")];
+
+        let result = CompactCommand.execute("", &mut ctx).await;
+
+        assert!(
+            matches!(result, CommandResult::RunCompaction { instruction: None }),
+            "expected a compaction request, got {result:?}"
+        );
+    }
+
+    /// `/compact <instruction>` steers the summary rather than being dropped.
+    #[tokio::test]
+    async fn compact_carries_the_users_instruction() {
+        let mut ctx = make_ctx();
+
+        let result = CompactCommand
+            .execute("  keep every file path  ", &mut ctx)
+            .await;
+
+        let CommandResult::RunCompaction { instruction } = result else {
+            panic!("expected a compaction request");
+        };
+        assert_eq!(instruction.as_deref(), Some("keep every file path"));
     }
 
     #[tokio::test]

@@ -191,6 +191,59 @@ async fn apply(
             session.messages.lock().clear();
             Outcome::said("Conversation cleared.")
         }
+        R::RunCompaction { instruction } => {
+            // A copy, so the session's lock never spans the summarisation call
+            // and the client can go on reading the conversation while it runs.
+            let current = session.messages.lock().clone();
+            let before = current.len();
+            let model = claurst_api::effective_model_for_config(
+                &runtime.config,
+                runtime.model_registry.as_ref(),
+            );
+            let route = runtime.config.resolve_route(&model);
+
+            let provider = claurst_query::compact::dispatches_through_provider(
+                &route.account,
+                &runtime.config,
+                runtime.api_client.as_ref(),
+            )
+            .then(|| {
+                claurst_query::compact::provider_for_turn(
+                    runtime.provider_registry.as_ref(),
+                    &runtime.config,
+                    &route.account,
+                )
+            })
+            .flatten();
+
+            let backend: Box<dyn claurst_query::compact::CompactBackend> = match provider {
+                Some(provider) => Box::new(claurst_query::compact::ProviderBackend(provider)),
+                None => Box::new(claurst_query::compact::AnthropicBackend(
+                    runtime.api_client.as_ref(),
+                )),
+            };
+
+            match claurst_query::compact::compact_conversation(
+                backend.as_ref(),
+                &current,
+                &route.model,
+                instruction.as_deref(),
+            )
+            .await
+            {
+                Ok(compacted) => {
+                    let removed = before.saturating_sub(compacted.len());
+                    *session.messages.lock() = compacted;
+                    Outcome::said(format!(
+                        "Compacted {removed} message{} into a summary.",
+                        if removed == 1 { "" } else { "s" }
+                    ))
+                }
+                // The conversation was never replaced, so it is intact.
+                Err(e) => Outcome::failed(format!("Could not compact: {e}")),
+            }
+        }
+
         R::SetMessages(messages) => {
             let removed = session.messages.lock().len().saturating_sub(messages.len());
             *session.messages.lock() = messages;

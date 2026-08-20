@@ -199,6 +199,14 @@ fn extract_topic_hint(messages: &[Message]) -> Option<String> {
     None
 }
 
+/// Estimated size of a conversation, in tokens.
+///
+/// For a caller with no provider-reported usage to go on, such as the footer
+/// right after `/compact` replaced the history.
+pub fn estimate_context_size(messages: &[Message]) -> u64 {
+    estimate_tokens_for_messages(messages) as u64
+}
+
 /// Rough token estimate: sum of character lengths divided by 4, padded by 4/3.
 pub(crate) fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
     let chars: usize = messages
@@ -328,7 +336,7 @@ pub async fn micro_compact_if_needed(
     );
 
     let target_tokens = config.summary_target_tokens as u32;
-    match summarise_head(backend, messages, split_at, model, target_tokens).await {
+    match summarise_head(backend, messages, split_at, model, target_tokens, None).await {
         Ok(new_msgs) => {
             info!(
                 original = total,
@@ -985,6 +993,12 @@ pub fn should_auto_compact_for_window(
 // Summarisation backends
 // ---------------------------------------------------------------------------
 
+// Which endpoint a turn belongs to, and the handle that serves it. Defined
+// beside the turn loop in `runner::context` and re-exported here, because a
+// caller compacting on demand has to pick the same backend the next turn will
+// dispatch through.
+pub use crate::runner::context::{dispatches_through_provider, provider_for_turn};
+
 /// Whatever can turn a transcript into a summary.
 ///
 /// Compaction needs exactly one model call and no tools, so it does not need
@@ -1112,6 +1126,7 @@ async fn summarise_head(
     split_at: usize,
     model: &str,
     max_summary_tokens: u32,
+    custom_instructions: Option<&str>,
 ) -> Result<Vec<Message>, ClaudeError> {
     if split_at == 0 {
         return Ok(messages.to_vec());
@@ -1188,7 +1203,8 @@ async fn summarise_head(
     let previous_summary_for_prompt = previous_summary.as_deref().map(strip_files_touched_section);
 
     // Select the UPDATE prompt variant when a prior summary is present.
-    let compact_prompt = get_compact_prompt(None, previous_summary_for_prompt.as_deref());
+    let compact_prompt =
+        get_compact_prompt(custom_instructions, previous_summary_for_prompt.as_deref());
 
     let user_content = if let Some(prev) = previous_summary_for_prompt.as_deref() {
         format!(
@@ -1311,6 +1327,7 @@ pub async fn compact_conversation(
     backend: &dyn CompactBackend,
     messages: &[Message],
     model: &str,
+    custom_instructions: Option<&str>,
 ) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
 
@@ -1342,7 +1359,15 @@ pub async fn compact_conversation(
     );
 
     // Use a generous token budget for the summary (20k mirrors TypeScript MAX_OUTPUT_TOKENS_FOR_SUMMARY)
-    let compacted = summarise_head(backend, messages, split_at, model, 20_000).await;
+    let compacted = summarise_head(
+        backend,
+        messages,
+        split_at,
+        model,
+        20_000,
+        custom_instructions,
+    )
+    .await;
 
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::PostCompact,
@@ -1387,7 +1412,7 @@ pub async fn auto_compact_if_needed(
         "Auto-compact triggered"
     );
 
-    match compact_conversation(backend, messages, model).await {
+    match compact_conversation(backend, messages, model, None).await {
         Ok(new_msgs) => {
             update_compact_state(session_id, AutoCompactState::on_success);
             info!(
@@ -1610,7 +1635,7 @@ pub async fn reactive_compact(
     let original_token_estimate = estimate_tokens_for_messages(&stripped[..split_at]) as u64;
 
     let mut new_messages =
-        summarise_head(backend, &stripped, split_at, &config.model, 20_000).await?;
+        summarise_head(backend, &stripped, split_at, &config.model, 20_000, None).await?;
 
     // The summary lives as the first message in new_messages.
     let summary_text = new_messages
@@ -1932,7 +1957,7 @@ mod tests {
         messages.push(make_user("what next"));
 
         let backend = RecordingBackend::new("Summary of the earlier work.");
-        let out = compact_conversation(&backend, &messages, "some-model")
+        let out = compact_conversation(&backend, &messages, "some-model", None)
             .await
             .expect("compaction succeeds");
 
@@ -1952,6 +1977,32 @@ mod tests {
         );
     }
 
+    /// `/compact <instruction>` reaches the summariser's prompt.
+    #[tokio::test]
+    async fn a_custom_instruction_reaches_the_prompt() {
+        let messages = vec![
+            make_user(&filler(80_000)),
+            make_assistant(&filler(80_000)),
+            make_user("what next"),
+        ];
+
+        let backend = RecordingBackend::new("Short.");
+        compact_conversation(
+            &backend,
+            &messages,
+            "some-model",
+            Some("keep every file path"),
+        )
+        .await
+        .expect("compaction succeeds");
+
+        let (_system, user, _model, _max) = backend.seen.lock().clone().expect("called");
+        assert!(
+            user.contains("keep every file path"),
+            "the instruction is in the prompt"
+        );
+    }
+
     /// An empty answer is a failed compaction, not a conversation with the
     /// head silently thrown away.
     #[tokio::test]
@@ -1963,7 +2014,7 @@ mod tests {
         ];
 
         let backend = RecordingBackend::new("");
-        let err = compact_conversation(&backend, &messages, "some-model")
+        let err = compact_conversation(&backend, &messages, "some-model", None)
             .await
             .expect_err("an empty summary is an error");
         assert!(err.to_string().contains("empty"));

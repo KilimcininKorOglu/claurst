@@ -2291,6 +2291,42 @@ fn apply_session_resume(
 /// one surface and missing from the next, so both happen here or neither does.
 /// The transcript is written separately, by the recorder that owns the message
 /// uuids.
+/// Summarise a conversation on demand, for `/compact`.
+///
+/// Picks the same backend the next turn would dispatch through, so the summary
+/// is written by the model the session is actually talking to rather than by
+/// whichever one happens to have a client lying around.
+async fn run_compaction(
+    messages: &[claurst_core::types::Message],
+    model: &str,
+    instruction: Option<&str>,
+    config: &claurst_core::Config,
+    client: &claurst_api::AnthropicClient,
+    provider_registry: Option<&std::sync::Arc<claurst_api::ProviderRegistry>>,
+) -> Result<Vec<claurst_core::types::Message>, claurst_core::error::ClaudeError> {
+    let route = config.resolve_route(model);
+    let provider = provider_registry
+        .filter(|_| {
+            claurst_query::compact::dispatches_through_provider(&route.account, config, client)
+        })
+        .and_then(|registry| {
+            claurst_query::compact::provider_for_turn(registry, config, &route.account)
+        });
+
+    let backend: Box<dyn claurst_query::compact::CompactBackend> = match provider {
+        Some(provider) => Box::new(claurst_query::compact::ProviderBackend(provider)),
+        None => Box::new(claurst_query::compact::AnthropicBackend(client)),
+    };
+
+    claurst_query::compact::compact_conversation(
+        backend.as_ref(),
+        messages,
+        &route.model,
+        instruction,
+    )
+    .await
+}
+
 async fn persist_session(
     session: &claurst_core::history::ConversationSession,
 ) -> anyhow::Result<()> {
@@ -3750,6 +3786,74 @@ async fn run_interactive(
                                         if removed == 1 { "" } else { "s" }
                                     ));
                                     transcript_replaced = true;
+                                }
+                                Some(CommandResult::RunCompaction { instruction }) => {
+                                    let before = messages.len();
+                                    let model = claurst_api::effective_model_for_config(
+                                        &cmd_ctx.config,
+                                        &model_registry,
+                                    );
+                                    app.status_message =
+                                        Some("Compacting the conversation…".to_string());
+                                    match run_compaction(
+                                        &messages,
+                                        &model,
+                                        instruction.as_deref(),
+                                        &cmd_ctx.config,
+                                        client.as_ref(),
+                                        base_query_config.provider_registry.as_ref(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(new_msgs) => {
+                                            messages = new_msgs.clone();
+                                            app.replace_messages(new_msgs);
+                                            session.messages = messages.clone();
+                                            session.updated_at = chrono::Utc::now();
+                                            // The transcript keeps the turns the
+                                            // summary replaced; its tip has to
+                                            // follow the conversation or the next
+                                            // launch reloads them.
+                                            let tip = messages.last().and_then(|m| m.uuid.clone());
+                                            if let Err(e) =
+                                                transcript.set_active_leaf(tip.as_deref()).await
+                                            {
+                                                app.push_notification(
+                                                    claurst_tui::NotificationKind::Error,
+                                                    format!(
+                                                        "Could not move the transcript's tip: {e}"
+                                                    ),
+                                                    None,
+                                                );
+                                            }
+                                            // The summary is the whole prompt now,
+                                            // so the footer has to say so.
+                                            app.context_used_tokens =
+                                                claurst_query::compact::estimate_context_size(
+                                                    &messages,
+                                                );
+                                            app.token_warning_threshold_shown = 0;
+                                            app.status_message = Some(format!(
+                                                "Compacted {} message{} into a summary.",
+                                                before.saturating_sub(messages.len()),
+                                                if before.saturating_sub(messages.len()) == 1 {
+                                                    ""
+                                                } else {
+                                                    "s"
+                                                }
+                                            ));
+                                            transcript_replaced = true;
+                                        }
+                                        Err(e) => {
+                                            // The conversation is untouched.
+                                            app.status_message = None;
+                                            app.push_notification(
+                                                claurst_tui::NotificationKind::Error,
+                                                format!("Could not compact: {e}"),
+                                                None,
+                                            );
+                                        }
+                                    }
                                 }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());

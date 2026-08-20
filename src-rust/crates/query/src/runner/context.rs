@@ -33,7 +33,7 @@ use crate::{QueryConfig, QueryEvent};
 ///
 /// The compaction pass and the dispatch arm both ask this, so a turn cannot be
 /// summarised by one endpoint and answered by another.
-pub(crate) fn dispatches_through_provider(
+pub fn dispatches_through_provider(
     account: &str,
     config: &claurst_core::Config,
     client: &claurst_api::AnthropicClient,
@@ -47,7 +47,7 @@ pub(crate) fn dispatches_through_provider(
 /// Both the dispatch arm and the compaction pass in front of it need the same
 /// handle, and picking it twice by hand is how the two would come to disagree
 /// about which endpoint a turn belongs to.
-pub(crate) fn provider_for_turn(
+pub fn provider_for_turn(
     registry: &claurst_api::ProviderRegistry,
     config: &claurst_core::Config,
     account: &str,
@@ -159,15 +159,15 @@ pub(crate) async fn compact_before_request(
         }
     }
 
-    // Reactive compact (T1-1) replaces the proactive path when its gate is set;
-    // it fires from usage rather than from a finished turn and adds a 97%
-    // emergency collapse. Off by default.
     // `autoCompact: false` means the user keeps the whole conversation and
     // accepts the consequence. They still get told how full it is.
     if !config.auto_compact {
         return pass;
     }
 
+    // Reactive compact (T1-1) replaces the proactive path when its gate is set;
+    // it fires from usage rather than from a finished turn and adds a 97%
+    // emergency collapse. Off by default.
     if claurst_core::feature_gates::is_feature_enabled("reactive_compact") {
         run_reactive(
             messages,
