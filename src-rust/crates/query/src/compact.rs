@@ -145,60 +145,6 @@ pub enum TokenWarningState {
     Critical,
 }
 
-// ---------------------------------------------------------------------------
-// Message grouping (from TypeScript grouping.ts)
-// ---------------------------------------------------------------------------
-
-/// A semantically coherent chunk of messages suitable for individual
-/// summarisation.  Groups are formed at API-round boundaries: one group per
-/// assistant response, which naturally pairs every tool_use with its result.
-#[derive(Debug, Clone)]
-pub struct MessageGroup {
-    pub messages: Vec<Message>,
-    /// First file path or tool name mentioned in this group, if any.
-    pub topic_hint: Option<String>,
-    /// Rough token estimate for the group (chars / 4, padded by 4/3).
-    pub token_estimate: usize,
-}
-
-impl MessageGroup {
-    fn from_messages(messages: Vec<Message>) -> Self {
-        let topic_hint = extract_topic_hint(&messages);
-        let token_estimate = estimate_tokens_for_messages(&messages);
-        Self {
-            messages,
-            topic_hint,
-            token_estimate,
-        }
-    }
-}
-
-/// Extract a short "topic hint" from a group: first file path or tool name
-/// mentioned in any tool_use or tool_result block.
-fn extract_topic_hint(messages: &[Message]) -> Option<String> {
-    for msg in messages {
-        let blocks = match &msg.content {
-            MessageContent::Blocks(b) => b,
-            _ => continue,
-        };
-        for block in blocks {
-            if let ContentBlock::ToolUse { name, input, .. } = block {
-                // Try to get a file_path from input, else use tool name
-                if let Some(fp) = input.get("file_path").and_then(|v| v.as_str()) {
-                    return Some(fp.to_string());
-                }
-                if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                    // Use first word of command as hint
-                    let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
-                    return Some(first_word.to_string());
-                }
-                return Some(name.clone());
-            }
-        }
-    }
-    None
-}
-
 /// Estimated size of a conversation, in tokens.
 ///
 /// For a caller with no provider-reported usage to go on, such as the footer
@@ -233,122 +179,6 @@ fn estimate_block_chars(block: &ContentBlock) -> usize {
         ContentBlock::Thinking { thinking, .. } => thinking.len(),
         ContentBlock::RedactedThinking { data } => data.len(),
         _ => 200, // default for images/documents
-    }
-}
-
-/// Group messages at API-round boundaries: one group per assistant response.
-/// This mirrors `groupMessagesByApiRound` from TypeScript grouping.ts.
-///
-/// Each group represents one complete API round:
-///   [user_messages..., assistant_response]
-///
-/// Boundary detection:
-/// - When messages have UUIDs, a new group fires at the START of each new
-///   assistant message whose UUID differs from the previous one.
-/// - When messages lack UUIDs (local / test messages), boundaries fire
-///   when an assistant message follows a PREVIOUS assistant in the current
-///   group — i.e. each assistant turn closes its own group.
-///
-/// The result is that user messages are grouped with the SUBSEQUENT assistant
-/// response that replies to them (matching TypeScript round semantics).
-pub fn group_messages_for_compact(messages: &[Message]) -> Vec<MessageGroup> {
-    let mut groups: Vec<MessageGroup> = Vec::new();
-    let mut current: Vec<Message> = Vec::new();
-
-    for msg in messages {
-        if msg.role == Role::Assistant {
-            // Add this assistant message to the current group (with any
-            // accumulated user messages from this round).
-            current.push(msg.clone());
-
-            // Close the group: the next user message(s) belong to the next round.
-            groups.push(MessageGroup::from_messages(current.clone()));
-            current.clear();
-        } else {
-            current.push(msg.clone());
-        }
-    }
-
-    // Any trailing non-assistant messages (shouldn't happen in practice)
-    // form their own group.
-    if !current.is_empty() {
-        groups.push(MessageGroup::from_messages(current));
-    }
-
-    groups
-}
-
-// ---------------------------------------------------------------------------
-// MicroCompact configuration & logic
-// ---------------------------------------------------------------------------
-
-/// Configuration for micro-compaction (partial, proactive summarisation).
-#[derive(Debug, Clone)]
-pub struct MicroCompactConfig {
-    /// Compact when context is this fraction full (e.g. 0.75 = 75 %).
-    pub trigger_threshold: f32,
-    /// Always keep this many recent messages verbatim.
-    pub keep_recent_messages: usize,
-    /// Target token count for the generated summary.
-    pub summary_target_tokens: usize,
-}
-
-impl Default for MicroCompactConfig {
-    fn default() -> Self {
-        Self {
-            trigger_threshold: 0.75,
-            keep_recent_messages: 10,
-            summary_target_tokens: 2048,
-        }
-    }
-}
-
-/// Attempt a micro-compact if the context is above `config.trigger_threshold`.
-///
-/// Returns `Some(new_messages)` when compaction occurred, `None` otherwise.
-pub async fn micro_compact_if_needed(
-    backend: &dyn CompactBackend,
-    messages: &[Message],
-    input_tokens: u64,
-    model: &str,
-    config: &MicroCompactConfig,
-) -> Option<Vec<Message>> {
-    let window = context_window_for_model(model);
-    let pct_used = input_tokens as f64 / window as f64;
-
-    if pct_used < config.trigger_threshold as f64 {
-        return None;
-    }
-
-    let total = messages.len();
-    if total <= config.keep_recent_messages + 1 {
-        return None;
-    }
-
-    let split_at = total.saturating_sub(config.keep_recent_messages);
-
-    info!(
-        input_tokens,
-        pct_used = format!("{:.1}%", pct_used * 100.0),
-        split_at,
-        keep = config.keep_recent_messages,
-        "MicroCompact triggered"
-    );
-
-    let target_tokens = config.summary_target_tokens as u32;
-    match summarise_head(backend, messages, split_at, model, target_tokens, None).await {
-        Ok(new_msgs) => {
-            info!(
-                original = total,
-                compacted = new_msgs.len(),
-                "MicroCompact complete"
-            );
-            Some(new_msgs)
-        }
-        Err(e) => {
-            warn!(error = %e, "MicroCompact failed");
-            None
-        }
     }
 }
 
@@ -1504,41 +1334,6 @@ pub fn should_context_collapse(tokens_used: u64, context_limit: u64) -> bool {
     tokens_used >= threshold
 }
 
-/// Snip the middle of the conversation, keeping:
-///   - the first message (usually the system/context bootstrap), and
-///   - the `keep_n_newest` most-recent messages.
-///
-/// Returns `(new_messages, rough_tokens_freed)`.
-///
-/// Mirrors `snipCompact` from TypeScript (no API call required — purely local).
-pub fn snip_compact(
-    messages: Vec<claurst_core::types::Message>,
-    keep_n_newest: usize,
-) -> (Vec<claurst_core::types::Message>, u64) {
-    let total = messages.len();
-    if total <= keep_n_newest + 1 {
-        // Nothing to snip.
-        return (messages, 0);
-    }
-
-    // Keep: messages[0] (first/system message) + messages[total-keep_n_newest..]
-    let snip_start = 1usize;
-    let snip_end = total.saturating_sub(keep_n_newest);
-
-    if snip_start >= snip_end {
-        return (messages, 0);
-    }
-
-    // Estimate how many tokens the snipped range held.
-    let snipped_tokens = estimate_tokens_for_messages(&messages[snip_start..snip_end]) as u64;
-
-    let mut result = Vec::with_capacity(1 + keep_n_newest);
-    result.push(messages[0].clone());
-    result.extend_from_slice(&messages[snip_end..]);
-
-    (result, snipped_tokens)
-}
-
 /// Compute the index into `messages` such that the tail starting at that
 /// index fits within `token_budget` tokens.
 ///
@@ -2291,41 +2086,6 @@ mod tests {
 
         forget_compact_state(session);
         assert!(!compact_state_for(session).disabled);
-    }
-
-    // ---- Message grouping ---------------------------------------------------
-
-    #[test]
-    fn test_group_messages_simple() {
-        let messages = vec![
-            make_user("Hello"),
-            make_assistant("Hi there"),
-            make_user("How are you?"),
-            make_assistant("I'm fine"),
-        ];
-
-        let groups = group_messages_for_compact(&messages);
-        // Should produce 2 groups: one per assistant turn boundary
-        assert_eq!(groups.len(), 2);
-        // First group: user + first assistant
-        assert_eq!(groups[0].messages.len(), 2);
-        // Second group: second user + second assistant
-        assert_eq!(groups[1].messages.len(), 2);
-    }
-
-    #[test]
-    fn test_group_empty() {
-        let groups = group_messages_for_compact(&[]);
-        assert!(groups.is_empty());
-    }
-
-    #[test]
-    fn test_group_only_user_messages() {
-        // No assistant messages → everything in one group
-        let messages = vec![make_user("A"), make_user("B"), make_user("C")];
-        let groups = group_messages_for_compact(&messages);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].messages.len(), 3);
     }
 
     // ---- format_compact_summary --------------------------------------------

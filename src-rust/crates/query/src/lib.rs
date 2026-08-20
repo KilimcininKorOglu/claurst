@@ -35,10 +35,8 @@ pub use compact::{
     auto_compact_if_needed, calculate_messages_to_keep_index, calculate_token_warning_state,
     calculate_token_warning_state_for_window, compact_conversation, context_collapse,
     context_window_for_model, estimate_context_tokens, format_compact_summary, get_compact_prompt,
-    group_messages_for_compact, micro_compact_if_needed, reactive_compact, resolve_context_window,
-    should_auto_compact_for_window, should_compact, should_context_collapse, snip_compact,
-    AutoCompactState, CompactResult, CompactTrigger, MessageGroup, MicroCompactConfig,
-    TokenWarningState,
+    reactive_compact, resolve_context_window, should_auto_compact_for_window, should_compact,
+    should_context_collapse, AutoCompactState, CompactResult, CompactTrigger, TokenWarningState,
 };
 pub use continuation::{
     ContinuationDecision, ContinuationMode, ContinuationPolicy, StopPolicy, TurnEndContext,
