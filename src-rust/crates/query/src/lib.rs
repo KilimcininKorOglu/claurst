@@ -1677,10 +1677,15 @@ async fn run_query_loop_inner(
         // for every provider — 1M Gemini/GPT windows, 32k local models) and
         // fall back to the Claude-centric heuristic only when the registry has
         // no usable entry. All threshold logic below keys off this. (#216)
+        //
+        // `effective_model`, never `config.model`: an agent definition's own
+        // model and a fallback switch both replace the live model, and a
+        // window sized for the session model would then be wrong by as much
+        // as the two models differ.
         let context_window = compact::resolve_context_window(
             config.model_registry.as_deref(),
             tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
-            &config.model,
+            &effective_model,
         );
 
         // Numerator for every threshold below: prefer the REAL context-token
@@ -1774,7 +1779,7 @@ async fn run_query_loop_inner(
                 client,
                 messages,
                 context_tokens,
-                &config.model,
+                &effective_model,
                 context_window,
                 &mut compact_state,
             )
