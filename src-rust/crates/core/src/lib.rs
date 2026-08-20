@@ -2060,15 +2060,42 @@ pub mod config {
             self.mouse_capture.unwrap_or(true)
         }
 
+        /// Split a `"<account>/<model>"` string, but only when the first
+        /// segment really names an account.
+        ///
+        /// The single place that rule is written. A bare `split_once('/')`
+        /// also fires on model ids that carry a slash of their own
+        /// (`meta-llama/Llama-3.3-70B` on OpenRouter, `anthropic/claude-*` on
+        /// any gateway), and reading `meta-llama` as an account sends the
+        /// request to an endpoint that does not exist.
+        fn account_prefix<'a>(&self, model: &'a str) -> Option<(&'a str, &'a str)> {
+            let (head, rest) = model.split_once('/')?;
+            (!rest.is_empty() && self.is_account_id(head)).then_some((head, rest))
+        }
+
+        /// The account the session is talking to.
+        ///
+        /// Same precedence as [`Config::resolve_route`], and deliberately so:
+        /// this decides which credential, base URL and timeout the request
+        /// carries while `resolve_route` decides where it goes. The two
+        /// disagreeing is how a prompt came to be signed with one account's
+        /// key and addressed to another's endpoint.
+        ///
+        /// Reads `self.model` rather than [`Config::effective_model`], whose
+        /// per-provider fallbacks are themselves slashed model ids
+        /// (`"anthropic/claude-sonnet-4"` for OpenRouter): resolving those as
+        /// an account prefix would move an unconfigured OpenRouter session to
+        /// Anthropic.
         pub fn selected_provider_id(&self) -> &str {
+            if let Some(model) = self.model.as_deref() {
+                if let Some((account, _)) = self.account_prefix(model) {
+                    return account;
+                }
+            }
             self.provider
                 .as_deref()
-                .or_else(|| {
-                    self.model
-                        .as_deref()
-                        .and_then(|model| model.split_once('/').map(|(provider, _)| provider))
-                })
-                .unwrap_or("anthropic")
+                .filter(|id| !id.is_empty())
+                .unwrap_or(crate::provider_id::ProviderId::ANTHROPIC)
         }
 
         /// Resolve the effective model, falling back to a provider-appropriate default.
@@ -2389,13 +2416,11 @@ pub mod config {
         /// contains a slash (`meta-llama/Llama-3.3` on OpenRouter) survives
         /// both as `"openrouter/meta-llama/Llama-3.3"` and bare.
         pub fn resolve_route(&self, model: &str) -> Route {
-            if let Some((head, rest)) = model.split_once('/') {
-                if !rest.is_empty() && self.is_account_id(head) {
-                    return Route {
-                        account: head.to_string(),
-                        model: rest.to_string(),
-                    };
-                }
+            if let Some((head, rest)) = self.account_prefix(model) {
+                return Route {
+                    account: head.to_string(),
+                    model: rest.to_string(),
+                };
             }
 
             let account = self
@@ -2407,6 +2432,26 @@ pub mod config {
             Route {
                 account: account.to_string(),
                 model: model.to_string(),
+            }
+        }
+
+        /// Where this configuration sends a request when nothing overrides it.
+        ///
+        /// Not `resolve_route(self.effective_model())`. The per-provider
+        /// fallbacks in [`Config::effective_model`] are themselves slashed
+        /// model ids (`"anthropic/claude-sonnet-4"` for OpenRouter,
+        /// `"meta-llama/Llama-3.3-70B-Instruct-Turbo"` for Together), and
+        /// reading their vendor namespace as an account prefix would move an
+        /// unconfigured session to a different endpoint entirely. When the
+        /// user chose no model the provider *is* the account, and the fallback
+        /// id is the wire model whole, namespace included.
+        pub fn effective_route(&self) -> Route {
+            match self.model.as_deref() {
+                Some(model) => self.resolve_route(model),
+                None => Route {
+                    account: self.selected_provider_id().to_string(),
+                    model: self.effective_model().to_string(),
+                },
             }
         }
 
@@ -8875,6 +8920,78 @@ mod route_resolution_tests {
         let config = config_with(None, &[]);
         let route = config.resolve_route("claude-sonnet-5");
         assert_eq!(route.account, "anthropic");
+    }
+
+    // ---- selected_provider_id agrees with resolve_route ---------------------
+
+    #[test]
+    fn a_vendor_namespace_is_not_read_as_an_account() {
+        // `meta-llama/Llama-3.3-70B` is one model id on OpenRouter, not an
+        // account and a model. `resolve_route` guarded this from the start;
+        // `selected_provider_id` did a bare `split_once('/')` and answered
+        // "meta-llama", an account nothing is filed under, so the credential
+        // lookup, the base URL and the timeout all came back empty.
+        //
+        // No provider selected on purpose: with one set, the old code returned
+        // it before ever reaching the split, and the test would pass against
+        // the bug it is here to catch.
+        let mut config = config_with(None, &[]);
+        config.model = Some("meta-llama/Llama-3.3-70B".to_string());
+
+        assert_eq!(config.selected_provider_id(), "anthropic");
+        assert_eq!(config.effective_route().account, "anthropic");
+        assert_eq!(
+            config.effective_route().model,
+            "meta-llama/Llama-3.3-70B",
+            "the namespace belongs to the model id"
+        );
+    }
+
+    #[test]
+    fn the_credential_and_the_endpoint_name_the_same_account() {
+        // `selected_provider_id` decides which key signs the request and
+        // `resolve_route` decides where it goes. They used to disagree
+        // whenever the model carried a prefix: the key came from the selected
+        // provider, the request from the prefixed account, and the composite
+        // went out as the wire model.
+        let mut config = config_with(Some("account_a"), &["account_a", "account_b"]);
+        config.model = Some("account_b/some-model".to_string());
+
+        let route = config.effective_route();
+        assert_eq!(config.selected_provider_id(), route.account);
+        assert_eq!(route.account, "account_b");
+        assert_eq!(route.model, "some-model");
+    }
+
+    #[test]
+    fn an_unset_model_leaves_the_provider_in_charge() {
+        let config = config_with(Some("openai"), &["openai"]);
+        assert_eq!(config.selected_provider_id(), "openai");
+    }
+
+    #[test]
+    fn a_fallback_models_namespace_never_moves_the_account() {
+        // With no model chosen, `effective_model` answers with the provider's
+        // own default, and several of those are slashed ids
+        // (`"anthropic/claude-sonnet-4"` for OpenRouter). Resolving that as a
+        // route would hand an unconfigured OpenRouter session to Anthropic,
+        // which is why `effective_route` does not go through `resolve_route`.
+        let config = config_with(Some("openrouter"), &["openrouter"]);
+        assert_eq!(config.effective_model(), "anthropic/claude-sonnet-4");
+
+        let route = config.effective_route();
+        assert_eq!(route.account, "openrouter");
+        assert_eq!(route.model, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn a_chosen_model_still_routes_by_its_prefix() {
+        let mut config = config_with(Some("openrouter"), &["openrouter", "anthropic"]);
+        config.model = Some("anthropic/claude-sonnet-5".to_string());
+
+        let route = config.effective_route();
+        assert_eq!(route.account, "anthropic");
+        assert_eq!(route.model, "claude-sonnet-5");
     }
 }
 
