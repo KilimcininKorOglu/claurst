@@ -9,7 +9,7 @@
 //      (refreshed by `refresh_from_models_dev()` once it has run).
 //   4. `refresh_from_models_dev()` fetches the latest catalog from
 //      `https://models.dev/api.json` (overridable via `MODELS_DEV_URL` /
-//      `CLAURST_MODELS_URL`) and writes it back to the on-disk cache.
+//      `MIKMIK_MODELS_URL`) and writes it back to the on-disk cache.
 //
 // **No more hardcoded per-provider model lists.**  All metadata —
 // modalities, pricing, release date, capability flags, npm SDK package —
@@ -70,7 +70,7 @@ impl ModelStatus {
     /// Whether to surface this model in default UI listings.
     ///
     /// Alpha/deprecated models are hidden unless
-    /// `CLAURST_ENABLE_EXPERIMENTAL_MODELS=1`.
+    /// `MIKMIK_ENABLE_EXPERIMENTAL_MODELS=1`.
     pub fn is_listed_by_default(self) -> bool {
         matches!(self, ModelStatus::Active | ModelStatus::Beta)
     }
@@ -917,10 +917,10 @@ impl ModelRegistry {
     /// List models for a provider, filtered to those that should appear in
     /// default UI listings (active/beta only — no alpha or deprecated).
     ///
-    /// Set the `CLAURST_ENABLE_EXPERIMENTAL_MODELS=1` env var to also include
+    /// Set the `MIKMIK_ENABLE_EXPERIMENTAL_MODELS=1` env var to also include
     /// alpha/deprecated entries.
     pub fn list_visible_by_provider(&self, provider_id: &str) -> Vec<&ModelEntry> {
-        let show_all = std::env::var("CLAURST_ENABLE_EXPERIMENTAL_MODELS")
+        let show_all = std::env::var("MIKMIK_ENABLE_EXPERIMENTAL_MODELS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         self.list_by_provider(provider_id)
@@ -1068,7 +1068,7 @@ impl ModelRegistry {
 
     /// Resolve the models.dev source URL, honoring env-var overrides.
     fn source_url() -> String {
-        std::env::var("CLAURST_MODELS_URL")
+        std::env::var("MIKMIK_MODELS_URL")
             .or_else(|_| std::env::var("MODELS_DEV_URL"))
             .unwrap_or_else(|_| "https://models.dev/api.json".to_string())
     }
@@ -1096,11 +1096,11 @@ impl ModelRegistry {
     /// Attempt to refresh the registry from the models.dev public API.
     ///
     /// Returns `Ok(true)` if new data was fetched, `Ok(false)` if the cache
-    /// was still fresh.  Honors `CLAURST_DISABLE_MODELS_FETCH`.  All network
+    /// was still fresh.  Honors `MIKMIK_DISABLE_MODELS_FETCH`.  All network
     /// or parse failures are silenced — the bundled snapshot is always
     /// sufficient.
     pub async fn refresh_from_models_dev(&mut self) -> anyhow::Result<bool> {
-        if std::env::var("CLAURST_DISABLE_MODELS_FETCH").is_ok() {
+        if std::env::var("MIKMIK_DISABLE_MODELS_FETCH").is_ok() {
             return Ok(false);
         }
         if self.cache_is_fresh() {

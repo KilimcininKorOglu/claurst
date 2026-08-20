@@ -1982,8 +1982,8 @@ impl App {
             voice_recorder: {
                 // Check whether voice input has been enabled via the /voice command
                 // (stored in ~/.config/mikmik/ui-settings.json).  We also accept
-                // CLAURST_VOICE_ENABLED=1 as an override for easier testing.
-                let voice_on = std::env::var("CLAURST_VOICE_ENABLED")
+                // MIKMIK_VOICE_ENABLED=1 as an override for easier testing.
+                let voice_on = std::env::var("MIKMIK_VOICE_ENABLED")
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                     .unwrap_or(false)
                     || {
@@ -2065,8 +2065,8 @@ impl App {
     /// Only enabled when the `token_budget` feature flag is active.
     #[cfg(feature = "token_budget")]
     fn load_token_budget() -> Option<u32> {
-        // First check CLAURST_TOKEN_BUDGET env var
-        if let Ok(budget_str) = std::env::var("CLAURST_TOKEN_BUDGET") {
+        // First check MIKMIK_TOKEN_BUDGET env var
+        if let Ok(budget_str) = std::env::var("MIKMIK_TOKEN_BUDGET") {
             if let Ok(budget) = budget_str.parse::<u32>() {
                 return Some(budget);
             }

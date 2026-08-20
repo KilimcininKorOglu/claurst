@@ -1635,8 +1635,8 @@ mod tests {
         // touches (or requires a writable) ~/.config/mikmik. Sandboxed builds run
         // with no HOME and disallow writes outside the build tree.
         let tmp = tempfile::tempdir().expect("tempdir");
-        let prev = std::env::var_os("CLAURST_MCP_TOKENS_DIR");
-        std::env::set_var("CLAURST_MCP_TOKENS_DIR", tmp.path());
+        let prev = std::env::var_os("MIKMIK_MCP_TOKENS_DIR");
+        std::env::set_var("MIKMIK_MCP_TOKENS_DIR", tmp.path());
 
         let mut mgr = McpManager::new();
         mgr.server_configs.insert(
@@ -1677,8 +1677,8 @@ mod tests {
         oauth::remove_mcp_token("remote").ok();
 
         match prev {
-            Some(v) => std::env::set_var("CLAURST_MCP_TOKENS_DIR", v),
-            None => std::env::remove_var("CLAURST_MCP_TOKENS_DIR"),
+            Some(v) => std::env::set_var("MIKMIK_MCP_TOKENS_DIR", v),
+            None => std::env::remove_var("MIKMIK_MCP_TOKENS_DIR"),
         }
     }
 }

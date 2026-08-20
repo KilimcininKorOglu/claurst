@@ -11,7 +11,7 @@
 //! The detection mirrors `messages::markdown::URL_PATTERN`, so what the
 //! markdown renderer underlines in cyan is exactly what gets linked here.
 //!
-//! Disable with `CLAURST_NO_HYPERLINKS=1`.
+//! Disable with `MIKMIK_NO_HYPERLINKS=1`.
 
 use std::io::{self, Write};
 
@@ -51,7 +51,7 @@ pub struct UrlHit {
 }
 
 fn enabled() -> bool {
-    enabled_for(std::env::var("CLAURST_NO_HYPERLINKS").ok().as_deref())
+    enabled_for(std::env::var("MIKMIK_NO_HYPERLINKS").ok().as_deref())
 }
 
 /// Pure decision split out from [`enabled`] so it can be unit-tested without

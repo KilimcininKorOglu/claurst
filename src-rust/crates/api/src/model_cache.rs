@@ -20,13 +20,13 @@ pub fn model_cache_dir() -> PathBuf {
 
 /// Resolve the models.dev source URL, honoring env-var overrides.
 pub fn models_source_url() -> String {
-    std::env::var("CLAURST_MODELS_URL")
+    std::env::var("MIKMIK_MODELS_URL")
         .or_else(|_| std::env::var("MODELS_DEV_URL"))
         .unwrap_or_else(|_| "https://models.dev/api.json".to_string())
 }
 
 /// Default cache filename — derived from the source URL so a custom
-/// `CLAURST_MODELS_URL` doesn't stomp the canonical models.dev cache.
+/// `MIKMIK_MODELS_URL` doesn't stomp the canonical models.dev cache.
 pub fn models_cache_path() -> PathBuf {
     let url = models_source_url();
     let filename = if url == "https://models.dev/api.json" {
@@ -50,9 +50,9 @@ pub fn models_dev_cache_path() -> PathBuf {
 /// network, and layer the user's metadata overrides on top.
 pub fn load_cached_model_registry(config: &Config) -> Arc<ModelRegistry> {
     let mut reg = ModelRegistry::new();
-    // CLAURST_MODELS_PATH wins outright — useful for offline dev where you
+    // MIKMIK_MODELS_PATH wins outright — useful for offline dev where you
     // pin a known-good api.json on disk.
-    if let Ok(custom) = std::env::var("CLAURST_MODELS_PATH") {
+    if let Ok(custom) = std::env::var("MIKMIK_MODELS_PATH") {
         reg.load_cache(&PathBuf::from(custom));
     } else {
         reg.load_cache(&models_cache_path());

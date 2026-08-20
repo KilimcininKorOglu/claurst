@@ -254,25 +254,25 @@ A few UI details confuse people running local models:
 
 ---
 
-## Is `CLAURST_COORDINATOR_MODE=1` a real thing?
+## Is `MIKMIK_COORDINATOR_MODE=1` a real thing?
 
 Short answer: **the name exists in the source, but setting it currently does
 nothing — don't cargo-cult it for local models (or any models).**
 
 Details, from grepping this repository:
 
-- The string `CLAURST_COORDINATOR_MODE` appears exactly once in the Rust
+- The string `MIKMIK_COORDINATOR_MODE` appears exactly once in the Rust
   runtime, as a constant in `crates/query/src/coordinator.rs`. There is a
   `coordinator` module (multi-worker orchestration) and a [Agents](agents) doc
   page describing a coordinator/worker model.
 - **But nothing in the live agent loop reads it.** `is_coordinator_mode()` (the
   function that would check the env var) has no callers outside the module's own
   unit tests, and the system-prompt builder hardcodes `coordinator_mode: false`.
-  So exporting `CLAURST_COORDINATOR_MODE=1` before launching Claurst has no
+  So exporting `MIKMIK_COORDINATOR_MODE=1` before launching Claurst has no
   observable effect in this version.
 - **You don't need it anyway.** Claurst is agentic by default — it plans and
   calls tools on every run. There is no separate "enable agentic mode" switch to
-  flip. If an assistant told you to set `CLAURST_COORDINATOR_MODE=1` to "turn on
+  flip. If an assistant told you to set `MIKMIK_COORDINATOR_MODE=1` to "turn on
   agentic workflows," that advice was wrong.
 
 If you specifically want parallel sub-agent orchestration, see

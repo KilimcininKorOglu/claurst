@@ -159,7 +159,7 @@ impl SystemPromptPrefix {
             return Self::Bedrock;
         }
 
-        if std::env::var("CLAURST_REMOTE").is_ok() {
+        if std::env::var("MIKMIK_REMOTE").is_ok() {
             return Self::Remote;
         }
 

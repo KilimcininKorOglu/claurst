@@ -212,15 +212,15 @@ impl BridgeConfig {
     /// Build config from environment variables.
     ///
     /// Recognised variables:
-    /// - `CLAURST_BRIDGE_URL` — overrides `server_url` and sets `enabled = true`
-    /// - `CLAURST_BRIDGE_TOKEN` / `CLAUDE_BRIDGE_OAUTH_TOKEN` — sets `session_token`
+    /// - `MIKMIK_BRIDGE_URL` — overrides `server_url` and sets `enabled = true`
+    /// - `MIKMIK_BRIDGE_TOKEN` / `CLAUDE_BRIDGE_OAUTH_TOKEN` — sets `session_token`
     /// - `CLAUDE_BRIDGE_BASE_URL` — alternative URL override (ant-only dev override)
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
         // URL override (sets enabled implicitly)
         if let Ok(url) =
-            std::env::var("CLAURST_BRIDGE_URL").or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
+            std::env::var("MIKMIK_BRIDGE_URL").or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         {
             if !url.is_empty() {
                 config.server_url = url;
@@ -229,7 +229,7 @@ impl BridgeConfig {
         }
 
         // Token override
-        if let Ok(token) = std::env::var("CLAURST_BRIDGE_TOKEN")
+        if let Ok(token) = std::env::var("MIKMIK_BRIDGE_TOKEN")
             .or_else(|_| std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN"))
         {
             if !token.is_empty() {
@@ -1193,7 +1193,7 @@ pub struct SimpleMessage {
 /// # Authentication
 ///
 /// Reads the bearer token from (in order of precedence):
-/// 1. `CLAURST_BRIDGE_TOKEN` environment variable
+/// 1. `MIKMIK_BRIDGE_TOKEN` environment variable
 /// 2. `CLAUDE_BRIDGE_OAUTH_TOKEN` environment variable
 ///
 /// If no token is found, returns an informative error.
@@ -1220,20 +1220,20 @@ pub async fn start_bridge_session(
 ) -> anyhow::Result<BridgeSessionInfo> {
     // Resolve auth token.
     let token = token_override
-        .or_else(|| std::env::var("CLAURST_BRIDGE_TOKEN").ok())
+        .or_else(|| std::env::var("MIKMIK_BRIDGE_TOKEN").ok())
         .or_else(|| std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN").ok())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Remote Control requires a session token.\n\
-                 Set CLAURST_BRIDGE_TOKEN=<your-token> to enable.\n\
+                 Set MIKMIK_BRIDGE_TOKEN=<your-token> to enable.\n\
                  Get a token from https://claude.ai (Settings → Remote Control).\n\
                  Note: Remote Control is only available with claude.ai subscriptions."
             )
         })?;
 
     // Resolve server base URL.
-    let server_url = std::env::var("CLAURST_BRIDGE_URL")
+    let server_url = std::env::var("MIKMIK_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .unwrap_or_else(|_| "https://claude.ai".to_string());
 
@@ -1336,7 +1336,7 @@ pub async fn poll_bridge_messages(
     info: &BridgeSessionInfo,
     since_id: Option<&str>,
 ) -> anyhow::Result<Vec<SimpleMessage>> {
-    let server_url = std::env::var("CLAURST_BRIDGE_URL")
+    let server_url = std::env::var("MIKMIK_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .unwrap_or_else(|_| "https://claude.ai".to_string());
 
@@ -1423,7 +1423,7 @@ pub async fn post_bridge_response(
     content: &str,
     done: bool,
 ) -> anyhow::Result<()> {
-    let server_url = std::env::var("CLAURST_BRIDGE_URL")
+    let server_url = std::env::var("MIKMIK_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .unwrap_or_else(|_| "https://claude.ai".to_string());
 
@@ -1485,7 +1485,7 @@ pub async fn post_bridge_response(
 /// Errors are returned to the caller, who should treat them as transient and
 /// ignore them so the query loop is never blocked.
 pub async fn post_bridge_event(info: &BridgeSessionInfo, payload: String) -> anyhow::Result<()> {
-    let server_url = std::env::var("CLAURST_BRIDGE_URL")
+    let server_url = std::env::var("MIKMIK_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .unwrap_or_else(|_| "https://claude.ai".to_string());
 

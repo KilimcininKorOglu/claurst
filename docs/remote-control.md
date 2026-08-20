@@ -70,7 +70,7 @@ In your user settings file (`~/.config/mikmik/settings.json`, or wherever `MIKMI
 
 This block is read from the user settings file only. A project settings file cannot set it, because a repository should not be able to point your machine's bridge at a relay.
 
-For a temporary redirect while developing, `CLAURST_BRIDGE_URL` and `CLAURST_BRIDGE_TOKEN` override the settings file.
+For a temporary redirect while developing, `MIKMIK_BRIDGE_URL` and `MIKMIK_BRIDGE_TOKEN` override the settings file.
 
 ---
 

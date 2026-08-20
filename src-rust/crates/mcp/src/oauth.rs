@@ -43,11 +43,11 @@ impl McpToken {
 /// Directory holding the MCP OAuth token store.
 ///
 /// Defaults to `<claurst home>/mcp-tokens`, but can be redirected with the
-/// `CLAURST_MCP_TOKENS_DIR` environment variable. The override lets tests run
+/// `MIKMIK_MCP_TOKENS_DIR` environment variable. The override lets tests run
 /// hermetically (and lets packagers/sandboxes relocate the store) without
 /// writing to the real HOME, which is unwritable in sandboxed builds.
 fn token_store_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CLAURST_MCP_TOKENS_DIR") {
+    if let Some(dir) = std::env::var_os("MIKMIK_MCP_TOKENS_DIR") {
         return PathBuf::from(dir);
     }
     mikmik_core::config::Settings::config_dir().join("mcp-tokens")

@@ -897,7 +897,7 @@ Set a durable multi-turn autonomous goal. When a goal is active, Claurst continu
 /goal complete                       — request a completion audit
 ```
 
-When the model believes the goal has been achieved, it calls the `GoalComplete` tool with an audit summary and evidence. Goals can be disabled globally by setting `CLAURST_GOALS=0` in your environment.
+When the model believes the goal has been achieved, it calls the `GoalComplete` tool with an audit summary and evidence. Goals can be disabled globally by setting `MIKMIK_GOALS=0` in your environment.
 
 See [Goal System](./advanced.md#goal-system) in the advanced guide.
 
@@ -1437,7 +1437,7 @@ Manage the bridge that lets a phone or browser drive this session through a rela
 /remote-control status   — same as no argument
 ```
 
-With no argument it reports the relay address it resolved and which source each value came from, so a session configured through `settings.json` and one redirected by `CLAURST_BRIDGE_URL` are told apart. A token shorter than 32 characters is reported as unusable and the bridge does not start.
+With no argument it reports the relay address it resolved and which source each value came from, so a session configured through `settings.json` and one redirected by `MIKMIK_BRIDGE_URL` are told apart. A token shorter than 32 characters is reported as unusable and the bridge does not start.
 
 `start` and `stop` change the setting only. The bridge connects on the next launch.
 

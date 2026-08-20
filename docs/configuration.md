@@ -193,7 +193,7 @@ There is no separate remote permission policy. `config.permission_mode` decides 
 
 This block is read from the user settings file only. A project settings file cannot set it, because pointing the bridge at a relay is a decision about the machine, not about the repository.
 
-`CLAURST_BRIDGE_URL` and `CLAURST_BRIDGE_TOKEN` override it when set.
+`MIKMIK_BRIDGE_URL` and `MIKMIK_BRIDGE_TOKEN` override it when set.
 
 ### External ACP agents
 
@@ -762,9 +762,9 @@ the name the account is filed under.
 |------------------------|---------------------------------------------------------------------------------|
 | `ANTHROPIC_API_KEY`    | Anthropic API key. Checked after the `config.api_key` setting.                  |
 | `ANTHROPIC_BASE_URL`   | Override the Anthropic API base URL.                                            |
-| `CLAURST_PROVIDER`     | Active provider. Equivalent to `--provider`.                                    |
-| `CLAURST_API_BASE`     | Override the API base URL for the active provider. Equivalent to `--api_base`.  |
-| `CLAURST_GOALS`        | Set to `0` to disable the goal system (`/goal` command and `GoalCompleteTool`). |
+| `MIKMIK_PROVIDER`     | Active provider. Equivalent to `--provider`.                                    |
+| `MIKMIK_API_BASE`     | Override the API base URL for the active provider. Equivalent to `--api_base`.  |
+| `MIKMIK_GOALS`        | Set to `0` to disable the goal system (`/goal` command and `GoalCompleteTool`). |
 | `OPENAI_API_KEY`       | API key for the `openai` provider.                                              |
 | `GOOGLE_API_KEY`       | API key for the `google` provider.                                              |
 | `GROQ_API_KEY`         | API key for the `groq` provider.                                                |
@@ -779,8 +779,8 @@ the name the account is filed under.
 | `AZURE_API_KEY`        | API key for the `azure` provider.                                               |
 | `HF_TOKEN`             | Token for the `huggingface` provider.                                           |
 | `NVIDIA_API_KEY`       | API key for the `nvidia` provider.                                              |
-| `CLAURST_BRIDGE_URL`   | Relay address for the remote-control bridge. Overrides `remoteControl.url`.     |
-| `CLAURST_BRIDGE_TOKEN` | Bearer token for the remote-control bridge. Overrides `remoteControl.token`.    |
+| `MIKMIK_BRIDGE_URL`   | Relay address for the remote-control bridge. Overrides `remoteControl.url`.     |
+| `MIKMIK_BRIDGE_TOKEN` | Bearer token for the remote-control bridge. Overrides `remoteControl.token`.    |
 | `RUST_LOG`             | Tracing filter (e.g. `debug`, `claurst_core=trace`).                            |
 
 ---

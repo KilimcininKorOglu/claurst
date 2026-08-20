@@ -532,7 +532,7 @@ claurst --provider openai --model gpt-4o "your prompt"
 claurst --provider ollama --model llama3.2 "your prompt"
 
 # Or via environment variable
-CLAURST_PROVIDER=google claurst "your prompt"
+MIKMIK_PROVIDER=google claurst "your prompt"
 ```
 
 ---

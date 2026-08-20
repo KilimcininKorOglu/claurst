@@ -3654,7 +3654,7 @@ pub mod config {
 
         #[test]
         fn env_values_are_resolved_when_copied_into_the_effective_config() {
-            std::env::set_var("CLAURST_TEST_ACP_TOKEN", "resolved-secret");
+            std::env::set_var("MIKMIK_TEST_ACP_TOKEN", "resolved-secret");
             let settings = Settings {
                 acp_agents: HashMap::from([(
                     "gemini".to_string(),
@@ -3663,7 +3663,7 @@ pub mod config {
                         args: vec![],
                         env: HashMap::from([(
                             "TOKEN".to_string(),
-                            "{env:CLAURST_TEST_ACP_TOKEN}".to_string(),
+                            "{env:MIKMIK_TEST_ACP_TOKEN}".to_string(),
                         )]),
                     },
                 )]),
@@ -3673,7 +3673,7 @@ pub mod config {
             let config = settings.effective_config();
             let resolved = &config.acp_agents["gemini"].env["TOKEN"];
             assert_eq!(resolved, "resolved-secret");
-            std::env::remove_var("CLAURST_TEST_ACP_TOKEN");
+            std::env::remove_var("MIKMIK_TEST_ACP_TOKEN");
         }
     }
 

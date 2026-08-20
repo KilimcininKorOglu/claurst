@@ -36,7 +36,7 @@ Then point claurst at it, in `~/.claurst/settings.json`:
 }
 ```
 
-`CLAURST_BRIDGE_URL` and `CLAURST_BRIDGE_TOKEN` override the settings file, which is handy while developing.
+`MIKMIK_BRIDGE_URL` and `MIKMIK_BRIDGE_TOKEN` override the settings file, which is handy while developing.
 
 ## Configuration
 

@@ -239,11 +239,11 @@ struct Cli {
     fallback_model: Option<String>,
 
     /// LLM provider to use (default: anthropic). Examples: openai, google, ollama
-    #[arg(long, env = "CLAURST_PROVIDER")]
+    #[arg(long, env = "MIKMIK_PROVIDER")]
     provider: Option<String>,
 
     /// Override the API base URL for the selected provider
-    #[arg(long, env = "CLAURST_API_BASE")]
+    #[arg(long, env = "MIKMIK_API_BASE")]
     api_base: Option<String>,
 
     /// Named agent to use (e.g., build, plan, explore)
@@ -319,7 +319,7 @@ fn resolve_bridge_config(
     if let Some(remote) = settings.remote_control.as_ref() {
         match remote.validate() {
             Ok(()) => {
-                let from_env = std::env::var("CLAURST_BRIDGE_URL").is_ok()
+                let from_env = std::env::var("MIKMIK_BRIDGE_URL").is_ok()
                     || std::env::var("CLAUDE_BRIDGE_BASE_URL").is_ok();
                 if !from_env {
                     bridge_config.server_url = remote.url.trim().trim_end_matches('/').to_string();
@@ -1484,13 +1484,13 @@ fn cache_is_fresh(path: &std::path::Path, ttl: std::time::Duration) -> bool {
 /// Background-refresh the models cache from the configured source URL.
 ///
 /// Honors:
-/// * `CLAURST_DISABLE_MODELS_FETCH` — skips the network call entirely.
-/// * `CLAURST_MODELS_URL` / `MODELS_DEV_URL` — overrides the source URL.
+/// * `MIKMIK_DISABLE_MODELS_FETCH` — skips the network call entirely.
+/// * `MIKMIK_MODELS_URL` / `MODELS_DEV_URL` — overrides the source URL.
 /// * 5-minute mtime-based freshness check — avoids hammering models.dev
 ///   on every CLI invocation.
 fn spawn_models_cache_refresh() {
-    if std::env::var("CLAURST_DISABLE_MODELS_FETCH").is_ok() {
-        tracing::debug!("CLAURST_DISABLE_MODELS_FETCH set — skipping models.dev refresh");
+    if std::env::var("MIKMIK_DISABLE_MODELS_FETCH").is_ok() {
+        tracing::debug!("MIKMIK_DISABLE_MODELS_FETCH set — skipping models.dev refresh");
         return;
     }
     tokio::spawn(async move {
@@ -1504,8 +1504,8 @@ fn spawn_models_cache_refresh() {
 /// catalog on disk for the `/model` picker to reload. Non-blocking — the UI is
 /// never held on the network.
 fn spawn_models_cache_refresh_loop() {
-    if std::env::var("CLAURST_DISABLE_MODELS_FETCH").is_ok() {
-        tracing::debug!("CLAURST_DISABLE_MODELS_FETCH set — skipping models.dev refresh loop");
+    if std::env::var("MIKMIK_DISABLE_MODELS_FETCH").is_ok() {
+        tracing::debug!("MIKMIK_DISABLE_MODELS_FETCH set — skipping models.dev refresh loop");
         return;
     }
     tokio::spawn(async move {
@@ -7218,9 +7218,9 @@ mod remote_control_config_tests {
     impl EnvGuard {
         fn new() -> Self {
             let keys = [
-                "CLAURST_BRIDGE_URL",
+                "MIKMIK_BRIDGE_URL",
                 "CLAUDE_BRIDGE_BASE_URL",
-                "CLAURST_BRIDGE_TOKEN",
+                "MIKMIK_BRIDGE_TOKEN",
                 "CLAUDE_BRIDGE_OAUTH_TOKEN",
             ];
             let saved = keys
@@ -7316,7 +7316,7 @@ mod remote_control_config_tests {
     fn the_environment_overrides_the_configured_url() {
         let _lock = ENV_LOCK.lock().expect("lock");
         let _env = EnvGuard::new();
-        std::env::set_var("CLAURST_BRIDGE_URL", "http://localhost:8350");
+        std::env::set_var("MIKMIK_BRIDGE_URL", "http://localhost:8350");
 
         let config = resolve_bridge_config(&settings_with(Some(configured())), "", false, false)
             .expect("bridge is active");

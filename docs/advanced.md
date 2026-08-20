@@ -246,10 +246,10 @@ Claurst displays both to the user before marking the goal complete. The model is
 ### Disabling the goal system
 
 ```bash
-CLAURST_GOALS=0 claurst
+MIKMIK_GOALS=0 claurst
 ```
 
-Set `CLAURST_GOALS=0` in the environment to completely disable goal-related commands and the `GoalCompleteTool`. Useful in environments where autonomous multi-turn execution is undesirable.
+Set `MIKMIK_GOALS=0` in the environment to completely disable goal-related commands and the `GoalCompleteTool`. Useful in environments where autonomous multi-turn execution is undesirable.
 
 ---
 

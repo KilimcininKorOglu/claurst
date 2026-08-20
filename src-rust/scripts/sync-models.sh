@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-URL="${CLAURST_MODELS_URL:-${MODELS_DEV_URL:-https://models.dev/api.json}}"
+URL="${MIKMIK_MODELS_URL:-${MODELS_DEV_URL:-https://models.dev/api.json}}"
 FORCE="${FORCE:-0}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

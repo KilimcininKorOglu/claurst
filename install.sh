@@ -459,7 +459,7 @@ add_to_windows_user_path() {
     local ps_script
     ps_script=$(cat <<'PSEOF'
 $ErrorActionPreference = 'Stop'
-$installDir = $env:CLAURST_INSTALL_DIR_WIN
+$installDir = $env:MIKMIK_INSTALL_DIR_WIN
 $current = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($null -eq $current) { $current = '' }
 foreach ($entry in ($current -split ';' | Where-Object { $_ -ne '' })) {
@@ -479,7 +479,7 @@ PSEOF
 )
 
     local result
-    if ! result=$(CLAURST_INSTALL_DIR_WIN="$win_dir" \
+    if ! result=$(MIKMIK_INSTALL_DIR_WIN="$win_dir" \
         powershell.exe -NoProfile -NonInteractive -Command "$ps_script" 2>/dev/null); then
         print_message warning "Could not update the Windows user PATH. Add it manually: $(escape_backslashes "$win_dir")"
         return

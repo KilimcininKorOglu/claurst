@@ -186,7 +186,7 @@ A session can bring its own MCP servers over stdio, HTTP or SSE, connected for t
 
 Configure your provider / API key before launching — run `claurst auth login`, use `/connect` inside the TUI, or edit `settings.json` directly. The ACP agent uses the same credentials and providers as the interactive TUI.
 
-Enable verbose ACP logging (to stderr — never stdout, which would corrupt the protocol) by setting `CLAURST_ACP_LOG=debug`.
+Enable verbose ACP logging (to stderr — never stdout, which would corrupt the protocol) by setting `MIKMIK_ACP_LOG=debug`.
 
 ### VS Code
 

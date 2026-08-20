@@ -150,16 +150,16 @@ Coordinator mode enables a single top-level agent to orchestrate multiple parall
 
 ### Enabling Coordinator Mode
 
-Set the `CLAURST_COORDINATOR_MODE` environment variable to `1` before launching:
+Set the `MIKMIK_COORDINATOR_MODE` environment variable to `1` before launching:
 
 ```bash
-CLAURST_COORDINATOR_MODE=1 claurst "refactor the entire authentication subsystem"
+MIKMIK_COORDINATOR_MODE=1 claurst "refactor the entire authentication subsystem"
 ```
 
 Or within a shell session:
 
 ```bash
-export CLAURST_COORDINATOR_MODE=1
+export MIKMIK_COORDINATOR_MODE=1
 claurst
 ```
 
@@ -193,7 +193,7 @@ The following tools are available to the coordinator but are not passed to worke
 
 Workers receive all standard tools (file operations, Bash, web search, MCP tools, skills) but do not receive the coordinator-only tools listed above. This prevents workers from spawning their own sub-coordinators or interfering with task management.
 
-In simple mode (`CLAURST_SIMPLE=1`), workers are further restricted to `["Bash", "Read", "Edit"]`.
+In simple mode (`MIKMIK_SIMPLE=1`), workers are further restricted to `["Bash", "Read", "Edit"]`.
 
 ### Banned Tools in Coordinator Mode
 
@@ -244,7 +244,7 @@ I need to refactor the authentication module. Let me plan this in parallel:
 **Example coordinator session prompt:**
 
 ```bash
-CLAURST_COORDINATOR_MODE=1 claurst \
+MIKMIK_COORDINATOR_MODE=1 claurst \
   "Audit the entire src/payments directory for security issues. \
    Use parallel workers to examine each file, then produce a \
    consolidated security report with severity rankings."
@@ -314,7 +314,7 @@ CLAURST_COORDINATOR_MODE=1 claurst \
 
 ## Session Continuity and Mode Matching
 
-When resuming a saved session, Claurst detects whether the original session used coordinator mode and automatically sets `CLAURST_COORDINATOR_MODE` to match. A warning is printed when the environment is changed to prevent mode confusion in long-running workflows.
+When resuming a saved session, Claurst detects whether the original session used coordinator mode and automatically sets `MIKMIK_COORDINATOR_MODE` to match. A warning is printed when the environment is changed to prevent mode confusion in long-running workflows.
 
 ---
 
@@ -326,7 +326,7 @@ Managed agents provide a formal **manager-executor** architecture that is distin
 
 |                     | Coordinator mode              | Managed agents                                 |
 |---------------------|-------------------------------|------------------------------------------------|
-| **Setup**           | `CLAURST_COORDINATOR_MODE=1`  | `/managed-agents enable`                       |
+| **Setup**           | `MIKMIK_COORDINATOR_MODE=1`  | `/managed-agents enable`                       |
 | **Model selection** | All agents use the same model | Manager and executors can use different models |
 | **Budget control**  | Global session limits         | Per-role USD caps or percentage splits         |
 | **Presets**         | None                          | Several built-in presets available             |

@@ -102,7 +102,7 @@ impl SlashCommand for RemoteControlCommand {
                      4. Restart Claurst — the bridge connects automatically\n\
                      5. Open the relay in a browser and enter the same token\n\
                      \n\
-                     CLAURST_BRIDGE_URL and CLAURST_BRIDGE_TOKEN override the\n\
+                     MIKMIK_BRIDGE_URL and MIKMIK_BRIDGE_TOKEN override the\n\
                      settings file when set.\n\
                      \n\
                      Use /remote-control start   to enable bridge at next startup\n\
@@ -172,11 +172,11 @@ fn permission_note(session_mode: &mikmik_core::config::PermissionMode) -> &'stat
 /// one thing while the bridge does another: an environment override wins, then
 /// the `remoteControl` block, then the built-in default.
 fn resolved_relay(settings: &mikmik_core::config::Settings) -> (String, String) {
-    let env_url = std::env::var("CLAURST_BRIDGE_URL")
+    let env_url = std::env::var("MIKMIK_BRIDGE_URL")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_BASE_URL"))
         .ok()
         .filter(|url| !url.trim().is_empty());
-    let env_token = std::env::var("CLAURST_BRIDGE_TOKEN")
+    let env_token = std::env::var("MIKMIK_BRIDGE_TOKEN")
         .or_else(|_| std::env::var("CLAUDE_BRIDGE_OAUTH_TOKEN"))
         .is_ok();
 
@@ -313,9 +313,9 @@ mod resolved_relay_tests {
 
     fn clear_env() {
         for name in [
-            "CLAURST_BRIDGE_URL",
+            "MIKMIK_BRIDGE_URL",
             "CLAUDE_BRIDGE_BASE_URL",
-            "CLAURST_BRIDGE_TOKEN",
+            "MIKMIK_BRIDGE_TOKEN",
             "CLAUDE_BRIDGE_OAUTH_TOKEN",
         ] {
             std::env::remove_var(name);
@@ -375,8 +375,8 @@ mod resolved_relay_tests {
     fn the_environment_wins_over_the_settings_file() {
         let _guard = ENV_LOCK.lock();
         clear_env();
-        std::env::set_var("CLAURST_BRIDGE_URL", "https://dev.example");
-        std::env::set_var("CLAURST_BRIDGE_TOKEN", "whatever");
+        std::env::set_var("MIKMIK_BRIDGE_URL", "https://dev.example");
+        std::env::set_var("MIKMIK_BRIDGE_TOKEN", "whatever");
 
         let (url, token) = resolved_relay(&settings_with(
             "https://relay.example",

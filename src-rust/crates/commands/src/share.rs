@@ -25,7 +25,7 @@ impl SlashCommand for ShareCommand {
          viewer URL of the form https://kilimcininkoroglu.github.io/claurst/session/#<gist-id>.\n\n\
          Requirements:\n  \
            - GitHub CLI (gh) installed and logged in (`gh auth login`).\n\n\
-         The viewer base URL can be overridden with CLAURST_SHARE_VIEWER_URL.\n\
+         The viewer base URL can be overridden with MIKMIK_SHARE_VIEWER_URL.\n\
          Secret gists are unlisted but readable by anyone who has the link."
     }
 
@@ -117,9 +117,9 @@ impl SlashCommand for ShareCommand {
         let viewer = share_viewer_url(gist_id);
 
         // Auto-open in the system browser unless the user opted out — saves the
-        // copy/paste dance after a /share. Skipped when `CLAURST_SHARE_NO_OPEN`
+        // copy/paste dance after a /share. Skipped when `MIKMIK_SHARE_NO_OPEN`
         // is set (e.g. on a headless box) or when `open` can't find a handler.
-        let opted_out = std::env::var_os("CLAURST_SHARE_NO_OPEN")
+        let opted_out = std::env::var_os("MIKMIK_SHARE_NO_OPEN")
             .map(|v| !v.is_empty() && v != "0")
             .unwrap_or(false);
         let opened = if opted_out {
@@ -215,7 +215,7 @@ impl SlashCommand for LinksCommand {
          /links <N>        Open the Nth URL from /links list.\n\
          /links last       Same as /links (open most recent).\n\n\
          URLs are detected in user/assistant message text. Set\n\
-         CLAURST_SHARE_NO_OPEN=1 to disable the auto-open behavior in /share."
+         MIKMIK_SHARE_NO_OPEN=1 to disable the auto-open behavior in /share."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {

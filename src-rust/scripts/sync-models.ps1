@@ -9,7 +9,7 @@
 # After running, commit the updated assets/models-snapshot.json.
 
 param(
-    [string]$Url = $env:CLAURST_MODELS_URL,
+    [string]$Url = $env:MIKMIK_MODELS_URL,
     [switch]$Force
 )
 
