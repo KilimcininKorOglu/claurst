@@ -1219,6 +1219,77 @@ pub mod config {
 
     // ---- Route -----------------------------------------------------------
 
+    /// A model id exactly as it must appear on the wire.
+    ///
+    /// A separate type from the string the user chose, because the two look
+    /// identical and mean different things: `"myaccount/claude-opus-5"` names
+    /// an account and a model, `"claude-opus-5"` names only a model, and a
+    /// provider handed the first answers 400 for a model it has never heard
+    /// of. That defect kept coming back because nothing in the type system
+    /// told the two apart.
+    ///
+    /// There is deliberately no `From<String>` and no `From<&str>`. The way to
+    /// get one is [`Config::resolve_route`], which is also the only code that
+    /// knows which leading segment is an account and which belongs to the
+    /// model id.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[serde(transparent)]
+    pub struct WireModel(String);
+
+    impl WireModel {
+        /// A model id written into the source rather than derived from
+        /// configuration.
+        ///
+        /// `&'static str` on purpose: a runtime `String` cannot be laundered
+        /// through here, so this stays what it claims to be.
+        pub fn literal(id: &'static str) -> Self {
+            Self(id.to_string())
+        }
+
+        /// A model id a provider swapped for one of its own upstreams.
+        ///
+        /// Only for a provider that owns both sides of the substitution, such
+        /// as free mode resolving `"free/auto"` to whichever upstream is
+        /// currently reachable. Anywhere else this would be the very laundering
+        /// the type exists to prevent, and
+        /// `the_provider_escape_hatch_stays_inside_the_providers` fails on a
+        /// call from outside `crates/api/src/providers/`.
+        pub fn rewritten_by_provider(id: String) -> Self {
+            Self(id)
+        }
+
+        pub fn as_str(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl std::fmt::Display for WireModel {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl AsRef<str> for WireModel {
+        fn as_ref(&self) -> &str {
+            &self.0
+        }
+    }
+
+    // Comparing against a plain string is a read, not a way in, so these cost
+    // nothing the type is guarding. `String` and `PathBuf` carry the same pair
+    // for the same reason.
+    impl PartialEq<str> for WireModel {
+        fn eq(&self, other: &str) -> bool {
+            self.0 == other
+        }
+    }
+
+    impl PartialEq<&str> for WireModel {
+        fn eq(&self, other: &&str) -> bool {
+            self.0 == *other
+        }
+    }
+
     /// A model string resolved onto the account that will serve the request.
     ///
     /// Produced by [`Config::resolve_route`]. Both turn-loop dispatch arms take
@@ -1230,7 +1301,7 @@ pub mod config {
         pub account: String,
         /// Model id exactly as it must appear on the wire, with any
         /// `"<account>/"` prefix already removed.
-        pub model: String,
+        pub model: WireModel,
     }
 
     // ---- Config ----------------------------------------------------------
@@ -2419,7 +2490,7 @@ pub mod config {
             if let Some((head, rest)) = self.account_prefix(model) {
                 return Route {
                     account: head.to_string(),
-                    model: rest.to_string(),
+                    model: WireModel(rest.to_string()),
                 };
             }
 
@@ -2431,7 +2502,54 @@ pub mod config {
 
             Route {
                 account: account.to_string(),
-                model: model.to_string(),
+                model: WireModel(model.to_string()),
+            }
+        }
+
+        /// Write an account and a wire model back into one selection string.
+        ///
+        /// The inverse of [`Config::resolve_route`] and the only place the
+        /// composite is built. Four hand-written copies of this rule used to
+        /// disagree about when the prefix belongs, and one of them left
+        /// free mode's `"openrouter/free"` unprefixed, which `resolve_route`
+        /// then read as the OpenRouter account serving a model called "free".
+        ///
+        /// The prefix goes on whenever the account can be recognised, with no
+        /// exception for Anthropic. Leaving the common case bare looked
+        /// tidier and cost the one property worth having: a bare
+        /// `"claude-sonnet-5"` read back under a different selected provider
+        /// resolves to that provider, so the string no longer means what it
+        /// meant when it was written. An unrecognised account gets no prefix,
+        /// because one `resolve_route` cannot read back would make the id
+        /// unusable rather than self-describing.
+        ///
+        /// Existing bare ids in `settings.json` keep working; `resolve_route`
+        /// reads both forms.
+        pub fn canonical_model(&self, account: &str, model: &WireModel) -> String {
+            if !self.is_account_id(account) {
+                return model.0.clone();
+            }
+            format!("{account}/{}", model.0)
+        }
+
+        /// Pair a model id from an account's own catalogue with that account.
+        ///
+        /// Nothing is parsed: the caller already knows which account listed
+        /// the id, so the id is that account's wire model whole, namespace and
+        /// all. That is the only way to express free mode's
+        /// `"openrouter/free"` or OpenRouter's `"meta-llama/Llama-3.3-70B"`,
+        /// which [`Config::resolve_route`] would otherwise split at the first
+        /// segment.
+        ///
+        /// This is the deliberate way to build a [`WireModel`] from a runtime
+        /// string, and the only one outside `resolve_route`. It asks the
+        /// caller to assert something it genuinely knows. Passing
+        /// [`Config::effective_model`] through here would assert something it
+        /// does not know and put the composite back on the wire.
+        pub fn route_for_account(&self, account: &str, model_id: &str) -> Route {
+            Route {
+                account: account.to_string(),
+                model: WireModel(model_id.to_string()),
             }
         }
 
@@ -2450,7 +2568,7 @@ pub mod config {
                 Some(model) => self.resolve_route(model),
                 None => Route {
                     account: self.selected_provider_id().to_string(),
-                    model: self.effective_model().to_string(),
+                    model: WireModel(self.effective_model().to_string()),
                 },
             }
         }
@@ -2466,7 +2584,7 @@ pub mod config {
         /// prompts to a different vendor than the one that was selected.
         pub fn reject_unserved_model(&self, route: &Route) -> Option<String> {
             let account = self.provider_configs.get(&route.account)?;
-            if account.serves_model(&route.model) {
+            if account.serves_model(route.model.as_str()) {
                 return None;
             }
 
@@ -8992,6 +9110,63 @@ mod route_resolution_tests {
         let route = config.effective_route();
         assert_eq!(route.account, "anthropic");
         assert_eq!(route.model, "claude-sonnet-5");
+    }
+
+    // ---- canonical_model is the inverse of resolve_route --------------------
+
+    #[test]
+    fn a_written_selection_reads_back_as_the_same_route() {
+        // The property that matters: whatever provider happens to be selected
+        // when the string is read again, it still names the account and the
+        // model it was written from.
+        // A provider deliberately unrelated to every case below, because the
+        // property being checked is that the written string does not depend
+        // on it.
+        let config = config_with(Some("some_other_account"), &["my_gateway", "openrouter"]);
+        let cases = [
+            ("my_gateway", "claude-opus-5"),
+            ("my_gateway", "gpt-5.6-sol"),
+            ("openrouter", "meta-llama/Llama-3.3-70B"),
+            ("anthropic", "claude-sonnet-5"),
+            ("free", "openrouter/free"),
+            ("free", "auto"),
+        ];
+
+        for (account, model) in cases {
+            let route = config.route_for_account(account, model);
+            let written = config.canonical_model(&route.account, &route.model);
+            let read_back = config.resolve_route(&written);
+            assert_eq!(read_back.account, account, "account for {written}");
+            assert_eq!(read_back.model, model, "model for {written}");
+        }
+    }
+
+    #[test]
+    fn free_modes_upstream_prefix_is_not_read_as_the_account() {
+        // The picker used to leave a free-mode entry unprefixed whenever it
+        // already carried a routing prefix of its own. `"openrouter/free"` is
+        // one of those, and `resolve_route` then read it as the OpenRouter
+        // account serving a model called "free".
+        let config = config_with(Some("free"), &["free", "openrouter"]);
+        let route = config.route_for_account("free", "openrouter/free");
+
+        let written = config.canonical_model(&route.account, &route.model);
+        assert_eq!(written, "free/openrouter/free");
+        assert_eq!(config.resolve_route(&written).account, "free");
+        assert_eq!(config.resolve_route(&written).model, "openrouter/free");
+    }
+
+    #[test]
+    fn an_unrecognised_account_adds_no_prefix() {
+        // A prefix `resolve_route` will not recognise makes the id unusable
+        // rather than self-describing, so the model is left to the provider
+        // that is selected when it is read.
+        let config = config_with(None, &[]);
+        let route = config.route_for_account("not_an_account", "some-model");
+        assert_eq!(
+            config.canonical_model(&route.account, &route.model),
+            "some-model"
+        );
     }
 }
 

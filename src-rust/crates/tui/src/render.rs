@@ -3037,7 +3037,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             // account the next request will actually reach. Splitting on the
             // first `/` here would read `meta-llama/Llama-3.3` as an account.
             let route = app.config.resolve_route(&app.model_name);
-            let (provider, model_short) = (route.account, route.model);
+            let (provider, model_short) = (route.account, route.model.to_string());
             let mut spans = vec![
                 Span::styled(
                     format!(" {} ", agent_mode.to_uppercase()),

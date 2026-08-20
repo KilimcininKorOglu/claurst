@@ -962,10 +962,11 @@ async fn run_query_loop_inner(
         };
 
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
-        let mut req_builder = CreateMessageRequest::builder(&route.model, config.max_tokens)
-            .messages(api_messages)
-            .system(system)
-            .tools(api_tools);
+        let mut req_builder =
+            CreateMessageRequest::builder(route.model.as_str(), config.max_tokens)
+                .messages(api_messages)
+                .system(system)
+                .tools(api_tools);
 
         // Resolve effective thinking budget:
         //   1. Explicit `thinking_budget` in config takes precedence.
@@ -1065,7 +1066,7 @@ async fn run_query_loop_inner(
                     // Notify TUI that we're calling the provider using a random spinner verb
                     if let Some(ref tx) = event_tx {
                         use claurst_core::sample_spinner_verb;
-                        let seed = provider_id_str.len() ^ model_id_str.len();
+                        let seed = provider_id_str.len() ^ model_id_str.as_str().len();
                         let verb = sample_spinner_verb(seed);
                         let _ = tx.send(QueryEvent::Status(format!("✳ {}…", verb)));
                     }
@@ -1078,7 +1079,7 @@ async fn run_query_loop_inner(
                     let mut caps = provider.capabilities();
                     if let Some(model_entry) =
                         config.model_registry.as_ref().and_then(|model_registry| {
-                            model_registry.get(&provider_id_str, &model_id_str)
+                            model_registry.get(&provider_id_str, model_id_str.as_str())
                         })
                     {
                         caps.image_input = model_entry.vision();
@@ -1128,7 +1129,7 @@ async fn run_query_loop_inner(
                         .collect();
 
                     let provider_request = claurst_api::ProviderRequest {
-                        model: model_id_str.to_owned(),
+                        model: model_id_str.as_str().to_owned(),
                         messages: provider_messages,
                         system_prompt: Some(system_for_provider.clone()),
                         tools: provider_tools,
@@ -1149,7 +1150,7 @@ async fn run_query_loop_inner(
                         // belong to the account itself.
                         provider_options: build_provider_options(
                             &vendor,
-                            &model_id_str,
+                            model_id_str.as_str(),
                             effective_effort_level,
                             effective_thinking_budget,
                             tool_ctx

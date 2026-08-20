@@ -158,7 +158,7 @@ pub(crate) async fn compact_before_request(
     let context_window = compact::resolve_context_window(
         config.model_registry.as_deref(),
         &input.route.account,
-        &input.route.model,
+        input.route.model.as_str(),
     );
 
     // Prefer the REAL context-token count the provider reported for the last
@@ -222,7 +222,7 @@ pub(crate) async fn compact_before_request(
         input.backend,
         messages,
         context_tokens,
-        &input.route.model,
+        input.route.model.as_str(),
         context_window,
         config.compact_threshold,
         input.session_id,
@@ -272,7 +272,8 @@ async fn run_reactive(
         }
         (
             "Context-collapse",
-            compact::context_collapse(messages.clone(), input.backend, &input.route.model).await,
+            compact::context_collapse(messages.clone(), input.backend, input.route.model.as_str())
+                .await,
         )
     } else if compact::should_compact(context_tokens, context_window, config.compact_threshold) {
         if let Some(tx) = event_tx {
@@ -283,7 +284,7 @@ async fn run_reactive(
             compact::reactive_compact(
                 messages.clone(),
                 input.backend,
-                &input.route.model,
+                input.route.model.as_str(),
                 cancel_token.clone(),
                 &[],
             )
@@ -376,10 +377,7 @@ mod tests {
 
     /// A route as `Config::resolve_route` would hand it over.
     fn route(model: &str) -> claurst_core::config::Route {
-        claurst_core::config::Route {
-            account: "anthropic".to_string(),
-            model: model.to_string(),
-        }
+        claurst_core::config::Config::default().route_for_account("anthropic", model)
     }
 
     fn input<'a>(

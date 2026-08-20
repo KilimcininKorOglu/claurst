@@ -2321,7 +2321,7 @@ async fn run_compaction(
     claurst_query::compact::compact_conversation(
         backend.as_ref(),
         messages,
-        &route.model,
+        route.model.as_str(),
         instruction,
     )
     .await
