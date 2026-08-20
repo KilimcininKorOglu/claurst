@@ -1632,7 +1632,7 @@ mod tests {
     #[test]
     fn test_auth_state_uses_token_expiry_datetime() {
         // Redirect the on-disk token store into a tempdir so this test never
-        // touches (or requires a writable) ~/.claurst. Sandboxed builds run
+        // touches (or requires a writable) ~/.config/mikmik. Sandboxed builds run
         // with no HOME and disallow writes outside the build tree.
         let tmp = tempfile::tempdir().expect("tempdir");
         let prev = std::env::var_os("CLAURST_MCP_TOKENS_DIR");

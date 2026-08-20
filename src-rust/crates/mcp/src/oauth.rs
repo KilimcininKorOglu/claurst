@@ -57,7 +57,7 @@ fn token_store_dir() -> PathBuf {
 ///
 /// # Errors
 /// Returns `InvalidInput` when `server_name` carries path components (`/`,
-/// `\`, `..`) or is empty. A project's `.claurst/settings.json` names the MCP
+/// `\`, `..`) or is empty. A project's `.mikmik/settings.json` names the MCP
 /// servers it defines, so the name is untrusted and a raw join would let a
 /// repository write an access token anywhere the user can write. Reducing the
 /// name to its last component instead would be worse than rejecting it: two

@@ -1,8 +1,8 @@
 /// Plugin discovery and loading — ported from `pluginLoader.ts` / `pluginDirectories.ts`.
 ///
 /// Scan order (matches TS precedence):
-/// 1. `~/.claurst/plugins/<name>/`  — user-global plugins
-/// 2. `<project>/.claurst/plugins/<name>/`  — project-local plugins
+/// 1. `~/.config/mikmik/plugins/<name>/`  — user-global plugins
+/// 2. `<project>/.mikmik/plugins/<name>/`  — project-local plugins
 /// 3. Extra paths from `settings.plugin_paths` (if the field exists)
 ///
 /// Each plugin directory must contain a manifest at one of
@@ -21,9 +21,9 @@ pub fn default_user_plugins_dir() -> Option<PathBuf> {
     Some(mikmik_core::config::Settings::config_dir().join("plugins"))
 }
 
-/// Return the project-level plugins directory: `<project>/.claurst/plugins`.
+/// Return the project-level plugins directory: `<project>/.mikmik/plugins`.
 pub fn project_plugins_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join(".claurst").join("plugins")
+    project_dir.join(".mikmik").join("plugins")
 }
 
 // ---------------------------------------------------------------------------

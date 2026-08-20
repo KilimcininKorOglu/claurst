@@ -200,7 +200,7 @@ impl SlashCommand for FastCommand {
         "Usage: /fast [on|off]\n\n\
          Fast mode switches to the active provider's smaller, faster model\n\
          for quick responses. Toggle without argument to switch.\n\
-         The setting is persisted to ~/.claurst/ui-settings.json."
+         The setting is persisted to ~/.config/mikmik/ui-settings.json."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {

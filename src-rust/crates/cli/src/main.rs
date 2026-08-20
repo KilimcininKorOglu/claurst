@@ -160,7 +160,7 @@ struct Cli {
     mcp_config: Option<String>,
 
     /// Trust and auto-launch project-defined MCP servers (declared in a repo's
-    /// .claurst/settings.json) without prompting. Off by default: such servers
+    /// .mikmik/settings.json) without prompting. Off by default: such servers
     /// can run arbitrary commands, so opening an untrusted repo would otherwise
     /// require explicit per-server approval. Intended for automation/CI.
     #[arg(long = "trust-project-mcp", action = ArgAction::SetTrue)]
@@ -745,7 +745,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Build provider registry: auto-registers all env-configured providers
-    // AND providers with keys stored in ~/.claurst/auth.json (from /connect).
+    // AND providers with keys stored in ~/.config/mikmik/auth.json (from /connect).
     // Anthropic is always the default; additional providers (OpenAI, Google,
     // Bedrock, Azure, Copilot, Cohere, local providers) are registered when
     // their respective environment variables or auth store entries are found.
@@ -851,7 +851,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize MCP servers first (needed for ToolContext.mcp_manager).
     //
     // SECURITY (issue #123): project-defined MCP servers (from a repo's
-    // .claurst/settings.json) can run arbitrary commands. Gate them behind
+    // .mikmik/settings.json) can run arbitrary commands. Gate them behind
     // explicit trust so opening a cloned repo never auto-spawns attacker
     // processes. User/global servers are unaffected. The untrusted project
     // servers are surfaced to the TUI for an approval prompt, or skipped (with

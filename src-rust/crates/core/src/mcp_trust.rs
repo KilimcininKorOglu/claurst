@@ -1,6 +1,6 @@
 //! Trust gating for project-defined MCP servers.
 //!
-//! A repository can ship a `.claurst/settings.json` that declares MCP servers
+//! A repository can ship a `.mikmik/settings.json` that declares MCP servers
 //! with an arbitrary `command`. With the stdio transport, launching such a
 //! server spawns a child process — so auto-launching project-defined servers
 //! on open is remote code execution: cloning and opening a malicious repo would
@@ -18,7 +18,7 @@
 //!       and a fingerprint of the server's launch identity.
 //!
 //! The persistent allowlist lives under the user's config dir
-//! (`~/.claurst/mcp_trust.json`), NOT in the repository, so a repo can never
+//! (`~/.config/mikmik/mcp_trust.json`), NOT in the repository, so a repo can never
 //! grant itself trust.
 
 use std::collections::{HashMap, HashSet};
@@ -30,7 +30,7 @@ use crate::config::{McpServerConfig, McpServerOrigin, Settings};
 
 /// Path to the per-user project-MCP trust store.
 ///
-/// Stored alongside the global settings (`~/.claurst/mcp_trust.json`) and never
+/// Stored alongside the global settings (`~/.config/mikmik/mcp_trust.json`) and never
 /// inside a repository.
 pub fn trust_store_path() -> PathBuf {
     Settings::config_dir().join("mcp_trust.json")
@@ -87,7 +87,7 @@ fn project_key(project_root: &Path) -> String {
 }
 
 /// Find the project root for `cwd`: the nearest ancestor directory that
-/// contains a `.claurst/settings.json(c)` and is *not* the global config dir.
+/// contains a `.mikmik/settings.json(c)` and is *not* the global config dir.
 ///
 /// Returns `None` when there is no project-level settings file above `cwd`.
 /// This mirrors the walk in `Settings::find_project_settings` so trust
@@ -96,7 +96,7 @@ pub fn project_root_for(cwd: &Path) -> Option<PathBuf> {
     let global = Settings::config_dir();
     let mut dir = cwd;
     loop {
-        let claurst = dir.join(".claurst");
+        let claurst = dir.join(".mikmik");
         if claurst != global {
             for name in ["settings.json", "settings.jsonc"] {
                 if claurst.join(name).exists() {
@@ -129,7 +129,7 @@ impl McpTrustStore {
         }
     }
 
-    /// Persist the store to disk (`~/.claurst/mcp_trust.json`).
+    /// Persist the store to disk (`~/.config/mikmik/mcp_trust.json`).
     pub fn save(&self) -> std::io::Result<()> {
         let path = trust_store_path();
         if let Some(parent) = path.parent() {

@@ -17,13 +17,13 @@ use std::time::SystemTime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScope {
-    /// `~/.claurst/rules/*.md` — global managed policy.
+    /// `~/.config/mikmik/rules/*.md` — global managed policy.
     Managed,
-    /// `~/.claurst/AGENTS.md` — user-level memory.
+    /// `~/.config/mikmik/AGENTS.md` — user-level memory.
     User,
     /// `{project_root}/AGENTS.md` — project-level memory.
     Project,
-    /// `{project_root}/.claurst/AGENTS.md` — local override.
+    /// `{project_root}/.mikmik/AGENTS.md` — local override.
     Local,
 }
 
@@ -271,9 +271,9 @@ pub fn load_all_memory_files(project_root: &Path) -> Vec<MemoryFileInfo> {
     // 3. Project: {project_root}/AGENTS.md then {project_root}/CLAUDE.md
     load_scope_files(project_root, MemoryScope::Project, &mut files);
 
-    // 4. Local: {project_root}/.claurst/AGENTS.md then {project_root}/.claurst/CLAUDE.md
+    // 4. Local: {project_root}/.mikmik/AGENTS.md then {project_root}/.mikmik/CLAUDE.md
     load_scope_files(
-        &project_root.join(".claurst"),
+        &project_root.join(".mikmik"),
         MemoryScope::Local,
         &mut files,
     );

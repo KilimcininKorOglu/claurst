@@ -1,4 +1,4 @@
-// auth_store.rs — JSON-based credential store at ~/.claurst/auth.json.
+// auth_store.rs — JSON-based credential store at ~/.config/mikmik/auth.json.
 //
 // Stores API keys and OAuth tokens for providers so users don't have to rely
 // solely on environment variables.
@@ -36,7 +36,7 @@ pub enum StoredCredential {
     CodexOAuth(crate::oauth_config::CodexTokens),
 }
 
-/// Persistent credential store backed by `~/.claurst/auth.json`.
+/// Persistent credential store backed by `~/.config/mikmik/auth.json`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuthStore {
     pub credentials: HashMap<String, StoredCredential>,
@@ -210,7 +210,7 @@ impl AuthStore {
             Ok(j) => j,
             Err(_) => return,
         };
-        let tmp = path.with_file_name(format!(".auth.json.claurst-tmp-{}", std::process::id()));
+        let tmp = path.with_file_name(format!(".auth.json.mikmik-tmp-{}", std::process::id()));
         if std::fs::write(&tmp, &json).is_ok() {
             // auth.json holds API keys + OAuth tokens. Lock the temp file to
             // 0o600 *before* the rename so the live credential file is never

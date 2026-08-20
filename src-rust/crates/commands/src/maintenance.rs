@@ -23,7 +23,7 @@ impl SlashCommand for VoiceCommand {
     fn help(&self) -> &str {
         "Usage: /voice [on|off|status]\n\n\
          Enables or disables voice input (push-to-talk).\n\
-         Setting is persisted to ~/.claurst/ui-settings.json.\n\n\
+         Setting is persisted to ~/.config/mikmik/ui-settings.json.\n\n\
          Transcription is performed via a Whisper-compatible API.\n\
          Set one of these env vars for the API key:\n\
            OPENAI_API_KEY   — OpenAI Whisper (default endpoint)\n\

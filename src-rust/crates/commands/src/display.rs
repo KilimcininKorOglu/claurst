@@ -88,7 +88,7 @@ impl SlashCommand for VimCommand {
         "Usage: /vim [on|off]\n\n\
          Toggles vim keybinding mode in the REPL input.\n\
          When enabled, use Esc to switch between INSERT and NORMAL modes.\n\n\
-         The setting is persisted to ~/.claurst/ui-settings.json."
+         The setting is persisted to ~/.config/mikmik/ui-settings.json."
     }
 
     async fn execute(&self, args: &str, _ctx: &mut CommandContext) -> CommandResult {

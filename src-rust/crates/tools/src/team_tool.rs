@@ -493,7 +493,7 @@ impl Tool for TeamDeleteTool {
     fn description(&self) -> &str {
         "Cancel a running team and clean up its directories. \
          Signals all in-flight agents to stop, then removes \
-         ~/.claurst/teams/{team_name}/."
+         ~/.config/mikmik/teams/{team_name}/."
     }
 
     fn permission_level(&self) -> PermissionLevel {

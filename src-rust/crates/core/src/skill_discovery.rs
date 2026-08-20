@@ -2,9 +2,9 @@
 //! on disk and (optionally) from git URLs.
 //!
 //! Search priority (first match wins for a given skill name):
-//!   1. Project `.claurst/skills/` — walk up from `cwd`
+//!   1. Project `.mikmik/skills/` — walk up from `cwd`
 //!   2. Project `.agents/skills/`  — walk up from `cwd`
-//!   3. Global `~/.claurst/skills/`
+//!   3. Global `~/.config/mikmik/skills/`
 //!   4. Configured extra paths from `SkillsConfig.paths`
 //!   5. Git-URL repos from `SkillsConfig.urls` (cloned once, then cached)
 
@@ -212,7 +212,7 @@ pub fn discover_skills(
     {
         let mut dir: &Path = cwd;
         loop {
-            add(scan_dir(&dir.join(".claurst").join("skills")));
+            add(scan_dir(&dir.join(".mikmik").join("skills")));
             add(scan_dir(&dir.join(".agents").join("skills")));
             match dir.parent() {
                 Some(parent) if parent != dir => dir = parent,
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn test_discover_from_project_dir() {
         let tmp = make_temp_dir();
-        let skills_dir = tmp.path().join(".claurst").join("skills");
+        let skills_dir = tmp.path().join(".mikmik").join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
         write_file(
             &skills_dir,
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn test_discover_deduplicates_first_wins() {
         let tmp = make_temp_dir();
-        let proj_skills = tmp.path().join(".claurst").join("skills");
+        let proj_skills = tmp.path().join(".mikmik").join("skills");
         std::fs::create_dir_all(&proj_skills).unwrap();
         write_file(
             &proj_skills,

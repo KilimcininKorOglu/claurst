@@ -23,7 +23,7 @@ impl SlashCommand for StatuslineCommand {
     fn help(&self) -> &str {
         "Usage: /statusline [show|hide] [cost|tokens|model|time|all]\n\n\
          Controls which items appear in the TUI status bar at the bottom.\n\
-         Settings are persisted to ~/.claurst/ui-settings.json.\n\n\
+         Settings are persisted to ~/.config/mikmik/ui-settings.json.\n\n\
          Examples:\n\
            /statusline               — show current configuration\n\
            /statusline show cost     — show cost in status line\n\
@@ -122,7 +122,7 @@ fn fmt_bool(v: bool) -> &'static str {
 fn describe_external_status_line(config: Option<&StatusLineConfig>) -> String {
     let Some(config) = config.filter(|config| config.is_command()) else {
         return "External command: none. Add \"statusLine\": {\"type\": \"command\", \
-                \"command\": \"…\"} to ~/.claurst/settings.json to run one."
+                \"command\": \"…\"} to ~/.config/mikmik/settings.json to run one."
             .to_string();
     };
 
@@ -321,12 +321,12 @@ mod tests {
 
     #[test]
     fn a_configured_command_is_named_with_its_cadence() {
-        let mut cfg = config("~/.claurst/statusline.sh");
+        let mut cfg = config("~/.config/mikmik/statusline.sh");
         cfg.refresh_interval = Some(5);
         cfg.padding = Some(2);
 
         let text = describe_external_status_line(Some(&cfg));
-        assert!(text.contains("~/.claurst/statusline.sh"));
+        assert!(text.contains("~/.config/mikmik/statusline.sh"));
         assert!(text.contains("every 5s"));
         assert!(text.contains("Padding:          2"));
     }

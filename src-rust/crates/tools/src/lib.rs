@@ -287,7 +287,7 @@ pub(crate) async fn write_atomic(path: &std::path::Path, contents: &[u8]) -> std
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
-    let tmp = path.with_file_name(format!(".{}.claurst-tmp-{}", file_name, std::process::id()));
+    let tmp = path.with_file_name(format!(".{}.mikmik-tmp-{}", file_name, std::process::id()));
 
     tokio::fs::write(&tmp, contents).await?;
     // Preserve the original file's permissions (e.g. the executable bit on
@@ -1125,12 +1125,12 @@ mod tests {
     // its contract: it writes the exact bytes and never leaves a temp file
     // behind on success — the guarantee that makes those tools crash-safe.
 
-    /// Count the `.claurst-tmp-*` scratch files left in `dir`.
+    /// Count the `.mikmik-tmp-*` scratch files left in `dir`.
     fn count_atomic_tmp_files(dir: &std::path::Path) -> usize {
         std::fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains(".claurst-tmp-"))
+            .filter(|e| e.file_name().to_string_lossy().contains(".mikmik-tmp-"))
             .count()
     }
 

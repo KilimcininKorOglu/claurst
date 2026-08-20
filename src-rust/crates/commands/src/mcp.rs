@@ -31,7 +31,7 @@ impl SlashCommand for McpCommand {
            /mcp resources [server]     — list resources from connected servers\n\
            /mcp prompts [server]       — list prompt templates from connected servers\n\
            /mcp get-prompt <server> <prompt> [key=value ...]  — expand a prompt template\n\n\
-         To add/remove MCP servers, edit ~/.claurst/settings.json\n\
+         To add/remove MCP servers, edit ~/.config/mikmik/settings.json\n\
          under the 'mcpServers' key.\n\
          Docs: https://docs.anthropic.com/claude-code/mcp"
     }
@@ -97,7 +97,7 @@ impl SlashCommand for McpCommand {
         if ctx.config.mcp_servers.is_empty() {
             return CommandResult::Message(
                 "No MCP servers configured.\n\n\
-                 To add a MCP server, edit ~/.claurst/settings.json:\n\
+                 To add a MCP server, edit ~/.config/mikmik/settings.json:\n\
                  {\n\
                    \"mcpServers\": [\n\
                      {\n\
@@ -242,7 +242,7 @@ impl McpCommand {
                 "MCP Server '{}' (stdio){}\n\
                  {}\n\n\
                  stdio servers authenticate via environment variables (API keys etc.).\n\
-                 Add required variables to the 'env' block in ~/.claurst/settings.json,\n\
+                 Add required variables to the 'env' block in ~/.config/mikmik/settings.json,\n\
                  then restart Claurst or run /mcp connect {} to reconnect.",
                 server_name, token_note, env_note, server_name
             ));
@@ -323,9 +323,9 @@ impl McpCommand {
              Server URL: {}\n\n\
              To authenticate:\n\
              1. Open the server URL in your browser and complete OAuth\n\
-             2. The token is saved to ~/.claurst/mcp-tokens/{}.json\n\
+             2. The token is saved to ~/.config/mikmik/mcp-tokens/{}.json\n\
              3. Restart Claurst — the token will be used automatically\n\n\
-             Token storage: ~/.claurst/mcp-tokens/{}.json",
+             Token storage: ~/.config/mikmik/mcp-tokens/{}.json",
             server_name, token_note, server_url, server_name, server_name
         ))
     }
@@ -420,7 +420,7 @@ impl McpCommand {
                 CommandResult::Message(format!(
                     "The MCP manager is not running in this session.\n\
                      To connect '{}', restart Claurst — servers connect automatically\n\
-                     on startup using the configuration in ~/.claurst/settings.json.\n\
+                     on startup using the configuration in ~/.config/mikmik/settings.json.\n\
                      \n\
                      If the server requires authentication, run /mcp auth {} first.",
                     server_name, server_name
@@ -451,7 +451,7 @@ impl McpCommand {
                              The runtime MCP manager reconnects servers automatically.\n\
                              If the server stays disconnected:\n\
                              1. Check authentication: /mcp auth {}\n\
-                             2. Verify the command/URL in ~/.claurst/settings.json\n\
+                             2. Verify the command/URL in ~/.config/mikmik/settings.json\n\
                              3. Restart Claurst to force a full reconnect",
                             server_name,
                             manager.server_status(server_name).display(),

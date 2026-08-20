@@ -9,7 +9,7 @@
 // a `cooldown_sessions` field — the tip won't be shown again until that many
 // sessions have passed since the last display.
 //
-// History is persisted to `~/.claurst/tip_history.json`.
+// History is persisted to `~/.config/mikmik/tip_history.json`.
 
 use std::collections::HashMap;
 
@@ -113,7 +113,7 @@ static ALL_TIPS: Lazy<Vec<Tip>> = Lazy::new(|| {
         },
         Tip {
             id: "custom-commands",
-            content: "Create skills by adding .md files to .claurst/skills/ in your project or ~/.claurst/skills/ for skills that work in any project",
+            content: "Create skills by adding .md files to .mikmik/skills/ in your project or ~/.config/mikmik/skills/ for skills that work in any project",
             cooldown_sessions: 15,
         },
         Tip {
@@ -184,12 +184,12 @@ pub struct TipHistory {
 }
 
 impl TipHistory {
-    /// Path to the persisted history file: `~/.claurst/tip_history.json`.
+    /// Path to the persisted history file: `~/.config/mikmik/tip_history.json`.
     fn history_path() -> Option<std::path::PathBuf> {
         Some(crate::config::Settings::config_dir().join("tip_history.json"))
     }
 
-    /// Load history from `~/.claurst/tip_history.json`.
+    /// Load history from `~/.config/mikmik/tip_history.json`.
     /// Returns an empty `TipHistory` if the file does not exist or cannot be
     /// parsed.
     pub fn load() -> Self {
@@ -203,7 +203,7 @@ impl TipHistory {
         }
     }
 
-    /// Persist history to `~/.claurst/tip_history.json`.
+    /// Persist history to `~/.config/mikmik/tip_history.json`.
     /// Silently ignores I/O errors (tips are non-critical).
     pub fn save(&self) {
         let path = match Self::history_path() {

@@ -350,7 +350,7 @@ mod tests {
 
     /// #226: NotebookEdit writes the updated notebook through `write_atomic`.
     /// A successful edit must persist the new cell source and leave no
-    /// `.claurst-tmp-*` scratch file behind in the notebook's directory.
+    /// `.mikmik-tmp-*` scratch file behind in the notebook's directory.
     #[tokio::test]
     async fn notebook_edit_writes_atomically_no_tmp_left() {
         let dir = tempfile::tempdir().unwrap();
@@ -394,7 +394,7 @@ mod tests {
         let tmp_left = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .any(|e| e.file_name().to_string_lossy().contains(".claurst-tmp-"));
+            .any(|e| e.file_name().to_string_lossy().contains(".mikmik-tmp-"));
         assert!(!tmp_left, "atomic write must not leave a temp file behind");
     }
 }

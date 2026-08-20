@@ -2,7 +2,7 @@
 //
 // Mirrors src/components/memory/MemoryUpdateNotification.tsx.
 // Shown briefly in the message area when Claurst updates a memory file
-// (e.g. ~/.claurst/AGENTS.md or a project-local AGENTS.md).
+// (e.g. ~/.config/mikmik/AGENTS.md or a project-local AGENTS.md).
 //
 // Displays: "Memory updated in {relative_path} · /memory to edit"
 //
@@ -198,9 +198,9 @@ mod tests {
     fn memory_notif_show_and_dismiss() {
         let mut state = MemoryUpdateNotificationState::new();
         assert!(!state.visible);
-        state.show("/home/user/.claurst/AGENTS.md");
+        state.show("/home/user/.mikmik/AGENTS.md");
         assert!(state.visible);
-        assert_eq!(state.memory_path, "/home/user/.claurst/AGENTS.md");
+        assert_eq!(state.memory_path, "/home/user/.mikmik/AGENTS.md");
         state.dismiss();
         assert!(!state.visible);
     }
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn memory_notif_render_smoke() {
         let mut state = MemoryUpdateNotificationState::new();
-        state.show("/home/user/.claurst/AGENTS.md");
+        state.show("/home/user/.mikmik/AGENTS.md");
         let area = Rect {
             x: 0,
             y: 0,

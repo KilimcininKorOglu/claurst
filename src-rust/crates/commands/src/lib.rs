@@ -1231,7 +1231,7 @@ impl SlashCommand for HooksCommand {
             // so the user knows what to do.
             return CommandResult::Message(
                 "No hooks configured.\n\
-                 Add hooks to ~/.claurst/settings.json under the 'hooks' key.\n\
+                 Add hooks to ~/.config/mikmik/settings.json under the 'hooks' key.\n\
                  Example:\n\
                  \x20 \"hooks\": {\n\
                  \x20   \"PreToolUse\": [{ \"matcher\": \"*\", \"hooks\": [{ \"type\": \"command\", \"command\": \"echo $STDIN\" }] }]\n\
@@ -1612,7 +1612,7 @@ pub fn commands_from_settings(settings: &mikmik_core::Settings) -> Vec<Box<dyn S
 }
 
 // ---------------------------------------------------------------------------
-// Discovered skill commands (from .claurst/skills/ and git URLs)
+// Discovered skill commands (from .mikmik/skills/ and git URLs)
 // ---------------------------------------------------------------------------
 
 /// A slash command backed by a discovered skill markdown file.
@@ -1695,7 +1695,7 @@ pub async fn execute_command(input: &str, ctx: &mut CommandContext) -> Option<Co
         return Some(tc.execute(args, ctx).await);
     }
 
-    // Check discovered skill commands (from .claurst/skills/, git URLs, etc.).
+    // Check discovered skill commands (from .mikmik/skills/, git URLs, etc.).
     {
         let discovered = mikmik_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
         if let Some(skill) = discovered.get(cmd_name) {

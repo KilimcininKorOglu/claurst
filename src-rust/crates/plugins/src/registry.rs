@@ -35,7 +35,7 @@ fn lsp_config_for(server: &crate::manifest::PluginLspServer) -> mikmik_core::lsp
 /// How much to trust an MCP server a plugin contributed.
 ///
 /// It follows where the plugin came from, not the fact that a plugin declared
-/// it. A plugin under `<project>/.claurst/plugins` arrives with a cloned
+/// it. A plugin under `<project>/.mikmik/plugins` arrives with a cloned
 /// repository, so its server is project-scoped and has to pass the same
 /// approval as one declared in the repository's settings file. Everything else
 /// is on the machine because someone put it there.

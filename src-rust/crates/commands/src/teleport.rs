@@ -75,7 +75,7 @@ impl SlashCommand for TeleportCommand {
          \n\
          /teleport export [--output <file>]\n\
          \x20 Serialize the current session to a .teleport JSON bundle.\n\
-         \x20 Defaults to ~/.claurst/teleport_<session_id>.json\n\
+         \x20 Defaults to ~/.config/mikmik/teleport_<session_id>.json\n\
          \n\
          /teleport import <file>\n\
          \x20 Load a .teleport bundle and restore messages, working dir, and\n\

@@ -266,8 +266,8 @@ pub async fn run_global_post_tool_hook(
 /// Discover and load all plugins from the standard locations.
 ///
 /// Search order:
-/// 1. `~/.claurst/plugins/`  (user-global)
-/// 2. `<project_dir>/.claurst/plugins/`  (project-local)
+/// 1. `~/.config/mikmik/plugins/`  (user-global)
+/// 2. `<project_dir>/.mikmik/plugins/`  (project-local)
 /// 3. Any paths listed in `extra_paths`
 ///
 /// Returns a fully populated `PluginRegistry`.  Errors encountered during
@@ -693,7 +693,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let plugin_dir = tmp
             .path()
-            .join(".claurst")
+            .join(".mikmik")
             .join("plugins")
             .join("test-plugin");
         std::fs::create_dir_all(&plugin_dir).unwrap();
@@ -754,7 +754,7 @@ mod tests {
     #[tokio::test]
     async fn a_disabled_plugin_does_not_load_enabled() {
         let tmp = tempfile::tempdir().expect("tmp");
-        let plugins = tmp.path().join(".claurst").join("plugins");
+        let plugins = tmp.path().join(".mikmik").join("plugins");
         std::fs::create_dir_all(&plugins).expect("plugins dir");
         write_plugin(&plugins, "alpha");
         write_plugin(&plugins, "beta");
@@ -865,7 +865,7 @@ mod tests {
         let _home = HomeGuard::with_settings(r#"{"disabledPlugins": ["beta"]}"#);
 
         let project = tempfile::tempdir().expect("tmp project");
-        let plugins = project.path().join(".claurst").join("plugins");
+        let plugins = project.path().join(".mikmik").join("plugins");
         std::fs::create_dir_all(&plugins).expect("plugins dir");
         write_plugin(&plugins, "alpha");
         write_plugin(&plugins, "beta");

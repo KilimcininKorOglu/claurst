@@ -1,5 +1,5 @@
 //! Session analytics: read persisted JSONL transcripts under
-//! `~/.claurst/projects/<base64url(cwd)>/<session>.jsonl` and produce
+//! `~/.config/mikmik/projects/<base64url(cwd)>/<session>.jsonl` and produce
 //! token / cost / tool-usage summaries.
 //!
 //! This is the persisted complement to the in-memory `/stats` slash command
@@ -137,7 +137,7 @@ fn parse_args(raw: &[&str]) -> Result<Args, String> {
 fn help_text() -> &'static str {
     "Usage: claurst stats [subcommand] [flags]\n\
      \n\
-     Reads persisted JSONL transcripts under ~/.claurst/projects/ and produces\n\
+     Reads persisted JSONL transcripts under ~/.config/mikmik/projects/ and produces\n\
      token, cost, and tool-usage summaries.\n\
      \n\
      Subcommands:\n  \
@@ -215,7 +215,7 @@ const MAX_PARSE_BYTES: u64 = 50 * 1024 * 1024;
 const TAIL_WINDOW: u64 = 64 * 1024;
 
 fn projects_dir() -> PathBuf {
-    // Same convention as core: ~/.claurst/projects/
+    // Same convention as core: ~/.config/mikmik/projects/
     mikmik_core::config::Settings::config_dir().join("projects")
 }
 

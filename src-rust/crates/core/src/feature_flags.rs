@@ -74,7 +74,7 @@ impl FeatureFlagManager {
         }
     }
 
-    /// Get the cache file path (~/.claurst/feature_flags.json)
+    /// Get the cache file path (~/.config/mikmik/feature_flags.json)
     fn get_cache_path() -> PathBuf {
         crate::config::Settings::config_dir().join("feature_flags.json")
     }

@@ -1,8 +1,8 @@
 //! Stats dialog — mirrors src/components/Stats.tsx
 //!
 //! Four-tab overlay: Overview | Daily Tokens | Cost Heatmap | Models
-//! Data source: the session transcripts under ~/.claurst/projects/, the same
-//! files `claurst stats` reads. This screen used to read ~/.claurst/stats.jsonl,
+//! Data source: the session transcripts under ~/.config/mikmik/projects/, the same
+//! files `claurst stats` reads. This screen used to read ~/.config/mikmik/stats.jsonl,
 //! which nothing has ever written, so it reported zeros for every session.
 
 use ratatui::{
@@ -116,7 +116,7 @@ pub async fn load_stats() -> AggregatedStats {
     agg
 }
 
-/// Every `.jsonl` transcript under `~/.claurst/projects/`.
+/// Every `.jsonl` transcript under `~/.config/mikmik/projects/`.
 async fn transcript_paths() -> Vec<std::path::PathBuf> {
     let root = mikmik_core::session_storage::projects_dir();
     let mut paths = Vec::new();
@@ -912,7 +912,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_screen_reads_what_the_turns_recorded() {
-        // It used to read ~/.claurst/stats.jsonl, which nothing writes, so
+        // It used to read ~/.config/mikmik/stats.jsonl, which nothing writes, so
         // every session showed zeros however much it had spent.
         let _lock = ENV_LOCK.lock().await;
         let home = tempfile::tempdir().expect("tempdir");

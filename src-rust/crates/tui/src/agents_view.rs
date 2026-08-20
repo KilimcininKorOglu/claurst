@@ -88,7 +88,7 @@ pub struct AgentInfo {
     pub cost_usd: f64,
 }
 
-/// A defined agent (from .claurst/agents/*.md or plugin).
+/// A defined agent (from .mikmik/agents/*.md or plugin).
 #[derive(Debug, Clone)]
 pub struct AgentDefinition {
     /// Backing markdown file path.
@@ -363,7 +363,7 @@ impl AgentsMenuState {
             .original_index
             .and_then(|idx| self.definitions.get(idx).map(|def| def.file_path.clone()))
             .unwrap_or_else(|| {
-                root.join(".claurst")
+                root.join(".mikmik")
                     .join("agents")
                     .join(format!("{}.md", slugify_agent_name(&self.editor.name)))
             });
@@ -404,7 +404,7 @@ pub fn load_agent_definitions(project_root: &std::path::Path) -> Vec<AgentDefini
     let mut sources: Vec<(String, std::path::PathBuf)> = vec![
         (
             "project".to_string(),
-            project_root.join(".claurst").join("agents"),
+            project_root.join(".mikmik").join("agents"),
         ),
         (
             "user".to_string(),

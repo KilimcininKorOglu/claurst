@@ -1981,7 +1981,7 @@ impl App {
             status_line_override: None,
             voice_recorder: {
                 // Check whether voice input has been enabled via the /voice command
-                // (stored in ~/.claurst/ui-settings.json).  We also accept
+                // (stored in ~/.config/mikmik/ui-settings.json).  We also accept
                 // CLAURST_VOICE_ENABLED=1 as an override for easier testing.
                 let voice_on = std::env::var("CLAURST_VOICE_ENABLED")
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))

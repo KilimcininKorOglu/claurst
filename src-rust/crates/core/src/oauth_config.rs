@@ -409,7 +409,7 @@ pub fn build_auth_url(
 // Codex (OpenAI) OAuth Token Storage
 // ---------------------------------------------------------------------------
 
-/// OpenAI Codex OAuth tokens, persisted to ~/.claurst/codex_tokens.json
+/// OpenAI Codex OAuth tokens, persisted to ~/.config/mikmik/codex_tokens.json
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CodexTokens {
     pub access_token: String,
@@ -422,7 +422,7 @@ pub struct CodexTokens {
     pub expires_at: Option<u64>,
 }
 
-/// Legacy single-file path: `~/.claurst/codex_tokens.json`, read once by the
+/// Legacy single-file path: `~/.config/mikmik/codex_tokens.json`, read once by the
 /// startup migration and never written.
 pub fn codex_tokens_path() -> std::path::PathBuf {
     crate::config::Settings::config_dir().join("codex_tokens.json")

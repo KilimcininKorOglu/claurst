@@ -122,7 +122,7 @@ pub fn render_invalid_config_dialog(
 
     // Subtitle
     let subtitle = match state.kind {
-        InvalidConfigKind::Settings => "~/.claurst/settings.json could not be parsed.",
+        InvalidConfigKind::Settings => "~/.config/mikmik/settings.json could not be parsed.",
         InvalidConfigKind::ClaudeMd => "AGENTS.md could not be parsed.",
         InvalidConfigKind::Generic => "A configuration file could not be parsed.",
     };
@@ -154,7 +154,7 @@ pub fn render_invalid_config_dialog(
     )]));
     let instructions = match state.kind {
         InvalidConfigKind::Settings => vec![
-            "  1. Open ~/.claurst/settings.json in a text editor.",
+            "  1. Open ~/.config/mikmik/settings.json in a text editor.",
             "  2. Fix the JSON syntax error shown above.",
             "  3. Restart Claurst.",
         ],

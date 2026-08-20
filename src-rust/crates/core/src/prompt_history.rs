@@ -1,11 +1,11 @@
 // Prompt history — append-only JSONL log of user prompts.
 //
 // Mirrors the behaviour of `src/history.ts` in the TypeScript codebase:
-//   - Entries are written to `~/.claurst/history.jsonl` via O_APPEND.
+//   - Entries are written to `~/.config/mikmik/history.jsonl` via O_APPEND.
 //   - An advisory lock file (`history.jsonl.lock`) serialises concurrent
 //     writers (up to 20 retries × 50 ms back-off).
 //   - Large pasted text (> 1 024 bytes) is stored externally in
-//     `~/.claurst/pastes/<sha256-hex>` and referenced by hash.
+//     `~/.config/mikmik/pastes/<sha256-hex>` and referenced by hash.
 //   - Images are not stored in the JSONL file (they live in the image cache).
 //   - `get_history()` reads the file, filters by project, and yields
 //     current-session entries first (newest-first within each group).
@@ -221,7 +221,7 @@ fn hash_text(text: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Persist `text` to `~/.claurst/pastes/<hash>`.  Fire-and-forget.
+/// Persist `text` to `~/.config/mikmik/pastes/<hash>`.  Fire-and-forget.
 async fn store_paste(hash: String, text: String) {
     let dir = pastes_dir();
     if let Err(e) = fs::create_dir_all(&dir).await {
@@ -247,7 +247,7 @@ async fn store_paste(hash: String, text: String) {
     }
 }
 
-/// Read text from `~/.claurst/pastes/<hash>`, returning `None` if missing.
+/// Read text from `~/.config/mikmik/pastes/<hash>`, returning `None` if missing.
 async fn retrieve_paste(hash: &str) -> Option<String> {
     fs::read_to_string(paste_path(hash)).await.ok()
 }
@@ -327,7 +327,7 @@ async fn flush_entries(entries: Vec<LogEntry>) {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Append `entry` to `~/.claurst/history.jsonl`.
+/// Append `entry` to `~/.config/mikmik/history.jsonl`.
 ///
 /// The call is fire-and-forget: it spawns a background Tokio task and returns
 /// immediately.  If `CLAURST_SKIP_PROMPT_HISTORY` is truthy the call is
@@ -408,7 +408,7 @@ pub fn add_to_history(entry: HistoryEntry) {
     });
 }
 
-/// Read `~/.claurst/history.jsonl`, filter by `project`, and return up to
+/// Read `~/.config/mikmik/history.jsonl`, filter by `project`, and return up to
 /// `MAX_HISTORY_ITEMS` entries newest-first.  Entries belonging to
 /// `current_session_id` are yielded before other sessions' entries.
 pub async fn get_history(project: &str, current_session_id: Option<&str>) -> Vec<HistoryEntry> {

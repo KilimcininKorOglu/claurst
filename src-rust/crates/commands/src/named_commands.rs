@@ -59,7 +59,7 @@ impl NamedCommand for AgentsCommand {
     fn execute_named(&self, args: &[&str], ctx: &CommandContext) -> CommandResult {
         match args.first().copied().unwrap_or("list") {
             "list" => {
-                // Load agent definitions from .claurst/agents/ in working dir
+                // Load agent definitions from .mikmik/agents/ in working dir
                 // (and home dir), using the same loader as the TUI agents view.
                 let defs = mikmik_tui::agents_view::load_agent_definitions(&ctx.working_dir);
 
@@ -90,7 +90,7 @@ impl NamedCommand for AgentsCommand {
             "create" => {
                 let name = args.get(1).copied().unwrap_or("my-agent");
                 CommandResult::Message(format!(
-                    "Create a new agent by adding .claurst/agents/{name}.md\n\
+                    "Create a new agent by adding .mikmik/agents/{name}.md\n\
                      Template:\n\
                      ---\n\
                      name: {name}\n\
@@ -110,7 +110,7 @@ impl NamedCommand for AgentsCommand {
                     }
                 };
                 CommandResult::Message(format!(
-                    "Edit .claurst/agents/{name}.md in your editor to update the agent."
+                    "Edit .mikmik/agents/{name}.md in your editor to update the agent."
                 ))
             }
             "delete" => {
@@ -123,7 +123,7 @@ impl NamedCommand for AgentsCommand {
                     }
                 };
                 CommandResult::Message(format!(
-                    "Delete .claurst/agents/{name}.md to remove the agent."
+                    "Delete .mikmik/agents/{name}.md to remove the agent."
                 ))
             }
             sub => CommandResult::Error(format!("Unknown agents subcommand: '{sub}'")),

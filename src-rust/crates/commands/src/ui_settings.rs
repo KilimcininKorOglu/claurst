@@ -1,10 +1,10 @@
-// UI settings helpers (stored in ~/.claurst/ui-settings.json).
+// UI settings helpers (stored in ~/.config/mikmik/ui-settings.json).
 //
 // These hold state not present in the core Config struct. Shared by many
 // commands; extracted from lib.rs (issue #232). Behavior-preserving move.
 
 // ---------------------------------------------------------------------------
-// UI settings helpers (stored in ~/.claurst/ui-settings.json)
+// UI settings helpers (stored in ~/.config/mikmik/ui-settings.json)
 // These hold things not present in the core Config struct.
 // ---------------------------------------------------------------------------
 

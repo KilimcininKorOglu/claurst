@@ -317,7 +317,7 @@ mod tests {
 
     /// #226: BatchEdit writes (and its rollback path) go through `write_atomic`.
     /// A successful multi-file batch must land the right content in every file
-    /// and leave no `.claurst-tmp-*` scratch file behind. Because each file is
+    /// and leave no `.mikmik-tmp-*` scratch file behind. Because each file is
     /// swapped in atomically via rename, a mid-write crash can never leave one
     /// of these files partially written — so the rollback only ever has to
     /// restore fully-written files, never repair a torn one.
@@ -348,7 +348,7 @@ mod tests {
         let tmp_left = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .any(|e| e.file_name().to_string_lossy().contains(".claurst-tmp-"));
+            .any(|e| e.file_name().to_string_lossy().contains(".mikmik-tmp-"));
         assert!(!tmp_left, "atomic write must not leave a temp file behind");
     }
 }

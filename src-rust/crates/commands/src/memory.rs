@@ -24,25 +24,25 @@ impl SlashCommand for MemoryCommand {
          Subcommands:\n\
            /memory              — show all AGENTS.md files\n\
            /memory edit         — open project AGENTS.md in your editor\n\
-           /memory edit global  — open global ~/.claurst/AGENTS.md in your editor\n\
+           /memory edit global  — open global ~/.config/mikmik/AGENTS.md in your editor\n\
            /memory clear        — clear the project AGENTS.md\n\
-           /memory clear global — clear the global ~/.claurst/AGENTS.md\n\n\
+           /memory clear global — clear the global ~/.config/mikmik/AGENTS.md\n\n\
          Locations checked (in priority order):\n\
-           1. <project>/.claurst/AGENTS.md\n\
+           1. <project>/.mikmik/AGENTS.md\n\
            2. <project>/AGENTS.md\n\
-           3. ~/.claurst/AGENTS.md  (global)\n\n\
+           3. ~/.config/mikmik/AGENTS.md  (global)\n\n\
          Use /init to create a new AGENTS.md from a template."
     }
 
     async fn execute(&self, args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let project_claude_dir = ctx.working_dir.join(".claurst").join("AGENTS.md");
+        let project_claude_dir = ctx.working_dir.join(".mikmik").join("AGENTS.md");
         let project_root = ctx.working_dir.join("AGENTS.md");
         let global_path = mikmik_core::config::Settings::config_dir().join("AGENTS.md");
 
         let locations = [
-            ("project (.claurst/AGENTS.md)", project_claude_dir.clone()),
+            ("project (.mikmik/AGENTS.md)", project_claude_dir.clone()),
             ("project (AGENTS.md)", project_root.clone()),
-            ("global (~/.claurst/AGENTS.md)", global_path.clone()),
+            ("global (~/.config/mikmik/AGENTS.md)", global_path.clone()),
         ];
 
         let cmd = args.trim();
@@ -120,10 +120,10 @@ impl SlashCommand for MemoryCommand {
                 .map(|s| s.trim())
                 .unwrap_or("project");
             let (label, target) = match target_hint {
-                "global" => ("global (~/.claurst/AGENTS.md)", global_path.clone()),
+                "global" => ("global (~/.config/mikmik/AGENTS.md)", global_path.clone()),
                 _ => {
                     if project_claude_dir.exists() {
-                        ("project (.claurst/AGENTS.md)", project_claude_dir.clone())
+                        ("project (.mikmik/AGENTS.md)", project_claude_dir.clone())
                     } else {
                         ("project (AGENTS.md)", project_root.clone())
                     }
@@ -198,7 +198,7 @@ impl SlashCommand for MemoryCommand {
             output.push_str(
                 "\nSubcommands:\n\
                  /memory edit          — edit project AGENTS.md\n\
-                 /memory edit global   — edit global ~/.claurst/AGENTS.md\n\
+                 /memory edit global   — edit global ~/.config/mikmik/AGENTS.md\n\
                  /memory clear         — clear project AGENTS.md\n\
                  /memory clear global  — clear global AGENTS.md",
             );

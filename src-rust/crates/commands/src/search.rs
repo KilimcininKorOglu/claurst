@@ -20,7 +20,7 @@ impl SlashCommand for SearchCommand {
     fn help(&self) -> &str {
         "Usage: /search <query>\n\n\
          Searches session titles and message content in the local SQLite\n\
-         session database (~/.claurst/sessions.db).  Returns the 50 best\n\
+         session database (~/.config/mikmik/sessions.db).  Returns the 50 best\n\
          matching sessions, ordered by most recently updated.\n\n\
          Example: /search refactor authentication"
     }

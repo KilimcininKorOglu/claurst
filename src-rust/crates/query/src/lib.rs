@@ -1801,7 +1801,7 @@ async fn run_query_loop_inner(
                             .await
                         {
                             Ok(memories) if !memories.is_empty() => {
-                                let target = working_dir_clone.join(".claurst").join("AGENTS.md");
+                                let target = working_dir_clone.join(".mikmik").join("AGENTS.md");
                                 if let Err(e) = session_memory::SessionMemoryExtractor::persist(
                                     &memories, &target,
                                 )

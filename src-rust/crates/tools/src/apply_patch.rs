@@ -545,7 +545,7 @@ mod tests {
     }
 
     /// #226: ApplyPatch writes through `write_atomic`. A successful patch must
-    /// leave the file with the right content and NO `.claurst-tmp-*` scratch
+    /// leave the file with the right content and NO `.mikmik-tmp-*` scratch
     /// file lingering in the directory.
     #[tokio::test]
     async fn apply_patch_writes_atomically_no_tmp_left() {
@@ -564,7 +564,7 @@ mod tests {
         let tmp_left = std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .any(|e| e.file_name().to_string_lossy().contains(".claurst-tmp-"));
+            .any(|e| e.file_name().to_string_lossy().contains(".mikmik-tmp-"));
         assert!(!tmp_left, "atomic write must not leave a temp file behind");
     }
 }

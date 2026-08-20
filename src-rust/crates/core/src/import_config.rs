@@ -925,7 +925,7 @@ mod tests {
         // with every other test reading the home dir in parallel.
         let tmp = TempDir::new().unwrap();
         let claude_dir = tmp.path().join(".claude");
-        let mikmik_dir = tmp.path().join(".claurst");
+        let mikmik_dir = tmp.path().join(".mikmik");
         std::fs::create_dir_all(&claude_dir).unwrap();
         std::fs::create_dir_all(&mikmik_dir).unwrap();
         std::fs::write(claude_dir.join("CLAUDE.md"), "hello\nworld").unwrap();

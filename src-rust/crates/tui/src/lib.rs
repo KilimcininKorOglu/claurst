@@ -728,7 +728,7 @@ mod tests {
 
         let saved = temp
             .path()
-            .join(".claurst")
+            .join(".mikmik")
             .join("agents")
             .join("planner.md");
         assert!(saved.exists());

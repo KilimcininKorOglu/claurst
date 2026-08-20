@@ -171,9 +171,9 @@ $ARGUMENTS
 ## Settings Reference
 
 Settings files are in:
-- User:    ~/.claurst/settings.json
-- Project: .claurst/settings.json
-- Local:   .claurst/settings.local.json
+- User:    ~/.config/mikmik/settings.json
+- Project: .mikmik/settings.json
+- Local:   .mikmik/settings.local.json
 
 Read the relevant files before making any changes."#,
         allowed_tools: Some(&["Read", "Grep", "Glob"]),
@@ -288,9 +288,9 @@ Modify Claurst configuration by updating settings.json files.
 
 | File | Scope | Use For |
 |------|-------|---------|
-| `~/.claurst/settings.json` | Global | Personal preferences for all projects |
-| `.claurst/settings.json` | Project | Team-wide hooks, permissions, plugins |
-| `.claurst/settings.local.json` | Project (local) | Personal overrides for this project |
+| `~/.config/mikmik/settings.json` | Global | Personal preferences for all projects |
+| `.mikmik/settings.json` | Project | Team-wide hooks, permissions, plugins |
+| `.mikmik/settings.local.json` | Project (local) | Personal overrides for this project |
 
 Settings load in order: user → project → local (later overrides earlier).
 

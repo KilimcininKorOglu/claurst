@@ -191,7 +191,7 @@ impl SlashCommand for DoctorCommand {
             lines.push(format!("  ✗ Config dir missing: {}", config_dir.display()));
         }
 
-        // Settings validation — try loading ~/.claurst/settings.json
+        // Settings validation — try loading ~/.config/mikmik/settings.json
         let settings_path = config_dir.join("settings.json");
         if settings_path.exists() {
             match std::fs::read_to_string(&settings_path)

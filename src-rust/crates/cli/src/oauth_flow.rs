@@ -16,7 +16,7 @@
 //    b. User manually pastes the authorization code at the terminal
 // 5. Exchange the authorization code for tokens via POST to TOKEN_URL
 // 6. For Console flow: call create_api_key endpoint to get an API key
-// 7. Save OAuthTokens to ~/.claurst/oauth_tokens.json
+// 7. Save OAuthTokens to ~/.config/mikmik/oauth_tokens.json
 // 8. Return the credential (API key or Bearer token)
 
 use anyhow::{bail, Context};

@@ -1,6 +1,6 @@
 //! Trust gating for the project settings that name something to run.
 //!
-//! A repository's `.claurst/settings.json` arrives with the checkout and nobody
+//! A repository's `.mikmik/settings.json` arrives with the checkout and nobody
 //! read it. Most of what it can say is harmless, and the fields that are never
 //! acceptable from a repository are refused outright in [`crate::config`]'s
 //! merge. Between those two sits a third group — hooks, formatters, language
@@ -26,7 +26,7 @@ use crate::config::Settings;
 
 /// Path to the per-user project-settings trust store.
 ///
-/// Stored alongside the global settings (`~/.claurst/project_trust.json`) and
+/// Stored alongside the global settings (`~/.config/mikmik/project_trust.json`) and
 /// never inside a repository.
 pub fn trust_store_path() -> PathBuf {
     Settings::config_dir().join("project_trust.json")
@@ -203,7 +203,7 @@ impl ProjectTrustStore {
         }
     }
 
-    /// Persist the store to `~/.claurst/project_trust.json`.
+    /// Persist the store to `~/.config/mikmik/project_trust.json`.
     pub fn save(&self) -> std::io::Result<()> {
         let path = trust_store_path();
         if let Some(parent) = path.parent() {

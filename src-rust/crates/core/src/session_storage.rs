@@ -1,6 +1,6 @@
 // session_storage.rs — JSONL transcript persistence for Claurst.
 //
-// File layout:  ~/.claurst/projects/{base64url(project_root)}/{session_id}.jsonl
+// File layout:  ~/.config/mikmik/projects/{base64url(project_root)}/{session_id}.jsonl
 //
 // Each line is a JSON object ("entry") whose `type` field is the discriminant.
 // The schema is kept compatible with the TypeScript `Entry` union in
@@ -243,7 +243,7 @@ pub struct SessionSummary {
 // Path helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the base projects directory: `~/.claurst/projects/`.
+/// Returns the base projects directory: `~/.config/mikmik/projects/`.
 pub fn projects_dir() -> PathBuf {
     crate::config::Settings::config_dir().join("projects")
 }
@@ -258,7 +258,7 @@ pub fn transcript_dir(project_root: &Path) -> PathBuf {
 }
 
 /// Like [`transcript_dir`] but rooted at an explicit config directory instead
-/// of the detected `~/.claurst`. Lets tests stage transcripts in a tempdir
+/// of the detected `~/.config/mikmik`. Lets tests stage transcripts in a tempdir
 /// without writing under HOME (unwritable in sandboxed builds).
 pub fn transcript_dir_in(config_dir: &Path, project_root: &Path) -> PathBuf {
     let encoded = URL_SAFE_NO_PAD.encode(project_root.to_string_lossy().as_bytes());

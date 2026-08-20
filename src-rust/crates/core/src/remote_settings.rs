@@ -3,7 +3,7 @@
 // Port of src/services/remoteManagedSettings/index.ts
 //
 // Fetches enterprise-managed settings from Anthropic's API, caches them to
-// ~/.claurst/remote-settings.json, and polls every hour in the background.
+// ~/.config/mikmik/remote-settings.json, and polls every hour in the background.
 // Fails open — if the fetch fails, the app continues without remote settings.
 //
 // Eligibility:
@@ -69,7 +69,7 @@ impl Default for RemoteSettingsConfig {
     }
 }
 
-/// On-disk cache structure stored in ~/.claurst/remote-settings.json.
+/// On-disk cache structure stored in ~/.config/mikmik/remote-settings.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RemoteSettingsCache {
     /// The cached settings object (may be empty `{}`).

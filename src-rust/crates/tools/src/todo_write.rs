@@ -54,7 +54,7 @@ pub fn load_todos_in(dir: &Path, session_id: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Persist `todos` to `~/.claurst/todos/<session_id>.json`.
+/// Persist `todos` to `~/.config/mikmik/todos/<session_id>.json`.
 pub fn save_todos(session_id: &str, todos: &[Value]) {
     save_todos_in(&todos_dir(), session_id, todos);
 }
@@ -480,8 +480,8 @@ mod tests {
             "todos_path should embed the session id"
         );
         // Route the assertion through the same canonical resolver instead of
-        // hardcoding `.claurst`: the todos file must live under the resolved
-        // claurst home (which may be ~/.claurst, $MIKMIK_HOME, or the XDG dir).
+        // hardcoding `.mikmik`: the todos file must live under the resolved
+        // claurst home (which may be ~/.config/mikmik, $MIKMIK_HOME, or the XDG dir).
         let home = mikmik_core::config::Settings::config_dir();
         assert!(
             path.starts_with(home.join("todos")),

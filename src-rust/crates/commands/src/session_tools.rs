@@ -25,7 +25,7 @@ impl SlashCommand for SkillsCommand {
         vec!["skill"]
     }
     fn description(&self) -> &str {
-        "List available skills in .claurst/commands/"
+        "List available skills in .mikmik/commands/"
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
@@ -34,7 +34,7 @@ impl SlashCommand for SkillsCommand {
         // directory, so the list names them without a leading slash.
         let mut found: Vec<String> = Vec::new();
         let dirs = [
-            ctx.working_dir.join(".claurst").join("commands"),
+            ctx.working_dir.join(".mikmik").join("commands"),
             mikmik_core::config::Settings::config_dir().join("commands"),
         ];
 
@@ -58,13 +58,13 @@ impl SlashCommand for SkillsCommand {
         // session adds each plugin's `skills/` directory to `config.skills`,
         // so they are listed by the same route that can run them.
         //
-        // Include discovered skills from .claurst/skills/ and configured paths/URLs.
+        // Include discovered skills from .mikmik/skills/ and configured paths/URLs.
         let discovered = mikmik_core::discover_skills(&ctx.working_dir, &ctx.config.skills);
 
         let mut output = if found.is_empty() && discovered.is_empty() {
             return CommandResult::Message(
-                "No skills found.\nCreate .md files in .claurst/commands/ to define skills.\n\
-                 Example: .claurst/commands/review.md"
+                "No skills found.\nCreate .md files in .mikmik/commands/ to define skills.\n\
+                 Example: .mikmik/commands/review.md"
                     .to_string(),
             );
         } else if found.is_empty() {
