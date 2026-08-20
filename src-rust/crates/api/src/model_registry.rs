@@ -1566,6 +1566,35 @@ pub fn effective_model_for_config(
     config.effective_model().to_string()
 }
 
+/// Where a [`Config`] sends a request, account and wire model both.
+///
+/// The same resolution as [`effective_model_for_config`], answered as a
+/// [`Route`] instead of a bare `String`. A `String` here is the composite
+/// `"<account>/<model>"` about half the time and the wire id the other half,
+/// and every caller had to remember which and split it again. Most did not.
+///
+/// The catalogue lookup asks about the account's protocol rather than its
+/// name, because an account the user named (`work_openai`) appears in no
+/// catalogue and would otherwise fall through to the Claude-shaped default
+/// table.
+pub fn resolve_effective_route(
+    config: &claurst_core::config::Config,
+    registry: &ModelRegistry,
+) -> claurst_core::config::Route {
+    if config.model.is_some() {
+        return config.effective_route();
+    }
+
+    if let Some(account) = config.provider.as_deref().filter(|id| !id.is_empty()) {
+        let vendor = config.vendor_id_for_account(account);
+        if let Some(best) = registry.best_model_for_provider(&vendor) {
+            return config.route_for_account(account, &best);
+        }
+    }
+
+    config.effective_route()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1968,6 +1997,61 @@ mod tests {
         assert!(
             !resolved.contains("claude"),
             "qwen must never resolve to a claude model, got {resolved}"
+        );
+
+        let route = resolve_effective_route(&cfg, &reg);
+        assert_eq!(route.account, "qwen");
+        assert!(
+            !route.model.as_str().contains("claude"),
+            "qwen must never route to a claude model, got {}",
+            route.model
+        );
+    }
+
+    #[test]
+    fn an_explicit_selection_routes_by_its_own_prefix() {
+        let reg = ModelRegistry::new();
+        let mut cfg = claurst_core::config::Config {
+            provider: Some("openai".to_string()),
+            model: Some("anthropic/claude-sonnet-5".to_string()),
+            ..Default::default()
+        };
+        cfg.provider_configs.insert(
+            "openai".to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+
+        let route = resolve_effective_route(&cfg, &reg);
+        assert_eq!(route.account, "anthropic");
+        assert_eq!(route.model, "claude-sonnet-5");
+    }
+
+    #[test]
+    fn an_account_the_user_named_still_gets_its_vendors_default() {
+        // `best_model_for_provider` is keyed by catalogue name, so an account
+        // called `work_openai` matched nothing and the resolution fell through
+        // to the Claude-shaped default table. Ask about the protocol it speaks
+        // and keep the account's own name on the route.
+        let reg = ModelRegistry::new();
+        let mut cfg = claurst_core::config::Config {
+            provider: Some("work_openai".to_string()),
+            model: None,
+            ..Default::default()
+        };
+        cfg.provider_configs.insert(
+            "work_openai".to_string(),
+            claurst_core::config::ProviderConfig {
+                protocol: Some("openai".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let route = resolve_effective_route(&cfg, &reg);
+        assert_eq!(route.account, "work_openai");
+        assert!(
+            !route.model.as_str().contains("claude"),
+            "a user-named OpenAI account must not default to a claude model, got {}",
+            route.model
         );
     }
 

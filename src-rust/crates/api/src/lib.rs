@@ -101,9 +101,9 @@ pub use providers::OpenAiProvider;
 // Phase 3 re-exports — model registry.
 pub use effort_support::{model_is_reasoning, supported_efforts, variant_ladder};
 pub use model_registry::{
-    effective_model_for_config, CostBreakdown, CostTier, CostTierCondition, ExperimentalMode,
-    InterleavedReasoning, Modality, ModelEntry, ModelRegistry, ModelStatus, ProviderEntry,
-    ProviderOverride,
+    effective_model_for_config, resolve_effective_route, CostBreakdown, CostTier,
+    CostTierCondition, ExperimentalMode, InterleavedReasoning, Modality, ModelEntry, ModelRegistry,
+    ModelStatus, ProviderEntry, ProviderOverride,
 };
 pub use variants::{
     variant_efforts, OPENAI_NONE_EFFORT_RELEASE_DATE, OPENAI_XHIGH_EFFORT_RELEASE_DATE,
