@@ -116,7 +116,7 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert!(content_type.starts_with("text/html"));
-        assert!(body.contains("claurst relay"));
+        assert!(body.contains("mikmik relay"));
     }
 
     #[tokio::test]

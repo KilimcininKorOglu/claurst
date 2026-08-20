@@ -1,14 +1,14 @@
 [package]
-name = "claurst-relay"
+name = "mikmik-relay"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-description = "Self-hosted relay that lets a phone or browser drive a running claurst session"
+description = "Self-hosted relay that lets a phone or browser drive a running mikmik session"
 license = "MIT"
 publish = false
 
 # Deliberately NOT a member of the src-rust workspace. The relay carries none
-# of claurst's dependency tree, which keeps the Docker image small and keeps
+# of mikmik's dependency tree, which keeps the Docker image small and keeps
 # the release/version-stamping process untouched.
 
 [dependencies]

@@ -1,11 +1,11 @@
-//! Wire types shared with `claurst-bridge`.
+//! Wire types shared with `mikmik-bridge`.
 //!
 //! These mirror `crates/bridge/src/lib.rs` field for field. The relay does not
 //! interpret them, but it does re-serialise them, so the shapes have to match
 //! or the CLI silently drops messages it cannot parse.
 //!
-//! Kept as a local copy rather than a dependency: pulling in `claurst-bridge`
-//! would drag the whole claurst dependency tree into the relay image for four
+//! Kept as a local copy rather than a dependency: pulling in `mikmik-bridge`
+//! would drag the whole mikmik dependency tree into the relay image for four
 //! enums.
 
 use serde::{Deserialize, Serialize};

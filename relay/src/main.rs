@@ -1,4 +1,4 @@
-//! claurst-relay — a self-hosted relay between a running claurst session and a
+//! mikmik-relay — a self-hosted relay between a running mikmik session and a
 //! phone or browser.
 //!
 //! The CLI dials out and long-polls, so the developer machine needs no inbound
@@ -187,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "claurst_relay=info".into()),
+                .unwrap_or_else(|_| "mikmik_relay=info".into()),
         )
         .init();
 

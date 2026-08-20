@@ -1,4 +1,4 @@
-//! Runner-facing API: the endpoints `claurst-bridge` already calls.
+//! Runner-facing API: the endpoints `mikmik-bridge` already calls.
 //!
 //! This surface is fixed by the CLI, not by us. `crates/bridge/src/lib.rs`
 //! hardcodes the paths, the bare-array poll response and the `{"events": []}`

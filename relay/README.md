@@ -1,16 +1,16 @@
-# claurst-relay
+# mikmik-relay
 
-A self-hosted relay that lets a phone or browser drive a claurst session running on your machine.
+A self-hosted relay that lets a phone or browser drive a mikmik session running on your machine.
 
 The CLI dials out and long-polls, so your machine needs no inbound port and no firewall change. The relay only queues and forwards; it does not interpret prompts, events or code.
 
 ```
-phone/web  ──HTTP+SSE──►  relay (Docker)  ◄──long-poll──  claurst (your machine)
+phone/web  ──HTTP+SSE──►  relay (Docker)  ◄──long-poll──  mikmik (your machine)
 ```
 
 ## Before you run it
 
-This token is a remote command-execution credential. Anything holding it can send a prompt into a running claurst session, and that session executes tools on your machine.
+This token is a remote command-execution credential. Anything holding it can send a prompt into a running mikmik session, and that session executes tools on your machine.
 
 - The relay does not terminate TLS. Put a TLS-terminating reverse proxy in front of it, or reach it only over a VPN or LAN. Without TLS the token and your source travel in plaintext.
 - `docker-compose.yml` publishes on `127.0.0.1` by default for that reason. Changing it to `0.0.0.0` without TLS in front puts the token on the wire.
@@ -24,7 +24,7 @@ openssl rand -hex 32          # paste into RELAY_TOKEN
 docker compose up -d
 ```
 
-Then point claurst at it, in `~/.claurst/settings.json`:
+Then point mikmik at it, in `~/.config/mikmik/settings.json`:
 
 ```json
 {
@@ -47,7 +47,7 @@ Then point claurst at it, in `~/.claurst/settings.json`:
 | `RELAY_SESSION_TTL_SECS` | `900`            | Drop a session after this long without a poll      |
 | `RELAY_EVENT_BUFFER`     | `500`            | Events retained per session for replay             |
 | `RELAY_INBOUND_QUEUE`    | `100`            | Messages queued for a runner before the oldest goes |
-| `RUST_LOG`               | `claurst_relay=info` | Log filter                                     |
+| `RUST_LOG`               | `mikmik_relay=info` | Log filter                                     |
 
 Host port 8350 is reserved for this project in the central Docker port registry.
 
@@ -55,7 +55,7 @@ Host port 8350 is reserved for this project in the central Docker port registry.
 
 Two surfaces, deliberately separate.
 
-**Runner surface** — fixed by what `claurst-bridge` already calls, so it cannot change:
+**Runner surface** — fixed by what `mikmik-bridge` already calls, so it cannot change:
 
 | Method   | Path                                        |
 |----------|---------------------------------------------|
@@ -110,4 +110,4 @@ cargo test -- --test-threads=1
 
 Tests drive the router through `tower::ServiceExt::oneshot` and make no network calls.
 
-This is a standalone Cargo project, not a member of the `src-rust` workspace. It carries none of claurst's dependency tree, which keeps the image small and leaves the release process untouched.
+This is a standalone Cargo project, not a member of the `src-rust` workspace. It carries none of mikmik's dependency tree, which keeps the image small and leaves the release process untouched.

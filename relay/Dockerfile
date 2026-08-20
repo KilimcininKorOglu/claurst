@@ -23,7 +23,7 @@ RUN useradd --system --create-home --uid 10001 relay
 USER relay
 WORKDIR /home/relay
 
-COPY --from=build /build/target/release/claurst-relay /usr/local/bin/claurst-relay
+COPY --from=build /build/target/release/mikmik-relay /usr/local/bin/mikmik-relay
 
 # RELAY_TOKEN has no default on purpose: the relay refuses to start without one,
 # and a default would be a published shared secret.
@@ -33,4 +33,4 @@ EXPOSE 8350
 
 # No shell form, so the process is PID 1 and receives SIGTERM directly for the
 # graceful shutdown path.
-ENTRYPOINT ["/usr/local/bin/claurst-relay"]
+ENTRYPOINT ["/usr/local/bin/mikmik-relay"]

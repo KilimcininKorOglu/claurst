@@ -1,7 +1,7 @@
 //! Bearer-token authentication.
 //!
 //! One shared secret guards the whole relay. Anything holding it can post a
-//! prompt into a running claurst session, which executes tools on the
+//! prompt into a running mikmik session, which executes tools on the
 //! developer's machine, so the token is treated as a command-execution
 //! credential rather than a convenience.
 

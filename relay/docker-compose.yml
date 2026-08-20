@@ -5,10 +5,10 @@ services:
     # compiled from source you can read is the safer default.
     #
     # To pull a prebuilt image instead, comment out `build` and swap `image`:
-    #   image: ghcr.io/kilimcininkoroglu/claurst-relay:main
+    #   image: ghcr.io/kilimcininkoroglu/mikmik-relay:main
     build: .
-    image: claurst-relay:local
-    container_name: claurst-relay
+    image: mikmik-relay:local
+    container_name: mikmik-relay
     restart: unless-stopped
     # Read from .env, never written into this file: RELAY_TOKEN grants command
     # execution on every connected machine.
@@ -17,7 +17,7 @@ services:
       RELAY_BIND: 0.0.0.0:8350
       RELAY_SESSION_TTL_SECS: ${RELAY_SESSION_TTL_SECS:-900}
       RELAY_EVENT_BUFFER: ${RELAY_EVENT_BUFFER:-500}
-      RUST_LOG: ${RUST_LOG:-claurst_relay=info}
+      RUST_LOG: ${RUST_LOG:-mikmik_relay=info}
     ports:
       # Bound to loopback by default. The relay does not terminate TLS, so
       # publishing it on 0.0.0.0 would put the token and your code on the wire
@@ -31,7 +31,7 @@ services:
       - ALL
     healthcheck:
       # No curl in the slim image; the relay answers /healthz without a token.
-      test: ["CMD", "/usr/local/bin/claurst-relay", "--health-check"]
+      test: ["CMD", "/usr/local/bin/mikmik-relay", "--health-check"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,7 +1,7 @@
 //! Client-facing API: what the web page and, later, a native app talk to.
 //!
 //! Deliberately separate from `runner.rs`. That surface is fixed by what
-//! `claurst-bridge` already calls and cannot change; this one is ours, so it
+//! `mikmik-bridge` already calls and cannot change; this one is ours, so it
 //! can grow without breaking the CLI.
 //!
 //! Events go out over SSE rather than long-polling: a browser `EventSource`
@@ -508,8 +508,8 @@ mod tests {
                 session_id: "s1".into(),
                 device_id: Some("dev".into()),
                 client_version: Some("0.1.7".into()),
-                label: Some("claurst".into()),
-                cwd: Some("/home/k/claurst".into()),
+                label: Some("mikmik".into()),
+                cwd: Some("/home/k/mikmik".into()),
                 ..Default::default()
             })
             .await;
@@ -525,8 +525,8 @@ mod tests {
 
         let body = body_json(response).await;
         assert_eq!(body[0]["session_id"], "s1");
-        assert_eq!(body[0]["label"], "claurst");
-        assert_eq!(body[0]["cwd"], "/home/k/claurst");
+        assert_eq!(body[0]["label"], "mikmik");
+        assert_eq!(body[0]["cwd"], "/home/k/mikmik");
     }
 
     #[tokio::test]
