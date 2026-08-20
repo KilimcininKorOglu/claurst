@@ -28,7 +28,7 @@ use claurst_api::{
 use claurst_core::error::ClaudeError;
 use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -67,7 +67,12 @@ const CRITICAL_PCT: f64 = 0.95; // 95 % full → red critical
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Tracks auto-compact state across turns.
+/// Tracks auto-compact state across a whole session.
+///
+/// Held in [`SESSION_COMPACT_STATE`] and keyed by session id, not by the turn
+/// loop: a value scoped to one `run_query_loop` call restarts on every user
+/// message, so three consecutive failures would have to land inside a single
+/// prompt and the circuit breaker below could never open.
 #[derive(Debug, Default, Clone)]
 pub struct AutoCompactState {
     /// Total compactions performed this session.
@@ -96,6 +101,36 @@ impl AutoCompactState {
             self.disabled = true;
         }
     }
+}
+
+/// Every live session's auto-compact state, keyed by session id.
+///
+/// A `parking_lot::Mutex` because the critical sections are two field reads
+/// and a write. No guard may cross the summarisation `.await`, so
+/// [`auto_compact_if_needed`] reads a copy, runs the call, then writes the
+/// outcome back.
+static SESSION_COMPACT_STATE: once_cell::sync::Lazy<
+    parking_lot::Mutex<HashMap<String, AutoCompactState>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(HashMap::new()));
+
+/// Read one session's auto-compact state.
+pub fn compact_state_for(session_id: &str) -> AutoCompactState {
+    SESSION_COMPACT_STATE
+        .lock()
+        .get(session_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Apply `f` to one session's auto-compact state, creating it if absent.
+fn update_compact_state(session_id: &str, f: impl FnOnce(&mut AutoCompactState)) {
+    let mut states = SESSION_COMPACT_STATE.lock();
+    f(states.entry(session_id.to_string()).or_default());
+}
+
+/// Forget a session's auto-compact state once the session is over.
+pub fn forget_compact_state(session_id: &str) {
+    SESSION_COMPACT_STATE.lock().remove(session_id);
 }
 
 /// Token-usage state relative to the context window.
@@ -1244,9 +1279,11 @@ pub async fn auto_compact_if_needed(
     input_tokens: u64,
     model: &str,
     context_window: u64,
-    state: &mut AutoCompactState,
+    session_id: &str,
 ) -> Option<Vec<Message>> {
-    if !should_auto_compact_for_window(input_tokens, context_window, state) {
+    // A copy, so no lock is held across the summarisation call below.
+    let state = compact_state_for(session_id);
+    if !should_auto_compact_for_window(input_tokens, context_window, &state) {
         return None;
     }
 
@@ -1259,7 +1296,7 @@ pub async fn auto_compact_if_needed(
 
     match compact_conversation(client, messages, model).await {
         Ok(new_msgs) => {
-            state.on_success();
+            update_compact_state(session_id, AutoCompactState::on_success);
             info!(
                 original_count = messages.len(),
                 new_count = new_msgs.len(),
@@ -1269,7 +1306,7 @@ pub async fn auto_compact_if_needed(
         }
         Err(e) => {
             warn!(error = %e, "Auto-compact failed");
-            state.on_failure();
+            update_compact_state(session_id, AutoCompactState::on_failure);
             None
         }
     }
@@ -1882,6 +1919,56 @@ mod tests {
         state.on_success();
         assert_eq!(state.consecutive_failures, 0);
         assert!(!state.disabled);
+    }
+
+    /// Failures accumulate across separate `run_query_loop` calls, because the
+    /// state is keyed by session and not scoped to one prompt. Three failures
+    /// spread over three user messages open the breaker, which is the case the
+    /// loop-local value could never reach.
+    #[test]
+    fn the_breaker_counts_failures_across_prompts() {
+        let session = "breaker-across-prompts";
+        forget_compact_state(session);
+
+        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+            assert!(!compact_state_for(session).disabled);
+            update_compact_state(session, AutoCompactState::on_failure);
+        }
+
+        assert!(compact_state_for(session).disabled);
+        forget_compact_state(session);
+    }
+
+    /// One session's failures never reach another's.
+    #[test]
+    fn a_breaker_stays_inside_its_own_session() {
+        let failing = "breaker-isolation-failing";
+        let healthy = "breaker-isolation-healthy";
+        forget_compact_state(failing);
+        forget_compact_state(healthy);
+
+        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+            update_compact_state(failing, AutoCompactState::on_failure);
+        }
+
+        assert!(compact_state_for(failing).disabled);
+        assert!(!compact_state_for(healthy).disabled);
+
+        forget_compact_state(failing);
+        forget_compact_state(healthy);
+    }
+
+    /// A session that ends leaves nothing behind, so a reused id starts clean.
+    #[test]
+    fn forgetting_a_session_clears_its_breaker() {
+        let session = "breaker-forgotten";
+        for _ in 0..MAX_CONSECUTIVE_FAILURES {
+            update_compact_state(session, AutoCompactState::on_failure);
+        }
+        assert!(compact_state_for(session).disabled);
+
+        forget_compact_state(session);
+        assert!(!compact_state_for(session).disabled);
     }
 
     // ---- Message grouping ---------------------------------------------------

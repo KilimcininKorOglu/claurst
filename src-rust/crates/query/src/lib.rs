@@ -520,7 +520,6 @@ async fn run_query_loop_inner(
     let tool_ctx = &loop_ctx;
 
     let mut turn = 0u32;
-    let mut compact_state = compact::AutoCompactState::default();
     // Tracks how many consecutive max_tokens recoveries we've attempted so
     // we don't loop forever on a model that can't finish within any budget.
     let mut max_tokens_recovery_count: u32 = 0;
@@ -1781,7 +1780,7 @@ async fn run_query_loop_inner(
                 context_tokens,
                 &effective_model,
                 context_window,
-                &mut compact_state,
+                &tool_ctx.session_id,
             )
             .await
             {

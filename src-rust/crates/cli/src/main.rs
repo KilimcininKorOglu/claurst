@@ -2108,6 +2108,9 @@ async fn run_headless(
     // Interpreters started by the REPL tool are kept alive between calls on
     // purpose; this is where that purpose ends.
     claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
+    // The auto-compact circuit breaker is keyed by session, so it has to be
+    // dropped here or a long-lived process keeps one entry per session it ran.
+    claurst_query::compact::forget_compact_state(&tool_ctx.session_id);
 
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::SessionEnd,
@@ -6206,6 +6209,9 @@ async fn run_interactive(
     // Interpreters started by the REPL tool are kept alive between calls on
     // purpose; this is where that purpose ends.
     claurst_tools::repl_tool::shutdown_session(&tool_ctx.session_id).await;
+    // The auto-compact circuit breaker is keyed by session, so it has to be
+    // dropped here or a long-lived process keeps one entry per session it ran.
+    claurst_query::compact::forget_compact_state(&tool_ctx.session_id);
 
     claurst_plugins::run_global_hook(
         claurst_plugins::HookEventKind::SessionEnd,
