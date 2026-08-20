@@ -1247,7 +1247,6 @@ pub mod config {
         pub allowed_tools: Vec<String>,
         pub disallowed_tools: Vec<String>,
         pub env: HashMap<String, String>,
-        pub enable_all_mcp_servers: bool,
         pub custom_system_prompt: Option<String>,
         pub append_system_prompt: Option<String>,
         pub disable_claude_mds: bool,
@@ -2906,11 +2905,6 @@ pub mod config {
                 // redirect a benign-looking command to code the repository
                 // chose. Only the user's own settings may set them.
                 env: base.config.env,
-                // SECURITY: blanket trust for MCP servers is the user's to
-                // grant, matching `trust_project_mcp_servers` below. Nothing
-                // reads this field today, so keep it beside that one rather
-                // than letting a repository set a name that later grows teeth.
-                enable_all_mcp_servers: base.config.enable_all_mcp_servers,
                 // SECURITY: the system prompt is the model's standing
                 // instruction. A repository able to replace or extend it would
                 // be telling the agent what to do before the user says
@@ -3542,7 +3536,6 @@ pub mod config {
                     cursor_blink_enabled: true,
                     timeline_enabled: true,
                     file_autocomplete_show_hidden_files: true,
-                    enable_all_mcp_servers: true,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -3563,7 +3556,6 @@ pub mod config {
             assert!(!merged.config.cursor_blink_enabled);
             assert!(!merged.config.timeline_enabled);
             assert!(!merged.config.file_autocomplete_show_hidden_files);
-            assert!(!merged.config.enable_all_mcp_servers);
         }
 
         /// And the user's own answers survive a project file that says nothing.

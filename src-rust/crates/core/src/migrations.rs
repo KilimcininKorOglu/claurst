@@ -41,10 +41,6 @@ pub const MIGRATIONS: &[(&str, MigrationFn)] = &[
         "migrate_repl_bridge_to_remote_control",
         migrate_repl_bridge_to_remote_control,
     ),
-    (
-        "migrate_enable_all_mcp_servers",
-        migrate_enable_all_mcp_servers,
-    ),
     ("migrate_auto_updates", migrate_auto_updates),
     ("reset_auto_mode_opt_in", reset_auto_mode_opt_in),
     ("reset_pro_to_opus_default", reset_pro_to_opus_default),
@@ -203,23 +199,6 @@ fn migrate_repl_bridge_to_remote_control(settings: &mut Value) -> bool {
 
     if let Some(obj) = settings.as_object_mut() {
         obj.remove("replBridgeEnabled");
-    }
-    true
-}
-
-/// Rename `enableAllProjectMcpServers` → `mcpAutoApprove`.
-fn migrate_enable_all_mcp_servers(settings: &mut Value) -> bool {
-    let old = match settings.get("enableAllProjectMcpServers").cloned() {
-        Some(v) => v,
-        None => return false,
-    };
-
-    if settings.get("mcpAutoApprove").is_none() {
-        settings["mcpAutoApprove"] = old;
-    }
-
-    if let Some(obj) = settings.as_object_mut() {
-        obj.remove("enableAllProjectMcpServers");
     }
     true
 }
@@ -414,14 +393,6 @@ mod tests {
         assert!(migrate_repl_bridge_to_remote_control(&mut s));
         assert!(s.get("replBridgeEnabled").is_none());
         assert_eq!(s["remoteControlAtStartup"].as_bool(), Some(true));
-    }
-
-    #[test]
-    fn enable_all_mcp_renames_field() {
-        let mut s = json!({ "enableAllProjectMcpServers": true });
-        assert!(migrate_enable_all_mcp_servers(&mut s));
-        assert!(s.get("enableAllProjectMcpServers").is_none());
-        assert_eq!(s["mcpAutoApprove"].as_bool(), Some(true));
     }
 
     #[test]
