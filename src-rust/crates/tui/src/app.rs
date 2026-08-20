@@ -7042,7 +7042,7 @@ impl App {
                 };
 
                 if let Some(text) = text {
-                    if crate::message_copy::copy_to_clipboard(&text) {
+                    if try_copy_to_clipboard(&text) {
                         self.push_notification(
                             NotificationKind::Info,
                             format!("Copied {} chars to clipboard.", text.len()),
