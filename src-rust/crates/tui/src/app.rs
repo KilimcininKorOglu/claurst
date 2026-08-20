@@ -1578,8 +1578,6 @@ pub struct App {
     pub status_line_override: Option<String>,
     /// Whether auto-compact is enabled (from settings).
     pub auto_compact_enabled: bool,
-    /// Context threshold (0-100) at which to auto-compact.
-    pub auto_compact_threshold: u8,
     /// Guard to prevent re-triggering auto-compact while one is in flight.
     pub auto_compact_running: bool,
 
@@ -1978,7 +1976,6 @@ impl App {
             background_task_status: None,
             status_line_override: None,
             auto_compact_enabled: false,
-            auto_compact_threshold: 95,
             auto_compact_running: false,
             voice_recorder: {
                 // Check whether voice input has been enabled via the /voice command
@@ -3568,40 +3565,6 @@ impl App {
     pub fn invalidate_transcript(&self) {
         self.transcript_version
             .set(self.transcript_version.get().wrapping_add(1));
-    }
-
-    /// Check current token usage and push token warning notifications as
-    /// appropriate.  Call this after updating `token_count`.
-    pub fn check_token_warnings(&mut self) {
-        let window = claurst_query::context_window_for_model(&self.model_name) as u32;
-        if window == 0 {
-            return;
-        }
-        let pct = (self.token_count as f64 / window as f64 * 100.0) as u8;
-
-        // Only escalate — never repeat a threshold already shown.
-        if pct >= 100 && self.token_warning_threshold_shown < 100 {
-            self.token_warning_threshold_shown = 100;
-            self.push_notification(
-                NotificationKind::Error,
-                "Context window full. Running auto-compact\u{2026}".to_string(),
-                None,
-            );
-        } else if pct >= 95 && self.token_warning_threshold_shown < 95 {
-            self.token_warning_threshold_shown = 95;
-            self.push_notification(
-                NotificationKind::Error,
-                "Context window 95% full! Run /compact now.".to_string(),
-                None, // persistent until dismissed
-            );
-        } else if pct >= 80 && self.token_warning_threshold_shown < 80 {
-            self.token_warning_threshold_shown = 80;
-            self.push_notification(
-                NotificationKind::Warning,
-                "Context window 80% full. Consider /compact.".to_string(),
-                Some(30),
-            );
-        }
     }
 
     /// Take the current input buffer, push it to history, and return it.
@@ -8188,13 +8151,15 @@ impl App {
                 self.is_streaming = false;
                 self.spinner_verb = None;
 
-                // Update context window usage from the usage info.
+                // Context fill is what the model just saw, not a running
+                // total. `total_input()` is input + cache-read + cache-creation
+                // for this turn, and `input_tokens` already covers the whole
+                // conversation, so adding turns together counted the same
+                // context once per turn and the footer ran away from the real
+                // figure. Output tokens are not part of the prompt at all;
+                // they only enter the context as part of the next turn's input.
                 if let Some(ref u) = usage {
-                    let turn_tokens = u.input_tokens
-                        + u.output_tokens
-                        + u.cache_creation_input_tokens
-                        + u.cache_read_input_tokens;
-                    self.context_used_tokens = self.context_used_tokens.saturating_add(turn_tokens);
+                    self.context_used_tokens = u.total_input();
                 }
                 // Record elapsed time and pick a completion verb
                 let seed = self.frame_count as usize ^ (self.messages.len() * 7);
@@ -8801,6 +8766,46 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    // ---- Context fill ----
+
+    /// Feed one finished turn and hand back what the footer would show.
+    fn finish_turn(app: &mut App, input: u64, output: u64, cache_read: u64) -> u64 {
+        app.handle_query_event(claurst_query::QueryEvent::TurnComplete {
+            turn: 0,
+            stop_reason: "end_turn".to_string(),
+            usage: Some(claurst_core::types::UsageInfo {
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_input_tokens: cache_read,
+                ..Default::default()
+            }),
+            model: "claude-opus-4-5".to_string(),
+        });
+        app.context_used_tokens
+    }
+
+    /// The provider reports the whole prompt on every turn, so the footer has
+    /// to follow that figure rather than add the turns together. Summing them
+    /// counted the same conversation once per turn: a real 12k prompt read as
+    /// 34.8k after three turns.
+    #[test]
+    fn context_fill_follows_the_prompt_instead_of_accumulating() {
+        let mut app = make_app();
+
+        assert_eq!(finish_turn(&mut app, 10_000, 500, 0), 10_000);
+        assert_eq!(finish_turn(&mut app, 11_000, 600, 0), 11_000);
+        assert_eq!(finish_turn(&mut app, 12_000, 700, 0), 12_000);
+    }
+
+    /// A cached prompt bills most of its context as cache reads, so those
+    /// count; generated output never does, because it is not in the prompt.
+    #[test]
+    fn context_fill_counts_cache_reads_and_ignores_output() {
+        let mut app = make_app();
+
+        assert_eq!(finish_turn(&mut app, 400, 9_000, 30_000), 30_400);
     }
 
     // ---- MikMik (the fixed welcome-screen mascot) ----
