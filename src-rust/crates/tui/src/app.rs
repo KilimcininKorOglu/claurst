@@ -1769,7 +1769,8 @@ fn format_turn_time_label() -> String {
 
 impl App {
     pub fn new(config: Config, cost_tracker: Arc<CostTracker>) -> Self {
-        let model_name = config.effective_model().to_string();
+        let effective = config.effective_route();
+        let model_name = config.canonical_model(&effective.account, &effective.model);
         let user_keybindings = UserKeybindings::load(&Settings::config_dir());
         // Build the model registry up front so user metadata overrides
         // (issue #309) are layered on before the struct owns `config`.
@@ -2111,7 +2112,10 @@ impl App {
                 let result_message = claurst_core::summarize_import_result(&result, &paths);
                 let imported_mcp = result.imported_fields.iter().any(|f| f == "mcpServers");
                 self.config = new_config.clone();
-                self.model_name = self.config.effective_model().to_string();
+                let effective = self.config.effective_route();
+                self.model_name = self
+                    .config
+                    .canonical_model(&effective.account, &effective.model);
                 self.refresh_context_window_size();
                 self.context_used_tokens = 0;
                 self.has_credentials = self.config.resolve_api_key().is_some();
@@ -2710,12 +2714,13 @@ impl App {
 
     /// Update the context window size from the model registry for the current model.
     pub fn refresh_context_window_size(&mut self) {
-        let provider = self.config.provider.as_deref().unwrap_or("anthropic");
-        let model_id = self
-            .model_name
-            .strip_prefix(&format!("{}/", provider))
-            .unwrap_or(&self.model_name);
-        if let Some(entry) = self.model_registry.get(provider, model_id) {
+        // From the route, not from `config.provider` plus a prefix strip. The
+        // two disagree whenever the chosen model names a different account, so
+        // the lookup asked one provider about another's model, missed, and
+        // fell back to a default window that is wrong for both.
+        let route = self.route();
+        let provider = route.account.as_str();
+        if let Some(entry) = self.model_registry.get(provider, route.model.as_str()) {
             self.context_window_size = entry.info.context_window as u64;
         } else {
             // Fallback: common defaults
@@ -2739,21 +2744,36 @@ impl App {
         self.effort_explicit = true;
     }
 
+    /// Where the next request goes, account and wire model both.
+    ///
+    /// Everything in the TUI that needs one half or the other asks here, so a
+    /// panel cannot describe one account while the request reaches another.
+    pub fn route(&self) -> claurst_core::config::Route {
+        self.config.resolve_route(&self.model_name)
+    }
+
     /// Update the active model name (also updates config).
     pub fn set_model(&mut self, model: String) {
-        self.model_name = model.clone();
-        self.config.model = Some(model.clone());
         // Keep the active account in step with the id the picker handed over.
         // Only an explicit `"<account>/"` prefix moves the account; the model
         // family never does, because a gateway may serve any vendor's models
         // and guessing from the name would silently retarget the request.
-        if let Some(provider) = Self::free_composite_provider(&model) {
-            self.config.provider = Some(provider.to_string());
-        } else if let Some((head, rest)) = model.split_once('/') {
-            if !rest.is_empty() && self.config.is_account_id(head) {
-                self.config.provider = Some(head.to_string());
-            }
-        }
+        let account = Self::free_composite_provider(&model)
+            .map(str::to_string)
+            .unwrap_or_else(|| self.config.resolve_route(&model).account);
+        let route = self.config.route_for_account(
+            &account,
+            model
+                .strip_prefix(&format!("{account}/"))
+                .unwrap_or(model.as_str()),
+        );
+
+        // Stored canonically so the string still names this account when it is
+        // read back under a different selection.
+        self.model_name = self.config.canonical_model(&route.account, &route.model);
+        self.config.model = Some(self.model_name.clone());
+        self.config.provider = Some(account);
+
         self.refresh_context_window_size();
         // Reset used tokens when switching models (context is fresh).
         self.context_used_tokens = 0;
@@ -2808,7 +2828,10 @@ impl App {
         self.model_picker_provider_id = None;
         self.has_credentials = has_credentials;
         self.fast_mode = false;
-        self.model_name = self.config.effective_model().to_string();
+        let effective = self.config.effective_route();
+        self.model_name = self
+            .config
+            .canonical_model(&effective.account, &effective.model);
         self.status_message = Some(status_message);
         self.clear_prompt();
     }
@@ -3093,13 +3116,12 @@ impl App {
                 // visually instead of cycling/typing it (issues #149 / #268). The
                 // selectable ladder is model-adaptive: it comes from
                 // `supported_efforts` for the current provider + model.
-                let provider = self.config.provider.as_deref().unwrap_or("anthropic");
-                let model_id = self
-                    .model_name
-                    .strip_prefix(&format!("{}/", provider))
-                    .unwrap_or(&self.model_name);
-                let levels =
-                    claurst_api::supported_efforts(provider, model_id, Some(&self.model_registry));
+                let route = self.route();
+                let levels = claurst_api::supported_efforts(
+                    &route.account,
+                    route.model.as_str(),
+                    Some(&self.model_registry),
+                );
                 self.effort_picker.open(self.effort_level, levels);
                 true
             }
@@ -4849,20 +4871,29 @@ impl App {
                                 self.set_provider_default(picked);
                             }
                         }
-                        // Store explicit selections in the canonical
-                        // "provider/model" form for non-Anthropic providers.
-                        // The "free" composite's picker entries already carry
-                        // a routing prefix (`free/…`, `zen/…`, `openrouter/…`)
-                        // so re-prefixing would produce nonsense like
-                        // `free/free/auto`.
-                        let provider = self.config.provider.as_deref().unwrap_or("anthropic");
-                        let already_qualified = model_id.starts_with(&format!("{provider}/"));
-                        let full_model =
-                            if provider == "anthropic" || provider == "free" || already_qualified {
-                                model_id.clone()
-                            } else {
-                                format!("{}/{}", provider, model_id)
-                            };
+                        // The picker's row id is that account's own catalogue
+                        // id, so it pairs with the account directly instead of
+                        // being parsed. The old rule here skipped the prefix
+                        // for `free`, which left an entry like
+                        // `openrouter/free` unqualified, and `resolve_route`
+                        // then read it as the OpenRouter account serving a
+                        // model called "free".
+                        let account = self
+                            .config
+                            .provider
+                            .clone()
+                            .unwrap_or_else(|| claurst_core::ProviderId::ANTHROPIC.to_string());
+                        let already_qualified = model_id.starts_with(&format!("{account}/"));
+                        let bare = if already_qualified {
+                            model_id
+                                .strip_prefix(&format!("{account}/"))
+                                .unwrap_or(&model_id)
+                        } else {
+                            model_id.as_str()
+                        };
+                        let route = self.config.route_for_account(&account, bare);
+                        let full_model = self.config.canonical_model(&route.account, &route.model);
+
                         self.set_model(full_model.clone());
                         self.persist_provider_and_model();
                         let effort_hint = effort

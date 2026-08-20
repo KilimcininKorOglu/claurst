@@ -537,7 +537,43 @@ mod tests {
     fn test_set_model() {
         let mut app = make_app();
         app.set_model("claude-opus-4-5".to_string());
-        assert_eq!(app.model_name, "claude-opus-4-5");
+
+        // Stored canonically, so the string still names this account when it
+        // is read back under a different selection.
+        assert_eq!(app.model_name, "anthropic/claude-opus-4-5");
+        assert_eq!(app.config.provider.as_deref(), Some("anthropic"));
+
+        let route = app.route();
+        assert_eq!(route.account, "anthropic");
+        assert_eq!(route.model, "claude-opus-4-5");
+    }
+
+    #[test]
+    fn a_models_own_namespace_does_not_become_the_account() {
+        let mut app = make_app();
+        app.config.provider = Some("openrouter".to_string());
+        app.set_model("meta-llama/Llama-3.3-70B".to_string());
+
+        // One OpenRouter model id, not an account and a model.
+        assert_eq!(app.config.provider.as_deref(), Some("openrouter"));
+        let route = app.route();
+        assert_eq!(route.account, "openrouter");
+        assert_eq!(route.model, "meta-llama/Llama-3.3-70B");
+    }
+
+    #[test]
+    fn an_account_prefix_moves_the_account() {
+        let mut app = make_app();
+        app.config.provider_configs.insert(
+            "my_gateway".to_string(),
+            claurst_core::config::ProviderConfig::default(),
+        );
+        app.set_model("my_gateway/claude-opus-5".to_string());
+
+        assert_eq!(app.config.provider.as_deref(), Some("my_gateway"));
+        let route = app.route();
+        assert_eq!(route.account, "my_gateway");
+        assert_eq!(route.model, "claude-opus-5");
     }
 
     #[test]
