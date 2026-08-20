@@ -1231,7 +1231,13 @@ pub mod config {
         pub theme: Theme,
         #[serde(default)]
         pub output_style: Option<String>,
-        pub auto_compact: bool,
+        /// Whether the context is compacted automatically. Defaults to on.
+        ///
+        /// `Option` rather than `bool` so the merge can tell "the project file
+        /// did not mention this" from "the project file set it to false". Read
+        /// it through [`Config::effective_auto_compact`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub auto_compact: Option<bool>,
         pub compact_threshold: f32,
         pub verbose: bool,
         pub output_format: OutputFormat,
@@ -1798,8 +1804,17 @@ pub mod config {
         #[serde(default = "default_true", rename = "terminalProgressBar")]
         pub terminal_progress_bar: bool,
         /// Whether to enable auto-compact. Defaults to true.
-        #[serde(default = "default_true", rename = "autoCompact")]
-        pub auto_compact: bool,
+        ///
+        /// `Option` rather than `bool` with `default_true`: that default made a
+        /// project settings file that never mentioned the key parse as `true`,
+        /// so the `over || base` merge forced it on for every user who had
+        /// turned it off. Read it through [`Settings::effective_auto_compact`].
+        #[serde(
+            default,
+            rename = "autoCompact",
+            skip_serializing_if = "Option::is_none"
+        )]
+        pub auto_compact: Option<bool>,
         /// Legacy top-level mirror of `config.fileAutocompleteLimit`. `None`
         /// means unset, so the nested value stands.
         #[serde(
@@ -2098,6 +2113,11 @@ pub mod config {
         pub fn effective_file_injection_max_size(&self) -> usize {
             self.file_injection_max_size
                 .unwrap_or_else(default_file_injection_max_size)
+        }
+
+        /// Whether the context is compacted automatically. Unset means on.
+        pub fn effective_auto_compact(&self) -> bool {
+            self.auto_compact.unwrap_or(true)
         }
 
         /// Resolve the effective compact threshold (0.0 - 1.0).
@@ -2524,6 +2544,16 @@ pub mod config {
             self.save_to_path_sync(&path)
         }
 
+        /// Whether the context is compacted automatically. Unset means on.
+        ///
+        /// The nested `config` block wins, matching `effective_config`.
+        pub fn effective_auto_compact(&self) -> bool {
+            self.config
+                .auto_compact
+                .or(self.auto_compact)
+                .unwrap_or(true)
+        }
+
         /// Return the effective `Config`, merging top-level provider settings
         /// into the embedded `config` field.
         ///
@@ -2543,6 +2573,12 @@ pub mod config {
             // Same precedence again for the companion.
             if config.companion.is_none() {
                 config.companion = self.companion.clone();
+            }
+            // The settings screen writes the top-level `autoCompact`; the query
+            // loop reads `config.autoCompact`. Fold one into the other here, or
+            // the toggle saves a value the running session never reads.
+            if config.auto_compact.is_none() {
+                config.auto_compact = self.auto_compact;
             }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
@@ -2816,7 +2852,7 @@ pub mod config {
                 // absent key must not overwrite what the user chose.
                 theme: base.config.theme,
                 output_style: over.config.output_style.or(base.config.output_style),
-                auto_compact: over.config.auto_compact || base.config.auto_compact,
+                auto_compact: over.config.auto_compact.or(base.config.auto_compact),
                 compact_threshold: if over.config.compact_threshold != 0.0 {
                     over.config.compact_threshold
                 } else {
@@ -3077,7 +3113,7 @@ pub mod config {
                 terminal_progress_bar: base.terminal_progress_bar,
                 show_cwd: base.show_cwd,
                 show_git_branch: base.show_git_branch,
-                auto_compact: over.auto_compact || base.auto_compact,
+                auto_compact: over.auto_compact.or(base.auto_compact),
                 file_autocomplete_limit: over
                     .file_autocomplete_limit
                     .or(base.file_autocomplete_limit),
@@ -3525,6 +3561,69 @@ pub mod config {
             assert!(merged.has_completed_onboarding);
             assert!(merged.config.cursor_blink_enabled);
             assert!(merged.config.timeline_enabled);
+        }
+
+        /// Auto-compact is a setting a project has a real stake in, so it is
+        /// still taken from the project file — but the file has to name it.
+        ///
+        /// `#[serde(default = "default_true")]` made an absent key parse as
+        /// `true`, so `over || base` was `true` for every project file that
+        /// existed, and a user who had turned auto-compact off got it back on
+        /// the moment any repository shipped a settings file at all.
+        #[test]
+        fn a_project_file_that_says_nothing_leaves_auto_compact_alone() {
+            let off = Settings {
+                auto_compact: Some(false),
+                ..Default::default()
+            };
+            // A project file exists but names other things.
+            let project: Settings =
+                serde_json::from_str(r#"{"theme":"dark"}"#).expect("project settings");
+
+            let merged = Settings::merge_with(off, project, ProjectRunnables::Deny);
+            assert!(!merged.effective_auto_compact());
+        }
+
+        #[test]
+        fn a_project_file_that_names_auto_compact_is_taken() {
+            let on = Settings {
+                auto_compact: Some(true),
+                ..Default::default()
+            };
+            let project: Settings =
+                serde_json::from_str(r#"{"autoCompact":false}"#).expect("project settings");
+
+            let merged = Settings::merge_with(on, project, ProjectRunnables::Deny);
+            assert!(!merged.effective_auto_compact());
+        }
+
+        #[test]
+        fn auto_compact_is_on_when_nobody_says_otherwise() {
+            assert!(Settings::default().effective_auto_compact());
+            assert!(Config::default().effective_auto_compact());
+        }
+
+        /// The settings screen writes the top-level key and the query loop
+        /// reads the nested one, so `effective_config` has to fold one into the
+        /// other or the toggle saves somewhere nothing reads.
+        #[test]
+        fn the_top_level_auto_compact_reaches_the_nested_config() {
+            let settings = Settings {
+                auto_compact: Some(false),
+                ..Default::default()
+            };
+            assert_eq!(settings.effective_config().auto_compact, Some(false));
+
+            // The nested block still wins where both are named.
+            let settings = Settings {
+                auto_compact: Some(false),
+                config: Config {
+                    auto_compact: Some(true),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            assert_eq!(settings.effective_config().auto_compact, Some(true));
         }
 
         /// The refused list is derived by running the merge, so the key has to

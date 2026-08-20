@@ -181,7 +181,7 @@ impl Tool for ConfigTool {
                             )
                         }
                     };
-                    settings.config.auto_compact = b;
+                    settings.config.auto_compact = Some(b);
                     if let Err(e) = settings.save().await {
                         return ToolResult::error(format!("Failed to save settings: {}", e));
                     }
@@ -244,9 +244,10 @@ impl Tool for ConfigTool {
                     settings.config.effective_max_tokens()
                 )),
                 "verbose" => ToolResult::success(format!("verbose = {}", settings.config.verbose)),
-                "auto_compact" => {
-                    ToolResult::success(format!("auto_compact = {}", settings.config.auto_compact))
-                }
+                "auto_compact" => ToolResult::success(format!(
+                    "auto_compact = {}",
+                    settings.effective_auto_compact()
+                )),
                 "permission_mode" => ToolResult::success(format!(
                     "permission_mode = \"{}\"",
                     permission_mode_str(&settings.config.permission_mode)

@@ -146,7 +146,7 @@ impl SettingsScreen {
     /// Apply all settings from the snapshot to the screen fields.
     /// This is called on initialization and when opening the settings screen.
     fn apply_settings_from_snapshot(&mut self) {
-        self.auto_compact = self.settings_snapshot.auto_compact;
+        self.auto_compact = self.settings_snapshot.effective_auto_compact();
         self.notifications = self.settings_snapshot.notifications;
         self.show_turn_duration = self.settings_snapshot.show_turn_duration;
         self.show_message_timestamps = self.settings_snapshot.show_message_timestamps;
@@ -1119,7 +1119,10 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                 match entry.key.as_str() {
                     "auto_compact" => {
                         screen.auto_compact = new_value;
-                        screen.settings_snapshot.auto_compact = new_value;
+                        screen.settings_snapshot.auto_compact = Some(new_value);
+                        // The query loop reads the nested key, so write both or
+                        // the toggle saves somewhere the session never looks.
+                        screen.settings_snapshot.config.auto_compact = Some(new_value);
                     }
                     "notifications" => {
                         screen.notifications = new_value;

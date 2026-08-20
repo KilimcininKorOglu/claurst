@@ -612,7 +612,7 @@ async fn main() -> anyhow::Result<()> {
     }
     config.additional_dirs = cli.add_dir.clone();
     if cli.no_auto_compact {
-        config.auto_compact = false;
+        config.auto_compact = Some(false);
     }
     if cli.auto_commits {
         config.auto_commits = Some(true);
@@ -2930,7 +2930,7 @@ async fn run_interactive(
     }
     app.provider_registry = base_query_config.provider_registry.clone();
     app.refresh_context_window_size();
-    app.auto_compact_enabled = live_config.auto_compact;
+    app.auto_compact_enabled = live_config.effective_auto_compact();
 
     // Background: keep the model registry fresh from models.dev for the whole
     // TUI session (opencode-style: refresh now, then every ~60 min, gated by a
