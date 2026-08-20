@@ -811,8 +811,7 @@ async fn run_query_loop_inner(
             config,
             runner::ContextPassInput {
                 backend: compact_backend.as_ref(),
-                model: &effective_model,
-                provider: &route.account,
+                route: &route,
                 session_id: &tool_ctx.session_id,
             },
             event_tx.as_ref(),

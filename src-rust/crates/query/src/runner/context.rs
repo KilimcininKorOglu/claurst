@@ -126,10 +126,15 @@ pub(crate) struct ContextPass {
 pub(crate) struct ContextPassInput<'a> {
     /// How the summary gets written, whichever arm dispatches this turn.
     pub backend: &'a dyn CompactBackend,
-    /// The model that ran, following an agent override and a fallback switch.
-    pub model: &'a str,
-    /// The account the model is served through.
-    pub provider: &'a str,
+    /// Where this turn is going, as `Config::resolve_route` resolved it from
+    /// `effective_model`.
+    ///
+    /// The whole `Route` and not a bare model string, because the summary has
+    /// to name the model exactly as the turn does. A composite such as
+    /// `"myaccount/some-model"` reaches the dispatch arm already split, so a
+    /// summariser handed the unsplit string addresses a model the account does
+    /// not serve.
+    pub route: &'a claurst_core::config::Route,
     /// The session, which owns the circuit breaker and the last prompt size.
     pub session_id: &'a str,
 }
@@ -152,8 +157,8 @@ pub(crate) async fn compact_before_request(
     // (#216)
     let context_window = compact::resolve_context_window(
         config.model_registry.as_deref(),
-        input.provider,
-        input.model,
+        &input.route.account,
+        &input.route.model,
     );
 
     // Prefer the REAL context-token count the provider reported for the last
@@ -217,7 +222,7 @@ pub(crate) async fn compact_before_request(
         input.backend,
         messages,
         context_tokens,
-        input.model,
+        &input.route.model,
         context_window,
         config.compact_threshold,
         input.session_id,
@@ -267,7 +272,7 @@ async fn run_reactive(
         }
         (
             "Context-collapse",
-            compact::context_collapse(messages.clone(), input.backend, config).await,
+            compact::context_collapse(messages.clone(), input.backend, &input.route.model).await,
         )
     } else if compact::should_compact(context_tokens, context_window, config.compact_threshold) {
         if let Some(tx) = event_tx {
@@ -278,7 +283,7 @@ async fn run_reactive(
             compact::reactive_compact(
                 messages.clone(),
                 input.backend,
-                config,
+                &input.route.model,
                 cancel_token.clone(),
                 &[],
             )
@@ -369,21 +374,33 @@ mod tests {
         ]
     }
 
-    fn input<'a>(backend: &'a StubBackend, model: &'a str) -> ContextPassInput<'a> {
+    /// A route as `Config::resolve_route` would hand it over.
+    fn route(model: &str) -> claurst_core::config::Route {
+        claurst_core::config::Route {
+            account: "anthropic".to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    fn input<'a>(
+        backend: &'a StubBackend,
+        route: &'a claurst_core::config::Route,
+        session_id: &'a str,
+    ) -> ContextPassInput<'a> {
         ContextPassInput {
             backend,
-            model,
-            provider: "anthropic",
-            session_id: "context-pass-tests",
+            route,
+            session_id,
         }
     }
 
     async fn run(messages: &mut Vec<Message>, backend: &StubBackend, model: &str) -> ContextPass {
         let config = QueryConfig::default();
+        let route = route(model);
         compact_before_request(
             messages,
             &config,
-            input(backend, model),
+            input(backend, &route, "context-pass-tests"),
             None,
             &CancellationToken::new(),
         )
@@ -425,6 +442,49 @@ mod tests {
         compact::forget_compact_state("context-pass-tests");
     }
 
+    /// The summariser names the model exactly as the turn does.
+    ///
+    /// `Route` carries the account and the wire model already split, and the
+    /// pass takes the whole `Route` so a caller cannot hand it an
+    /// `"<account>/<model>"` composite by accident. The turn goes out with
+    /// `route.model`; a summary addressed to `"myaccount/some-model"` would
+    /// name a model the account does not serve.
+    #[tokio::test]
+    async fn the_summariser_names_the_wire_model_from_the_route() {
+        let session = "context-pass-route";
+        compact::forget_compact_state(session);
+        let mut messages = a_full_conversation();
+        let backend = StubBackend::answering("Short.");
+        let composite = claurst_core::config::Config {
+            provider_configs: std::iter::once((
+                "myaccount".to_string(),
+                claurst_core::config::ProviderConfig::default(),
+            ))
+            .collect(),
+            ..Default::default()
+        }
+        .resolve_route("myaccount/some-model");
+
+        assert_eq!(composite.account, "myaccount");
+        assert_eq!(composite.model, "some-model");
+
+        compact_before_request(
+            &mut messages,
+            &QueryConfig::default(),
+            input(&backend, &composite, session),
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(
+            backend.model_seen.lock().as_deref(),
+            Some("some-model"),
+            "the account prefix must not travel as part of the model id"
+        );
+        compact::forget_compact_state(session);
+    }
+
     /// A conversation nowhere near the threshold is left exactly as it was.
     #[tokio::test]
     async fn a_short_conversation_is_left_alone() {
@@ -456,7 +516,7 @@ mod tests {
         let pass = compact_before_request(
             &mut messages,
             &config,
-            input(&backend, "claude-opus-4-5"),
+            input(&backend, &route("claude-opus-4-5"), "context-pass-tests"),
             None,
             &CancellationToken::new(),
         )
@@ -480,15 +540,13 @@ mod tests {
             Message::user("and now the next thing"),
         ];
 
+        let route = route("claude-opus-4-5");
+        let backend = StubBackend::answering("short");
+
         let at_default = compact_before_request(
             &mut messages.clone(),
             &QueryConfig::default(),
-            ContextPassInput {
-                backend: &StubBackend::answering("short"),
-                model: "claude-opus-4-5",
-                provider: "anthropic",
-                session_id: "context-pass-threshold",
-            },
+            input(&backend, &route, "context-pass-threshold"),
             None,
             &CancellationToken::new(),
         )
@@ -502,12 +560,7 @@ mod tests {
         let lowered = compact_before_request(
             &mut messages,
             &config,
-            ContextPassInput {
-                backend: &StubBackend::answering("short"),
-                model: "claude-opus-4-5",
-                provider: "anthropic",
-                session_id: "context-pass-threshold",
-            },
+            input(&backend, &route, "context-pass-threshold"),
             None,
             &CancellationToken::new(),
         )
@@ -542,8 +595,7 @@ mod tests {
             &QueryConfig::default(),
             ContextPassInput {
                 backend: &backend,
-                model: "claude-opus-4-5",
-                provider: "anthropic",
+                route: &route("claude-opus-4-5"),
                 session_id: session,
             },
             None,
@@ -568,10 +620,10 @@ mod tests {
 
         let mut messages = a_cuttable_conversation();
         let backend = StubBackend::answering("Short.");
+        let route = route("claude-opus-4-5");
         let input = || ContextPassInput {
             backend: &backend,
-            model: "claude-opus-4-5",
-            provider: "anthropic",
+            route: &route,
             session_id: session,
         };
 
@@ -657,8 +709,7 @@ mod tests {
             &QueryConfig::default(),
             ContextPassInput {
                 backend: &backend,
-                model: "claude-opus-4-5",
-                provider: "anthropic",
+                route: &route("claude-opus-4-5"),
                 session_id: "context-pass-failure",
             },
             None,

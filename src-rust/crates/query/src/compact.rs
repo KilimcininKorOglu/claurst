@@ -1418,7 +1418,7 @@ fn strip_images(messages: Vec<claurst_core::types::Message>) -> Vec<claurst_core
 pub async fn reactive_compact(
     messages: Vec<claurst_core::types::Message>,
     backend: &dyn CompactBackend,
-    config: &crate::QueryConfig,
+    model: &str,
     cancel: tokio_util::sync::CancellationToken,
     recently_modified: &[std::path::PathBuf],
 ) -> Result<CompactResult, claurst_core::error::ClaudeError> {
@@ -1454,7 +1454,7 @@ pub async fn reactive_compact(
     let original_token_estimate = estimate_tokens_for_messages(&stripped[..split_at]) as u64;
 
     let mut new_messages =
-        summarise_head(backend, &stripped, split_at, &config.model, 20_000, None).await?;
+        summarise_head(backend, &stripped, split_at, model, 20_000, None).await?;
 
     // The summary lives as the first message in new_messages.
     let summary_text = new_messages
@@ -1507,7 +1507,7 @@ pub async fn reactive_compact(
 pub async fn context_collapse(
     messages: Vec<claurst_core::types::Message>,
     backend: &dyn CompactBackend,
-    config: &crate::QueryConfig,
+    model: &str,
 ) -> Result<CompactResult, claurst_core::error::ClaudeError> {
     let total = messages.len();
     if total == 0 {
@@ -1550,7 +1550,7 @@ pub async fn context_collapse(
             "You are a conversation summariser. Produce an emergency ultra-short \
              summary as instructed. Plain text only.",
             &collapse_prompt,
-            &config.model,
+            model,
             1_000,
         )
         .await?;
