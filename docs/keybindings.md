@@ -128,11 +128,11 @@ The `/keybindings` command opens an interactive TUI keybinding editor:
 /keybindings
 ```
 
-The editor lists all bindable actions grouped by context. Use arrow keys to navigate, press `Enter` on an action to enter rebind mode, then press the desired key combination. Press `Escape` to cancel a rebind. Changes are saved immediately to `~/.mikmik/keybindings.json`.
+The editor lists all bindable actions grouped by context. Use arrow keys to navigate, press `Enter` on an action to enter rebind mode, then press the desired key combination. Press `Escape` to cancel a rebind. Changes are saved immediately to `~/.config/mikmik/keybindings.json`.
 
 ### Via keybindings.json
 
-For batch edits or scripted configuration, edit `~/.mikmik/keybindings.json` directly. The file format is:
+For batch edits or scripted configuration, edit `~/.config/mikmik/keybindings.json` directly. The file format is:
 
 ```json
 {
@@ -357,7 +357,7 @@ An `@` that is *not* at a word boundary (e.g. inside an email `me@example.com`) 
 
 Files that pass all checks are injected silently — no dialog is shown.
 
-**Configuration.** Two settings in `~/.mikmik/settings.json`:
+**Configuration.** Two settings in `~/.config/mikmik/settings.json`:
 
 | Setting                | Default | Description                                                    |
 |------------------------|---------|----------------------------------------------------------------|

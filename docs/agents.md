@@ -6,7 +6,7 @@ MikMik has a named-agent system that lets you select a pre-configured persona wi
 
 ## Built-in Named Agents
 
-Three agents ship by default. Their definitions can be overridden per-user in `~/.mikmik/settings.json`.
+Three agents ship by default. Their definitions can be overridden per-user in `~/.config/mikmik/settings.json`.
 
 ### build
 
@@ -84,7 +84,7 @@ Output shows the agent name, description, access level, and max turn limit. Agen
 
 ## Custom Agent Definitions
 
-Define custom agents in `~/.mikmik/settings.json` under the `agents` key. Custom definitions override built-in agents of the same name.
+Define custom agents in `~/.config/mikmik/settings.json` under the `agents` key. Custom definitions override built-in agents of the same name.
 
 ```json
 {

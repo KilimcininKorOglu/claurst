@@ -18,7 +18,7 @@ mikmik --provider ollama "explain this function"
 mikmik --provider groq --model llama-3.3-70b-versatile "write tests"
 ```
 
-The provider can also be set persistently in `~/.mikmik/settings.json`:
+The provider can also be set persistently in `~/.config/mikmik/settings.json`:
 
 ```json
 {
@@ -736,7 +736,7 @@ Wafer-scale inference hardware.
 
 ## Per-Provider Configuration in settings.json
 
-The `providers` map in `~/.mikmik/settings.json` accepts per-provider `ProviderConfig` objects:
+The `providers` map in `~/.config/mikmik/settings.json` accepts per-provider `ProviderConfig` objects:
 
 ```json
 {
@@ -808,7 +808,7 @@ The above example allows only `gpt-4o` (whitelist minus blacklist).
 
 ## Model Registry
 
-MikMik ships a bundled snapshot of models for Anthropic, OpenAI, and Google. At runtime it optionally refreshes from the public `https://models.dev/api.json` API (cached to `~/.mikmik/models_cache.json`, refreshed at most every 5 minutes). Network failures are swallowed silently; the bundled snapshot is always sufficient for normal operation.
+MikMik ships a bundled snapshot of models for Anthropic, OpenAI, and Google. At runtime it optionally refreshes from the public `https://models.dev/api.json` API (cached to `~/.config/mikmik/models_cache.json`, refreshed at most every 5 minutes). Network failures are swallowed silently; the bundled snapshot is always sufficient for normal operation.
 
 When no model is explicitly set, MikMik scores available models by priority patterns to pick the best default. Well-known model prefixes (`claude-*`, `gpt-*`, `gemini-*`, etc.) are always routed to their canonical provider regardless of gateway entries in the remote cache.
 
@@ -821,7 +821,7 @@ an unrelated catalog entry, or because there is no catalog entry at all. The
 `modelOverrides` map lets you supply or correct that metadata. **User overrides
 take precedence over the models.dev catalog and over the built-in defaults.**
 
-Add it at the top level of `~/.mikmik/settings.json` (or inside the `config`
+Add it at the top level of `~/.config/mikmik/settings.json` (or inside the `config`
 object), keyed by the fully-qualified `"provider/model"` id:
 
 ```json

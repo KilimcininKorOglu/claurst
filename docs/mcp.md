@@ -97,7 +97,7 @@ If `MY_API_TOKEN` is not set, `"demo"` is passed as the token. If `HOME` is set,
 
 ## Configuring MCP Servers in settings.json
 
-Add servers to the `config.mcp_servers` array in `~/.mikmik/settings.json`:
+Add servers to the `config.mcp_servers` array in `~/.config/mikmik/settings.json`:
 
 ```json
 {

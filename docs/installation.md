@@ -170,7 +170,7 @@ mikmik upgrade --force       # reinstall the same version
 
 The upgrade command downloads the matching archive from GitHub, extracts the
 new binary, and replaces the running executable atomically. Settings in
-`~/.mikmik/` are preserved.
+`~/.config/mikmik/` are preserved.
 
 ---
 
@@ -409,7 +409,7 @@ rm ~/.local/bin/mikmik                  # if installed user-local
 To also remove all settings and session data:
 
 ```bash
-rm -rf ~/.mikmik
+rm -rf ~/.config/mikmik
 ```
 
 You may also want to remove the `# mikmik` PATH line that the installer

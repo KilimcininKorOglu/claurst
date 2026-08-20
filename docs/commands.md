@@ -371,7 +371,7 @@ Accounts do not pool quota. Each one keeps its own rate limit, so this splits us
 
 A colon inside a model ID is not read as an account: `ollama/llama3:8b` still names a model, because the account separator is only looked for before the `/`.
 
-The setting persists to `~/.mikmik/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
+The setting persists to `~/.config/mikmik/settings.json` under `advisorModel`. `/advisor review` uses a new model immediately; the `Advisor` tool is offered to the main model from the next session, because the tool list is assembled at startup.
 
 Advisor calls are capped at two per turn and their tokens are added to the session cost.
 
@@ -388,7 +388,7 @@ Toggle fast mode. In fast mode, MikMik switches to the active provider's smaller
 /fast off      — disable fast mode
 ```
 
-Setting persists to `~/.mikmik/ui-settings.json`.
+Setting persists to `~/.config/mikmik/ui-settings.json`.
 
 ---
 
@@ -484,7 +484,7 @@ guessing `acceptEdits` would hand back more than was taken away.
 
 ### /keybindings
 
-Open the interactive keybinding configurator. Displays all bound actions with their current shortcuts. Select an action to rebind it. Changes are written to `~/.mikmik/keybindings.json`.
+Open the interactive keybinding configurator. Displays all bound actions with their current shortcuts. Select an action to rebind it. Changes are written to `~/.config/mikmik/keybindings.json`.
 
 ```
 /keybindings
@@ -927,7 +927,7 @@ Configure the manager-executor agent architecture, where a manager model delegat
 /managed-agents budget <amount>                       — set total budget in USD (0 to clear)
 ```
 
-Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4o`). Configuration persists to `~/.mikmik/settings.json` under `managed_agents`.
+Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4o`). Configuration persists to `~/.config/mikmik/settings.json` under `managed_agents`.
 
 > **Preview feature.** Behaviour may change across releases.
 
@@ -1099,7 +1099,7 @@ Useful for testing web applications, scraping, or automating browser-based workf
 
 ## Authentication
 
-MikMik supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.mikmik/accounts/<provider>/<id>/` and the registry at `~/.mikmik/accounts.json` tracks which one is active.
+MikMik supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.config/mikmik/accounts/<provider>/<id>/` and the registry at `~/.config/mikmik/accounts.json` tracks which one is active.
 
 See [Authentication Guide](./auth.md#multi-account-profiles) for the full story and on-disk layout.
 

@@ -12,11 +12,11 @@ and how to authenticate with non-Anthropic providers.
 MikMik checks for credentials in the following priority order:
 
 1. `--api-key` flag (highest priority, session-only)
-2. `api_key` field in `~/.mikmik/settings.json`
+2. `api_key` field in `~/.config/mikmik/settings.json`
 3. `ANTHROPIC_API_KEY` environment variable
 4. Tokens for the **active Anthropic profile** under
-   `~/.mikmik/accounts/anthropic/<id>/oauth_tokens.json`
-5. Legacy `~/.mikmik/oauth_tokens.json` (auto-migrated to a profile on first
+   `~/.config/mikmik/accounts/anthropic/<id>/oauth_tokens.json`
+5. Legacy `~/.config/mikmik/oauth_tokens.json` (auto-migrated to a profile on first
    read)
 
 The first non-empty credential found is used. Provider-specific credentials
@@ -24,7 +24,7 @@ The first non-empty credential found is used. Provider-specific credentials
 variables and provider config entries.
 
 Codex (OpenAI ChatGPT subscription) accounts follow a parallel system —
-multiple profiles stored under `~/.mikmik/accounts/codex/<id>/`, with the
+multiple profiles stored under `~/.config/mikmik/accounts/codex/<id>/`, with the
 active profile selected via the account registry.
 
 ---
@@ -68,7 +68,7 @@ $env:ANTHROPIC_API_KEY = "sk-ant-api03-..."
 
 **Option B: Settings file**
 
-Store the key in `~/.mikmik/settings.json`. Ensure the file has restricted
+Store the key in `~/.config/mikmik/settings.json`. Ensure the file has restricted
 permissions on shared systems.
 
 ```json
@@ -116,8 +116,8 @@ mikmik auth login
 5. The browser redirects to `http://localhost:<port>/callback` with an
    authorization code.
 6. MikMik exchanges the code for tokens via the token endpoint.
-7. Tokens are saved under `~/.mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json`
-   and the profile is registered as **active** in `~/.mikmik/accounts.json`.
+7. Tokens are saved under `~/.config/mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json`
+   and the profile is registered as **active** in `~/.config/mikmik/accounts.json`.
 
 This flow produces a Bearer token (`user:inference` scope) used directly for
 API calls.
@@ -166,7 +166,7 @@ Pro/Max/Team plans, or testing against multiple organizations.
 ### On-disk layout
 
 ```
-~/.mikmik/
+~/.config/mikmik/
 ├── accounts.json                              # registry (active + metadata)
 └── accounts/
     ├── anthropic/
@@ -271,8 +271,8 @@ a duplicate being created — re-logging-in the same account is idempotent.
 If you previously used MikMik (with the older single-file storage), your
 existing tokens are auto-migrated on first read:
 
-- `~/.mikmik/oauth_tokens.json` → `~/.mikmik/accounts/anthropic/<derived>/oauth_tokens.json`
-- `~/.mikmik/codex_tokens.json` → `~/.mikmik/accounts/codex/<derived>/codex_tokens.json`
+- `~/.config/mikmik/oauth_tokens.json` → `~/.config/mikmik/accounts/anthropic/<derived>/oauth_tokens.json`
+- `~/.config/mikmik/codex_tokens.json` → `~/.config/mikmik/accounts/codex/<derived>/codex_tokens.json`
 
 The legacy files are removed after a successful migration. No manual action
 needed.
@@ -303,7 +303,7 @@ ANTHROPIC_API_KEY="sk-ant-..." mikmik --print "summarize the last 10 commits"
 Each Anthropic account profile has its own file:
 
 ```
-~/.mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json
+~/.config/mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json
 ```
 
 The file contains the access token, optional refresh token, expiry timestamp,
@@ -320,14 +320,14 @@ granted scopes, and account email. Example structure:
 }
 ```
 
-The active profile pointer lives in `~/.mikmik/accounts.json` (see
+The active profile pointer lives in `~/.config/mikmik/accounts.json` (see
 [Multi-Account Profiles](#multi-account-profiles)). Files are written with
 user-only permissions (`600` on Unix). Do not commit them to version control.
 
 ### Codex tokens (per profile)
 
 ```
-~/.mikmik/accounts/codex/<profile-id>/codex_tokens.json
+~/.config/mikmik/accounts/codex/<profile-id>/codex_tokens.json
 ```
 
 Contains the OpenAI access token, refresh token, account_id, and expiry.
@@ -337,7 +337,7 @@ Contains the OpenAI access token, refresh token, account_id, and expiry.
 API keys for non-Anthropic providers without dedicated OAuth flows are stored in:
 
 ```
-~/.mikmik/auth.json
+~/.config/mikmik/auth.json
 ```
 
 This file is keyed by provider ID and contains either an `api` credential
@@ -357,8 +357,8 @@ This file is keyed by provider ID and contains either an `api` credential
 }
 ```
 
-> **Note:** `~/.mikmik/auth.json` is the multi-provider credential cache for
-> simple API-key providers. It is **distinct** from `~/.mikmik/accounts.json`,
+> **Note:** `~/.config/mikmik/auth.json` is the multi-provider credential cache for
+> simple API-key providers. It is **distinct** from `~/.config/mikmik/accounts.json`,
 > which is the multi-account registry for Anthropic/Codex OAuth profiles.
 
 ---
@@ -471,7 +471,7 @@ providers. Each provider looks for credentials in this order:
 
 1. `api_key` in the provider's entry under `providers` in `settings.json`
 2. The provider-specific environment variable (see table below)
-3. The credential stored in `~/.mikmik/auth.json`
+3. The credential stored in `~/.config/mikmik/auth.json`
 
 ### Provider environment variables
 
@@ -570,19 +570,19 @@ mikmik --provider llamacpp --api-base http://localhost:8080
 
 - Store API keys in environment variables or a secrets manager rather than in
   `settings.json`, especially on shared or CI systems.
-- Restrict permissions on `~/.mikmik/` to your user only:
+- Restrict permissions on `~/.config/mikmik/` to your user only:
   ```bash
-  chmod 700 ~/.mikmik
-  chmod 700 ~/.mikmik/accounts
-  chmod 600 ~/.mikmik/accounts.json
-  chmod 600 ~/.mikmik/auth.json
-  chmod 600 ~/.mikmik/settings.json
-  find ~/.mikmik/accounts -type f -name '*tokens.json' -exec chmod 600 {} +
+  chmod 700 ~/.config/mikmik
+  chmod 700 ~/.config/mikmik/accounts
+  chmod 600 ~/.config/mikmik/accounts.json
+  chmod 600 ~/.config/mikmik/auth.json
+  chmod 600 ~/.config/mikmik/settings.json
+  find ~/.config/mikmik/accounts -type f -name '*tokens.json' -exec chmod 600 {} +
   ```
   MikMik already sets `0600` on `accounts.json` automatically on Unix; the
   command above is the belt-and-braces version that also covers the per-
   profile token files.
-- Do not commit `~/.mikmik/` to version control.
+- Do not commit `~/.config/mikmik/` to version control.
 - Add `.mikmik/` to your project's `.gitignore` to prevent accidentally
   committing project-level settings files that may contain keys.
 - Rotate API keys periodically from the Anthropic Console.

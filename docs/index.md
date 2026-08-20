@@ -82,7 +82,7 @@ irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install
 ```
 
 The installer auto-detects your platform/arch, drops `mikmik` into
-`~/.mikmik/bin/`, and adds it to your `PATH`. See
+`~/.config/mikmik/bin/`, and adds it to your `PATH`. See
 [Installation](installation) for flags, manual download, and uninstall steps.
 
 **2. Set your API key**
@@ -107,7 +107,7 @@ mikmik --print "explain the auth module"
 
 ## Configuration
 
-MikMik reads `~/.mikmik/settings.json` at startup. The most common settings:
+MikMik reads `~/.config/mikmik/settings.json` at startup. The most common settings:
 
 ```json
 {

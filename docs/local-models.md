@@ -41,7 +41,7 @@ If your server runs elsewhere:
 LLAMA_CPP_HOST=http://192.168.1.50:8080 mikmik --provider llamacpp --model your-model
 ```
 
-Or persist it in `~/.mikmik/settings.json`:
+Or persist it in `~/.config/mikmik/settings.json`:
 
 ```json
 {

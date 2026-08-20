@@ -454,7 +454,7 @@ The value is a map from event name to an array of matcher objects. Each matcher 
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.mikmik/hooks/check_bash.py"
+            "command": "python3 ~/.config/mikmik/hooks/check_bash.py"
           }
         ]
       }
@@ -475,7 +475,7 @@ The value is a map from event name to an array of matcher objects. Each matcher 
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.mikmik/hooks/notify-slack.sh"
+            "command": "bash ~/.config/mikmik/hooks/notify-slack.sh"
           }
         ]
       }
@@ -546,7 +546,7 @@ Changes made through `/hooks` are written immediately to the appropriate setting
         "hooks": [
           {
             "type": "command",
-            "command": "jq -c '{ts: now | todate, event: .hook_event_name, tool: .tool_name, input: .tool_input}' >> ~/.mikmik/tool.log"
+            "command": "jq -c '{ts: now | todate, event: .hook_event_name, tool: .tool_name, input: .tool_input}' >> ~/.config/mikmik/tool.log"
           }
         ]
       }
@@ -557,7 +557,7 @@ Changes made through `/hooks` are written immediately to the appropriate setting
 
 ### Block dangerous shell patterns
 
-Create `~/.mikmik/hooks/guard.sh`:
+Create `~/.config/mikmik/hooks/guard.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -592,7 +592,7 @@ Register it:
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.mikmik/hooks/guard.sh"
+            "command": "bash ~/.config/mikmik/hooks/guard.sh"
           }
         ]
       }
@@ -607,7 +607,7 @@ An exit code of `2` sends the stderr message directly to the model, which will t
 
 ```bash
 #!/usr/bin/env bash
-# ~/.mikmik/hooks/slack-session-end.sh
+# ~/.config/mikmik/hooks/slack-session-end.sh
 INPUT=$(cat)
 REASON=$(echo "$INPUT" | jq -r '.reason')
 
@@ -643,7 +643,7 @@ Or using a shell command with environment variable interpolation:
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.mikmik/hooks/slack-session-end.sh"
+            "command": "bash ~/.config/mikmik/hooks/slack-session-end.sh"
           }
         ]
       }
@@ -689,7 +689,7 @@ To test a blocking hook without a live session, pipe a sample payload directly:
 
 ```bash
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"},"tool_use_id":"test"}' \
-  | bash ~/.mikmik/hooks/guard.sh
+  | bash ~/.config/mikmik/hooks/guard.sh
 echo "Exit: $?"
 ```
 

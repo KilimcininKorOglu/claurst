@@ -34,8 +34,8 @@ lists the keys in each.
   `skills` and project-defined `mcpServers`. Each names a command to execute or
   an address to fetch from, so MikMik prints them as written and asks before
   any of them takes effect. "Always allow" records a SHA-256 fingerprint of
-  exactly what was shown, under `~/.mikmik/project_trust.json` and
-  `~/.mikmik/mcp_trust.json`. Neither store is ever written inside a
+  exactly what was shown, under `~/.config/mikmik/project_trust.json` and
+  `~/.config/mikmik/mcp_trust.json`. Neither store is ever written inside a
   repository, and editing an approved command changes its fingerprint, so an
   approval cannot be re-pointed at something else. Headless (`--print`) never
   applies them and says so on stderr.

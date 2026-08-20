@@ -10,10 +10,10 @@ variables, and command-line flags. This document describes every option.
 The global settings file lives at:
 
 ```
-~/.mikmik/settings.json
+~/.config/mikmik/settings.json
 ```
 
-The directory `~/.mikmik/` is created automatically on first run if it does
+The directory `~/.config/mikmik/` is created automatically on first run if it does
 not exist. The file is standard JSON (or JSONC — comments are stripped before
 parsing).
 
@@ -43,7 +43,7 @@ never mentioned them was resetting them to their defaults.
 `skills` each name a command to run or an address to fetch from. On the first
 session in a checkout that declares any of them, MikMik shows them verbatim
 and asks. "Always allow" records a fingerprint of exactly what was shown under
-`~/.mikmik/project_trust.json`, never inside the repository; editing an
+`~/.config/mikmik/project_trust.json`, never inside the repository; editing an
 approved command changes the fingerprint and asks again. Headless (`--print`)
 never runs them, because there is no way to ask, and says so on stderr.
 Project-defined `mcpServers` follow the same shape through their own prompt.
@@ -257,7 +257,7 @@ the session only and writes nothing.
 | Key             | Type           | Default     | Description                                                                                                                                                 |
 |-----------------|----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `theme`         | string         | `"default"` | Color theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`.                                                                         |
-| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.mikmik/output-styles/`. |
+| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.config/mikmik/output-styles/`. |
 | `output_format` | string         | `"text"`    | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`.                                                                    |
 | `verbose`       | boolean        | false       | Enable debug-level log output.                                                                                                                              |
 
@@ -360,7 +360,7 @@ in view.
   "config": {
     "statusLine": {
       "type": "command",
-      "command": "~/.mikmik/statusline.sh",
+      "command": "~/.config/mikmik/statusline.sh",
       "padding": 2,
       "refreshInterval": 5
     }
@@ -398,7 +398,7 @@ The session arrives as JSON on stdin:
 ```json
 {
   "session_id": "…",
-  "transcript_path": "~/.mikmik/projects/…/….jsonl",
+  "transcript_path": "~/.config/mikmik/projects/…/….jsonl",
   "version": "0.1.7",
   "cwd": "/work/project",
   "workspace": { "current_dir": "/work/project", "project_dir": "/work" },
@@ -591,8 +591,8 @@ following order (earlier = higher priority, later content is appended below):
 
 | Scope   | Path                                | Description                                                                                                |
 |---------|-------------------------------------|------------------------------------------------------------------------------------------------------------|
-| Managed | `~/.mikmik/rules/*.md`             | Global policy files. All `.md` files in this directory are loaded in alphabetical order.                   |
-| User    | `~/.mikmik/AGENTS.md`              | Your personal preferences and instructions, applied to all projects.                                       |
+| Managed | `~/.config/mikmik/rules/*.md`             | Global policy files. All `.md` files in this directory are loaded in alphabetical order.                   |
+| User    | `~/.config/mikmik/AGENTS.md`              | Your personal preferences and instructions, applied to all projects.                                       |
 | Project | `<project-root>/AGENTS.md`          | Project-level context: architecture notes, conventions, workflows. Typically committed to version control. |
 | Local   | `<project-root>/.mikmik/AGENTS.md` | Local overrides not committed to version control (add `.mikmik/` to `.gitignore`).                        |
 

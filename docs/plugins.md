@@ -6,7 +6,7 @@ MikMik's plugin system lets you extend the agent with additional slash commands,
 
 ## Plugin Discovery
 
-Plugins are loaded from the `~/.mikmik/plugins/` directory. Each subdirectory that carries a valid manifest is treated as a plugin. The manifest is looked for at three paths, in order:
+Plugins are loaded from the `~/.config/mikmik/plugins/` directory. Each subdirectory that carries a valid manifest is treated as a plugin. The manifest is looked for at three paths, in order:
 
 | Path                          | Notes                                                        |
 |-------------------------------|--------------------------------------------------------------|
@@ -17,7 +17,7 @@ Plugins are loaded from the `~/.mikmik/plugins/` directory. Each subdirectory th
 The plugin's root stays the directory itself in every case: `commands/`, `agents/`, `skills/`, `hooks/` and `output-styles/` are resolved against it, not against `.claude-plugin/`.
 
 ```
-~/.mikmik/plugins/
+~/.config/mikmik/plugins/
 ├── my-plugin/
 │   ├── plugin.toml          <- manifest
 │   ├── commands/            <- *.md slash command definitions
@@ -209,7 +209,7 @@ A definition whose name is already taken by a project or user agent is listed wi
 
 An array of inline MCP server definitions. Each entry is identical to an `McpServerConfig` (see the MCP documentation). In `plugin.json` the field can also be written as `"mcpServers"` with an object mapping (the loader converts it to the array form automatically).
 
-These servers connect at startup along with the ones declared in `settings.json`. A server carries the scope of the plugin that declared it: one from `~/.mikmik/plugins/` launches directly, while one from `<project>/.mikmik/plugins/` is project-scoped and waits for the same approval as a project-defined server, because it arrives with a cloned repository. Approve it in the TUI prompt, or pass `--trust-project-mcp` (or set `trustProjectMcpServers`) for headless runs.
+These servers connect at startup along with the ones declared in `settings.json`. A server carries the scope of the plugin that declared it: one from `~/.config/mikmik/plugins/` launches directly, while one from `<project>/.mikmik/plugins/` is project-scoped and waits for the same approval as a project-defined server, because it arrives with a cloned repository. Approve it in the TUI prompt, or pass `--trust-project-mcp` (or set `trustProjectMcpServers`) for headless runs.
 
 ### lsp_servers
 
@@ -502,7 +502,7 @@ Run `/plugin reload` afterwards to use the plugin in the running session.
 ## Example: A Complete Plugin
 
 ```toml
-# ~/.mikmik/plugins/code-quality/plugin.toml
+# ~/.config/mikmik/plugins/code-quality/plugin.toml
 
 name        = "code-quality"
 version     = "0.3.1"
@@ -523,7 +523,7 @@ default     = false
 ```
 
 ```json
-// ~/.mikmik/plugins/code-quality/hooks/hooks.json
+// ~/.config/mikmik/plugins/code-quality/hooks/hooks.json
 {
   "description": "Lint and format on file edits",
   "hooks": {

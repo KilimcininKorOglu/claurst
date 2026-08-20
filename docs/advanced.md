@@ -117,7 +117,7 @@ Opens an interactive visualisation of which parts of the context are consuming t
 
 ## Session management
 
-Sessions are stored as JSONL files under `~/.mikmik/projects/<base64url(project-root)>/<session-id>.jsonl`. Each line in the file is a JSON object representing a message or event in the conversation. The per-session metadata index lives at `~/.mikmik/sessions/<id>.json`.
+Sessions are stored as JSONL files under `~/.config/mikmik/projects/<base64url(project-root)>/<session-id>.jsonl`. Each line in the file is a JSON object representing a message or event in the conversation. The per-session metadata index lives at `~/.config/mikmik/sessions/<id>.json`.
 
 The transcript directory is derived from the project root: the git repository the working directory sits in, or the working directory itself when there is none. A session started in a subdirectory therefore files its transcript under the repository, which is where `/stats`, `/rewind` and the welcome screen's recent activity look for it.
 
@@ -313,7 +313,7 @@ Control how the total token/cost budget is divided between the manager and execu
 /managed-agents status
 ```
 
-Configuration persists to `~/.mikmik/settings.json` under `managed_agents`.
+Configuration persists to `~/.config/mikmik/settings.json` under `managed_agents`.
 
 > **Preview feature.** The managed-agents API is under active development and may change in future releases.
 
@@ -574,7 +574,7 @@ For VS Code, which has no ACP client of its own, the repository ships an extensi
 MikMik reads instruction files from the filesystem before every session and whenever a relevant file changes. The lookup order is:
 
 1. **Managed** — `/etc/claude-code/AGENTS.md` and `/etc/claude-code/CLAUDE.md` (administrator-controlled, always loaded).
-2. **User** — `~/.mikmik/AGENTS.md` then `~/.mikmik/CLAUDE.md` (personal global instructions).
+2. **User** — `~/.config/mikmik/AGENTS.md` then `~/.config/mikmik/CLAUDE.md` (personal global instructions).
 3. **Project** — `AGENTS.md`, `CLAUDE.md`, `.mikmik/AGENTS.md`, and `.mikmik/CLAUDE.md` in each directory from the filesystem root down to the current working directory. Files are loaded from the root toward the CWD so that parent-directory rules are visible when processing child-directory rules.
 
 `AGENTS.md` is preferred (universal cross-tool standard); `CLAUDE.md` is loaded next at every scope for compatibility with other Claude tooling. If both exist at the same scope, both are loaded.
