@@ -791,7 +791,7 @@ impl LlmProvider for GoogleProvider {
                             };
                             yield Ok(StreamEvent::MessageStart {
                                 id: message_id.clone(),
-                                model: model_clone.clone(),
+                                model: model_clone.to_string(),
                                 usage,
                             });
                         }
@@ -1004,12 +1004,13 @@ fn thought_signature_from_part(part: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claurst_core::config::WireModel;
     use claurst_core::types::Message;
     use serde_json::json;
 
     fn test_request(messages: Vec<Message>) -> ProviderRequest {
         ProviderRequest {
-            model: "gemini-3-flash-preview".to_string(),
+            model: WireModel::literal("gemini-3-flash-preview"),
             messages,
             system_prompt: None,
             tools: vec![],

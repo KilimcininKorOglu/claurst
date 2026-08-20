@@ -118,7 +118,7 @@ async fn semantic_extraction(html: &str, ctx: &ToolContext) -> Option<String> {
     let system = "You are a content extraction expert. Given HTML, extract and return only the main text content. Return just plain text, no markdown or formatting.";
 
     let request = claurst_api::ProviderRequest {
-        model: route.model.to_string(),
+        model: route.model.clone(),
         messages: vec![claurst_core::types::Message::user(format!(
             "Extract the main content from this HTML and return only the text:\n\n{}",
             html_excerpt

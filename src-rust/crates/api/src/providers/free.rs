@@ -24,6 +24,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use claurst_core::config::WireModel;
 use claurst_core::provider_id::{ModelId, ProviderId};
 use futures::Stream;
 
@@ -291,7 +292,9 @@ impl LlmProvider for FreeProvider {
         for (idx, upstream_model) in plan {
             let entry = &self.chain[idx];
             let mut req = request.clone();
-            req.model = upstream_model;
+            // The provider owns both sides of this substitution: it just
+            // chose which upstream serves the id it was handed.
+            req.model = WireModel::rewritten_by_provider(upstream_model);
             match entry.provider.create_message(req).await {
                 Ok(resp) => return Ok(resp),
                 Err(err) if Self::should_fallback(&err) => {
@@ -336,7 +339,9 @@ impl LlmProvider for FreeProvider {
         for (idx, upstream_model) in plan {
             let entry = &self.chain[idx];
             let mut req = request.clone();
-            req.model = upstream_model;
+            // The provider owns both sides of this substitution: it just
+            // chose which upstream serves the id it was handed.
+            req.model = WireModel::rewritten_by_provider(upstream_model);
             match entry.provider.create_message_stream(req).await {
                 Ok(stream) => return Ok(stream),
                 Err(err) if Self::should_fallback(&err) => {
@@ -456,7 +461,7 @@ mod tests {
             if self.ok {
                 Ok(ProviderResponse {
                     id: "msg".to_string(),
-                    model: request.model,
+                    model: request.model.to_string(),
                     content: Vec::new(),
                     stop_reason: StopReason::EndTurn,
                     usage: UsageInfo::default(),
@@ -521,7 +526,7 @@ mod tests {
 
     fn dummy_request(model: &str) -> ProviderRequest {
         ProviderRequest {
-            model: model.to_string(),
+            model: WireModel::rewritten_by_provider(model.to_string()),
             messages: vec![Message::user("hi")],
             system_prompt: None,
             tools: Vec::new(),

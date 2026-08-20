@@ -25,6 +25,7 @@ use claurst_api::{
     AnthropicStreamEvent, ApiMessage, CreateMessageRequest, StreamAccumulator, StreamHandler,
     SystemPrompt,
 };
+use claurst_core::config::WireModel;
 use claurst_core::error::ClaudeError;
 use claurst_core::types::{ContentBlock, Message, MessageContent, Role};
 use serde_json::Value;
@@ -864,7 +865,7 @@ pub trait CompactBackend: Send + Sync {
         &self,
         system: &str,
         user: &str,
-        model: &str,
+        model: &WireModel,
         max_tokens: u32,
     ) -> Result<String, ClaudeError>;
 }
@@ -878,7 +879,7 @@ impl CompactBackend for AnthropicBackend<'_> {
         &self,
         system: &str,
         user: &str,
-        model: &str,
+        model: &WireModel,
         max_tokens: u32,
     ) -> Result<String, ClaudeError> {
         let request = CreateMessageRequest::builder(model, max_tokens)
@@ -918,11 +919,11 @@ impl CompactBackend for ProviderBackend {
         &self,
         system: &str,
         user: &str,
-        model: &str,
+        model: &WireModel,
         max_tokens: u32,
     ) -> Result<String, ClaudeError> {
         let request = claurst_api::ProviderRequest {
-            model: model.to_string(),
+            model: model.clone(),
             messages: vec![Message::user(user)],
             system_prompt: Some(SystemPrompt::Text(system.to_string())),
             // No tools: a summariser that could call one would compact the
@@ -972,7 +973,7 @@ async fn summarise_head(
     backend: &dyn CompactBackend,
     messages: &[Message],
     split_at: usize,
-    model: &str,
+    model: &WireModel,
     max_summary_tokens: u32,
     custom_instructions: Option<&str>,
 ) -> Result<Vec<Message>, ClaudeError> {
@@ -1174,7 +1175,7 @@ fn compute_keep_split_index(messages: &[Message], keep_recent_tokens: u64) -> us
 pub async fn compact_conversation(
     backend: &dyn CompactBackend,
     messages: &[Message],
-    model: &str,
+    model: &WireModel,
     custom_instructions: Option<&str>,
 ) -> Result<Vec<Message>, ClaudeError> {
     let total = messages.len();
@@ -1249,7 +1250,7 @@ pub async fn auto_compact_if_needed(
     backend: &dyn CompactBackend,
     messages: &[Message],
     input_tokens: u64,
-    model: &str,
+    model: &WireModel,
     context_window: u64,
     threshold_pct: u8,
     session_id: &str,
@@ -1262,7 +1263,7 @@ pub async fn auto_compact_if_needed(
 
     info!(
         input_tokens,
-        model,
+        model = %model,
         compaction_count = state.compaction_count,
         "Auto-compact triggered"
     );
@@ -1419,7 +1420,7 @@ fn strip_images(messages: Vec<claurst_core::types::Message>) -> Vec<claurst_core
 pub async fn reactive_compact(
     messages: Vec<claurst_core::types::Message>,
     backend: &dyn CompactBackend,
-    model: &str,
+    model: &WireModel,
     cancel: tokio_util::sync::CancellationToken,
     recently_modified: &[std::path::PathBuf],
 ) -> Result<CompactResult, claurst_core::error::ClaudeError> {
@@ -1508,7 +1509,7 @@ pub async fn reactive_compact(
 pub async fn context_collapse(
     messages: Vec<claurst_core::types::Message>,
     backend: &dyn CompactBackend,
-    model: &str,
+    model: &WireModel,
 ) -> Result<CompactResult, claurst_core::error::ClaudeError> {
     let total = messages.len();
     if total == 0 {
@@ -1756,7 +1757,7 @@ mod tests {
             &self,
             system: &str,
             user: &str,
-            model: &str,
+            model: &WireModel,
             max_tokens: u32,
         ) -> Result<String, ClaudeError> {
             *self.seen.lock() = Some((
@@ -1777,9 +1778,10 @@ mod tests {
         messages.push(make_user("what next"));
 
         let backend = RecordingBackend::new("Summary of the earlier work.");
-        let out = compact_conversation(&backend, &messages, "some-model", None)
-            .await
-            .expect("compaction succeeds");
+        let out =
+            compact_conversation(&backend, &messages, &WireModel::literal("some-model"), None)
+                .await
+                .expect("compaction succeeds");
 
         let (system, user, model, max_tokens) =
             backend.seen.lock().clone().expect("the backend was called");
@@ -1836,9 +1838,10 @@ mod tests {
         );
 
         let backend = RecordingBackend::new("never asked for");
-        let out = compact_conversation(&backend, &messages, "some-model", None)
-            .await
-            .expect("compaction succeeds");
+        let out =
+            compact_conversation(&backend, &messages, &WireModel::literal("some-model"), None)
+                .await
+                .expect("compaction succeeds");
 
         assert!(
             backend.seen.lock().is_none(),
@@ -1887,7 +1890,7 @@ mod tests {
         compact_conversation(
             &backend,
             &messages,
-            "some-model",
+            &WireModel::literal("some-model"),
             Some("keep every file path"),
         )
         .await
@@ -1911,9 +1914,10 @@ mod tests {
         ];
 
         let backend = RecordingBackend::new("");
-        let err = compact_conversation(&backend, &messages, "some-model", None)
-            .await
-            .expect_err("an empty summary is an error");
+        let err =
+            compact_conversation(&backend, &messages, &WireModel::literal("some-model"), None)
+                .await
+                .expect_err("an empty summary is an error");
         assert!(err.to_string().contains("empty"));
     }
 

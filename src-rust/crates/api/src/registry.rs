@@ -978,13 +978,6 @@ pub async fn provider_by_id(
         .find_map(|lookup_id| registry.get(&ProviderId::new(lookup_id)).cloned())
 }
 
-/// Hand back the provider selected by `config`.
-pub async fn provider_for_config(
-    config: &claurst_core::config::Config,
-) -> Option<Arc<dyn LlmProvider>> {
-    provider_by_id(config, config.selected_provider_id()).await
-}
-
 /// Why a provider could not be resolved.
 ///
 /// `provider_by_id` collapses every failure into `None`. Naming an account

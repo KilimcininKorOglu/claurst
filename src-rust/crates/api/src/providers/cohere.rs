@@ -258,7 +258,7 @@ impl CohereProvider {
             content: content_blocks,
             stop_reason,
             usage,
-            model: request.model.clone(),
+            model: request.model.to_string(),
         })
     }
 
@@ -470,7 +470,7 @@ impl LlmProvider for CohereProvider {
                                     .to_string();
                                 yield Ok(StreamEvent::MessageStart {
                                     id: msg_id,
-                                    model: model_name.clone(),
+                                    model: model_name.to_string(),
                                     usage: UsageInfo::default(),
                                 });
                                 yield Ok(StreamEvent::ContentBlockStart {
@@ -493,7 +493,7 @@ impl LlmProvider for CohereProvider {
                             if !message_started {
                                 yield Ok(StreamEvent::MessageStart {
                                     id: "unknown".to_string(),
-                                    model: model_name.clone(),
+                                    model: model_name.to_string(),
                                     usage: UsageInfo::default(),
                                 });
                                 yield Ok(StreamEvent::ContentBlockStart {
@@ -524,7 +524,7 @@ impl LlmProvider for CohereProvider {
                             if !message_started {
                                 yield Ok(StreamEvent::MessageStart {
                                     id: "unknown".to_string(),
-                                    model: model_name.clone(),
+                                    model: model_name.to_string(),
                                     usage: UsageInfo::default(),
                                 });
                                 yield Ok(StreamEvent::ContentBlockStart {

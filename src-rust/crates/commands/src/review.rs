@@ -120,7 +120,6 @@ impl SlashCommand for ReviewCommand {
         // disagree: the composite `"myaccount/model"` went out as the model id
         // while the request went to whichever account was selected.
         let route = ctx.config.effective_route();
-        let model = route.model.to_string();
         let provider = match claurst_api::provider_for_account(&ctx.config, &route.account).await {
             Ok(provider) => provider,
             Err(e) => {
@@ -152,7 +151,7 @@ impl SlashCommand for ReviewCommand {
         );
 
         let request = claurst_api::ProviderRequest {
-            model,
+            model: route.model.clone(),
             messages: vec![Message::user(review_prompt)],
             system_prompt: Some(claurst_api::SystemPrompt::Text(
                 "You are a thorough, constructive code reviewer. \

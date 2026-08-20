@@ -243,7 +243,7 @@ impl SessionMemoryExtractor {
             .summarise(
                 EXTRACTION_SYSTEM_PROMPT,
                 &prompt,
-                self.model.as_str(),
+                &self.model,
                 self.max_tokens,
             )
             .await
@@ -667,7 +667,7 @@ MEMORY: code_pattern | 7 | Uses builder pattern";
             &self,
             _system: &str,
             _user: &str,
-            model: &str,
+            model: &WireModel,
             _max_tokens: u32,
         ) -> Result<String, claurst_core::error::ClaudeError> {
             *self.0.lock() = Some(model.to_string());

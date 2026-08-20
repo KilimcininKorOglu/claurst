@@ -157,8 +157,8 @@ impl Tool for AdvisorTool {
             ));
         }
 
-        let (account, model) = (route.account.as_str(), route.model.as_str());
-        debug!(account, model, "Consulting advisor");
+        let account = route.account.as_str();
+        debug!(account, model = route.model.as_str(), "Consulting advisor");
 
         let provider = match claurst_api::provider_for_account(&ctx.config, account).await {
             Ok(provider) => provider,
@@ -174,7 +174,7 @@ impl Tool for AdvisorTool {
         }
 
         let request = claurst_api::ProviderRequest {
-            model: model.to_string(),
+            model: route.model.clone(),
             messages: vec![Message::user(prompt)],
             system_prompt: Some(claurst_api::SystemPrompt::Text(
                 ADVISOR_SYSTEM_PROMPT.to_string(),
@@ -197,7 +197,7 @@ impl Tool for AdvisorTool {
         // Advisor tokens are billed to the session, priced at the advisor
         // model's own rates.
         ctx.cost_tracker.add_usage(
-            model,
+            route.model.as_str(),
             response.usage.input_tokens,
             response.usage.output_tokens,
             response.usage.cache_creation_input_tokens,
@@ -206,7 +206,7 @@ impl Tool for AdvisorTool {
 
         let advice = text_from_blocks(&response.content);
         if advice.trim().is_empty() {
-            return ToolResult::error(format!("Advisor model '{model}' returned no text."));
+            return ToolResult::error(format!("Advisor model '{}' returned no text.", route.model));
         }
 
         ToolResult::success(advice)

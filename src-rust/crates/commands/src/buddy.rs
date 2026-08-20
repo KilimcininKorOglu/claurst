@@ -240,7 +240,7 @@ async fn hatch(ctx: &CommandContext, companion: &Companion) -> Result<CompanionS
         .map_err(|e| format!("no provider is configured to hatch with: {e}"))?;
 
     let request = claurst_api::ProviderRequest {
-        model: route.model.to_string(),
+        model: route.model.clone(),
         messages: vec![Message::user(format!(
             "Name this creature and describe it.\n\n\
              species: {}\nrarity: {}\nhat: {}\n\
@@ -312,7 +312,7 @@ pub async fn companion_reply(
         .map_err(|e| format!("no provider is configured: {e}"))?;
 
     let request = claurst_api::ProviderRequest {
-        model: route.model.to_string(),
+        model: route.model.clone(),
         messages: vec![Message::user(format!(
             "The user just said:\n\n{}",
             truncate_for_bubble(user_message)

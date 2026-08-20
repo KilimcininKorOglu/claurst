@@ -137,7 +137,7 @@ async fn review_last_reply(ctx: &CommandContext) -> CommandResult {
     };
 
     let request = claurst_api::ProviderRequest {
-        model: model.to_string(),
+        model: route.model.clone(),
         messages: vec![Message::user(format!(
             "Review the assistant reply below. Name the most important problem first, \
              then concrete failure cases and wrong assumptions. If it is sound, say so \

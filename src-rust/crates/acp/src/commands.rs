@@ -225,7 +225,7 @@ async fn apply(
             match claurst_query::compact::compact_conversation(
                 backend.as_ref(),
                 &current,
-                route.model.as_str(),
+                &route.model,
                 instruction.as_deref(),
             )
             .await

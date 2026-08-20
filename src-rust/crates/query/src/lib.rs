@@ -14,7 +14,6 @@
 
 pub mod agent_tool;
 pub mod auto_dream;
-pub mod away_summary;
 pub mod command_queue;
 pub mod compact;
 pub mod context_analyzer;
@@ -969,11 +968,10 @@ async fn run_query_loop_inner(
         };
 
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
-        let mut req_builder =
-            CreateMessageRequest::builder(route.model.as_str(), config.max_tokens)
-                .messages(api_messages)
-                .system(system)
-                .tools(api_tools);
+        let mut req_builder = CreateMessageRequest::builder(&route.model, config.max_tokens)
+            .messages(api_messages)
+            .system(system)
+            .tools(api_tools);
 
         // Resolve effective thinking budget:
         //   1. Explicit `thinking_budget` in config takes precedence.
@@ -1136,7 +1134,7 @@ async fn run_query_loop_inner(
                         .collect();
 
                     let provider_request = claurst_api::ProviderRequest {
-                        model: model_id_str.as_str().to_owned(),
+                        model: model_id_str.clone(),
                         messages: provider_messages,
                         system_prompt: Some(system_for_provider.clone()),
                         tools: provider_tools,

@@ -46,8 +46,16 @@ pub enum StopReason {
 /// fields can be passed via `provider_options` as an arbitrary JSON object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderRequest {
-    /// The model identifier (e.g. `"claude-opus-4-5"`, `"gpt-4o"`).
-    pub model: String,
+    /// The model identifier (e.g. `"claude-opus-4-5"`, `"gpt-4o"`), exactly as
+    /// it goes on the wire.
+    ///
+    /// A [`WireModel`] and not a `String`, because the selection string the
+    /// user chose may name an account (`"myaccount/claude-opus-5"`) and a
+    /// provider handed that answers 400. Nothing in a `String` said which of
+    /// the two it held, so the mistake kept coming back.
+    ///
+    /// [`WireModel`]: claurst_core::config::WireModel
+    pub model: claurst_core::config::WireModel,
 
     /// The conversation history to send to the model.
     pub messages: Vec<Message>,

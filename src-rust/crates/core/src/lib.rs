@@ -1275,6 +1275,18 @@ pub mod config {
         }
     }
 
+    /// Reading is free; only constructing is guarded. A provider adapter has
+    /// to ask the id whether it starts with a vendor's prefix, slice it, or
+    /// hand it to a formatter, and `Deref` is one-way out: it offers no path
+    /// back from a `String`. `String` derefs to `str` for the same reason.
+    impl std::ops::Deref for WireModel {
+        type Target = str;
+
+        fn deref(&self) -> &str {
+            &self.0
+        }
+    }
+
     // Comparing against a plain string is a read, not a way in, so these cost
     // nothing the type is guarding. `String` and `PathBuf` carry the same pair
     // for the same reason.
@@ -9154,6 +9166,55 @@ mod route_resolution_tests {
         assert_eq!(written, "free/openrouter/free");
         assert_eq!(config.resolve_route(&written).account, "free");
         assert_eq!(config.resolve_route(&written).model, "openrouter/free");
+    }
+
+    /// Every `.rs` file in the workspace, so a guard can read the source
+    /// rather than trust a rule to be remembered.
+    fn workspace_sources() -> Vec<(std::path::PathBuf, String)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    if let Ok(text) = std::fs::read_to_string(&path) {
+                        out.push((path, text));
+                    }
+                }
+            }
+        }
+
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/");
+        let mut out = Vec::new();
+        walk(crates, &mut out);
+        assert!(out.len() > 50, "the source walk found almost nothing");
+        out
+    }
+
+    #[test]
+    fn the_provider_escape_hatch_stays_inside_the_providers() {
+        // `rewritten_by_provider` takes a runtime `String`, which is exactly
+        // what `WireModel` exists to keep out. It is sound only where the
+        // caller owns both sides of the substitution: a provider choosing
+        // which upstream serves the id it was handed. Anywhere else it would
+        // launder a selection string back onto the wire.
+        let offenders: Vec<String> = workspace_sources()
+            .into_iter()
+            .filter(|(_, text)| text.contains("rewritten_by_provider"))
+            .map(|(path, _)| path.display().to_string())
+            .filter(|path| !path.contains("/api/src/providers/"))
+            .filter(|path| !path.ends_with("core/src/lib.rs"))
+            .collect();
+
+        assert!(
+            offenders.is_empty(),
+            "rewritten_by_provider used outside crates/api/src/providers/: {offenders:?}"
+        );
     }
 
     #[test]

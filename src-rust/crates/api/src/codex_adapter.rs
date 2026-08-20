@@ -155,11 +155,12 @@ pub fn build_anthropic_response(
 mod tests {
     use super::*;
     use crate::types::{ApiMessage, SystemPrompt};
+    use claurst_core::config::WireModel;
 
     #[test]
     fn test_anthropic_to_openai_request_basic() {
         let request = CreateMessageRequest {
-            model: "gpt-5.2-codex".to_string(),
+            model: WireModel::literal("gpt-5.2-codex"),
             max_tokens: 1024,
             messages: vec![ApiMessage {
                 role: "user".to_string(),

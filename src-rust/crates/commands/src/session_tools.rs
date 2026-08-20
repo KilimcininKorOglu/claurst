@@ -440,7 +440,7 @@ impl SlashCommand for RenameCommand {
             Respond with ONLY the name, nothing else.";
 
         let request = claurst_api::ProviderRequest {
-            model: rename_route.model.to_string(),
+            model: rename_route.model.clone(),
             messages: vec![Message::user(format!(
                 "Conversation to name:\n\n{}",
                 &excerpt[..excerpt.len().min(2000)]

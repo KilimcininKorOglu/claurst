@@ -88,8 +88,8 @@ pub use protocol::{LineStreamDecoder, OpenAiChatDecoder};
 
 // Phase 1C re-exports — provider registry.
 pub use registry::{
-    provider_by_id, provider_for_account, provider_for_config, provider_lookup_ids,
-    ProviderRegistry, ProviderResolveError,
+    provider_by_id, provider_for_account, provider_lookup_ids, ProviderRegistry,
+    ProviderResolveError,
 };
 
 // Phase 1D re-exports — concrete provider adapters.
@@ -101,9 +101,9 @@ pub use providers::OpenAiProvider;
 // Phase 3 re-exports — model registry.
 pub use effort_support::{model_is_reasoning, supported_efforts, variant_ladder};
 pub use model_registry::{
-    effective_model_for_config, resolve_effective_route, resolve_small_model_route, CostBreakdown,
-    CostTier, CostTierCondition, ExperimentalMode, InterleavedReasoning, Modality, ModelEntry,
-    ModelRegistry, ModelStatus, ProviderEntry, ProviderOverride,
+    resolve_effective_route, resolve_small_model_route, CostBreakdown, CostTier, CostTierCondition,
+    ExperimentalMode, InterleavedReasoning, Modality, ModelEntry, ModelRegistry, ModelStatus,
+    ProviderEntry, ProviderOverride,
 };
 pub use variants::{
     variant_efforts, OPENAI_NONE_EFFORT_RELEASE_DATE, OPENAI_XHIGH_EFFORT_RELEASE_DATE,
@@ -196,7 +196,11 @@ pub mod types {
     /// The request body sent to `POST /v1/messages`.
     #[derive(Debug, Clone, Serialize)]
     pub struct CreateMessageRequest {
-        pub model: String,
+        /// The wire model, so a `"<account>/<model>"` selection string cannot
+        /// reach the request body. That is the defect this type exists to
+        /// stop: the provider answers 400 for a model it has never heard of,
+        /// and nothing upstream said which of the two a `String` held.
+        pub model: claurst_core::config::WireModel,
         pub max_tokens: u32,
         pub messages: Vec<ApiMessage>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1368,9 +1372,12 @@ pub mod client {
 
 impl CreateMessageRequest {
     /// Create a minimal request builder.
-    pub fn builder(model: impl Into<String>, max_tokens: u32) -> CreateMessageRequestBuilder {
+    pub fn builder(
+        model: &claurst_core::config::WireModel,
+        max_tokens: u32,
+    ) -> CreateMessageRequestBuilder {
         CreateMessageRequestBuilder {
-            model: model.into(),
+            model: model.clone(),
             max_tokens,
             messages: vec![],
             system: None,
@@ -1385,7 +1392,7 @@ impl CreateMessageRequest {
 }
 
 pub struct CreateMessageRequestBuilder {
-    model: String,
+    model: claurst_core::config::WireModel,
     max_tokens: u32,
     messages: Vec<ApiMessage>,
     system: Option<SystemPrompt>,
@@ -1639,6 +1646,7 @@ impl StreamAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claurst_core::config::WireModel;
 
     #[test]
     fn test_sse_parser_basic() {
@@ -1654,7 +1662,7 @@ mod tests {
 
     #[test]
     fn test_create_message_request_builder() {
-        let req = CreateMessageRequest::builder("claude-opus-4-6", 4096)
+        let req = CreateMessageRequest::builder(&WireModel::literal("claude-opus-4-6"), 4096)
             .system_text("You are helpful.")
             .temperature(0.7)
             .build();

@@ -222,7 +222,7 @@ pub(crate) async fn compact_before_request(
         input.backend,
         messages,
         context_tokens,
-        input.route.model.as_str(),
+        &input.route.model,
         context_window,
         config.compact_threshold,
         input.session_id,
@@ -272,8 +272,7 @@ async fn run_reactive(
         }
         (
             "Context-collapse",
-            compact::context_collapse(messages.clone(), input.backend, input.route.model.as_str())
-                .await,
+            compact::context_collapse(messages.clone(), input.backend, &input.route.model).await,
         )
     } else if compact::should_compact(context_tokens, context_window, config.compact_threshold) {
         if let Some(tx) = event_tx {
@@ -284,7 +283,7 @@ async fn run_reactive(
             compact::reactive_compact(
                 messages.clone(),
                 input.backend,
-                input.route.model.as_str(),
+                &input.route.model,
                 cancel_token.clone(),
                 &[],
             )
@@ -345,7 +344,7 @@ mod tests {
             &self,
             _system: &str,
             _user: &str,
-            model: &str,
+            model: &claurst_core::config::WireModel,
             _max_tokens: u32,
         ) -> Result<String, ClaudeError> {
             *self.model_seen.lock() = Some(model.to_string());

@@ -461,12 +461,13 @@ impl LlmProvider for MinimaxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claurst_core::config::WireModel;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     fn request(model: &str, thinking: bool) -> ProviderRequest {
         ProviderRequest {
-            model: model.to_string(),
+            model: WireModel::rewritten_by_provider(model.to_string()),
             messages: Vec::new(),
             system_prompt: None,
             tools: Vec::new(),

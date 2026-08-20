@@ -1542,36 +1542,16 @@ fn small_patterns_for(provider_id: &str) -> &'static [&'static str] {
 // Dynamic model resolution helper
 // ---------------------------------------------------------------------------
 
-/// Resolve the effective model for a [`Config`], using the model registry to
-/// dynamically pick the best available model for the active provider.
-///
-/// **Resolution order**:
-///  1. If the user explicitly set `config.model`, use it verbatim.
-///  2. Consult the model registry for the configured provider's best model.
-///  3. Fall back to the hardcoded table in [`Config::effective_model()`].
-pub fn effective_model_for_config(
-    config: &claurst_core::config::Config,
-    registry: &ModelRegistry,
-) -> String {
-    if config.model.is_some() {
-        return config.effective_model().to_string();
-    }
-
-    if let Some(provider_id) = config.provider.as_deref() {
-        if let Some(best) = registry.best_model_for_provider(provider_id) {
-            return best;
-        }
-    }
-
-    config.effective_model().to_string()
-}
-
 /// Where a [`Config`] sends a request, account and wire model both.
 ///
-/// The same resolution as [`effective_model_for_config`], answered as a
-/// [`Route`] instead of a bare `String`. A `String` here is the composite
-/// `"<account>/<model>"` about half the time and the wire id the other half,
-/// and every caller had to remember which and split it again. Most did not.
+/// Resolution order: an explicitly set `config.model`, then the registry's
+/// best model for the configured account, then the hardcoded table in
+/// [`Config::effective_model`].
+///
+/// A [`Route`] and not the bare `String` this used to answer with. That string
+/// was the composite `"<account>/<model>"` about half the time and the wire id
+/// the other half, and every caller had to remember which and split it again.
+/// Most did not.
 ///
 /// The catalogue lookup asks about the account's protocol rather than its
 /// name, because an account the user named (`work_openai`) appears in no
@@ -2016,12 +1996,6 @@ mod tests {
             model: None,
             ..Default::default()
         };
-        let resolved = effective_model_for_config(&cfg, &reg);
-        assert!(
-            !resolved.contains("claude"),
-            "qwen must never resolve to a claude model, got {resolved}"
-        );
-
         let route = resolve_effective_route(&cfg, &reg);
         assert_eq!(route.account, "qwen");
         assert!(
