@@ -203,7 +203,7 @@ fn extract_topic_hint(messages: &[Message]) -> Option<String> {
 }
 
 /// Rough token estimate: sum of character lengths divided by 4, padded by 4/3.
-fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
+pub(crate) fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
     let chars: usize = messages
         .iter()
         .map(|m| match &m.content {

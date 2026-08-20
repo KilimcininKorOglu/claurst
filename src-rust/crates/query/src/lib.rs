@@ -520,6 +520,9 @@ async fn run_query_loop_inner(
     let tool_ctx = &loop_ctx;
 
     let mut turn = 0u32;
+    // The previous turn's real prompt size, read at the next request
+    // boundary. Zero before the first response, where the estimate stands in.
+    let mut last_context_tokens: u64 = 0;
     // Tracks how many consecutive max_tokens recoveries we've attempted so
     // we don't loop forever on a model that can't finish within any budget.
     let mut max_tokens_recovery_count: u32 = 0;
@@ -754,6 +757,60 @@ async fn run_query_loop_inner(
             }
         }
 
+        // Resolve the account and the wire model ONCE, before either dispatch
+        // arm builds a request. The Anthropic arm below and the provider arm
+        // further down both read this, so a `"<account>/<model>"` prefix is
+        // stripped for both instead of only for the provider arm.
+        let route = tool_ctx.config.resolve_route(&effective_model);
+
+        // Refuse a model the account is known not to serve rather than moving
+        // the request to whichever account does serve it.
+        if let Some(message) = tool_ctx.config.reject_unserved_model(&route) {
+            return QueryOutcome::Error(ClaudeError::Config(message));
+        }
+
+        // Compaction runs here, at the request boundary and in front of the
+        // sanitiser, for two reasons. One call reaches both dispatch arms,
+        // where the old end-of-turn placement reached only the raw Anthropic
+        // one and left every registry-served provider uncompacted. And a cut
+        // can strand a `tool_result` whose `tool_use` was summarised away, so
+        // the sanitiser standing immediately behind it repairs that in the
+        // same pass rather than a turn later.
+        let compact_backend: Box<dyn compact::CompactBackend + '_> = match config
+            .provider_registry
+            .as_ref()
+            .filter(|_| {
+                runner::dispatches_through_provider(&route.account, &tool_ctx.config, client)
+            })
+            .and_then(|registry| {
+                runner::provider_for_turn(registry, &tool_ctx.config, &route.account)
+            }) {
+            Some(provider) => Box::new(compact::ProviderBackend(provider)),
+            None => Box::new(compact::AnthropicBackend(client)),
+        };
+        let context_pass = runner::compact_before_request(
+            messages,
+            config,
+            runner::ContextPassInput {
+                backend: compact_backend.as_ref(),
+                model: &effective_model,
+                provider: &route.account,
+                session_id: &tool_ctx.session_id,
+                last_context_tokens,
+            },
+            event_tx.as_ref(),
+            &cancel_token,
+        )
+        .await;
+        if context_pass.compacted {
+            last_context_tokens = context_pass.tokens_after;
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(QueryEvent::Status(
+                    "Context compacted to stay within limits.".to_string(),
+                ));
+            }
+        }
+
         // Request-boundary invariant pass (issue #229 / MI-2). Compaction,
         // max_tokens recovery, and the command-queue / pending-message drains
         // above can each independently leave the history with a broken
@@ -887,18 +944,6 @@ async fn run_query_loop_inner(
             build_system_prompt(&patched)
         };
 
-        // Resolve the account and the wire model ONCE, before either dispatch
-        // arm builds a request. The Anthropic arm below and the provider arm
-        // further down both read this, so a `"<account>/<model>"` prefix is
-        // stripped for both instead of only for the provider arm.
-        let route = tool_ctx.config.resolve_route(&effective_model);
-
-        // Refuse a model the account is known not to serve rather than moving
-        // the request to whichever account does serve it.
-        if let Some(message) = tool_ctx.config.reject_unserved_model(&route) {
-            return QueryOutcome::Error(ClaudeError::Config(message));
-        }
-
         let system_for_provider = system.clone(); // used by non-Anthropic dispatch below
         let mut req_builder = CreateMessageRequest::builder(&route.model, config.max_tokens)
             .messages(api_messages)
@@ -986,48 +1031,17 @@ async fn run_query_loop_inner(
             // AND for Anthropic when the pre-built client has no API key
             // (user started without ANTHROPIC_API_KEY but added one via /connect).
             //
-            // The question is which wire format the account speaks, not what it
-            // is called: an OAuth login named after its owner still belongs on
-            // the raw client, which is the arm that refreshes an expired token.
+            // The wire format the account speaks, which is not always what the
+            // account is called. `build_provider_options` keys its rules off
+            // this, so an account filed under a name of its owner's choosing
+            // still gets the right request body.
             let vendor = tool_ctx.config.vendor_id_for_account(&provider_id_str);
             let use_provider_dispatch =
-                vendor != claurst_core::ProviderId::ANTHROPIC || client.api_key_is_empty();
+                runner::dispatches_through_provider(&provider_id_str, &tool_ctx.config, client);
 
             if use_provider_dispatch {
-                let pid = claurst_core::provider_id::ProviderId::new(&provider_id_str);
-
-                // Always prefer a fresh provider built from the auth_store so
-                // that keys added at runtime via /connect are picked up
-                // immediately — even when the provider was pre-registered at
-                // startup with a stale or missing key.
-                let runtime_provider =
-                    claurst_api::registry::runtime_provider_for(&provider_id_str);
-
-                let registry_provider = if runtime_provider.is_some() {
-                    // Fresh auth_store key available — use it instead of the
-                    // (possibly stale) registry entry.
-                    None
-                } else {
-                    registry.get(&pid).cloned()
-                };
-
-                let mut provider = runtime_provider.or(registry_provider);
-
-                // Rebuild providers using the unified base resolver so overrides
-                // from settings/env/defaults are applied consistently.
-                if claurst_api::registry::resolve_provider_api_base(
-                    &tool_ctx.config,
-                    &provider_id_str,
-                )
-                .is_some()
-                {
-                    if let Some(overridden) = claurst_api::registry::provider_from_config(
-                        &tool_ctx.config,
-                        &provider_id_str,
-                    ) {
-                        provider = Some(overridden);
-                    }
-                }
+                let provider =
+                    runner::provider_for_turn(registry, &tool_ctx.config, &provider_id_str);
                 if let Some(provider) = provider {
                     debug!(provider = %provider_id_str, model = %model_id_str, "Dispatching to non-Anthropic provider");
 
@@ -1671,131 +1685,10 @@ async fn run_query_loop_inner(
             }
         }
 
-        // Resolve the effective context window ONCE per turn for the active
-        // provider+model. Prefer the models.dev-backed registry value (correct
-        // for every provider — 1M Gemini/GPT windows, 32k local models) and
-        // fall back to the Claude-centric heuristic only when the registry has
-        // no usable entry. All threshold logic below keys off this. (#216)
-        //
-        // `effective_model`, never `config.model`: an agent definition's own
-        // model and a fallback switch both replace the live model, and a
-        // window sized for the session model would then be wrong by as much
-        // as the two models differ.
-        let context_window = compact::resolve_context_window(
-            config.model_registry.as_deref(),
-            tool_ctx.config.provider.as_deref().unwrap_or("anthropic"),
-            &effective_model,
-        );
-
-        // Numerator for every threshold below: prefer the REAL context-token
-        // count the provider just reported (input + cache-read + cache-creation
-        // = what the model actually saw) over the chars/4 estimate. With prompt
-        // caching the bare `input_tokens` field undercounts badly. Fall back to
-        // the estimate only before the first response / when usage is absent. (#231)
-        let real_usage = usage.total_input();
-        let context_tokens =
-            compact::estimate_context_tokens(messages, (real_usage > 0).then_some(real_usage));
-
-        // Emit token warning events when approaching context limits.
-        // Thresholds mirror TypeScript autoCompact.ts: 80% → Warning, 95% → Critical.
-        {
-            let warning_state =
-                compact::calculate_token_warning_state_for_window(context_tokens, context_window);
-            if warning_state != compact::TokenWarningState::Ok {
-                if let Some(ref tx) = event_tx {
-                    let pct_used = context_tokens as f64 / context_window as f64;
-                    let _ = tx.send(QueryEvent::TokenWarning {
-                        state: warning_state,
-                        pct_used,
-                    });
-                }
-            }
-        }
-
-        // This arm dispatches through the raw Anthropic client, so the
-        // summariser does too.
-        let backend = compact::AnthropicBackend(client);
-
-        // Auto-compact: if context is near-full, summarise older messages now
-        // (before the next turn's API call would fail with prompt-too-long).
-        //
-        // Reactive compact (T1-1): when the CLAUDE_REACTIVE_COMPACT feature gate
-        // is enabled, we replace the proactive auto-compact path with reactive
-        // compact / context-collapse instead. This fires on every streaming turn
-        // so it can act before a prompt-too-long error is returned by the API.
-        //
-        // Feature gate check: CLAURST_FEATURE_REACTIVE_COMPACT=1
-        let reactive_compact_enabled =
-            claurst_core::feature_gates::is_feature_enabled("reactive_compact");
-
-        if reactive_compact_enabled {
-            // Reactive path: emergency collapse takes priority over normal compact.
-            let context_limit = context_window;
-            if compact::should_context_collapse(context_tokens, context_limit) {
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(QueryEvent::Status(
-                        "Compacting context... (emergency collapse)".to_string(),
-                    ));
-                }
-                // Pass a clone so the live conversation survives a failed
-                // compaction; `*messages` is only overwritten on success (#213).
-                let outcome = compact::context_collapse(messages.clone(), &backend, config).await;
-                match apply_compact_result(messages, outcome) {
-                    Ok(tokens_freed) => {
-                        info!(tokens_freed, "Context-collapse complete");
-                    }
-                    Err(e) => {
-                        // `*messages` is left untouched — the conversation is intact.
-                        warn!(error = %e, "Context-collapse failed; conversation preserved");
-                    }
-                }
-            } else if compact::should_compact(context_tokens, context_limit) {
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(QueryEvent::Status("Compacting context...".to_string()));
-                }
-                // Pass a clone so the live conversation survives a failed
-                // compaction; `*messages` is only overwritten on success (#213).
-                let outcome = compact::reactive_compact(
-                    messages.clone(),
-                    &backend,
-                    config,
-                    cancel_token.clone(),
-                    &[],
-                )
-                .await;
-                match apply_compact_result(messages, outcome) {
-                    Ok(tokens_freed) => {
-                        info!(tokens_freed, "Reactive compact complete");
-                    }
-                    // `*messages` is left untouched on both failure arms below.
-                    Err(claurst_core::error::ClaudeError::Cancelled) => {
-                        warn!("Reactive compact was cancelled; conversation preserved");
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Reactive compact failed; conversation preserved");
-                    }
-                }
-            }
-        } else if stop == "end_turn" || stop == "tool_use" {
-            // Proactive auto-compact (original path, used when reactive compact is off).
-            if let Some(new_msgs) = compact::auto_compact_if_needed(
-                &backend,
-                messages,
-                context_tokens,
-                &effective_model,
-                context_window,
-                &tool_ctx.session_id,
-            )
-            .await
-            {
-                *messages = new_msgs;
-                if let Some(ref tx) = event_tx {
-                    let _ = tx.send(QueryEvent::Status(
-                        "Context compacted to stay within limits.".to_string(),
-                    ));
-                }
-            }
-        }
+        // The turn's real prompt size, carried to the next request boundary
+        // where compaction decides whether to act on it. `total_input()` is
+        // input + cache-read + cache-creation: what the model actually saw.
+        last_context_tokens = usage.total_input();
 
         if let Some(ref tx) = event_tx {
             let _ = tx.send(QueryEvent::TurnComplete {
