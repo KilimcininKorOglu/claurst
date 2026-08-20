@@ -1729,15 +1729,35 @@ async fn reload_provider_runtime_state(
 /// The wire model is not rewritten here; `Config::resolve_route` strips the
 /// prefix at request time for both dispatch arms.
 fn normalize_provider_from_model(config: &mut Config) {
-    let Some(model) = config.model.as_deref() else {
+    let Some(model) = config.model.clone() else {
         return;
     };
-    if let Some((head, rest)) = model.split_once('/') {
-        if !rest.is_empty() && config.is_account_id(head) {
-            let head = head.to_string();
-            config.provider = Some(head);
-        }
-    }
+    config.provider = Some(config.resolve_route(&model).account);
+}
+
+/// The model string a session records and the query loop resolves.
+///
+/// Canonical, so it still names the account it was chosen from when it is read
+/// back under a different selection. `effective_model_for_config` answered
+/// with the composite `"<account>/<model>"` about half the time and the bare
+/// wire id the other half, with nothing in the type to say which, and this is
+/// the string that lands in `session.model` and `qcfg.model`.
+fn session_model_string(config: &Config, registry: &claurst_api::ModelRegistry) -> String {
+    let route = claurst_api::resolve_effective_route(config, registry);
+    config.canonical_model(&route.account, &route.model)
+}
+
+/// Whether `config` points at the cheap model `/fast` would choose.
+///
+/// `model.contains("haiku")` only ever answered for Anthropic, so turning fast
+/// mode on anywhere else left the badge off while fast mode was on.
+fn is_fast_mode_model(config: &Config, registry: &claurst_api::ModelRegistry) -> bool {
+    let Some(model) = config.model.as_deref() else {
+        return false;
+    };
+    let chosen = config.resolve_route(model);
+    let fast = claurst_api::resolve_small_model_route(config, registry);
+    chosen.account == fast.account && chosen.model == fast.model
 }
 
 /// Filter the tool list based on the agent's access level.
@@ -2871,9 +2891,10 @@ async fn run_interactive(
     let mut tool_ctx = tool_ctx;
     let mut resume_warning: Option<String> = None;
     let fresh_session = || {
-        let mut session = claurst_core::history::ConversationSession::new(
-            claurst_api::effective_model_for_config(&config, &model_registry),
-        );
+        let mut session = claurst_core::history::ConversationSession::new(session_model_string(
+            &config,
+            &model_registry,
+        ));
         session.id = tool_ctx.session_id.clone();
         session.working_dir = Some(tool_ctx.working_dir.display().to_string());
         session
@@ -3671,10 +3692,8 @@ async fn run_interactive(
                                     // session is only persisted once the first
                                     // message completes a turn, matching opencode's
                                     // lazy-session semantics.
-                                    let model = claurst_api::effective_model_for_config(
-                                        &cmd_ctx.config,
-                                        &model_registry,
-                                    );
+                                    let model =
+                                        session_model_string(&cmd_ctx.config, &model_registry);
                                     session = claurst_commands::build_home_session(
                                         model,
                                         Some(tool_ctx.working_dir.display().to_string()),
@@ -3789,10 +3808,8 @@ async fn run_interactive(
                                 }
                                 Some(CommandResult::RunCompaction { instruction }) => {
                                     let before = messages.len();
-                                    let model = claurst_api::effective_model_for_config(
-                                        &cmd_ctx.config,
-                                        &model_registry,
-                                    );
+                                    let model =
+                                        session_model_string(&cmd_ctx.config, &model_registry);
                                     app.status_message =
                                         Some("Compacting the conversation…".to_string());
                                     match run_compaction(
@@ -4020,18 +4037,16 @@ async fn run_interactive(
                                                     Some(refreshed.provider_registry.clone());
                                                 base_query_config.model_registry =
                                                     Some(refreshed.model_registry.clone());
-                                                base_query_config.model =
-                                                    claurst_api::effective_model_for_config(
-                                                        &cmd_ctx.config,
-                                                        refreshed.model_registry.as_ref(),
-                                                    );
+                                                base_query_config.model = session_model_string(
+                                                    &cmd_ctx.config,
+                                                    refreshed.model_registry.as_ref(),
+                                                );
                                                 client = refreshed.client;
                                                 model_registry = refreshed.model_registry;
-                                                session.model =
-                                                    claurst_api::effective_model_for_config(
-                                                        &cmd_ctx.config,
-                                                        model_registry.as_ref(),
-                                                    );
+                                                session.model = session_model_string(
+                                                    &cmd_ctx.config,
+                                                    model_registry.as_ref(),
+                                                );
                                                 session.updated_at = chrono::Utc::now();
                                                 app.apply_provider_refresh(
                                                     refreshed.config,
@@ -4102,18 +4117,13 @@ async fn run_interactive(
                                         app.set_model(model.clone());
                                     }
                                     // Sync fast_mode visual indicator.
-                                    app.fast_mode = applied_cfg
-                                        .model
-                                        .as_deref()
-                                        .map(|m| m.contains("haiku"))
-                                        .unwrap_or(false);
+                                    app.fast_mode =
+                                        is_fast_mode_model(&applied_cfg, &model_registry);
                                     // Sync plan_mode visual indicator.
                                     app.plan_mode = plan_badge_for(applied_cfg.permission_mode);
                                     app.reload_companion();
-                                    session.model = claurst_api::effective_model_for_config(
-                                        &cmd_ctx.config,
-                                        &model_registry,
-                                    );
+                                    session.model =
+                                        session_model_string(&cmd_ctx.config, &model_registry);
                                     app.status_message = Some("Configuration updated.".to_string());
                                 }
                                 Some(CommandResult::ConfigChangeMessage(new_cfg, msg)) => {
@@ -4124,19 +4134,17 @@ async fn run_interactive(
                                     // Sync model/provider + fast_mode visual indicator.
                                     if let Some(ref model) = applied_cfg.model {
                                         app.set_model(model.clone());
-                                        app.fast_mode = model.contains("haiku");
-                                    } else {
-                                        // model reset to None means fast mode off.
-                                        app.fast_mode = false;
                                     }
+                                    // A `None` model means the default is back,
+                                    // which is never the fast one.
+                                    app.fast_mode =
+                                        is_fast_mode_model(&applied_cfg, &model_registry);
                                     app.config = applied_cfg.clone();
                                     // Same sync the `Config` arm above does.
                                     app.plan_mode = plan_badge_for(applied_cfg.permission_mode);
                                     app.reload_companion();
-                                    session.model = claurst_api::effective_model_for_config(
-                                        &cmd_ctx.config,
-                                        &model_registry,
-                                    );
+                                    session.model =
+                                        session_model_string(&cmd_ctx.config, &model_registry);
                                     app.status_message = Some(msg);
                                 }
                                 Some(CommandResult::UserMessage(msg)) => {
@@ -4546,10 +4554,7 @@ async fn run_interactive(
                         let tools_arc_clone = tools_arc.clone();
                         let mut ctx_clone = tool_ctx.clone();
                         let mut qcfg = base_query_config.clone();
-                        qcfg.model = claurst_api::effective_model_for_config(
-                            &cmd_ctx.config,
-                            &model_registry,
-                        );
+                        qcfg.model = session_model_string(&cmd_ctx.config, &model_registry);
                         qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
                         // Re-read per turn so `/turns` reaches the next run; an agent's
                         // own limit still wins inside the loop.
@@ -5336,8 +5341,7 @@ async fn run_interactive(
                     let tools_arc_clone = tools_arc.clone();
                     let ctx_clone = tool_ctx.clone();
                     let mut qcfg = base_query_config.clone();
-                    qcfg.model =
-                        claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
+                    qcfg.model = session_model_string(&cmd_ctx.config, &model_registry);
                     qcfg.max_tokens = cmd_ctx.config.effective_max_tokens();
                     // Re-read per turn so `/turns` reaches the next run; an agent's
                     // own limit still wins inside the loop.
@@ -5500,10 +5504,7 @@ async fn run_interactive(
             // Cost is rounded first: it creeps with every model call, and
             // comparing the raw float would re-register on each one.
             let info = claurst_bridge::SessionInfo {
-                model: Some(claurst_api::effective_model_for_config(
-                    &cmd_ctx.config,
-                    &model_registry,
-                )),
+                model: Some(session_model_string(&cmd_ctx.config, &model_registry)),
                 permission_mode: Some(
                     format!("{:?}", cmd_ctx.config.permission_mode).to_lowercase(),
                 ),
@@ -5910,8 +5911,7 @@ async fn run_interactive(
                 }
                 session.messages = messages.clone();
                 session.updated_at = chrono::Utc::now();
-                session.model =
-                    claurst_api::effective_model_for_config(&cmd_ctx.config, &model_registry);
+                session.model = session_model_string(&cmd_ctx.config, &model_registry);
                 session.working_dir = Some(tool_ctx.working_dir.display().to_string());
                 // A point to come back to, recorded once the turn is whole.
                 claurst_core::history::create_checkpoint(&mut session, None);
@@ -6011,16 +6011,11 @@ async fn run_interactive(
                     tool_ctx.config = refreshed.config.clone();
                     base_query_config.provider_registry = Some(refreshed.provider_registry.clone());
                     base_query_config.model_registry = Some(refreshed.model_registry.clone());
-                    base_query_config.model = claurst_api::effective_model_for_config(
-                        &cmd_ctx.config,
-                        refreshed.model_registry.as_ref(),
-                    );
+                    base_query_config.model =
+                        session_model_string(&cmd_ctx.config, refreshed.model_registry.as_ref());
                     client = refreshed.client;
                     model_registry = refreshed.model_registry;
-                    session.model = claurst_api::effective_model_for_config(
-                        &cmd_ctx.config,
-                        model_registry.as_ref(),
-                    );
+                    session.model = session_model_string(&cmd_ctx.config, model_registry.as_ref());
                     app.provider_registry = Some(refreshed.provider_registry);
                     app.has_credentials = true;
                 }
