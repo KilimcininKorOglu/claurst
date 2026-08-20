@@ -150,65 +150,6 @@ pub fn format_model_line(
     parts.join("  ")
 }
 
-/// A group of models belonging to the same provider, for structured display.
-pub struct ProviderSection {
-    pub provider_name: String,
-    pub models: Vec<String>, // model ID strings in "provider/model" format
-}
-
-impl ModelPickerState {
-    /// Build grouped model sections from a flat list of model strings.
-    ///
-    /// Models with a `"provider/model"` slash format are grouped by their
-    /// provider prefix.  Bare model names are heuristically assigned to a
-    /// provider based on the model name pattern.
-    pub fn build_provider_sections(models: &[String]) -> Vec<ProviderSection> {
-        use std::collections::HashMap;
-        let mut by_provider: HashMap<String, Vec<String>> = HashMap::new();
-
-        for m in models {
-            let provider = if let Some((p, _)) = m.split_once('/') {
-                p.to_string()
-            } else {
-                // Bare model name — detect provider from model name
-                if m.contains("claude") {
-                    "anthropic".to_string()
-                } else if m.starts_with("gpt") || m.starts_with("o3") || m.starts_with("o4") {
-                    "openai".to_string()
-                } else if m.contains("gemini") {
-                    "google".to_string()
-                } else if m.contains("minimax") {
-                    "minimax".to_string()
-                } else {
-                    "other".to_string()
-                }
-            };
-            by_provider.entry(provider).or_default().push(m.clone());
-        }
-
-        let mut sections = Vec::new();
-        for provider in PROVIDER_DISPLAY_ORDER {
-            if let Some(models) = by_provider.remove(*provider) {
-                sections.push(ProviderSection {
-                    provider_name: provider_display_name(provider),
-                    models,
-                });
-            }
-        }
-        // Any provider outside the preferred order, in a stable order so the
-        // list does not reshuffle between openings.
-        let mut rest: Vec<(String, Vec<String>)> = by_provider.into_iter().collect();
-        rest.sort_by(|a, b| a.0.cmp(&b.0));
-        for (provider, models) in rest {
-            sections.push(ProviderSection {
-                provider_name: provider_display_name(&provider),
-                models,
-            });
-        }
-        sections
-    }
-}
-
 /// Providers shown first, in this order. Anything else follows alphabetically.
 const PROVIDER_DISPLAY_ORDER: &[&str] = &["anthropic", "openai", "google", "ollama", "other"];
 

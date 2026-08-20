@@ -22,51 +22,6 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
         .sum()
 }
 
-/// Context-window info for a model / token count pair.
-pub struct ContextUsage {
-    pub used: u64,
-    pub total: u64,
-    pub pct: f64,
-}
-
-/// Calculate context window usage.
-pub fn calculate_context_window_usage(messages: &[Message], model: &str) -> ContextUsage {
-    let used = estimate_messages_tokens(messages);
-    let total = context_window_for_model(model);
-    let pct = if total > 0 {
-        (used as f64 / total as f64) * 100.0
-    } else {
-        0.0
-    };
-    ContextUsage { used, total, pct }
-}
-
-/// Return the context window token limit for a known model.
-pub fn context_window_for_model(model: &str) -> u64 {
-    if model.contains("claude-3-5-haiku") {
-        return 200_000;
-    }
-    if model.contains("claude-3-5-sonnet") {
-        return 200_000;
-    }
-    if model.contains("claude-3-7-sonnet") {
-        return 200_000;
-    }
-    if model.contains("claude-sonnet-4") {
-        return 200_000;
-    }
-    if model.contains("claude-opus-4") {
-        return 200_000;
-    }
-    if model.contains("opus") {
-        return 200_000;
-    }
-    if model.contains("haiku") {
-        return 200_000;
-    }
-    200_000 // safe default
-}
-
 // ---------------------------------------------------------------------------
 // Message content helpers
 // ---------------------------------------------------------------------------
