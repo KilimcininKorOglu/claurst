@@ -735,6 +735,69 @@ plugins simultaneously.
 
 ---
 
+## Auto memory
+
+A second memory store, separate from AGENTS.md. AGENTS.md is a file you write
+and commit; the auto memory directory is one MikMik keeps for you, outside the
+checkout, and the model writes to it during a session.
+
+| Key                 | Type    | Default | Description                                               |
+|---------------------|---------|---------|-----------------------------------------------------------|
+| `autoMemoryEnabled` | boolean | false   | Keep the directory and show it to the model.              |
+
+Off by default. Turn it on with `/settings` → **Auto memory**, and `/memory`
+reports the directory's path and what it holds.
+
+### What is in the directory
+
+The directory lives beside the project's transcripts, under
+`~/.config/mikmik/projects/<encoded-project-root>/memory/`. The project root is
+the repository root, so a session started in a subdirectory reads the same
+memory.
+
+It holds `MEMORY.md`, an index the model keeps by hand, plus one `.md` file per
+topic. A topic file opens with YAML frontmatter:
+
+```markdown
+---
+name: Deploy
+description: How releases reach production
+type: project
+---
+
+Tag the commit, then wait for the release workflow.
+```
+
+`type` is one of `user`, `feedback`, `project` or `reference`. `name` and
+`description` are what a search scores against, so a file without them is
+harder for the model to find.
+
+Session extraction writes `session-notes.md` there on its own.
+
+### What the model sees
+
+While the feature is on, the system prompt carries a `<memory>` block naming
+the directory, the `MEMORY.md` index (capped at 200 lines and 25 KB), and a
+one-line manifest entry per file with its type, description and age. Bodies are
+not loaded; the model reads one with the `Memory` tool, which is offered only
+while the feature is on.
+
+Each body the tool returns is prefixed with a staleness note when the file is
+more than a day old, because a memory is a point-in-time observation and a
+file:line citation in it may no longer hold.
+
+### Environment variables
+
+| Variable                      | Effect                                                                    |
+|-------------------------------|---------------------------------------------------------------------------|
+| `MIKMIK_DISABLE_AUTO_MEMORY`  | Truthy turns it off whatever the setting says; defined-but-falsy turns it on. |
+| `MIKMIK_MEMORY_PATH_OVERRIDE` | Full path to use as the memory directory, bypassing the project layout.   |
+| `MIKMIK_REMOTE_MEMORY_DIR`    | Base directory to derive the project's memory directory from.             |
+
+`--bare` (`MIKMIK_SIMPLE`) turns auto memory off along with everything else.
+
+---
+
 ## Providers
 
 MikMik can send requests to multiple LLM providers. Set the active provider
