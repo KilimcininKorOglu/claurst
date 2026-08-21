@@ -144,6 +144,23 @@ Toggle it from the TUI with `/config` → **Show message timestamps**. Turns
 restored from a transcript recorded before this option existed carry no time
 and render without one.
 
+### Desktop notifications
+
+The three moments a session either stops and waits or has nothing left to do.
+Each is sent through the operating system's own notification service, so it
+arrives while the terminal is in the background.
+
+| Key                    | Type    | Default | Description                                                             |
+|------------------------|---------|---------|-------------------------------------------------------------------------|
+| `notifications`        | boolean | true    | Master switch. Off means nothing is sent, whatever the three below say.  |
+| `notifyOnQuestion`     | boolean | true    | The model called `AskUserQuestion` and the turn is blocked on an answer. |
+| `notifyOnPlanReady`    | boolean | true    | A plan is waiting for approval (see [`plan`](#plan)).                    |
+| `notifyOnTurnComplete` | boolean | true    | The turn finished, tool round-trips included, and the prompt is free. The last thing the model said is used as the body. |
+
+Toggle them from the TUI with `/settings`. Delivery is best-effort: a machine
+with no notification daemon, or a terminal that was never granted notification
+permission, drops the notification without interrupting the turn.
+
 ### Advisor
 
 | Key            | Type   | Default | Description                                                                                                                                       |
@@ -567,6 +584,21 @@ Read-only mode. File reads and searches are allowed; file writes and command
 execution are blocked. This matches the built-in `plan` agent's behaviour and
 is useful for code analysis sessions where you want to prevent accidental
 modifications.
+
+Leaving plan mode is your decision, not the model's. When the model calls
+`ExitPlanMode`, the plan is shown in a dialog and the turn waits there. Three
+answers:
+
+| Answer                       | Result                                                        |
+|------------------------------|---------------------------------------------------------------|
+| Approve and auto-accept edits | Permission mode becomes `acceptEdits`, agent mode becomes `build`. |
+| Approve, ask before each edit | Permission mode becomes `default`, agent mode becomes `build`.     |
+| Keep planning                 | Nothing changes; the session is still planning.                    |
+
+Anything typed in the note row reaches the model with every answer, so a
+rejection carries its reason. `Esc` counts as "keep planning" and sends no
+note. Headless (`--print`) has no dialog to ask through, so `ExitPlanMode`
+returns there exactly as it always did rather than blocking on nobody.
 
 The permission mode can also be overridden per-session on the command line:
 

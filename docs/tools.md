@@ -688,11 +688,13 @@ Edit a Jupyter notebook (`.ipynb`) by modifying, inserting, or deleting cells. O
 
 ### EnterPlanModeTool
 
-**Permission level:** Execute
+**Permission level:** None
 
 Switch the agent into plan mode. In plan mode, all write and execute tools are blocked. The agent can only read files, search, and reason. Used to draft an approach before taking action.
 
-No parameters.
+| Parameter | Type   | Required | Description                    |
+|-----------|--------|----------|--------------------------------|
+| `reason`  | string | no       | Why plan mode is being entered |
 
 Exits automatically when `/plan off` is invoked or when `ExitPlanModeTool` is called.
 
@@ -700,11 +702,15 @@ Exits automatically when `/plan off` is invoked or when `ExitPlanModeTool` is ca
 
 ### ExitPlanModeTool
 
-**Permission level:** Execute
+**Permission level:** None
 
-Exit plan mode and return to the normal permission mode that was active before `/plan` was called.
+Put the plan in front of the user and wait for their decision. The turn is blocked until they answer, and the answer decides the permission mode the session lands in. See [Plan mode](configuration.md#plan) for the three answers.
 
-No parameters.
+| Parameter | Type   | Required | Description                  |
+|-----------|--------|----------|------------------------------|
+| `summary` | string | no       | The plan, as written for the user |
+
+Headless (`--print`) has no dialog to ask through: there the tool reports the plan and leaves plan mode without blocking.
 
 ---
 
