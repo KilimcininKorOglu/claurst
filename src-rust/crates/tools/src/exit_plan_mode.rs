@@ -155,37 +155,72 @@ fn message_for(choice: PlanChoice) -> &'static str {
     }
 }
 
+/// How many plans one session may write before the tool gives up naming them.
+///
+/// Far above any real session; it exists so that a directory nothing can be
+/// created in fails instead of looping.
+const MAX_PLANS_PER_SESSION: u32 = 999;
+
 /// Write the plan where the user can open it, returning where it landed.
+///
+/// Each plan gets its own file, numbered in the order it was written, so a
+/// session that plans several times keeps every one of them and a sub-agent
+/// sharing the session id cannot overwrite the plan the user is looking at.
 ///
 /// Best-effort: a plan that cannot be written still reaches the dialog, which
 /// then offers no way to edit it. The failure is logged rather than returned,
 /// because it changes nothing about what the model should do next.
 fn write_plan(session_id: &str, plan: &str) -> Option<PathBuf> {
-    let path = match mikmik_core::session_storage::plan_path(session_id) {
-        Ok(path) => path,
+    let dir = match mikmik_core::session_storage::plan_dir(session_id) {
+        Ok(dir) => dir,
         Err(error) => {
-            warn!(%error, session_id, "the session id cannot name a plan file");
+            warn!(%error, session_id, "the session id cannot name a plan directory");
             return None;
         }
     };
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            warn!(%error, dir = %parent.display(), "could not create the plans directory");
-            return None;
-        }
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        warn!(%error, dir = %dir.display(), "could not create the plan directory");
+        return None;
     }
+
     // Ends with a newline: this file is opened in an editor, and a plan that
     // does not end its last line makes anything appended to it join that line.
-    let plan = if plan.ends_with('\n') {
+    let body = if plan.ends_with('\n') {
         plan.to_string()
     } else {
         format!("{plan}\n")
     };
-    if let Err(error) = std::fs::write(&path, plan) {
-        warn!(%error, path = %path.display(), "could not write the plan file");
-        return None;
+
+    // `create_new` is what makes the number safe to derive from the directory:
+    // two writers that pick the same one cannot both win, and the loser tries
+    // the next.
+    for n in 1..=MAX_PLANS_PER_SESSION {
+        let path = dir.join(format!("{n:03}.md"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(error) = file.write_all(body.as_bytes()) {
+                    warn!(%error, path = %path.display(), "could not write the plan file");
+                    return None;
+                }
+                return Some(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                warn!(%error, path = %path.display(), "could not create the plan file");
+                return None;
+            }
+        }
     }
-    Some(path)
+    warn!(
+        dir = %dir.display(),
+        "this session has already written {MAX_PLANS_PER_SESSION} plans"
+    );
+    None
 }
 
 /// The plan as it stands on disk, when that is not what was written there.
@@ -218,9 +253,9 @@ mod tests {
         assert!(!result.is_error);
         assert!(result.content.contains("do the thing"));
 
-        let written = mikmik_core::session_storage::plan_path(&ctx.session_id)
+        let written = mikmik_core::session_storage::plan_dir(&ctx.session_id)
             .ok()
-            .and_then(|path| std::fs::read_to_string(path).ok());
+            .and_then(|dir| std::fs::read_to_string(dir.join("001.md")).ok());
         // Ends its last line, or an editor appending to it joins that line.
         assert_eq!(written.as_deref(), Some("do the thing\n"));
     }
@@ -263,6 +298,29 @@ mod tests {
                 .and_then(Value::as_bool),
             Some(false)
         );
+    }
+
+    /// A session that plans several times keeps every plan, so the user can go
+    /// back to one and a sub-agent sharing the session id cannot overwrite it.
+    #[tokio::test]
+    async fn each_plan_gets_its_own_file() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("a temp home");
+        let _home = HomeGuard::pointing_at(home.path());
+
+        let ctx = allow_all_context(std::env::temp_dir());
+        for plan in ["first plan", "second plan", "third plan"] {
+            ExitPlanModeTool
+                .execute(json!({ "summary": plan }), &ctx)
+                .await;
+        }
+
+        let dir = mikmik_core::session_storage::plan_dir(&ctx.session_id)
+            .expect("a plain id is a legal directory name");
+        let read = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
+        assert_eq!(read("001.md").as_deref(), Some("first plan\n"));
+        assert_eq!(read("002.md").as_deref(), Some("second plan\n"));
+        assert_eq!(read("003.md").as_deref(), Some("third plan\n"));
     }
 
     /// The dialog can open the plan in an editor while it waits, so what the

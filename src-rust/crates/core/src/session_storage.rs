@@ -279,17 +279,18 @@ pub fn transcript_path(project_root: &Path, session_id: &str) -> crate::Result<P
     Ok(transcript_dir(project_root).join(format!("{}.jsonl", session_id)))
 }
 
-/// Returns the full path to a session's plan file: `<config dir>/plans/<id>.md`.
+/// Returns a session's plan directory: `<config dir>/plans/<id>/`.
 ///
-/// The plan a session is working from is a document the user edits, so it lives
-/// as one file per session rather than inside the transcript. Not
-/// project-scoped, because a plan is written before any directory is decided.
+/// One directory per session holding one file per plan, because a session that
+/// plans repeatedly produces several and each is a document the user may go
+/// back to. Not project-scoped, because a plan is written before any directory
+/// is decided.
 ///
 /// # Errors
 /// Returns `crate::ClaudeError::Other` if `session_id` is empty or contains
 /// path components (`/`, `\`, or `..`), on the same grounds as
 /// [`transcript_path`].
-pub fn plan_path(session_id: &str) -> crate::Result<PathBuf> {
+pub fn plan_dir(session_id: &str) -> crate::Result<PathBuf> {
     if session_id.is_empty()
         || session_id.contains('/')
         || session_id.contains('\\')
@@ -301,7 +302,7 @@ pub fn plan_path(session_id: &str) -> crate::Result<PathBuf> {
     }
     Ok(crate::config::Settings::config_dir()
         .join("plans")
-        .join(format!("{}.md", session_id)))
+        .join(session_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -1527,25 +1528,25 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_path_is_one_file_per_session() {
-        let path = plan_path("sess-1").expect("a plain id is a legal file name");
+    fn a_plan_dir_is_one_directory_per_session() {
+        let dir = plan_dir("sess-1").expect("a plain id is a legal directory name");
 
         assert_eq!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("sess-1.md")
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("sess-1")
         );
         assert_eq!(
-            path.parent().and_then(|dir| dir.file_name()?.to_str()),
+            dir.parent().and_then(|parent| parent.file_name()?.to_str()),
             Some("plans")
         );
     }
 
     #[test]
-    fn a_plan_path_refuses_to_escape_its_directory() {
+    fn a_plan_dir_refuses_to_escape_its_parent() {
         for id in ["", "../../etc/passwd", "a/b", "a\\b"] {
             assert!(
-                plan_path(id).is_err(),
-                "{id:?} was accepted as a plan file name"
+                plan_dir(id).is_err(),
+                "{id:?} was accepted as a plan directory name"
             );
         }
     }
