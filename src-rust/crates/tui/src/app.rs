@@ -1611,6 +1611,9 @@ pub struct App {
         Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
     /// State for the plan approval dialog.
     pub plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState,
+    /// The permission mode in force when plan mode was entered, if it was
+    /// entered during this session. Approving a plan restores it.
+    pub permission_mode_before_plan: Option<mikmik_core::config::PermissionMode>,
 
     // ---- Context window & rate limit info ----------------------------------
     /// Total context window size for the current model (tokens).
@@ -2019,6 +2022,7 @@ impl App {
             ask_user_dialog: crate::ask_user_dialog::AskUserDialogState::new(),
             plan_approval_rx: None,
             plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState::new(),
+            permission_mode_before_plan: None,
             context_window_size: 0,
             context_used_tokens: 0,
             rate_limit_5h_pct: None,
@@ -2770,6 +2774,35 @@ impl App {
         );
     }
 
+    /// Record the permission mode plan mode is being entered from, or forget it
+    /// on the way out.
+    ///
+    /// Approving a plan restores this mode rather than picking a fixed one, so
+    /// a session that planned from bypass returns to bypass and a session that
+    /// planned from default returns to being asked.
+    fn remember_permission_mode_for_plan(&mut self, entering: bool) {
+        use mikmik_core::config::PermissionMode;
+        if !entering {
+            self.permission_mode_before_plan = None;
+            return;
+        }
+        // Entering twice must not record `Plan` as the mode to come back to.
+        if self.config.permission_mode != PermissionMode::Plan {
+            self.permission_mode_before_plan = Some(self.config.permission_mode);
+        }
+    }
+
+    /// The permission mode an approved plan puts the session into.
+    ///
+    /// Falls back to `AcceptEdits` when nothing was recorded, which happens
+    /// when the session started in plan mode: approving still has to mean more
+    /// than "carry on asking", or the option says nothing.
+    pub fn permission_mode_after_plan(&self) -> mikmik_core::config::PermissionMode {
+        self.permission_mode_before_plan
+            .filter(|mode| *mode != mikmik_core::config::PermissionMode::Default)
+            .unwrap_or(mikmik_core::config::PermissionMode::AcceptEdits)
+    }
+
     /// Cycle to the next agent mode: build → plan → build.
     /// Sets `agent_mode_changed` so the main loop can update the query config
     /// and tool list accordingly.
@@ -2783,6 +2816,7 @@ impl App {
         self.accent_color = accent_for_mode(Some(next));
 
         // Sync plan_mode flag for legacy code paths
+        self.remember_permission_mode_for_plan(next == "plan");
         self.plan_mode = next == "plan";
 
         let label = match next {
@@ -3130,12 +3164,20 @@ impl App {
             }
             "plan" => {
                 use mikmik_core::config::PermissionMode;
-                self.plan_mode = !self.plan_mode;
-                self.config.permission_mode = if self.plan_mode {
+                let entering = !self.plan_mode;
+                let mode = if entering {
+                    self.remember_permission_mode_for_plan(true);
                     PermissionMode::Plan
                 } else {
-                    PermissionMode::Default
+                    // Leaving plan mode puts back what was in force before it,
+                    // not a fixed default, so a session that planned from
+                    // bypass returns to bypass.
+                    self.permission_mode_before_plan
+                        .take()
+                        .unwrap_or(PermissionMode::Default)
                 };
+                self.plan_mode = entering;
+                self.config.permission_mode = mode;
                 self.status_message = Some(if self.plan_mode {
                     "Plan mode ON — MikMik will plan before acting.".to_string()
                 } else {
@@ -10601,6 +10643,98 @@ mod tests {
         assert_eq!(app.prompt_input.cursor, 10, "goLineEnd did not move");
         app.handle_keybinding_action("goLineStart");
         assert_eq!(app.prompt_input.cursor, 0, "goLineStart did not move");
+    }
+
+    /// Tab into plan mode and back out again, with the mode to come back to
+    /// recorded on the way in.
+    #[test]
+    fn tab_records_the_mode_plan_mode_was_entered_from() {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+
+        app.cycle_agent_mode();
+
+        assert!(app.plan_mode);
+        assert_eq!(
+            app.permission_mode_before_plan,
+            Some(PermissionMode::BypassPermissions)
+        );
+        // Tab does not touch the permission mode itself.
+        assert_eq!(
+            app.config.permission_mode,
+            PermissionMode::BypassPermissions
+        );
+
+        app.cycle_agent_mode();
+        assert!(!app.plan_mode);
+        assert_eq!(app.permission_mode_before_plan, None);
+    }
+
+    /// `/plan` changes the permission mode as well, so leaving must put back
+    /// what it replaced instead of a fixed default.
+    #[test]
+    fn the_plan_command_restores_the_mode_it_replaced() {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+
+        assert!(!app.intercept_slash_command("plan"));
+        assert_eq!(app.config.permission_mode, PermissionMode::Plan);
+        assert_eq!(
+            app.permission_mode_before_plan,
+            Some(PermissionMode::BypassPermissions)
+        );
+
+        assert!(!app.intercept_slash_command("plan"));
+        assert_eq!(
+            app.config.permission_mode,
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(app.permission_mode_before_plan, None);
+    }
+
+    /// A session that was already in plan mode has nothing recorded, and
+    /// approving still has to mean more than "carry on asking".
+    #[test]
+    fn approval_falls_back_to_accept_edits() {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        assert_eq!(app.permission_mode_before_plan, None);
+        assert_eq!(
+            app.permission_mode_after_plan(),
+            PermissionMode::AcceptEdits
+        );
+
+        // Default is recorded but means the same thing, so it takes the same
+        // fallback rather than approving into "ask me every time".
+        app.config.permission_mode = PermissionMode::Default;
+        app.cycle_agent_mode();
+        assert_eq!(
+            app.permission_mode_after_plan(),
+            PermissionMode::AcceptEdits
+        );
+    }
+
+    /// Entering plan mode twice must not record `Plan` as the mode to restore.
+    #[test]
+    fn entering_plan_mode_twice_keeps_the_first_mode() {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+
+        assert!(!app.intercept_slash_command("plan"));
+        // Tab now also thinks it is entering plan mode.
+        app.cycle_agent_mode();
+
+        assert_eq!(
+            app.permission_mode_after_plan(),
+            PermissionMode::BypassPermissions
+        );
     }
 
     /// Approving a plan has to move the session, not just answer the model:
