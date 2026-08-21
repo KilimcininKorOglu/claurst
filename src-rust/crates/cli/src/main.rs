@@ -6016,6 +6016,44 @@ async fn run_interactive(
                 );
                 app.is_streaming = false;
                 app.status_message = None;
+
+                // The user approved a plan and asked for a clean slate first.
+                // It happens here rather than when they answered, because a
+                // summary written mid-turn would swallow the pending tool call
+                // and leave the request with a tool_use nothing answers.
+                if let Some(plan) = app.take_pending_plan_compaction() {
+                    let replaced = compact_conversation(
+                        Some(
+                            "The user approved a plan and is about to have it \
+                             implemented. Summarise what has been established \
+                             so far, keeping every decision the plan depends on.",
+                        ),
+                        &mut messages,
+                        &mut app,
+                        &mut session,
+                        &mut transcript,
+                        &cmd_ctx.config,
+                        client.as_ref(),
+                        base_query_config.provider_registry.as_ref(),
+                        &model_registry,
+                        &tool_ctx.session_id,
+                    )
+                    .await;
+                    if replaced {
+                        if let Some(runtime) = bridge_runtime.as_ref() {
+                            let (entries, omitted) = history_for_bridge(&messages);
+                            let _ = runtime
+                                .outbound_tx
+                                .try_send(BridgeOutbound::History { entries, omitted });
+                        }
+                    }
+                    // Queued rather than dispatched: the drain below is the one
+                    // place a follow-up turn starts, and it already handles the
+                    // prompt and the auto-submit.
+                    app.queued_messages
+                        .push_front(format!("Implement the approved plan:\n\n{plan}"));
+                }
+
                 // Drain one queued message into the prompt and request an
                 // auto-submit on the next loop iteration (issue #149).
                 if let Some(next) = app.queued_messages.pop_front() {
