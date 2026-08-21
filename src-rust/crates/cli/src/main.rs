@@ -3202,12 +3202,13 @@ async fn run_interactive(
     // (TS parity), so the warning is a one-time gate — not re-shown on every
     // launch.
     use mikmik_core::config::PermissionMode;
-    if live_config.permission_mode == PermissionMode::BypassPermissions
-        && !settings.skip_dangerous_mode_permission_prompt
-        && !app.bypass_permissions_dialog_shown
+    // The gate answers to one flag from here on, so the session loop can ask
+    // the same question when the mode is switched later without re-reading the
+    // settings file.
+    app.bypass_gate_cleared = settings.skip_dangerous_mode_permission_prompt;
+    if live_config.permission_mode == PermissionMode::BypassPermissions && !app.bypass_gate_cleared
     {
-        app.bypass_permissions_dialog.show();
-        app.bypass_permissions_dialog_shown = true;
+        app.bypass_permissions_dialog.show(true);
     } else if live_config.permission_mode != PermissionMode::BypassPermissions {
         // Show onboarding only if NOT in bypass-permissions mode.
         // Bypass dialog is a mandatory security gate and takes absolute priority.

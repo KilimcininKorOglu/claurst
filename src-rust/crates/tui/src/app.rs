@@ -1453,12 +1453,23 @@ pub struct App {
     pub project_trust_granted: bool,
     /// Go to Line dialog (Ctrl+G in message pane).
     pub go_to_line_dialog: GoToLineDialog,
-    /// Bypass-permissions startup confirmation dialog.
-    /// Shown at startup when --dangerously-skip-permissions was passed.
-    /// User must explicitly accept or the session exits.
+    /// Bypass-permissions confirmation dialog.
+    ///
+    /// Shown at startup when the session begins in `BypassPermissions`, and
+    /// again whenever the mode is switched to it mid-session.
     pub bypass_permissions_dialog: crate::bypass_permissions_dialog::BypassPermissionsDialogState,
-    /// Whether the bypass-permissions dialog has been shown this session.
-    pub bypass_permissions_dialog_shown: bool,
+    /// Whether the bypass warning no longer has to be shown.
+    ///
+    /// Starts as `skipDangerousModePermissionPrompt` from the settings file and
+    /// is set when the user accepts, so the gate is a one-time thing rather
+    /// than something that interrupts every switch.
+    pub bypass_gate_cleared: bool,
+    /// The last mode observed that was not `BypassPermissions`.
+    ///
+    /// Declining a mid-session switch puts this back. `shift+tab`, `/yolo` and
+    /// `/permissions set` all write the mode directly, so the mode they
+    /// replaced is only knowable by having watched it.
+    pub mode_before_bypass: mikmik_core::config::PermissionMode,
     /// File injection warning dialog.
     /// Shown when oversized or binary files are detected in @refs.
     pub file_injection_dialog: crate::file_injection_dialog::FileInjectionDialogState,
@@ -1923,7 +1934,8 @@ impl App {
             go_to_line_dialog: GoToLineDialog::new(),
             bypass_permissions_dialog:
                 crate::bypass_permissions_dialog::BypassPermissionsDialogState::new(),
-            bypass_permissions_dialog_shown: false,
+            bypass_gate_cleared: false,
+            mode_before_bypass: mikmik_core::config::PermissionMode::Default,
             file_injection_dialog: crate::file_injection_dialog::FileInjectionDialogState::new(),
             file_injection_force: false,
             onboarding_dialog: crate::onboarding_dialog::OnboardingDialogState::new(),
@@ -4259,6 +4271,56 @@ impl App {
         settings.save_sync()
     }
 
+    /// Put the settings file back if it currently names `bypassPermissions`.
+    ///
+    /// `/yolo on` and `/permissions set bypass-permissions` write the mode to
+    /// disk before the gate is reached, so declining has to undo that or the
+    /// refused mode would come back on the next launch. `shift+tab` never
+    /// writes, and the file is left alone in that case.
+    fn persist_bypass_permissions_declined(
+        restored: mikmik_core::config::PermissionMode,
+    ) -> anyhow::Result<()> {
+        let mut settings = mikmik_core::config::Settings::load_sync()?;
+        if settings.config.permission_mode != mikmik_core::config::PermissionMode::BypassPermissions
+        {
+            return Ok(());
+        }
+        settings.config.permission_mode = restored;
+        settings.save_sync()
+    }
+
+    /// The user accepted the warning: dismiss it and stop asking.
+    fn accept_bypass_permissions(&mut self) {
+        self.bypass_permissions_dialog.dismiss();
+        self.bypass_gate_cleared = true;
+        let _ = Self::persist_bypass_permissions_accepted();
+    }
+
+    /// The user refused the warning.
+    ///
+    /// At startup that ends the session, because bypass was asked for on the
+    /// command line and there is no earlier mode to fall back to. Mid-session
+    /// the previous mode goes back instead, in the live config and on disk.
+    fn decline_bypass_permissions(&mut self) {
+        if self.bypass_permissions_dialog.at_startup {
+            self.should_exit = true;
+            return;
+        }
+        let restored = self.mode_before_bypass;
+        self.bypass_permissions_dialog.dismiss();
+        self.config.permission_mode = restored;
+        let _ = Self::persist_bypass_permissions_declined(restored);
+        self.status_message = Some(format!(
+            "Bypass permissions declined — back to {}.",
+            match restored {
+                mikmik_core::config::PermissionMode::Default => "asking for permission",
+                mikmik_core::config::PermissionMode::AcceptEdits => "accept-edits mode",
+                mikmik_core::config::PermissionMode::Plan => "plan mode",
+                mikmik_core::config::PermissionMode::BypassPermissions => "bypass permissions",
+            }
+        ));
+    }
+
     /// Resolve the character to insert for a printable key press, applying the
     /// US-QWERTY shift map only when the kitty keyboard protocol is active.
     ///
@@ -4356,29 +4418,21 @@ impl App {
             }
         }
 
-        // Bypass-permissions dialog: highest-priority gate — user must accept or the
-        // session exits immediately. Mirrors TS BypassPermissionsModeDialog.tsx.
-        // Accepting is remembered in settings.json (skipDangerousModePermissionPrompt)
-        // so the warning is shown once, not on every launch.
+        // Bypass-permissions dialog: highest-priority gate. Mirrors TS
+        // BypassPermissionsModeDialog.tsx. Accepting is remembered in
+        // settings.json (skipDangerousModePermissionPrompt) so the warning is
+        // shown once, not on every launch and not on every switch.
         if self.bypass_permissions_dialog.visible {
             match key.code {
-                KeyCode::Char('1') | KeyCode::Esc => {
-                    // "No, exit" — quit immediately
-                    self.should_exit = true;
-                }
-                KeyCode::Char('2') => {
-                    // "Yes, I accept" — dismiss and continue
-                    self.bypass_permissions_dialog.dismiss();
-                    let _ = Self::persist_bypass_permissions_accepted();
-                }
+                KeyCode::Char('1') | KeyCode::Esc => self.decline_bypass_permissions(),
+                KeyCode::Char('2') => self.accept_bypass_permissions(),
                 KeyCode::Up | KeyCode::Char('k') => self.bypass_permissions_dialog.select_prev(),
                 KeyCode::Down | KeyCode::Char('j') => self.bypass_permissions_dialog.select_next(),
                 KeyCode::Enter => {
                     if self.bypass_permissions_dialog.is_accept_selected() {
-                        self.bypass_permissions_dialog.dismiss();
-                        let _ = Self::persist_bypass_permissions_accepted();
+                        self.accept_bypass_permissions();
                     } else {
-                        self.should_exit = true;
+                        self.decline_bypass_permissions();
                     }
                 }
                 _ => {}
@@ -10779,6 +10833,115 @@ mod tests {
             app.permission_mode_after_plan(),
             PermissionMode::BypassPermissions
         );
+    }
+
+    /// An app already switched into bypass, with the dialog open the way the
+    /// session loop opens it mid-session.
+    fn app_in_a_mid_session_bypass_switch(from: mikmik_core::config::PermissionMode) -> App {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        app.mode_before_bypass = from;
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+        app.bypass_permissions_dialog.show(false);
+        app
+    }
+
+    #[test]
+    fn declining_a_mid_session_switch_puts_the_previous_mode_back() {
+        use mikmik_core::config::PermissionMode;
+
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+
+        let mut app = app_in_a_mid_session_bypass_switch(PermissionMode::AcceptEdits);
+        app.handle_key_event(press_key(KeyCode::Char('1'), KeyModifiers::NONE));
+
+        assert_eq!(app.config.permission_mode, PermissionMode::AcceptEdits);
+        assert!(!app.bypass_permissions_dialog.visible);
+        assert!(
+            !app.should_exit,
+            "a refused mid-session switch must not end the session"
+        );
+    }
+
+    #[test]
+    fn declining_at_startup_still_ends_the_session() {
+        use mikmik_core::config::PermissionMode;
+
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+
+        let mut app = make_app();
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+        app.bypass_permissions_dialog.show(true);
+        app.handle_key_event(press_key(KeyCode::Char('1'), KeyModifiers::NONE));
+
+        assert!(app.should_exit);
+    }
+
+    #[test]
+    fn accepting_clears_the_gate_so_it_does_not_ask_again() {
+        use mikmik_core::config::PermissionMode;
+
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+
+        let mut app = app_in_a_mid_session_bypass_switch(PermissionMode::Default);
+        app.handle_key_event(press_key(KeyCode::Char('2'), KeyModifiers::NONE));
+
+        assert!(app.bypass_gate_cleared);
+        assert!(!app.bypass_permissions_dialog.visible);
+        assert_eq!(
+            app.config.permission_mode,
+            PermissionMode::BypassPermissions,
+            "accepting keeps the mode the user asked for"
+        );
+
+        let settings = mikmik_core::config::Settings::load_sync().expect("settings");
+        assert!(settings.skip_dangerous_mode_permission_prompt);
+    }
+
+    #[test]
+    fn declining_undoes_a_bypass_the_settings_file_already_holds() {
+        use mikmik_core::config::PermissionMode;
+
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+
+        // `/yolo on` and `/permissions set bypass-permissions` write the mode
+        // before the gate is reached, so a refusal that only fixed the live
+        // config would let the refused mode come back on the next launch.
+        let mut on_disk = mikmik_core::config::Settings::load_sync().expect("settings");
+        on_disk.config.permission_mode = PermissionMode::BypassPermissions;
+        on_disk.save_sync().expect("save");
+
+        let mut app = app_in_a_mid_session_bypass_switch(PermissionMode::Default);
+        app.handle_key_event(press_key(KeyCode::Char('1'), KeyModifiers::NONE));
+
+        let after = mikmik_core::config::Settings::load_sync().expect("settings");
+        assert_eq!(after.config.permission_mode, PermissionMode::Default);
+    }
+
+    #[test]
+    fn declining_leaves_a_settings_file_that_never_named_bypass_alone() {
+        use mikmik_core::config::PermissionMode;
+
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+
+        // `shift+tab` never writes the mode, so there is nothing to undo and
+        // the refusal must not invent a value the file did not hold.
+        let mut on_disk = mikmik_core::config::Settings::load_sync().expect("settings");
+        on_disk.config.permission_mode = PermissionMode::Plan;
+        on_disk.save_sync().expect("save");
+
+        let mut app = app_in_a_mid_session_bypass_switch(PermissionMode::AcceptEdits);
+        app.handle_key_event(press_key(KeyCode::Char('1'), KeyModifiers::NONE));
+
+        let after = mikmik_core::config::Settings::load_sync().expect("settings");
+        assert_eq!(after.config.permission_mode, PermissionMode::Plan);
+        assert_eq!(app.config.permission_mode, PermissionMode::AcceptEdits);
     }
 
     /// A dialog on `app`, restoring whatever mode was recorded.

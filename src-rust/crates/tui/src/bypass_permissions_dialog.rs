@@ -18,13 +18,21 @@ use crate::overlays::centered_rect;
 // State
 // ---------------------------------------------------------------------------
 
-/// State for the bypass-permissions startup confirmation dialog.
+/// State for the bypass-permissions confirmation dialog.
 #[derive(Debug, Default, Clone)]
 pub struct BypassPermissionsDialogState {
     /// Whether the dialog is currently visible.
     pub visible: bool,
     /// 0 = "No, exit" selected; 1 = "Yes, I accept" selected
     pub selected: usize,
+    /// Whether this showing is the startup gate.
+    ///
+    /// Declining at startup ends the session, because the user asked for bypass
+    /// on the command line and there is nothing else to fall back to. Declining
+    /// a switch made mid-session puts the previous mode back instead: the
+    /// conversation is already under way and throwing it out is a heavier
+    /// answer than the question deserves.
+    pub at_startup: bool,
 }
 
 impl BypassPermissionsDialogState {
@@ -32,10 +40,11 @@ impl BypassPermissionsDialogState {
         Self::default()
     }
 
-    /// Show the dialog (called at startup when bypass mode is active).
-    pub fn show(&mut self) {
+    /// Show the dialog. `at_startup` decides what declining does.
+    pub fn show(&mut self, at_startup: bool) {
         self.visible = true;
         self.selected = 0;
+        self.at_startup = at_startup;
     }
 
     /// Move selection up (wraps).
@@ -152,9 +161,17 @@ pub fn render_bypass_permissions_dialog(
         Style::default().fg(Color::Red)
     };
 
+    // The refusal has to name what it actually does, or a mid-session decline
+    // reads as "this ends the session" and nobody picks it.
+    let decline_label = if state.at_startup {
+        "No, exit"
+    } else {
+        "No, keep asking"
+    };
+
     lines.push(Line::from(vec![
         Span::styled("  [1] ", Style::default().fg(Color::DarkGray)),
-        Span::styled("No, exit", opt_no_style),
+        Span::styled(decline_label, opt_no_style),
         Span::raw("        "),
         Span::styled("  [2] ", Style::default().fg(Color::DarkGray)),
         Span::styled("Yes, I accept", opt_yes_style),
@@ -192,15 +209,26 @@ mod tests {
     #[test]
     fn bypass_dialog_show_sets_visible() {
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         assert!(state.visible);
         assert_eq!(state.selected, 0); // "No, exit" selected by default
+        assert!(state.at_startup);
+    }
+
+    #[test]
+    fn a_mid_session_showing_records_that_it_is_not_the_startup_gate() {
+        // The flag is what tells the key handler to put the previous mode back
+        // instead of ending the session.
+        let mut state = BypassPermissionsDialogState::new();
+        state.show(false);
+        assert!(state.visible);
+        assert!(!state.at_startup);
     }
 
     #[test]
     fn bypass_dialog_navigate() {
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         assert!(!state.is_accept_selected());
         state.select_next();
         assert!(state.is_accept_selected());
@@ -211,7 +239,7 @@ mod tests {
     #[test]
     fn bypass_dialog_navigate_wraps() {
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         state.select_prev(); // wrap from 0 → 1
         assert_eq!(state.selected, 1);
         state.select_next(); // wrap from 1 → 0
@@ -221,7 +249,7 @@ mod tests {
     #[test]
     fn bypass_dialog_dismiss() {
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         state.dismiss();
         assert!(!state.visible);
     }
@@ -230,7 +258,7 @@ mod tests {
     fn bypass_dialog_renders_without_panic() {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         terminal
             .draw(|frame| {
                 let area = frame.area();
@@ -250,7 +278,7 @@ mod tests {
     fn bypass_dialog_shows_both_options() {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         let mut state = BypassPermissionsDialogState::new();
-        state.show();
+        state.show(true);
         terminal
             .draw(|frame| {
                 render_bypass_permissions_dialog(frame, &state, frame.area());
@@ -266,6 +294,35 @@ mod tests {
             .collect();
         assert!(content.contains("No") || content.contains("exit"));
         assert!(content.contains("accept") || content.contains("Yes"));
+    }
+
+    #[test]
+    fn the_refusal_names_what_it_does_in_each_case() {
+        // "No, exit" on a mid-session switch would read as "this ends the
+        // session", which is not what declining does there.
+        fn drawn(at_startup: bool) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            let mut state = BypassPermissionsDialogState::new();
+            state.show(at_startup);
+            terminal
+                .draw(|frame| {
+                    render_bypass_permissions_dialog(frame, &state, frame.area());
+                })
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .clone()
+                .content()
+                .iter()
+                .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                .collect()
+        }
+
+        assert!(drawn(true).contains("No, exit"));
+        let mid = drawn(false);
+        assert!(mid.contains("No, keep asking"), "{mid}");
+        assert!(!mid.contains("No, exit"), "{mid}");
     }
 
     #[test]
