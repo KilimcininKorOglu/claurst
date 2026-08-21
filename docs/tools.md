@@ -704,7 +704,7 @@ Exits automatically when `/plan off` is invoked or when `ExitPlanModeTool` is ca
 
 **Permission level:** None
 
-Write the plan to `<config dir>/plans/<session id>.md`, put it in front of the user and wait for their decision. The turn is blocked until they answer, and the answer decides the permission mode the session lands in. A plan edited in the dialog is read back from the file and returned in place of the one that was proposed. See [Plan mode](configuration.md#plan) for the four answers.
+Write the plan to the next numbered file under `<config dir>/plans/<session id>/`, put it in front of the user and wait for their decision. The turn is blocked until they answer, and the answer decides the permission mode the session lands in. A plan edited in the dialog is read back from the file and returned in place of the one that was proposed. See [Plan mode](configuration.md#plan) for the four answers.
 
 | Parameter | Type   | Required | Description                  |
 |-----------|--------|----------|------------------------------|

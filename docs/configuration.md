@@ -623,9 +623,16 @@ Keys in the dialog:
 | `PgUp` `PgDn`      | Scroll a plan taller than the dialog.                                      |
 | `Esc`              | Keep planning, sending no note.                                            |
 
-The plan is written to `<config dir>/plans/<session id>.md` on every
-`ExitPlanMode` call, headless included, and the dialog shows the path. It is
+Every `ExitPlanMode` call writes its plan to `<config dir>/plans/<session
+id>/`, numbered in the order they were written (`001.md`, `002.md`, …), headless
+included. The dialog shows the path of the plan it is asking about. Nothing is
+deleted, so a session that planned several times keeps every version, and it is
 the only lasting copy: the tool call itself scrolls away with the transcript.
+
+A sub-agent shares the session id but never opens the dialog: the session it
+would interrupt belongs to the user, not to it. Its `ExitPlanMode` returns the
+way it does headless, and its plan lands as the next numbered file rather than
+over the one being shown.
 
 The permission mode can also be overridden per-session on the command line:
 
