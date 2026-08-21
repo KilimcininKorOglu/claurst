@@ -203,9 +203,12 @@ pub fn parse_frontmatter_quick(
 }
 
 /// Format memory headers as a text manifest: one entry per file with
-/// `[type] filename (iso-timestamp): description`.
+/// `[type] filename (iso-timestamp, age): description`.
 ///
-/// Mirrors `formatMemoryManifest` in `memoryScan.ts`.
+/// The age is carried alongside the timestamp rather than instead of it: the
+/// timestamp is what a later reader can compare against a commit or a log,
+/// and the age is what makes the model treat an old memory as suspect
+/// without doing date arithmetic.
 pub fn format_memory_manifest(memories: &[MemoryFileMeta]) -> String {
     memories
         .iter()
@@ -216,12 +219,15 @@ pub fn format_memory_manifest(memories: &[MemoryFileMeta]) -> String {
                 .map(|t| format!("[{}] ", t.as_str()))
                 .unwrap_or_default();
 
-            // Convert modified_secs to an ISO-8601-like timestamp.
-            let ts = format_unix_secs_iso(m.modified_secs);
+            let when = format!(
+                "{}, {}",
+                format_unix_secs_iso(m.modified_secs),
+                memory_age(m.modified_secs)
+            );
 
             match &m.description {
-                Some(desc) => format!("- {}{} ({}): {}", tag, m.filename, ts, desc),
-                None => format!("- {}{}", tag, m.filename),
+                Some(desc) => format!("- {}{} ({}): {}", tag, m.filename, when, desc),
+                None => format!("- {}{} ({})", tag, m.filename, when),
             }
         })
         .collect::<Vec<_>>()
@@ -491,13 +497,44 @@ pub fn load_memory_index(memory_dir: &Path) -> Option<EntrypointTruncation> {
 /// Build the memory content string to inject into the system prompt's
 /// `<memory>` block.
 ///
-/// Always includes the `MEMORY.md` index when it exists.
+/// Three parts: where the directory is, the `MEMORY.md` index, and a manifest
+/// of the topic files. The path comes first because the model writes memories
+/// with the ordinary `Write` and `Edit` tools, and without the path it has
+/// nowhere to put one. The manifest lists what exists without spending the
+/// tokens to load every body; a body is fetched on demand.
+///
+/// Returns an empty string for a directory with neither an index nor a topic
+/// file, so an untouched installation adds no block at all.
+///
 /// Called during `build_system_prompt` → `SystemPromptOptions::memory_content`.
 pub fn build_memory_prompt_content(memory_dir: &Path) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    let index = load_memory_index(memory_dir);
+    let files = scan_memory_dir(memory_dir);
 
-    if let Some(index) = load_memory_index(memory_dir) {
-        parts.push(format!("## Memory Index (MEMORY.md)\n{}", index.content));
+    if index.is_none() && files.is_empty() {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = vec![format!(
+        "Memory directory: {}\nWrite a new memory as a `.md` file there, with \
+         `name`, `description` and `type` frontmatter, and add one line for it \
+         to {}.",
+        memory_dir.display(),
+        MEMORY_ENTRYPOINT
+    )];
+
+    if let Some(index) = index {
+        parts.push(format!(
+            "## Memory Index ({})\n{}",
+            MEMORY_ENTRYPOINT, index.content
+        ));
+    }
+
+    if !files.is_empty() {
+        parts.push(format!(
+            "## Memory Files\n{}",
+            format_memory_manifest(&files)
+        ));
     }
 
     parts.join("\n\n")
@@ -767,6 +804,55 @@ mod tests {
         assert!(result.content.contains("test.md"));
     }
 
+    // ---- build_memory_prompt_content ---------------------------------------
+
+    /// An installation that never wrote a memory must add no block, or every
+    /// prompt carries an empty heading.
+    #[test]
+    fn an_empty_memory_dir_produces_no_block() {
+        let dir = make_temp_dir();
+        assert_eq!(build_memory_prompt_content(dir.path()), "");
+        assert_eq!(build_memory_prompt_content(Path::new("/nonexistent")), "");
+    }
+
+    #[test]
+    fn the_block_carries_the_path_the_index_and_the_manifest() {
+        let dir = make_temp_dir();
+        write_file(dir.path(), "MEMORY.md", "- see user_role.md for the user");
+        write_file(
+            dir.path(),
+            "user_role.md",
+            "---\nname: Role\ndescription: The user is a data scientist\ntype: user\n---\nbody",
+        );
+        write_file(dir.path(), "notes/api.md", "---\nname: API\n---\nbody");
+
+        let block = build_memory_prompt_content(dir.path());
+
+        // The model writes memories with Write/Edit, so it needs the path.
+        assert!(
+            block.contains(&dir.path().display().to_string()),
+            "the block does not say where the directory is:\n{block}"
+        );
+        assert!(block.contains("data scientist"), "index missing:\n{block}");
+        assert!(block.contains("[user] user_role.md"), "{block}");
+        // A file in a subdirectory keeps its relative path.
+        assert!(block.contains("notes/api.md"), "{block}");
+        // MEMORY.md is the index, never a manifest entry of its own.
+        assert!(!block.contains("- MEMORY.md"), "{block}");
+    }
+
+    /// A directory with topic files but no index still describes itself.
+    #[test]
+    fn the_manifest_alone_is_enough_for_a_block() {
+        let dir = make_temp_dir();
+        write_file(dir.path(), "one.md", "---\nname: One\n---\nbody");
+
+        let block = build_memory_prompt_content(dir.path());
+
+        assert!(block.contains("one.md"), "{block}");
+        assert!(!block.contains("Memory Index"), "{block}");
+    }
+
     // ---- scan_memory_dir ---------------------------------------------------
 
     #[test]
@@ -821,8 +907,42 @@ mod tests {
         };
         let manifest = format_memory_manifest(&[meta]);
         assert!(manifest.contains("ref.md"));
-        // No description separator colon
-        assert!(!manifest.contains("ref.md ("));
+        // No description, so no separator colon after the parenthesis.
+        assert!(!manifest.contains("): "));
+    }
+
+    /// A raw timestamp does not make a model doubt a memory; an age does.
+    #[test]
+    fn every_manifest_line_carries_the_files_age() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let described = MemoryFileMeta {
+            filename: "old.md".to_string(),
+            path: PathBuf::from("old.md"),
+            name: None,
+            description: Some("something".to_string()),
+            memory_type: None,
+            modified_secs: now - 47 * 86400,
+        };
+        let bare = MemoryFileMeta {
+            filename: "fresh.md".to_string(),
+            description: None,
+            modified_secs: now,
+            ..described.clone()
+        };
+
+        let manifest = format_memory_manifest(&[described, bare]);
+
+        assert!(
+            manifest.contains("47 days ago"),
+            "a described file lost its age:\n{manifest}"
+        );
+        assert!(
+            manifest.contains("today"),
+            "a file with no description lost its age:\n{manifest}"
+        );
     }
 
     // ---- MemoryType --------------------------------------------------------
