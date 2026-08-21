@@ -7,6 +7,43 @@ use async_trait::async_trait;
 
 pub struct MemoryCommand;
 
+/// The project's auto memory directory, described for `/memory` output.
+///
+/// Reports the state rather than the contents: the directory holds whole
+/// documents and `/memory` already prints every AGENTS.md in full.
+fn auto_memory_section(working_dir: &std::path::Path, config: &mikmik_core::Config) -> String {
+    if !mikmik_core::memdir::is_auto_memory_enabled(config.auto_memory_enabled) {
+        return "\n\nAuto memory is off. Turn it on with /settings → Auto memory.".to_string();
+    }
+
+    let project_root = mikmik_core::session_storage::transcript_root_for(working_dir);
+    let dir = mikmik_core::memdir::auto_memory_path(&project_root);
+    let files = mikmik_core::memdir::scan_memory_dir(&dir);
+    let has_index = mikmik_core::memdir::load_memory_index(&dir).is_some();
+
+    let index_line = if has_index {
+        format!("{} is present", mikmik_core::memdir::MEMORY_ENTRYPOINT)
+    } else {
+        format!("no {} yet", mikmik_core::memdir::MEMORY_ENTRYPOINT)
+    };
+
+    let files_line = match files.len() {
+        0 => "no memory files yet".to_string(),
+        1 => "1 memory file".to_string(),
+        n => format!("{n} memory files"),
+    };
+
+    format!(
+        "\n\nAuto memory\n\
+         ───────────\n\
+         Path: {}\n\
+         {}, {}.",
+        dir.display(),
+        index_line,
+        files_line
+    )
+}
+
 // ---- /memory -------------------------------------------------------------
 
 #[async_trait]
@@ -180,6 +217,100 @@ impl SlashCommand for MemoryCommand {
             );
         }
 
+        // The second store. Without this the auto memory directory is
+        // invisible: it is outside the checkout, the model writes to it on its
+        // own, and nothing else in the interface names it.
+        output.push_str(&auto_memory_section(&ctx.working_dir, &ctx.config));
+
         CommandResult::Message(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mikmik_core::CostTracker;
+
+    /// Serialises the tests that redirect the memory directory.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct MemoryDirGuard {
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl MemoryDirGuard {
+        fn new(dir: &std::path::Path) -> Self {
+            let saved = std::env::var_os("MIKMIK_MEMORY_PATH_OVERRIDE");
+            std::env::set_var("MIKMIK_MEMORY_PATH_OVERRIDE", dir);
+            Self { saved }
+        }
+    }
+
+    impl Drop for MemoryDirGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MIKMIK_MEMORY_PATH_OVERRIDE", value),
+                None => std::env::remove_var("MIKMIK_MEMORY_PATH_OVERRIDE"),
+            }
+        }
+    }
+
+    fn ctx_in(dir: &std::path::Path, auto_memory: Option<bool>) -> CommandContext {
+        CommandContext {
+            config: mikmik_core::config::Config {
+                auto_memory_enabled: auto_memory,
+                ..Default::default()
+            },
+            cost_tracker: CostTracker::new(),
+            messages: vec![],
+            working_dir: dir.to_path_buf(),
+            session_id: "test-session".to_string(),
+            session_title: None,
+            effort_level: None,
+            remote_session_url: None,
+            mcp_manager: None,
+            mcp_auth_runner: None,
+            interactive: true,
+            active_agent: None,
+        }
+    }
+
+    async fn run(ctx: &mut CommandContext) -> String {
+        match MemoryCommand.execute("", ctx).await {
+            CommandResult::Message(text) => text,
+            other => panic!("expected a message, got {other:?}"),
+        }
+    }
+
+    /// The auto memory directory sits outside the checkout and the model
+    /// writes to it unprompted, so `/memory` has to name it.
+    #[tokio::test]
+    async fn the_report_names_the_auto_memory_directory() {
+        let _lock = ENV_LOCK.lock().await;
+        let project = tempfile::tempdir().expect("tempdir");
+        let memory = project.path().join("memory");
+        std::fs::create_dir_all(&memory).expect("mkdir");
+        std::fs::write(memory.join("MEMORY.md"), "- an index line").expect("index");
+        std::fs::write(memory.join("one.md"), "---\nname: One\n---\nbody").expect("topic");
+        let _guard = MemoryDirGuard::new(&memory);
+
+        let mut ctx = ctx_in(project.path(), Some(true));
+        let output = run(&mut ctx).await;
+
+        assert!(output.contains(&memory.display().to_string()), "{output}");
+        assert!(output.contains("MEMORY.md is present"), "{output}");
+        assert!(output.contains("1 memory file"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_directory_is_reported_as_off() {
+        let _lock = ENV_LOCK.lock().await;
+        let project = tempfile::tempdir().expect("tempdir");
+        let _guard = MemoryDirGuard::new(&project.path().join("memory"));
+
+        let mut ctx = ctx_in(project.path(), Some(false));
+        let output = run(&mut ctx).await;
+
+        assert!(output.contains("Auto memory is off"), "{output}");
     }
 }
