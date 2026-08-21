@@ -662,8 +662,13 @@ yourself in every session.
 
 ### File locations and priority
 
-MikMik loads AGENTS.md files from four locations. They are processed in the
-following order (earlier = higher priority, later content is appended below):
+MikMik loads memory files from four locations, and nowhere else. It does not
+walk up from the working directory, so an `AGENTS.md` in a subdirectory or in
+a parent of the project is not read. The project root is the repository root,
+so a session started in a subdirectory reads the same files as one started at
+the top.
+
+The four locations are processed in this order, each appended below the last:
 
 | Scope   | Path                                | Description                                                                                                |
 |---------|-------------------------------------|------------------------------------------------------------------------------------------------------------|
@@ -672,16 +677,31 @@ following order (earlier = higher priority, later content is appended below):
 | Project | `<project-root>/AGENTS.md`          | Project-level context: architecture notes, conventions, workflows. Typically committed to version control. |
 | Local   | `<project-root>/.mikmik/AGENTS.md` | Local overrides not committed to version control (add `.mikmik/` to `.gitignore`).                        |
 
-Files from all four locations are concatenated (separated by blank lines) into
-a single system-prompt fragment. If the same instruction appears at multiple
+Files from all four locations are concatenated into a single system-prompt
+fragment, each under a `# Memory (<scope>, from <path>)` heading so the model
+can attribute an instruction. If the same instruction appears at several
 levels, the narrower scope (Project/Local) effectively wins because it appears
 later in the prompt.
 
 ### CLAUDE.md compatibility
 
-Files named `CLAUDE.md` in the same locations are treated identically to
-`AGENTS.md`. Both names are supported for compatibility with the TypeScript
-Claude Code CLI.
+Files named `CLAUDE.md` are read from the same locations as `AGENTS.md`, for
+compatibility with the TypeScript Claude Code CLI. A project may hold both.
+
+Two independent keys decide which of the two names is read:
+
+| Key                | Type    | Default | Description                                     |
+|--------------------|---------|---------|-------------------------------------------------|
+| `agentsMdEnabled`  | boolean | true    | Read `AGENTS.md` at every scope.                |
+| `claudeMdEnabled`  | boolean | false   | Read `CLAUDE.md` at every scope.                |
+
+Turn either on or off from the TUI with `/settings` → **Read AGENTS.md** and
+**Read CLAUDE.md**. Both on reads both files; both off reads neither, which is
+the same result as `--no-claude-md`. The Managed scope is unaffected: files
+under `rules/` carry neither name and are always read.
+
+Within one scope `AGENTS.md` comes before `CLAUDE.md` unless a `priority` in
+the frontmatter says otherwise.
 
 ### YAML frontmatter
 
@@ -703,9 +723,11 @@ Frontmatter fields:
 
 | Field         | Description                                                                      |
 |---------------|----------------------------------------------------------------------------------|
-| `memory_type` | Informal label (currently informational only).                                   |
-| `priority`    | Integer sort priority (lower numbers are prepended first within the same scope). |
-| `scope`       | Informational label for documentation purposes.                                  |
+| `memory_type` | Informal label. Read but not acted on.                                           |
+| `priority`    | Integer sort order within one scope. Lower numbers come first; a file that sets no priority sorts after every file that does. |
+| `scope`       | Informal label. Read but not acted on.                                           |
+
+The frontmatter block itself is stripped before the file reaches the model.
 
 ### @include directives
 
@@ -719,19 +741,23 @@ AGENTS.md files support `@include` to pull in content from other files:
 ```
 
 Paths may be relative to the including file, absolute, or tilde-expanded.
-Circular includes are detected and skipped. Files larger than 40 KB are
-skipped with a warning comment.
+Circular includes are detected and skipped, and nesting stops at ten levels.
+A file that cannot be read leaves an HTML comment in its place.
 
-### Disabling AGENTS.md loading
+There is no size limit, on the including file or on what it pulls in. A deep
+`@include` tree can therefore fill the context; what you write is what is
+sent.
 
-To skip all AGENTS.md files for a session:
+### Disabling memory loading
+
+To skip every memory file for a session:
 
 ```bash
 mikmik --no-claude-md "your prompt"
 ```
 
-Or in a session, use the `--bare` flag to disable AGENTS.md, hooks, and
-plugins simultaneously.
+This covers all four scopes and both filenames. `--bare` implies it, and also
+disables hooks and plugins.
 
 ---
 
