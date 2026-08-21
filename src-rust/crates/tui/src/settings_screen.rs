@@ -89,6 +89,7 @@ pub struct SettingsScreen {
     pub notify_on_question: bool,
     pub notify_on_plan_ready: bool,
     pub notify_on_turn_complete: bool,
+    pub notify_sound: bool,
     pub show_turn_duration: bool,
     pub show_message_timestamps: bool,
     pub output_style: String,
@@ -139,6 +140,7 @@ impl SettingsScreen {
             notify_on_question: true,
             notify_on_plan_ready: true,
             notify_on_turn_complete: true,
+            notify_sound: false,
             show_turn_duration: false,
             show_message_timestamps: false,
             output_style: "default".to_string(),
@@ -178,6 +180,7 @@ impl SettingsScreen {
         self.notify_on_question = self.settings_snapshot.notify_on_question;
         self.notify_on_plan_ready = self.settings_snapshot.notify_on_plan_ready;
         self.notify_on_turn_complete = self.settings_snapshot.notify_on_turn_complete;
+        self.notify_sound = self.settings_snapshot.notify_sound;
         self.show_turn_duration = self.settings_snapshot.show_turn_duration;
         self.show_message_timestamps = self.settings_snapshot.show_message_timestamps;
         self.output_style = self
@@ -526,7 +529,7 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
         SettingsEntry {
             key: "notifications".into(),
             label: "Desktop notifications".into(),
-            description: "Master switch for the three notifications below.".into(),
+            description: "Master switch for the notification settings below.".into(),
             kind: SettingKind::Bool,
             value: if screen.notifications { "true" } else { "false" }.to_string(),
         },
@@ -550,6 +553,13 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Notify when a turn finishes and the prompt is free.".into(),
             kind: SettingKind::Bool,
             value: if screen.notify_on_turn_complete { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "notify_sound".into(),
+            label: "Notification sound".into(),
+            description: "Play a short sound with each notification.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.notify_sound { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "show_turn_duration".into(),
@@ -1251,6 +1261,10 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                         screen.notify_on_turn_complete = new_value;
                         screen.settings_snapshot.notify_on_turn_complete = new_value;
                     }
+                    "notify_sound" => {
+                        screen.notify_sound = new_value;
+                        screen.settings_snapshot.notify_sound = new_value;
+                    }
                     "show_turn_duration" => {
                         screen.show_turn_duration = new_value;
                         screen.settings_snapshot.show_turn_duration = new_value;
@@ -1552,6 +1566,61 @@ mod tests {
         // Simulate toggle (manually, since toggle_or_cycle_current modifies internal state)
         screen.notifications = !screen.notifications;
         assert_ne!(screen.notifications, initial);
+    }
+
+    /// The sound is a sub-setting of the notification, so it sits with the
+    /// three events rather than at the far end of the list.
+    #[test]
+    fn the_notification_sound_row_follows_the_three_events() {
+        let screen = SettingsScreen::new();
+        let all = all_entries(&screen);
+        let keys: Vec<&str> = all.iter().map(|e| e.key.as_str()).collect();
+
+        let sound = keys
+            .iter()
+            .position(|key| *key == "notify_sound")
+            .expect("the notification sound row is missing");
+        let turn_complete = keys
+            .iter()
+            .position(|key| *key == "notify_on_turn_complete")
+            .expect("the turn-complete row is missing");
+
+        assert_eq!(sound, turn_complete + 1);
+        assert_eq!(all[sound].label, "Notification sound");
+        // Opt-in, so a fresh screen shows it off.
+        assert_eq!(all[sound].value, "false");
+    }
+
+    /// Through `toggle_or_cycle_current` rather than by assigning the field:
+    /// a key missing from that match arm reads as a working row and silently
+    /// changes nothing.
+    #[test]
+    fn toggling_the_sound_row_writes_the_screen_and_the_snapshot() {
+        let _guard = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.open();
+        let mut config = Config::default();
+
+        let index = all_entries(&screen)
+            .iter()
+            .position(|e| e.key == "notify_sound")
+            .expect("the notification sound row is missing");
+        screen.selected_idx = index;
+
+        assert!(!screen.notify_sound);
+        toggle_or_cycle_current(&mut screen, &mut config);
+
+        assert!(screen.notify_sound, "the screen's own copy stayed off");
+        assert!(
+            screen.settings_snapshot.notify_sound,
+            "the snapshot written to disk stayed off"
+        );
+        assert_eq!(screen.save_error, None);
+
+        toggle_or_cycle_current(&mut screen, &mut config);
+        assert!(!screen.notify_sound, "the row does not toggle back off");
+        assert!(!screen.settings_snapshot.notify_sound);
     }
 
     #[test]
