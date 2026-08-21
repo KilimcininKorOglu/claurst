@@ -78,6 +78,12 @@ const SPINNER: &[char] = &[
 ];
 const CLAUDE_ORANGE: Color = Color::Rgb(233, 30, 99);
 const WELCOME_BOX_HEIGHT: u16 = 9;
+/// The rule drawn between a tool's header line and what the tool printed.
+///
+/// A fixed width rather than the pane's: the transcript is built into
+/// `Line`s before a width is known, and a rule that reached the edge would
+/// dominate a block whose output is one short line.
+const TOOL_OUTPUT_RULE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}";
 const STATUS_THINKING: &str = "thinking";
 const STATUS_THINKING_ELLIPSIS: &str = "thinking\u{2026}";
 
@@ -2774,6 +2780,18 @@ fn render_tool_block_lines(
 
     // Output preview (done/error state) — home paths shortened, dimmed.
     if let Some(ref preview) = block.output_preview {
+        // A rule between the command and what it printed. Without it the
+        // header and the first output line read as one wrapped sentence.
+        lines.push(Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                TOOL_OUTPUT_RULE.to_string(),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]));
+
         let preview_style = match block.status {
             ToolStatus::Error => Style::default().fg(Color::Rgb(255, 140, 0)),
             _ => Style::default().fg(Color::DarkGray),
@@ -4523,6 +4541,42 @@ mod tool_block_tests {
         let mut lines = Vec::new();
         render_tool_block_lines(&mut lines, b, 0, Some(model));
         lines.iter().map(flatten_line_text).collect()
+    }
+
+    #[test]
+    fn a_rule_separates_the_command_from_what_it_printed() {
+        let with_output = render(&block(
+            "Bash",
+            ToolStatus::Done,
+            r#"{"command":"ls"}"#,
+            Some("alpha\nbeta"),
+        ));
+        let rule_at = with_output
+            .iter()
+            .position(|line| line.contains(TOOL_OUTPUT_RULE));
+        let first_output_at = with_output.iter().position(|line| line.contains("alpha"));
+        assert!(rule_at.is_some(), "no rule in {with_output:?}");
+        assert!(
+            rule_at < first_output_at,
+            "the rule must come before the output: {with_output:?}"
+        );
+        assert!(rule_at > Some(0), "the header comes first: {with_output:?}");
+    }
+
+    #[test]
+    fn a_block_with_no_output_gets_no_rule() {
+        // A rule under a header with nothing beneath it would draw a line to
+        // separate the header from the next block.
+        let running = render(&block(
+            "Bash",
+            ToolStatus::Running,
+            r#"{"command":"ls"}"#,
+            None,
+        ));
+        assert!(
+            !running.iter().any(|line| line.contains(TOOL_OUTPUT_RULE)),
+            "{running:?}"
+        );
     }
 
     #[test]
