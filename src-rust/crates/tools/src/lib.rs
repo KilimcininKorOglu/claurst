@@ -127,6 +127,54 @@ pub struct UserQuestionEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Plan approval channel
+// ---------------------------------------------------------------------------
+
+/// What the user decided to do with a plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanChoice {
+    /// Implement it, and stop asking before each edit.
+    AutoAcceptEdits,
+    /// Implement it, but ask before each edit.
+    ManualApproval,
+    /// Do not implement it yet; the plan needs more work.
+    KeepPlanning,
+}
+
+impl PlanChoice {
+    /// The permission mode this choice puts the session into.
+    ///
+    /// `None` for [`Self::KeepPlanning`]: refusing a plan leaves the session
+    /// exactly where it was, still in plan mode.
+    pub fn permission_mode(self) -> Option<mikmik_core::config::PermissionMode> {
+        match self {
+            Self::AutoAcceptEdits => Some(mikmik_core::config::PermissionMode::AcceptEdits),
+            Self::ManualApproval => Some(mikmik_core::config::PermissionMode::Default),
+            Self::KeepPlanning => None,
+        }
+    }
+}
+
+/// The user's answer to a plan.
+#[derive(Debug, Clone)]
+pub struct PlanDecision {
+    /// The option the user picked.
+    pub choice: PlanChoice,
+    /// Anything the user typed alongside it. Carried into the tool result on
+    /// every choice, so a rejection reaches the model with its reason.
+    pub note: Option<String>,
+}
+
+/// Event sent through the TUI side-channel when `ExitPlanMode` needs the user
+/// to approve a plan before the session leaves planning.
+pub struct PlanApprovalEvent {
+    /// The plan to show, as the model wrote it.
+    pub plan: String,
+    /// Send the decision back through this channel to resume execution.
+    pub reply_tx: tokio::sync::oneshot::Sender<PlanDecision>,
+}
+
+// ---------------------------------------------------------------------------
 // Core trait & types
 // ---------------------------------------------------------------------------
 
@@ -361,6 +409,10 @@ pub struct ToolContext {
     /// Channel for the `AskUserQuestion` tool to send questions to the TUI and
     /// receive the user's typed answer.  `None` in headless / non-interactive mode.
     pub user_question_tx: Option<tokio::sync::mpsc::UnboundedSender<UserQuestionEvent>>,
+    /// Channel for `ExitPlanMode` to put a plan in front of the user and wait
+    /// for a decision. `None` in headless / non-interactive mode, where the
+    /// tool reports the plan and returns without blocking.
+    pub plan_approval_tx: Option<tokio::sync::mpsc::UnboundedSender<PlanApprovalEvent>>,
     /// Cancellation token for the owning query loop (issue #218). The parallel
     /// tool executor selects on this to abandon in-flight tools when the user
     /// cancels, and long-running tools may observe it to bail out early. Defaults
@@ -815,6 +867,7 @@ mod tests {
             pending_permissions: None,
             permission_manager: None,
             user_question_tx: None,
+            plan_approval_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,

@@ -952,6 +952,8 @@ async fn main() -> anyhow::Result<()> {
         } else {
             Some(user_question_tx)
         },
+        // Wired to the approval dialog by the interactive loop below.
+        plan_approval_tx: None,
         // Placeholder token; `run_query_loop` rebinds it to the loop's actual
         // cancel token so the parallel tool executor honours Ctrl-C (issue #218).
         cancel_token: tokio_util::sync::CancellationToken::new(),
@@ -8101,6 +8103,7 @@ mod bang_command_tests {
             pending_permissions: None,
             permission_manager: None,
             user_question_tx: None,
+            plan_approval_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,
