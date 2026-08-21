@@ -2,7 +2,8 @@
 //
 // Reads from and persists to `settings.json` under the resolved config root.
 // Supported settings: model, provider, effort, max_tokens, verbose,
-// permission_mode, auto_compact.
+// permission_mode, auto_compact. `permission_mode` is read-only here; see the
+// refusal in the SET branch.
 
 use crate::{PermissionLevel, Tool, ToolContext, ToolResult};
 use async_trait::async_trait;
@@ -31,7 +32,7 @@ static SUPPORTED_SETTINGS: &[(&str, &str)] = &[
     ("verbose", "Enable verbose logging (true/false)"),
     (
         "permission_mode",
-        "Permission mode: default | accept_edits | bypass_permissions | plan",
+        "Permission mode: default | accept_edits | bypass_permissions | plan (read-only)",
     ),
     (
         "auto_compact",
@@ -48,7 +49,8 @@ impl Tool for ConfigTool {
     fn description(&self) -> &str {
         "Get or set MikMik configuration settings. Omit 'value' to read the current value. \
          Supported settings: model, provider, effort, max_tokens, verbose, permission_mode, \
-         auto_compact. Changes persist to settings.json and apply to the next session."
+         auto_compact. 'permission_mode' can only be read. Changes persist to settings.json \
+         and apply to the next session."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -61,7 +63,7 @@ impl Tool for ConfigTool {
             "properties": {
                 "setting": {
                     "type": "string",
-                    "description": "Setting key (e.g. 'model', 'provider', 'effort', 'verbose', 'max_tokens', 'permission_mode')"
+                    "description": "Setting key (e.g. 'model', 'provider', 'effort', 'verbose', 'max_tokens', 'permission_mode'). 'permission_mode' can only be read."
                 },
                 "value": {
                     "description": "New value to set. Omit to read the current value."
@@ -200,36 +202,22 @@ impl Tool for ConfigTool {
                     }
                     ToolResult::success(format!("auto_compact = {}", b))
                 }
-                "permission_mode" => {
-                    use mikmik_core::config::PermissionMode;
-                    let s = match new_value.as_str() {
-                        Some(s) => s,
-                        None => {
-                            return ToolResult::error(
-                                "'permission_mode' must be a string".to_string(),
-                            )
-                        }
-                    };
-                    let mode = match s {
-                        "default" => PermissionMode::Default,
-                        "accept_edits" | "acceptEdits" => PermissionMode::AcceptEdits,
-                        "bypass_permissions" | "bypassPermissions" => {
-                            PermissionMode::BypassPermissions
-                        }
-                        "plan" => PermissionMode::Plan,
-                        _ => {
-                            return ToolResult::error(format!(
-                                "Unknown permission_mode '{}'. Use: default | accept_edits | bypass_permissions | plan",
-                                s
-                            ))
-                        }
-                    };
-                    settings.config.permission_mode = mode;
-                    if let Err(e) = settings.save().await {
-                        return ToolResult::error(format!("Failed to save settings: {}", e));
-                    }
-                    ToolResult::success(format!("permission_mode = \"{}\"", s))
-                }
+                // Refused rather than left out of the match: the model asked
+                // for something specific and deserves to be told why it is
+                // being denied, not that the key does not exist.
+                //
+                // `permission_mode` decides whether this tool's own next call
+                // reaches a prompt at all. Writing `bypass_permissions` here
+                // would let a turn switch every future permission check off,
+                // persist that to settings.json, and carry it into every later
+                // session. Only the user changes it.
+                "permission_mode" => ToolResult::error(
+                    "'permission_mode' is read-only from this tool, because writing it \
+                     would let a turn switch off its own permission checks. Ask the user \
+                     to run /permissions set <mode> or /yolo, or to relaunch with \
+                     --permission-mode."
+                        .to_string(),
+                ),
                 _ => ToolResult::error(format!(
                     "Unknown setting '{}'. Use setting='list' to see all supported settings.",
                     key
@@ -358,5 +346,40 @@ mod tests {
         for (key, _) in SUPPORTED_SETTINGS {
             assert!(listed.content.contains(key), "{key} missing from the list");
         }
+    }
+
+    #[tokio::test]
+    async fn the_permission_mode_cannot_be_written_from_a_turn() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        // Writing it would let the turn switch off the checks that gate its own
+        // next tool call, and settings.json would carry that into every later
+        // session.
+        for mode in ["bypass_permissions", "accept_edits", "default", "plan"] {
+            let result = run("permission_mode", Some(json!(mode))).await;
+            assert!(result.is_error, "{mode} was accepted: {}", result.content);
+        }
+
+        let settings = mikmik_core::config::Settings::load()
+            .await
+            .expect("settings load");
+        assert_eq!(
+            settings.config.permission_mode,
+            mikmik_core::config::PermissionMode::Default,
+            "a refused write still reached the settings file"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_permission_mode_can_still_be_read() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("temp home");
+        let _guard = HomeGuard::pointing_at(home.path());
+
+        let read = run("permission_mode", None).await;
+        assert!(!read.is_error, "{}", read.content);
+        assert!(read.content.contains("default"), "{}", read.content);
     }
 }
