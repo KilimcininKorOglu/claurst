@@ -704,13 +704,13 @@ Exits automatically when `/plan off` is invoked or when `ExitPlanModeTool` is ca
 
 **Permission level:** None
 
-Put the plan in front of the user and wait for their decision. The turn is blocked until they answer, and the answer decides the permission mode the session lands in. See [Plan mode](configuration.md#plan) for the three answers.
+Write the plan to `<config dir>/plans/<session id>.md`, put it in front of the user and wait for their decision. The turn is blocked until they answer, and the answer decides the permission mode the session lands in. A plan edited in the dialog is read back from the file and returned in place of the one that was proposed. See [Plan mode](configuration.md#plan) for the four answers.
 
 | Parameter | Type   | Required | Description                  |
 |-----------|--------|----------|------------------------------|
 | `summary` | string | no       | The plan, as written for the user |
 
-Headless (`--print`) has no dialog to ask through: there the tool reports the plan and leaves plan mode without blocking.
+Headless (`--print`) has no dialog to ask through: there the tool writes the plan file, reports the plan and leaves plan mode without blocking.
 
 ---
 

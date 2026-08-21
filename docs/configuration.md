@@ -586,19 +586,46 @@ is useful for code analysis sessions where you want to prevent accidental
 modifications.
 
 Leaving plan mode is your decision, not the model's. When the model calls
-`ExitPlanMode`, the plan is shown in a dialog and the turn waits there. Three
+`ExitPlanMode`, the plan is shown in a dialog and the turn waits there. Four
 answers:
 
-| Answer                       | Result                                                        |
-|------------------------------|---------------------------------------------------------------|
-| Approve and auto-accept edits | Permission mode becomes `acceptEdits`, agent mode becomes `build`. |
-| Approve, ask before each edit | Permission mode becomes `default`, agent mode becomes `build`.     |
-| Keep planning                 | Nothing changes; the session is still planning.                    |
+| Answer                                | Result                                                                   |
+|---------------------------------------|--------------------------------------------------------------------------|
+| Yes, clear context and switch to *M*  | Summarises the conversation, then sends the plan again as a fresh prompt. Permission mode becomes *M*. |
+| Yes, and switch to *M* for this session | Permission mode becomes *M*, agent mode becomes `build`.                |
+| Yes, manually approve edits           | Permission mode becomes `default`, agent mode becomes `build`.            |
+| Tell MikMik what to change            | Nothing changes; the session is still planning.                           |
+
+*M* is the permission mode that was in force when plan mode was entered, so a
+session that planned from `bypassPermissions` returns to it. A session that was
+already in `default`, or that started in plan mode, gets `acceptEdits` instead:
+approving has to mean more than "carry on asking".
+
+Clearing the context happens after the turn ends, not when you answer: a
+conversation rewritten mid-turn would leave the pending tool call unanswered.
+The model is told to stop, the conversation is summarised, and the plan is sent
+again as the next message.
 
 Anything typed in the note row reaches the model with every answer, so a
 rejection carries its reason. `Esc` counts as "keep planning" and sends no
 note. Headless (`--print`) has no dialog to ask through, so `ExitPlanMode`
 returns there exactly as it always did rather than blocking on nobody.
+
+Keys in the dialog:
+
+| Key                | What it does                                                              |
+|--------------------|---------------------------------------------------------------------------|
+| `↑` `↓` `Tab`      | Move between the four answers and the note row.                            |
+| `1`-`4`            | Pick an answer, unless you are already typing a note.                      |
+| `Enter`            | Send the picked answer.                                                    |
+| `shift+tab`        | Approve carrying the note. On the fourth answer it sends the plain approval, because the shortcut cannot mean "refuse". |
+| `ctrl+g`           | Open the plan in `$VISUAL` or `$EDITOR`. What you save is what the model is told to implement. |
+| `PgUp` `PgDn`      | Scroll a plan taller than the dialog.                                      |
+| `Esc`              | Keep planning, sending no note.                                            |
+
+The plan is written to `<config dir>/plans/<session id>.md` on every
+`ExitPlanMode` call, headless included, and the dialog shows the path. It is
+the only lasting copy: the tool call itself scrolls away with the transcript.
 
 The permission mode can also be overridden per-session on the command line:
 
