@@ -5352,17 +5352,18 @@ mod mikmik_welcome_tests {
                 .unwrap_or_else(|| panic!("not drawn: {needle}"))
         };
 
-        // The product carries the mascot's name now, so the banner title
-        // matches "MikMik" too. The mascot's own label is the row that has
-        // the name and nothing else on it.
-        let row_of_the_label = rows
-            .iter()
-            .position(|row| row.contains("MikMik") && !row.contains(APP_VERSION))
-            .expect("the mascot's name is not drawn");
-
         assert!(row_of("/\\_/\\") < row_of("( o.o )"));
         assert!(row_of("( o.o )") < row_of("> ^ <"));
-        assert!(row_of("> ^ <") < row_of_the_label);
+
+        // The product carries the mascot's name now, so several rows match
+        // "MikMik": the banner title, and the greeting when there is no
+        // resolvable user name. Search by position instead, because the label
+        // the test is about is the row directly under the cat.
+        let under_the_cat = &rows[row_of("> ^ <") + 1];
+        assert!(
+            under_the_cat.contains("MikMik"),
+            "the mascot's name should sit directly under it: {under_the_cat:?}"
+        );
     }
 
     #[test]
