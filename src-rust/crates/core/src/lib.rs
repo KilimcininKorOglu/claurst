@@ -1939,6 +1939,14 @@ pub mod config {
         /// Defaults to true.
         #[serde(default = "default_true", rename = "notifyOnTurnComplete")]
         pub notify_on_turn_complete: bool,
+        /// Keep a memory directory for each project and show it to the model.
+        /// Defaults to off.
+        ///
+        /// `Option<bool>` rather than `bool`: `memdir::is_auto_memory_enabled`
+        /// distinguishes "the user never said" from "the user said no", and an
+        /// env var overrides only the former.
+        #[serde(default, rename = "autoMemoryEnabled")]
+        pub auto_memory_enabled: Option<bool>,
         /// Play a short sound with each notification. Defaults to false.
         ///
         /// Opt-in: a sound reaches further than a banner, so it is the user's
@@ -3390,6 +3398,7 @@ pub mod config {
                 notify_on_question: base.notify_on_question,
                 notify_on_plan_ready: base.notify_on_plan_ready,
                 notify_on_turn_complete: base.notify_on_turn_complete,
+                auto_memory_enabled: base.auto_memory_enabled,
                 notify_sound: base.notify_sound,
                 show_turn_duration: base.show_turn_duration,
                 show_message_timestamps: base.show_message_timestamps,
@@ -3793,6 +3802,7 @@ pub mod config {
                 notify_on_plan_ready: true,
                 notify_on_turn_complete: true,
                 notify_sound: true,
+                auto_memory_enabled: Some(true),
                 show_turn_duration: true,
                 show_message_timestamps: true,
                 reduce_motion: true,
@@ -3822,6 +3832,9 @@ pub mod config {
             // A repository deciding when the developer's speakers make a noise
             // is the same overreach again.
             assert!(!merged.notify_sound);
+            // And a repository must not decide that a directory on the
+            // developer's machine starts collecting what they work on.
+            assert_eq!(merged.auto_memory_enabled, None);
             assert!(!merged.show_turn_duration);
             assert!(!merged.show_message_timestamps);
             assert!(!merged.reduce_motion);

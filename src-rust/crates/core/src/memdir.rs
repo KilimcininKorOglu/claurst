@@ -333,52 +333,46 @@ pub const MAX_ENTRYPOINT_BYTES: usize = 25_000;
 
 /// Compute the auto-memory directory path for a project root.
 ///
-/// Resolution order (mirrors `getAutoMemPath` in `paths.ts`):
-/// 1. `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` env var (full-path override).
-/// 2. `<MIKMIK_REMOTE_MEMORY_DIR>/projects/<sanitized-root>/memory/`
+/// Resolution order:
+/// 1. `MIKMIK_MEMORY_PATH_OVERRIDE` env var (full-path override).
+/// 2. `<MIKMIK_REMOTE_MEMORY_DIR>/projects/<encoded-root>/memory/`
 ///    when `MIKMIK_REMOTE_MEMORY_DIR` is set.
-/// 3. `~/.config/mikmik/projects/<sanitized-root>/memory/` (default).
+/// 3. `~/.config/mikmik/projects/<encoded-root>/memory/` (default).
+///
+/// The project directory is the one
+/// [`crate::session_storage::transcript_dir_in`] already derives, so a
+/// project's transcripts and its memory live under one directory rather than
+/// two siblings encoded differently.
+///
+/// Pass a root resolved with [`crate::session_storage::transcript_root_for`],
+/// so a session started in a subdirectory sees the same memory as one started
+/// at the repository root.
 pub fn auto_memory_path(project_root: &Path) -> PathBuf {
-    // 1. Cowork full-path override.
-    if let Ok(override_path) = std::env::var("CLAUDE_COWORK_MEMORY_PATH_OVERRIDE") {
+    if let Ok(override_path) = std::env::var("MIKMIK_MEMORY_PATH_OVERRIDE") {
         if !override_path.is_empty() {
             return PathBuf::from(override_path);
         }
     }
 
-    // 2. Determine the memory base directory.
     let memory_base = std::env::var("MIKMIK_REMOTE_MEMORY_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| crate::config::Settings::config_dir());
 
-    // 3. Sanitize the project root into a safe directory name.
-    let sanitized = sanitize_path_component(&project_root.to_string_lossy());
-
-    memory_base.join("projects").join(sanitized).join("memory")
-}
-
-/// Sanitize an arbitrary string into a directory-name-safe component.
-/// Matches `sanitizePath` used inside `getAutoMemPath` in `paths.ts`.
-pub fn sanitize_path_component(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    crate::session_storage::transcript_dir_in(&memory_base, project_root).join("memory")
 }
 
 /// Whether the auto-memory system is enabled for this session.
 ///
-/// Priority chain (mirrors `isAutoMemoryEnabled` in `paths.ts`):
+/// Priority chain:
 /// 1. `MIKMIK_DISABLE_AUTO_MEMORY` — truthy → OFF, falsy (but defined) → ON.
 /// 2. `MIKMIK_SIMPLE` (--bare) → OFF.
 /// 3. Remote mode without `MIKMIK_REMOTE_MEMORY_DIR` → OFF.
-/// 4. `settings_enabled` parameter (from settings.json `autoMemoryEnabled` field).
-/// 5. Default: enabled.
+/// 4. `settings_enabled` parameter (from settings.json `autoMemoryEnabled`).
+/// 5. Default: off.
+///
+/// Off by default because the feature writes to disk and adds a block to
+/// every system prompt; an install that never asks for it keeps behaving the
+/// way it did before.
 pub fn is_auto_memory_enabled(settings_enabled: Option<bool>) -> bool {
     if let Ok(val) = std::env::var("MIKMIK_DISABLE_AUTO_MEMORY") {
         // Truthy values (non-empty, non-"0", non-"false") disable memory.
@@ -397,7 +391,7 @@ pub fn is_auto_memory_enabled(settings_enabled: Option<bool>) -> bool {
         return false;
     }
 
-    settings_enabled.unwrap_or(true)
+    settings_enabled.unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -750,21 +744,6 @@ mod tests {
         assert!(result.content.contains("WARNING"));
     }
 
-    // ---- sanitize_path_component -------------------------------------------
-
-    #[test]
-    fn test_sanitize_path_component() {
-        assert_eq!(
-            sanitize_path_component("/home/user/project"),
-            "_home_user_project"
-        );
-        assert_eq!(
-            sanitize_path_component("normal-name_123"),
-            "normal-name_123"
-        );
-        assert_eq!(sanitize_path_component("C:\\Users\\foo"), "C__Users_foo");
-    }
-
     // ---- load_memory_index -------------------------------------------------
 
     #[test]
@@ -867,24 +846,117 @@ mod tests {
         assert!(MemoryType::parse("bogus").is_none());
     }
 
-    // ---- is_auto_memory_enabled -------------------------------------------
+    // ---- auto_memory_path --------------------------------------------------
 
+    /// Memory and transcripts share one project directory. Two encodings of
+    /// the same project root would leave a user with two sibling directories
+    /// and no way to tell which belongs to which checkout.
     #[test]
-    fn test_auto_memory_enabled_default() {
-        // No env vars set for this test, settings None → should be enabled.
-        // We can't guarantee the test environment is clean, so just check it
-        // returns a bool without panicking.
-        let _ = is_auto_memory_enabled(None);
+    fn the_memory_dir_sits_inside_the_project_transcript_dir() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let base = make_temp_dir();
+        let _guard = EnvGuard::set(
+            "MIKMIK_REMOTE_MEMORY_DIR",
+            base.path().to_str().unwrap_or(""),
+        );
+        let _no_override = EnvGuard::unset("MIKMIK_MEMORY_PATH_OVERRIDE");
+
+        let project = Path::new("/home/user/project");
+        let memory = auto_memory_path(project);
+        let transcripts = crate::session_storage::transcript_dir_in(base.path(), project);
+
+        assert_eq!(memory.parent(), Some(transcripts.as_path()));
+        assert_eq!(memory.file_name().and_then(|n| n.to_str()), Some("memory"));
     }
 
     #[test]
-    fn test_auto_memory_disabled_by_setting() {
-        // If settings explicitly disable it and no env override, returns false.
-        // We only test the settings-path without touching process env.
-        // Simulate: env vars not set, settings says false.
-        // We can't unset env vars reliably in tests, so just ensure the
-        // function handles Some(false) without panicking.
-        // (The full env-var paths are integration-tested separately.)
-        let _ = is_auto_memory_enabled(Some(false));
+    fn the_full_path_override_wins_over_the_base() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = EnvGuard::set("MIKMIK_MEMORY_PATH_OVERRIDE", "/tmp/elsewhere");
+
+        assert_eq!(
+            auto_memory_path(Path::new("/home/user/project")),
+            PathBuf::from("/tmp/elsewhere")
+        );
+    }
+
+    // ---- is_auto_memory_enabled -------------------------------------------
+
+    /// Serialises the tests that mutate process-global environment variables.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets or clears one environment variable and restores it on drop.
+    struct EnvGuard {
+        key: &'static str,
+        saved: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let saved = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, saved }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let saved = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    /// Clear every env var the priority chain reads, so the ambient
+    /// environment cannot decide the answer.
+    fn clear_memory_env() -> Vec<EnvGuard> {
+        vec![
+            EnvGuard::unset("MIKMIK_DISABLE_AUTO_MEMORY"),
+            EnvGuard::unset("MIKMIK_SIMPLE"),
+            EnvGuard::unset("MIKMIK_REMOTE"),
+        ]
+    }
+
+    #[test]
+    fn auto_memory_is_off_until_the_setting_asks_for_it() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = clear_memory_env();
+
+        assert!(!is_auto_memory_enabled(None), "an unset key turned it on");
+        assert!(!is_auto_memory_enabled(Some(false)));
+        assert!(is_auto_memory_enabled(Some(true)));
+    }
+
+    #[test]
+    fn the_disable_env_var_beats_the_setting_in_both_directions() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = clear_memory_env();
+
+        {
+            let _off = EnvGuard::set("MIKMIK_DISABLE_AUTO_MEMORY", "1");
+            assert!(!is_auto_memory_enabled(Some(true)));
+        }
+        {
+            // Defined-but-falsy is an explicit "do not disable", so it turns
+            // the feature on even where the setting is absent.
+            let _on = EnvGuard::set("MIKMIK_DISABLE_AUTO_MEMORY", "0");
+            assert!(is_auto_memory_enabled(None));
+        }
+    }
+
+    #[test]
+    fn bare_mode_silences_auto_memory() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = clear_memory_env();
+        let _bare = EnvGuard::set("MIKMIK_SIMPLE", "1");
+
+        assert!(!is_auto_memory_enabled(Some(true)));
     }
 }
