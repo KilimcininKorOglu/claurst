@@ -1382,6 +1382,22 @@ Copy the most recent assistant response to the system clipboard. Pass a number t
 /copy N       — copy the Nth most recent response
 ```
 
+A format may be named as well. Without one the response text is copied
+unchanged, which is what `/copy` has always done.
+
+| Format     | What is copied                                                     |
+|------------|--------------------------------------------------------------------|
+| `markdown` | Role heading, thinking blocks folded into `<details>`, tool calls as fenced JSON |
+| `text`     | The same content with markdown formatting stripped out              |
+| `code`     | Only the fenced code blocks, separated by rules                     |
+| `json`     | The message as a JSON object, with its token counts and cost        |
+
+```
+/copy code        — every code block in the most recent response
+/copy json 3      — the third most recent response as JSON
+/copy 3 json      — the same; the order does not matter
+```
+
 ---
 
 ## Advanced & Internal

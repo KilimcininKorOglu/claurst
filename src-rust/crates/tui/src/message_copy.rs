@@ -5,7 +5,8 @@
 //! - Plaintext: Removes all markdown formatting
 //! - Code blocks only: Extracts code blocks
 //! - JSON: Serialized message data
-//! - Selection only: Selected text only
+//!
+//! Reached from `/copy <format>` in `mikmik_commands::copy`.
 
 use mikmik_core::Message;
 use serde_json::json;
@@ -173,11 +174,6 @@ pub fn copy_as_json(message: &Message) -> String {
     });
 
     serde_json::to_string_pretty(&json_value).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// Extract plaintext from selected text (identity function, for consistency)
-pub fn copy_selection(selected_text: &str) -> String {
-    selected_text.to_string()
 }
 
 // ============================================================================
