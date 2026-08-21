@@ -634,8 +634,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build context
-    let ctx_builder =
-        ContextBuilder::new(cwd.clone()).disable_claude_mds(config.disable_claude_mds);
+    let ctx_builder = ContextBuilder::new(cwd.clone())
+        .disable_claude_mds(config.disable_claude_mds)
+        .memory_filenames(mikmik_core::claudemd::MemoryFilenames::from_config(&config));
     let system_ctx = ctx_builder.build_system_context().await;
     let user_ctx = ctx_builder.build_user_context().await;
     let loaded_instructions = !system_ctx.trim().is_empty() || !user_ctx.trim().is_empty();

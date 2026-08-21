@@ -4755,7 +4755,6 @@ pub mod constants {
          effort-2025-11-24";
 
     // File system
-    pub const CLAUDE_MD_FILENAME: &str = "AGENTS.md";
     pub const SETTINGS_FILENAME: &str = "settings.json";
     pub const HISTORY_FILENAME: &str = "conversations";
 
@@ -4811,6 +4810,7 @@ pub mod context {
     pub struct ContextBuilder {
         cwd: PathBuf,
         disable_claude_mds: bool,
+        memory_filenames: crate::claudemd::MemoryFilenames,
     }
 
     impl ContextBuilder {
@@ -4818,11 +4818,18 @@ pub mod context {
             Self {
                 cwd,
                 disable_claude_mds: false,
+                memory_filenames: crate::claudemd::MemoryFilenames::default(),
             }
         }
 
         pub fn disable_claude_mds(mut self, val: bool) -> Self {
             self.disable_claude_mds = val;
+            self
+        }
+
+        /// Which of `AGENTS.md` and `CLAUDE.md` this session reads.
+        pub fn memory_filenames(mut self, names: crate::claudemd::MemoryFilenames) -> Self {
+            self.memory_filenames = names;
             self
         }
 
@@ -4897,50 +4904,31 @@ pub mod context {
             Some(result)
         }
 
-        /// Walk up from cwd looking for AGENTS.md files and the global one.
+        /// Read the four memory scopes and render them for the prompt.
+        ///
+        /// This used to walk from cwd to the filesystem root, which read
+        /// `AGENTS.md` from directories above any project and skipped the
+        /// managed and local scopes entirely. The set of locations is now
+        /// exactly the documented one, resolved by
+        /// [`crate::claudemd::load_all_memory_files`].
+        ///
+        /// The project root is the repository root, so a session started in a
+        /// subdirectory reads the same files as one started at the top.
+        ///
+        /// Off the runtime: loading is synchronous and `@include` can pull in
+        /// an arbitrary tree, so the reads do not belong on an executor thread.
         async fn find_and_read_claude_md(&self) -> Option<String> {
-            let mut claude_mds = vec![];
+            let project_root = crate::session_storage::transcript_root_for(&self.cwd);
+            let filenames = self.memory_filenames;
 
-            // Global <mikmik home>/AGENTS.md
-            {
-                let global_claude_md = crate::config::Settings::config_dir()
-                    .join(crate::constants::CLAUDE_MD_FILENAME);
-                if global_claude_md.exists() {
-                    if let Ok(content) = tokio::fs::read_to_string(&global_claude_md).await {
-                        claude_mds.push(format!(
-                            "# Memory (from {})\n{}",
-                            global_claude_md.display(),
-                            content
-                        ));
-                    }
-                }
-            }
+            let prompt = tokio::task::spawn_blocking(move || {
+                let files = crate::claudemd::load_all_memory_files(&project_root, filenames);
+                crate::claudemd::build_memory_prompt(&files)
+            })
+            .await
+            .ok()?;
 
-            // Walk from cwd up to filesystem root, collecting AGENTS.md
-            let mut dir = Some(self.cwd.as_path());
-            let mut project_mds: Vec<String> = vec![];
-            while let Some(d) = dir {
-                let candidate = d.join(crate::constants::CLAUDE_MD_FILENAME);
-                if candidate.exists() {
-                    if let Ok(content) = tokio::fs::read_to_string(&candidate).await {
-                        project_mds.push(format!(
-                            "# Project Memory (from {})\n{}",
-                            candidate.display(),
-                            content
-                        ));
-                    }
-                }
-                dir = d.parent();
-            }
-            // Reverse so outermost directory comes first
-            project_mds.reverse();
-            claude_mds.extend(project_mds);
-
-            if claude_mds.is_empty() {
-                None
-            } else {
-                Some(claude_mds.join("\n\n"))
-            }
+            (!prompt.trim().is_empty()).then_some(prompt)
         }
     }
 }
