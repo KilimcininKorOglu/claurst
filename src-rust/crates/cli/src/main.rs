@@ -407,6 +407,43 @@ fn startup_permission_mode(
     }
 }
 
+/// What the session loop owes the permission mode it has just observed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BypassGate {
+    /// Nothing to do.
+    Nothing,
+    /// Not bypass: record it, so a later refusal has a mode to go back to.
+    RememberMode,
+    /// Bypass, and the user has not been warned: show the warning.
+    Warn,
+    /// Bypass while running as root: put the previous mode back, no dialog.
+    RefuseForRoot,
+}
+
+/// Decide the gate from the mode alone.
+///
+/// `shift+tab`, `/yolo on`, `/permissions set bypass-permissions` and the
+/// settings file all write `config.permission_mode` and share nothing else, so
+/// watching the mode catches every one of them with a single check. Wiring the
+/// four call sites separately would leave the next one added unguarded.
+fn bypass_gate_for(
+    mode: PermissionMode,
+    gate_cleared: bool,
+    dialog_visible: bool,
+    is_root: bool,
+) -> BypassGate {
+    if mode != PermissionMode::BypassPermissions {
+        return BypassGate::RememberMode;
+    }
+    if is_root {
+        return BypassGate::RefuseForRoot;
+    }
+    if gate_cleared || dialog_visible {
+        return BypassGate::Nothing;
+    }
+    BypassGate::Warn
+}
+
 /// Whether this process runs with root privileges.
 ///
 /// `bypassPermissions` skips every permission check, so a root session would
@@ -3445,6 +3482,27 @@ async fn run_interactive(
         app.frame_count = app.frame_count.wrapping_add(1);
         app.tick_mikmik_pose();
         app.notifications.tick();
+
+        // The bypass warning, asked of the mode rather than of whoever set it.
+        match bypass_gate_for(
+            app.config.permission_mode,
+            app.bypass_gate_cleared,
+            app.bypass_permissions_dialog.visible,
+            running_as_root(),
+        ) {
+            BypassGate::RememberMode => app.mode_before_bypass = app.config.permission_mode,
+            BypassGate::Warn => app.bypass_permissions_dialog.show(false),
+            BypassGate::RefuseForRoot => {
+                // No dialog: root has no acceptable answer to offer.
+                app.config.permission_mode = app.mode_before_bypass;
+                app.push_notification(
+                    mikmik_tui::NotificationKind::Error,
+                    "Bypass permissions cannot be used with root/sudo privileges.".to_string(),
+                    Some(8),
+                );
+            }
+            BypassGate::Nothing => {}
+        }
 
         // Background loads the widgets ask for. Nothing else answers these
         // flags, so a missed call leaves the session browser empty and the
@@ -8368,7 +8426,7 @@ mod bang_command_tests {
 }
 
 #[cfg(test)]
-mod permission_mode_flag_tests {
+mod permission_mode_tests {
     use super::*;
 
     #[test]
@@ -8438,5 +8496,57 @@ mod permission_mode_flag_tests {
             PermissionMode::AcceptEdits,
             "with no flag the settings file decides"
         );
+    }
+
+    #[test]
+    fn a_switch_into_bypass_is_warned_about_however_it_was_made() {
+        // The gate reads the mode, so shift+tab, /yolo, /permissions set and
+        // the settings file are all one case here.
+        assert_eq!(
+            bypass_gate_for(PermissionMode::BypassPermissions, false, false, false),
+            BypassGate::Warn
+        );
+    }
+
+    #[test]
+    fn a_mode_that_is_not_bypass_is_recorded_to_go_back_to() {
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Plan,
+        ] {
+            assert_eq!(
+                bypass_gate_for(mode, false, false, false),
+                BypassGate::RememberMode,
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_warning_is_not_repeated_once_it_has_been_answered() {
+        assert_eq!(
+            bypass_gate_for(PermissionMode::BypassPermissions, true, false, false),
+            BypassGate::Nothing,
+            "an accepted gate must not ask again"
+        );
+        assert_eq!(
+            bypass_gate_for(PermissionMode::BypassPermissions, false, true, false),
+            BypassGate::Nothing,
+            "the dialog is already on screen"
+        );
+    }
+
+    #[test]
+    fn root_is_refused_rather_than_asked() {
+        // There is no answer root could give that makes bypass acceptable, so
+        // the dialog is not offered at all, and a cleared gate does not help.
+        for cleared in [false, true] {
+            assert_eq!(
+                bypass_gate_for(PermissionMode::BypassPermissions, cleared, false, true),
+                BypassGate::RefuseForRoot,
+                "cleared={cleared}"
+            );
+        }
     }
 }
