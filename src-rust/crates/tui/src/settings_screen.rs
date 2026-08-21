@@ -85,6 +85,7 @@ pub struct SettingsScreen {
 
     // ---- Real settings fields ----
     pub auto_compact: bool,
+    pub auto_memory: bool,
     pub notifications: bool,
     pub notify_on_question: bool,
     pub notify_on_plan_ready: bool,
@@ -136,6 +137,7 @@ impl SettingsScreen {
             save_error: None,
             saves: 0,
             auto_compact: false,
+            auto_memory: false,
             notifications: true,
             notify_on_question: true,
             notify_on_plan_ready: true,
@@ -176,6 +178,8 @@ impl SettingsScreen {
     /// This is called on initialization and when opening the settings screen.
     fn apply_settings_from_snapshot(&mut self) {
         self.auto_compact = self.settings_snapshot.effective_auto_compact();
+        self.auto_memory =
+            mikmik_core::memdir::is_auto_memory_enabled(self.settings_snapshot.auto_memory_enabled);
         self.notifications = self.settings_snapshot.notifications;
         self.notify_on_question = self.settings_snapshot.notify_on_question;
         self.notify_on_plan_ready = self.settings_snapshot.notify_on_plan_ready;
@@ -525,6 +529,14 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
             description: "Automatically compact turns at threshold.".into(),
             kind: SettingKind::Bool,
             value: if screen.auto_compact { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "auto_memory".into(),
+            label: "Auto memory".into(),
+            description: "Keep a memory directory for this project and show it to the model."
+                .into(),
+            kind: SettingKind::Bool,
+            value: if screen.auto_memory { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "notifications".into(),
@@ -1245,6 +1257,12 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                         // the toggle saves somewhere the session never looks.
                         screen.settings_snapshot.config.auto_compact = Some(new_value);
                     }
+                    "auto_memory" => {
+                        screen.auto_memory = new_value;
+                        screen.settings_snapshot.auto_memory_enabled = Some(new_value);
+                        // Both keys again, for the same reason as auto_compact.
+                        screen.settings_snapshot.config.auto_memory_enabled = Some(new_value);
+                    }
                     "notifications" => {
                         screen.notifications = new_value;
                         screen.settings_snapshot.notifications = new_value;
@@ -1554,18 +1572,57 @@ mod tests {
 
     #[test]
     fn toggle_bool_entry_flips_value() {
+        // Guarded: `open()` loads the settings file, and without this the row
+        // reflects whatever the machine running the test happens to have set.
+        let _guard = HomeGuard::new();
+
         let mut screen = SettingsScreen::new();
-        screen.notifications = true;
         screen.open();
+        screen.notifications = true;
 
         let initial = screen.notifications;
         let all = all_entries(&screen);
-        let entry = &all[2]; // notifications is at index 2
+        // By key, not by index: a row inserted anywhere above used to move
+        // this one and fail a test that has nothing to do with the new row.
+        let entry = all
+            .iter()
+            .find(|e| e.key == "notifications")
+            .expect("the notifications row is missing");
         assert_eq!(entry.label, "Desktop notifications");
+        assert_eq!(entry.value, "true");
 
         // Simulate toggle (manually, since toggle_or_cycle_current modifies internal state)
         screen.notifications = !screen.notifications;
         assert_ne!(screen.notifications, initial);
+    }
+
+    /// The query loop reads `config.autoMemoryEnabled`, so a toggle that
+    /// writes only the top-level key saves somewhere the session never looks.
+    #[test]
+    fn toggling_auto_memory_writes_both_keys() {
+        let _guard = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.open();
+        let mut config = Config::default();
+
+        let index = all_entries(&screen)
+            .iter()
+            .position(|e| e.key == "auto_memory")
+            .expect("the auto memory row is missing");
+        screen.selected_idx = index;
+
+        assert!(!screen.auto_memory, "the row does not start off");
+        toggle_or_cycle_current(&mut screen, &mut config);
+
+        assert!(screen.auto_memory);
+        assert_eq!(screen.settings_snapshot.auto_memory_enabled, Some(true));
+        assert_eq!(
+            screen.settings_snapshot.config.auto_memory_enabled,
+            Some(true),
+            "the nested key the query loop reads stayed unset"
+        );
+        assert_eq!(screen.save_error, None);
     }
 
     /// The sound is a sub-setting of the notification, so it sits with the
