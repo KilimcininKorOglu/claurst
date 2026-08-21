@@ -187,12 +187,58 @@ pub fn load_memory_file(path: &Path, scope: MemoryScope) -> Option<MemoryFileInf
     })
 }
 
+/// Which of the two memory filenames a session reads.
+///
+/// Two independent switches rather than one three-way choice: a project can
+/// hold both files, and the user may want either one, the other, or both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryFilenames {
+    pub agents_md: bool,
+    pub claude_md: bool,
+}
+
+impl MemoryFilenames {
+    /// Read the pair out of a `Config`.
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        Self {
+            agents_md: config.effective_agents_md_enabled(),
+            claude_md: config.effective_claude_md_enabled(),
+        }
+    }
+
+    /// The filenames to try, in the order they reach the prompt.
+    fn names(self) -> Vec<&'static str> {
+        let mut names = Vec::with_capacity(2);
+        if self.agents_md {
+            names.push("AGENTS.md");
+        }
+        if self.claude_md {
+            names.push("CLAUDE.md");
+        }
+        names
+    }
+}
+
+impl Default for MemoryFilenames {
+    fn default() -> Self {
+        Self {
+            agents_md: true,
+            claude_md: false,
+        }
+    }
+}
+
 /// Load memory files from a directory for a given scope.
 ///
-/// Loads `AGENTS.md` first (primary/universal standard), then `CLAUDE.md` if
-/// present (Claude-specific additions or overrides). Either file may be absent.
-fn load_scope_files(dir: &Path, scope: MemoryScope, files: &mut Vec<MemoryFileInfo>) {
-    for name in &["AGENTS.md", "CLAUDE.md"] {
+/// `AGENTS.md` comes first (universal standard), then `CLAUDE.md`
+/// (Claude-specific additions). Either may be switched off or absent.
+fn load_scope_files(
+    dir: &Path,
+    scope: MemoryScope,
+    filenames: MemoryFilenames,
+    files: &mut Vec<MemoryFileInfo>,
+) {
+    for name in filenames.names() {
         let path = dir.join(name);
         if path.exists() {
             if let Some(f) = load_memory_file(&path, scope) {
@@ -210,7 +256,13 @@ fn load_scope_files(dir: &Path, scope: MemoryScope, files: &mut Vec<MemoryFileIn
 /// Returned list is ordered Managed → User → Project → Local, and within one
 /// scope by `priority` ascending. Later entries reach the model later, so the
 /// narrower scope wins where two files say different things.
-pub fn load_all_memory_files(project_root: &Path) -> Vec<MemoryFileInfo> {
+///
+/// `filenames` decides which of `AGENTS.md` and `CLAUDE.md` is read. The
+/// Managed scope ignores it: those files carry neither name.
+pub fn load_all_memory_files(
+    project_root: &Path,
+    filenames: MemoryFilenames,
+) -> Vec<MemoryFileInfo> {
     let mut files = Vec::new();
 
     // 1. Managed: <mikmik home>/rules/*.md
@@ -238,16 +290,17 @@ pub fn load_all_memory_files(project_root: &Path) -> Vec<MemoryFileInfo> {
         }
 
         // 2. User: <mikmik home>/AGENTS.md then <mikmik home>/CLAUDE.md
-        load_scope_files(&mikmik, MemoryScope::User, &mut files);
+        load_scope_files(&mikmik, MemoryScope::User, filenames, &mut files);
     }
 
     // 3. Project: {project_root}/AGENTS.md then {project_root}/CLAUDE.md
-    load_scope_files(project_root, MemoryScope::Project, &mut files);
+    load_scope_files(project_root, MemoryScope::Project, filenames, &mut files);
 
     // 4. Local: {project_root}/.mikmik/AGENTS.md then {project_root}/.mikmik/CLAUDE.md
     load_scope_files(
         &project_root.join(".mikmik"),
         MemoryScope::Local,
+        filenames,
         &mut files,
     );
 
@@ -319,6 +372,14 @@ mod tests {
         }
     }
 
+    /// Both filenames on, which is what most of these tests exercise.
+    fn both() -> MemoryFilenames {
+        MemoryFilenames {
+            agents_md: true,
+            claude_md: true,
+        }
+    }
+
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("mkdir");
@@ -351,7 +412,7 @@ mod tests {
         write(&tmp.path().join("AGENTS.md"), "agents content");
         write(&tmp.path().join("CLAUDE.md"), "claude content");
 
-        let files = load_all_memory_files(tmp.path());
+        let files = load_all_memory_files(tmp.path(), both());
         // Filter to just the project-scope files from our temp dir.
         let project: Vec<_> = files
             .iter()
@@ -379,13 +440,66 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write(&tmp.path().join("CLAUDE.md"), "claude only");
 
-        let files = load_all_memory_files(tmp.path());
+        let files = load_all_memory_files(tmp.path(), both());
         let project: Vec<_> = files
             .iter()
             .filter(|f| f.path.starts_with(tmp.path()))
             .collect();
         assert_eq!(project.len(), 1);
         assert!(project[0].path.ends_with("CLAUDE.md"));
+    }
+
+    /// Each switch acts on its own filename, at every scope.
+    #[test]
+    fn each_filename_switch_acts_on_its_own_file() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+
+        write(&home.path().join("AGENTS.md"), "USER-AGENTS");
+        write(&home.path().join("CLAUDE.md"), "USER-CLAUDE");
+        write(&project.path().join("AGENTS.md"), "PROJECT-AGENTS");
+        write(&project.path().join("CLAUDE.md"), "PROJECT-CLAUDE");
+
+        let prompt = |names: MemoryFilenames| {
+            build_memory_prompt(&load_all_memory_files(project.path(), names))
+        };
+
+        let agents_only = prompt(MemoryFilenames {
+            agents_md: true,
+            claude_md: false,
+        });
+        assert!(agents_only.contains("USER-AGENTS"));
+        assert!(agents_only.contains("PROJECT-AGENTS"));
+        assert!(!agents_only.contains("CLAUDE"), "{agents_only}");
+
+        let claude_only = prompt(MemoryFilenames {
+            agents_md: false,
+            claude_md: true,
+        });
+        assert!(claude_only.contains("USER-CLAUDE"));
+        assert!(claude_only.contains("PROJECT-CLAUDE"));
+        assert!(!claude_only.contains("AGENTS"), "{claude_only}");
+
+        let both_on = prompt(both());
+        assert!(both_on.contains("USER-AGENTS") && both_on.contains("USER-CLAUDE"));
+
+        let neither = prompt(MemoryFilenames {
+            agents_md: false,
+            claude_md: false,
+        });
+        assert_eq!(neither, "", "both switches off must read nothing");
+    }
+
+    /// A user who has said nothing keeps today's behaviour.
+    #[test]
+    fn the_default_reads_agents_md_and_not_claude_md() {
+        let defaults = MemoryFilenames::default();
+        assert!(defaults.agents_md);
+        assert!(!defaults.claude_md);
+
+        let config = crate::config::Config::default();
+        assert_eq!(MemoryFilenames::from_config(&config), defaults);
     }
 
     /// Every documented location, in the documented order.
@@ -404,7 +518,7 @@ mod tests {
         write(&project.path().join(".mikmik/AGENTS.md"), "LOCAL-AGENTS");
         write(&project.path().join(".mikmik/CLAUDE.md"), "LOCAL-CLAUDE");
 
-        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path(), both()));
         let order: Vec<&str> = [
             "MANAGED-A",
             "MANAGED-B",
@@ -444,7 +558,7 @@ mod tests {
         );
         write(&home.path().join("rules/c.md"), "NOPRIORITY");
 
-        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path(), both()));
         let five = prompt.find("FIVE").expect("FIVE missing");
         let ten = prompt.find("TEN").expect("TEN missing");
         let none = prompt.find("NOPRIORITY").expect("NOPRIORITY missing");
@@ -470,7 +584,7 @@ mod tests {
             &format!("{filler}\nFILE-END\n@include ./big.md\n"),
         );
 
-        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path(), both()));
 
         assert!(prompt.contains("FILE-END"), "a 60 KB file was cut");
         assert!(prompt.contains("INCLUDE-END"), "a 60 KB @include was cut");
@@ -486,7 +600,7 @@ mod tests {
             "---\nmemory_type: project\npriority: 3\n---\nBODY-TEXT\n",
         );
 
-        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path(), both()));
 
         assert!(prompt.contains("BODY-TEXT"));
         assert!(
@@ -507,7 +621,7 @@ mod tests {
         let path = project.path().join("AGENTS.md");
         write(&path, "BODY");
 
-        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path(), both()));
 
         assert!(
             prompt.contains(&format!("# Memory (project, from {})", path.display())),

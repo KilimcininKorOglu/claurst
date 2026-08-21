@@ -1352,6 +1352,20 @@ pub mod config {
         /// from "set to false"; an env var overrides only the former.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub auto_memory_enabled: Option<bool>,
+        /// Whether `AGENTS.md` files are loaded into the prompt. Defaults to on.
+        ///
+        /// `Option` because `Config` derives `Default`, where a `bool` would
+        /// start out false; read it through
+        /// [`Config::effective_agents_md_enabled`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub agents_md_enabled: Option<bool>,
+        /// Whether `CLAUDE.md` files are loaded alongside them. Defaults to off.
+        ///
+        /// Separate from `agents_md_enabled` so a project holding both files
+        /// can have either one, the other, or both read. Read it through
+        /// [`Config::effective_claude_md_enabled`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub claude_md_enabled: Option<bool>,
         /// Context fill, as a percentage 0-100, at which auto-compact fires.
         ///
         /// A percentage because that is the unit the settings screen offers
@@ -1954,6 +1968,15 @@ pub mod config {
         /// env var overrides only the former.
         #[serde(default, rename = "autoMemoryEnabled")]
         pub auto_memory_enabled: Option<bool>,
+        /// Whether `AGENTS.md` files are loaded into the prompt. Defaults to on.
+        #[serde(default, rename = "agentsMdEnabled")]
+        pub agents_md_enabled: Option<bool>,
+        /// Whether `CLAUDE.md` files are loaded alongside them. Defaults to off.
+        ///
+        /// A project can hold both files; these two keys let the user read
+        /// either one, the other, or both.
+        #[serde(default, rename = "claudeMdEnabled")]
+        pub claude_md_enabled: Option<bool>,
         /// Play a short sound with each notification. Defaults to false.
         ///
         /// Opt-in: a sound reaches further than a banner, so it is the user's
@@ -2316,6 +2339,17 @@ pub mod config {
         /// Whether the context is compacted automatically. Unset means on.
         pub fn effective_auto_compact(&self) -> bool {
             self.auto_compact.unwrap_or(true)
+        }
+
+        /// Whether `AGENTS.md` files are read. Unset means yes.
+        pub fn effective_agents_md_enabled(&self) -> bool {
+            self.agents_md_enabled.unwrap_or(true)
+        }
+
+        /// Whether `CLAUDE.md` files are read. Unset means no, so an update
+        /// does not start injecting a file the session never read before.
+        pub fn effective_claude_md_enabled(&self) -> bool {
+            self.claude_md_enabled.unwrap_or(false)
         }
 
         /// Whether tool traversal ignores `.gitignore`. Unset means it respects
@@ -2869,6 +2903,13 @@ pub mod config {
             if config.auto_memory_enabled.is_none() {
                 config.auto_memory_enabled = self.auto_memory_enabled;
             }
+            // And for the two memory filenames.
+            if config.agents_md_enabled.is_none() {
+                config.agents_md_enabled = self.agents_md_enabled;
+            }
+            if config.claude_md_enabled.is_none() {
+                config.claude_md_enabled = self.claude_md_enabled;
+            }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
                 config
@@ -3147,6 +3188,10 @@ pub mod config {
                 // collecting what they work on, which is not a repository's
                 // call to make.
                 auto_memory_enabled: base.config.auto_memory_enabled,
+                // Same reasoning: which file on the developer's disk gets read
+                // into their prompt is not a repository's call.
+                agents_md_enabled: base.config.agents_md_enabled,
+                claude_md_enabled: base.config.claude_md_enabled,
                 // When the context is compacted is the user's call, like
                 // `verbose` below: a repository has no stake in how much room
                 // the user keeps for their own conversation.
@@ -3415,6 +3460,8 @@ pub mod config {
                 notify_on_plan_ready: base.notify_on_plan_ready,
                 notify_on_turn_complete: base.notify_on_turn_complete,
                 auto_memory_enabled: base.auto_memory_enabled,
+                agents_md_enabled: base.agents_md_enabled,
+                claude_md_enabled: base.claude_md_enabled,
                 notify_sound: base.notify_sound,
                 show_turn_duration: base.show_turn_duration,
                 show_message_timestamps: base.show_message_timestamps,
@@ -3819,6 +3866,8 @@ pub mod config {
                 notify_on_turn_complete: true,
                 notify_sound: true,
                 auto_memory_enabled: Some(true),
+                agents_md_enabled: Some(true),
+                claude_md_enabled: Some(true),
                 show_turn_duration: true,
                 show_message_timestamps: true,
                 reduce_motion: true,
@@ -3851,6 +3900,8 @@ pub mod config {
             // And a repository must not decide that a directory on the
             // developer's machine starts collecting what they work on.
             assert_eq!(merged.auto_memory_enabled, None);
+            assert_eq!(merged.agents_md_enabled, None);
+            assert_eq!(merged.claude_md_enabled, None);
             assert!(!merged.show_turn_duration);
             assert!(!merged.show_message_timestamps);
             assert!(!merged.reduce_motion);
