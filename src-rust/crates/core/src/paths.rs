@@ -19,6 +19,39 @@ pub fn mikmik_home() -> PathBuf {
     crate::config::Settings::config_dir()
 }
 
+/// The editor to open a file with, and how to say where it came from.
+///
+/// `$VISUAL` wins over `$EDITOR`, which is the convention every other tool
+/// follows. The fallback is the one editor the platform is guaranteed to have,
+/// because failing here would leave the user with no way to edit at all.
+///
+/// The hint is returned alongside so the caller can say which variable it
+/// obeyed; a user staring at an editor they did not expect has no other way to
+/// find out.
+pub fn preferred_editor() -> (String, String) {
+    if let Ok(visual) = std::env::var("VISUAL") {
+        if !visual.is_empty() {
+            let hint = format!("Using $VISUAL=\"{visual}\".");
+            return (visual, hint);
+        }
+    }
+    if let Ok(editor) = std::env::var("EDITOR") {
+        if !editor.is_empty() {
+            let hint = format!("Using $EDITOR=\"{editor}\".");
+            return (editor, hint);
+        }
+    }
+    let fallback = if cfg!(target_os = "windows") {
+        "notepad"
+    } else {
+        "vi"
+    };
+    (
+        fallback.to_string(),
+        "To use a different editor, set the $EDITOR or $VISUAL environment variable.".to_string(),
+    )
+}
+
 // These tests drive the resolver through `HOME`/`XDG_CONFIG_HOME`, which only
 // govern `dirs::home_dir()` on Unix — on Windows the home dir comes from the OS
 // profile API and can't be pinned via env, so they'd be non-hermetic there.

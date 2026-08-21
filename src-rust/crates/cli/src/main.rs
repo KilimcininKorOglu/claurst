@@ -5644,6 +5644,31 @@ async fn run_interactive(
             }
         }
 
+        // ctrl+g in the plan dialog. The editor needs the terminal back, and
+        // this loop is the only place that can hand it over: drawing an editor
+        // over the alternate screen leaves both unusable.
+        if let Some(path) = app.plan_approval_dialog.take_edit_request() {
+            let (editor, editor_hint) = mikmik_core::paths::preferred_editor();
+            mikmik_tui::restore_terminal(&mut terminal).ok();
+            let status = std::process::Command::new(&editor).arg(&path).status();
+            terminal = mikmik_tui::setup_terminal(app.config.mouse_capture_enabled())?;
+            app.kitty_keyboard_active = mikmik_tui::keyboard_enhancement_active();
+
+            app.status_message = match status {
+                // The dialog shows what the tool will read back when the user
+                // answers, so it has to be refreshed from the file rather than
+                // kept as the model wrote it.
+                Ok(_) => match std::fs::read_to_string(&path) {
+                    Ok(text) => {
+                        app.plan_approval_dialog.plan = text.trim().to_string();
+                        None
+                    }
+                    Err(e) => Some(format!("Could not read the plan back: {e}")),
+                },
+                Err(e) => Some(format!("Could not launch '{editor}': {e}. {editor_hint}")),
+            };
+        }
+
         // Spawn async provider model-list fetch when requested.
         if app.model_picker_fetch_pending {
             app.model_picker_fetch_pending = false;

@@ -79,23 +79,7 @@ impl SlashCommand for MemoryCommand {
                 }
                 let _ = std::fs::write(&target, "");
             }
-            let editor = std::env::var("VISUAL")
-                .or_else(|_| std::env::var("EDITOR"))
-                .unwrap_or_else(|_| {
-                    if cfg!(target_os = "windows") {
-                        "notepad".to_string()
-                    } else {
-                        "vi".to_string()
-                    }
-                });
-            let editor_hint = if let Ok(visual) = std::env::var("VISUAL") {
-                format!("Using $VISUAL=\"{}\".", visual)
-            } else if let Ok(ed) = std::env::var("EDITOR") {
-                format!("Using $EDITOR=\"{}\".", ed)
-            } else {
-                "To use a different editor, set the $EDITOR or $VISUAL environment variable."
-                    .to_string()
-            };
+            let (editor, editor_hint) = mikmik_core::paths::preferred_editor();
             let spawn_result = std::process::Command::new(&editor).arg(&target).status();
             return match spawn_result {
                 Ok(_) => CommandResult::Message(format!(
