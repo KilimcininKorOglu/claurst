@@ -1586,6 +1586,7 @@ mod tests {
             status: ToolStatus::Running,
             output_preview: None,
             input_json: r#"{"file_path":"foo.rs"}"#.to_string(),
+            live_output: String::new(),
         });
         app.handle_query_event(mikmik_query::QueryEvent::ToolEnd {
             tool_name: "Read".to_string(),

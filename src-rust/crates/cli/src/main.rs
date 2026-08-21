@@ -984,6 +984,16 @@ async fn main() -> anyhow::Result<()> {
         Some(plan_approval_rx)
     };
 
+    // And for a tool's output while it is still running. Unlike the two above
+    // this one never blocks anything: a chunk nobody drains is just dropped.
+    let (tool_output_tx, tool_output_rx) =
+        tokio::sync::mpsc::unbounded_channel::<mikmik_tools::ToolOutputChunk>();
+    let tool_output_rx = if is_non_interactive {
+        None
+    } else {
+        Some(tool_output_rx)
+    };
+
     let tool_ctx = ToolContext {
         working_dir: cwd.clone(),
         permission_mode: config.permission_mode,
@@ -1008,6 +1018,11 @@ async fn main() -> anyhow::Result<()> {
             None
         } else {
             Some(plan_approval_tx)
+        },
+        tool_output_tx: if is_non_interactive {
+            None
+        } else {
+            Some(tool_output_tx)
         },
         // Placeholder token; `run_query_loop` rebinds it to the loop's actual
         // cancel token so the parallel tool executor honours Ctrl-C (issue #218).
@@ -1174,6 +1189,7 @@ async fn main() -> anyhow::Result<()> {
             model_registry,
             user_question_rx,
             plan_approval_rx,
+            tool_output_rx,
             pending_project_mcp,
             mcp_project_root,
             project_trust_pending,
@@ -3029,6 +3045,7 @@ async fn run_interactive(
     model_registry: Arc<mikmik_api::ModelRegistry>,
     user_question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::UserQuestionEvent>>,
     plan_approval_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
+    tool_output_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::ToolOutputChunk>>,
     pending_project_mcp: Vec<mikmik_core::config::McpServerConfig>,
     mcp_project_root: Option<PathBuf>,
     project_trust_pending: Option<mikmik_core::project_trust::GatedProjectSettings>,
@@ -3166,6 +3183,9 @@ async fn run_interactive(
     }
     if let Some(rx) = plan_approval_rx {
         app.plan_approval_rx = Some(rx);
+    }
+    if let Some(rx) = tool_output_rx {
+        app.tool_output_rx = Some(rx);
     }
 
     app.config.project_dir = Some(tool_ctx.working_dir.clone());
@@ -5711,6 +5731,37 @@ async fn run_interactive(
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     app.user_question_rx = None;
                 }
+            }
+        }
+
+        // Drain whatever a running tool has printed since the last frame.
+        //
+        // Every chunk waiting is taken, not one: a command that prints steadily
+        // would otherwise fall a frame further behind on every read and show
+        // output long after it was produced.
+        if let Some(ref mut rx) = app.tool_output_rx {
+            let mut chunks = Vec::new();
+            loop {
+                match rx.try_recv() {
+                    Ok(chunk) => chunks.push(chunk),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        app.tool_output_rx = None;
+                        break;
+                    }
+                }
+            }
+            if !chunks.is_empty() {
+                for chunk in chunks {
+                    if let Some(block) = app
+                        .tool_use_blocks
+                        .iter_mut()
+                        .find(|b| b.id == chunk.tool_id)
+                    {
+                        block.push_live_output(&chunk.text);
+                    }
+                }
+                app.invalidate_transcript();
             }
         }
 
@@ -8335,6 +8386,7 @@ mod bang_command_tests {
             permission_manager: None,
             user_question_tx: None,
             plan_approval_tx: None,
+            tool_output_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,

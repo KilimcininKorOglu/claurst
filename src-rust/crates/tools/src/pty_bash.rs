@@ -380,6 +380,7 @@ async fn run_in_pty(
     working_dir: &str,
     env_vars: &HashMap<String, String>,
     timeout: Duration,
+    on_output: Option<impl Fn(&str) + Send + 'static>,
 ) -> PtyOutcome {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
@@ -429,7 +430,7 @@ async fn run_in_pty(
     // which a detached grandchild would hold open forever (#184).
     let read_handle = tokio::task::spawn_blocking(move || {
         let master_fd = master.as_raw_fd();
-        let result = drive_pty_child(child, reader, master_fd);
+        let result = drive_pty_child(child, reader, master_fd, on_output);
         // Keep the master fd alive until reading + reaping is complete.
         drop(master);
         result
@@ -501,6 +502,7 @@ fn drive_pty_child(
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
     mut reader: Box<dyn std::io::Read + Send>,
     master_fd: Option<std::os::unix::io::RawFd>,
+    on_output: Option<impl Fn(&str)>,
 ) -> (String, i32) {
     use std::io::Read;
 
@@ -531,7 +533,11 @@ fn drive_pty_child(
                         output.push_str("\n[output truncated at 2 MB limit]");
                         break;
                     }
-                    output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    let chunk = String::from_utf8_lossy(&buf[..n]);
+                    if let Some(ref emit) = on_output {
+                        emit(&chunk);
+                    }
+                    output.push_str(&chunk);
                     continue; // keep draining while bytes remain
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -852,7 +858,14 @@ async fn run_bash(params: BashInput, ctx: &ToolContext) -> ToolResult {
 
         // run_in_pty owns the timeout so it can KILL the child when it fires
         // (a bare outer timeout would just drop the future and orphan it) (#220).
-        let outcome = run_in_pty(&script, &working_dir_str, &restored_env, timeout_dur).await;
+        let outcome = run_in_pty(
+            &script,
+            &working_dir_str,
+            &restored_env,
+            timeout_dur,
+            ctx.live_output_sink(),
+        )
+        .await;
 
         match outcome {
             PtyOutcome::Completed(raw_output, exit_code) => {
@@ -1338,6 +1351,7 @@ mod tests {
             permission_manager: None,
             user_question_tx: None,
             plan_approval_tx: None,
+            tool_output_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,

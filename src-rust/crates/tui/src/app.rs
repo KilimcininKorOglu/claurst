@@ -834,6 +834,38 @@ pub struct ToolUseBlock {
     pub output_preview: Option<String>,
     /// JSON-serialised input for the tool call (populated from the API stream).
     pub input_json: String,
+    /// What the tool has printed so far, while it is still running.
+    ///
+    /// Only ever filled when the live-output setting is on. `output_preview`
+    /// replaces it once the call finishes, so the transcript keeps the result
+    /// rather than the play-by-play.
+    pub live_output: String,
+}
+
+impl ToolUseBlock {
+    /// The last `max_lines` lines of live output, oldest first.
+    ///
+    /// A tail rather than the whole thing: a build prints thousands of lines
+    /// and the block would push everything else off the screen.
+    pub fn live_output_tail(&self, max_lines: usize) -> Vec<&str> {
+        let lines: Vec<&str> = self.live_output.lines().collect();
+        let start = lines.len().saturating_sub(max_lines);
+        lines[start..].to_vec()
+    }
+
+    /// Append a chunk, keeping the buffer from growing without bound.
+    pub fn push_live_output(&mut self, chunk: &str) {
+        const MAX_LIVE_BYTES: usize = 64 * 1024;
+        self.live_output.push_str(chunk);
+        if self.live_output.len() > MAX_LIVE_BYTES {
+            // Drop from the front on a char boundary, so the tail stays valid.
+            let cut = self.live_output.len() - MAX_LIVE_BYTES;
+            let cut = (cut..self.live_output.len())
+                .find(|i| self.live_output.is_char_boundary(*i))
+                .unwrap_or(self.live_output.len());
+            self.live_output.drain(..cut);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1618,6 +1650,11 @@ pub struct App {
     /// When a plan arrives, `plan_approval_dialog` is populated and shown.
     pub plan_approval_rx:
         Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
+    /// Receiver for output a tool produced while it was still running.
+    ///
+    /// `None` when nothing asked for live output, so the drain below costs
+    /// nothing in an ordinary session.
+    pub tool_output_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::ToolOutputChunk>>,
     /// State for the plan approval dialog.
     pub plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState,
     /// The permission mode in force when plan mode was entered, if it was
@@ -2034,6 +2071,7 @@ impl App {
             user_question_rx: None,
             ask_user_dialog: crate::ask_user_dialog::AskUserDialogState::new(),
             plan_approval_rx: None,
+            tool_output_rx: None,
             plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState::new(),
             permission_mode_before_plan: None,
             pending_plan_compaction: None,
@@ -8420,6 +8458,7 @@ impl App {
                     existing.turn_index = turn_index;
                     existing.status = ToolStatus::Running;
                     existing.output_preview = None;
+                    existing.live_output.clear();
                     existing.input_json = input_json;
                 } else {
                     self.tool_use_blocks.push(ToolUseBlock {
@@ -8429,6 +8468,7 @@ impl App {
                         status: ToolStatus::Running,
                         output_preview: None,
                         input_json,
+                        live_output: String::new(),
                     });
                 }
                 self.invalidate_transcript();
@@ -8456,6 +8496,7 @@ impl App {
                         ToolStatus::Done
                     };
                     block.output_preview = Some(preview);
+                    block.live_output.clear();
                 }
                 self.invalidate_transcript();
                 if is_error {

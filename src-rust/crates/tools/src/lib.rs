@@ -166,6 +166,21 @@ pub struct PlanDecision {
     pub note: Option<String>,
 }
 
+/// A piece of output a tool produced while it was still running.
+///
+/// Sent through a side-channel rather than a `QueryEvent`, because the turn
+/// loop has two dispatch arms and a new event variant would have to be added to
+/// both to reach every provider. Only the frontend that owns the channel sees
+/// these; the finished result still travels the normal way.
+#[derive(Debug, Clone)]
+pub struct ToolOutputChunk {
+    /// The `tool_use` id of the call that produced it, so the frontend knows
+    /// which block on screen the text belongs to.
+    pub tool_id: String,
+    /// The bytes as they arrived, undecorated.
+    pub text: String,
+}
+
 /// Event sent through the TUI side-channel when `ExitPlanMode` needs the user
 /// to approve a plan before the session leaves planning.
 pub struct PlanApprovalEvent {
@@ -418,6 +433,11 @@ pub struct ToolContext {
     /// for a decision. `None` in headless / non-interactive mode, where the
     /// tool reports the plan and returns without blocking.
     pub plan_approval_tx: Option<tokio::sync::mpsc::UnboundedSender<PlanApprovalEvent>>,
+    /// Channel a long-running tool writes its output to while it is still
+    /// running. `None` in headless / non-interactive mode, and whenever
+    /// `config.live_tool_output` is off, so nothing is produced that nothing
+    /// would draw.
+    pub tool_output_tx: Option<tokio::sync::mpsc::UnboundedSender<ToolOutputChunk>>,
     /// Cancellation token for the owning query loop (issue #218). The parallel
     /// tool executor selects on this to abandon in-flight tools when the user
     /// cancels, and long-running tools may observe it to bail out early. Defaults
@@ -434,6 +454,26 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    /// A sink for output produced while the current call is still running.
+    ///
+    /// `None` unless a frontend asked for live output, the setting is on, and
+    /// the dispatcher told this context which call it belongs to. Returning
+    /// the closure rather than the channel keeps the tool from having to know
+    /// its own id or repeat the three conditions.
+    pub fn live_output_sink(&self) -> Option<impl Fn(&str) + Send + Sync + 'static> {
+        if !self.config.live_tool_output {
+            return None;
+        }
+        let tx = self.tool_output_tx.clone()?;
+        let tool_id = self.current_call.as_ref()?.id.clone();
+        Some(move |text: &str| {
+            let _ = tx.send(ToolOutputChunk {
+                tool_id: tool_id.clone(),
+                text: text.to_string(),
+            });
+        })
+    }
+
     /// Every directory this session can reach, by name.
     ///
     /// Derived from the working directory and the configured extra directories
@@ -873,6 +913,7 @@ mod tests {
             permission_manager: None,
             user_question_tx: None,
             plan_approval_tx: None,
+            tool_output_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,
@@ -1229,5 +1270,72 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755, "executable bit preserved");
         assert_eq!(count_atomic_tmp_files(dir.path()), 0);
+    }
+
+    // ---- live output sink -------------------------------------------------
+
+    fn ctx_with_output_channel(
+        live: bool,
+        with_call: bool,
+    ) -> (
+        ToolContext,
+        tokio::sync::mpsc::UnboundedReceiver<ToolOutputChunk>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut ctx = crate::test_support::allow_all_context(std::env::temp_dir());
+        ctx.config.live_tool_output = live;
+        ctx.tool_output_tx = Some(tx);
+        if with_call {
+            ctx.current_call = Some(Arc::new(ActiveToolCall {
+                id: "call-1".to_string(),
+                input: serde_json::json!({}),
+            }));
+        }
+        (ctx, rx)
+    }
+
+    #[test]
+    fn the_sink_stamps_each_chunk_with_the_call_it_came_from() {
+        let (ctx, mut rx) = ctx_with_output_channel(true, true);
+        let sink = ctx.live_output_sink().expect("sink");
+
+        sink("first");
+        sink("second");
+
+        let a = rx.try_recv().expect("first chunk");
+        assert_eq!(a.tool_id, "call-1");
+        assert_eq!(a.text, "first");
+        assert_eq!(rx.try_recv().expect("second chunk").text, "second");
+    }
+
+    #[test]
+    fn the_sink_is_absent_unless_every_condition_holds() {
+        // Producing chunks nobody draws would cost a clone per read for the
+        // whole run of every command.
+        assert!(
+            ctx_with_output_channel(false, true)
+                .0
+                .live_output_sink()
+                .is_none(),
+            "the setting is off"
+        );
+        assert!(
+            ctx_with_output_channel(true, false)
+                .0
+                .live_output_sink()
+                .is_none(),
+            "the dispatcher has not said which call this is"
+        );
+
+        let mut no_channel = crate::test_support::allow_all_context(std::env::temp_dir());
+        no_channel.config.live_tool_output = true;
+        no_channel.current_call = Some(Arc::new(ActiveToolCall {
+            id: "call-1".to_string(),
+            input: serde_json::json!({}),
+        }));
+        assert!(
+            no_channel.live_output_sink().is_none(),
+            "no frontend asked for live output"
+        );
     }
 }

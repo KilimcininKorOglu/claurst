@@ -78,6 +78,11 @@ const SPINNER: &[char] = &[
 ];
 const CLAUDE_ORANGE: Color = Color::Rgb(233, 30, 99);
 const WELCOME_BOX_HEIGHT: u16 = 9;
+/// How many lines of a running command's output stay on screen.
+///
+/// A tail, because a build prints thousands of lines and the block would push
+/// the conversation off the screen while it ran.
+const LIVE_OUTPUT_TAIL_LINES: usize = 10;
 /// The rule drawn between a tool's header line and what the tool printed.
 ///
 /// A fixed width rather than the pane's: the transcript is built into
@@ -2778,6 +2783,30 @@ fn render_tool_block_lines(
     }
     lines.push(Line::from(header_spans));
 
+    // What the command has printed so far. Only ever filled while it runs and
+    // only when the setting is on, so an ordinary session reaches neither this
+    // branch nor the allocation behind it.
+    if running && !block.live_output.is_empty() {
+        lines.push(Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                TOOL_OUTPUT_RULE.to_string(),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]));
+        for line_text in block.live_output_tail(LIVE_OUTPUT_TAIL_LINES) {
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled(
+                    expand_tabs(&shorten_home_path(line_text)),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+    }
+
     // Output preview (done/error state) — home paths shortened, dimmed.
     if let Some(ref preview) = block.output_preview {
         // A rule between the command and what it printed. Without it the
@@ -4528,6 +4557,7 @@ mod tool_block_tests {
             status,
             output_preview: preview.map(|s| s.to_string()),
             input_json: input.into(),
+            live_output: String::new(),
         }
     }
 
@@ -4576,6 +4606,60 @@ mod tool_block_tests {
         assert!(
             !running.iter().any(|line| line.contains(TOOL_OUTPUT_RULE)),
             "{running:?}"
+        );
+    }
+
+    #[test]
+    fn a_running_block_draws_what_the_command_has_printed_so_far() {
+        let mut b = block("Bash", ToolStatus::Running, r#"{"command":"make"}"#, None);
+        b.push_live_output("compiling one\ncompiling two\n");
+
+        let rendered = render(&b);
+        assert!(
+            rendered.iter().any(|line| line.contains("compiling two")),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains(TOOL_OUTPUT_RULE)),
+            "live output needs the same rule as a finished result: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn only_the_tail_of_a_long_run_stays_on_screen() {
+        // A build prints thousands of lines; drawing them all would push the
+        // conversation off the screen for as long as it ran.
+        let mut b = block("Bash", ToolStatus::Running, r#"{"command":"make"}"#, None);
+        for i in 0..(LIVE_OUTPUT_TAIL_LINES * 3) {
+            b.push_live_output(&format!("line {i}\n"));
+        }
+
+        let rendered = render(&b);
+        assert!(
+            rendered.iter().any(|line| line.contains("line 29")),
+            "the newest line must be shown: {rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("line 0")),
+            "the oldest line must have scrolled off: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn a_finished_block_shows_the_result_rather_than_the_play_by_play() {
+        let mut b = block(
+            "Bash",
+            ToolStatus::Done,
+            r#"{"command":"make"}"#,
+            Some("done"),
+        );
+        b.push_live_output("compiling one\n");
+
+        let rendered = render(&b).join("\n");
+        assert!(rendered.contains("done"), "{rendered:?}");
+        assert!(
+            !rendered.contains("compiling one"),
+            "a finished block keeps the result, not the steps: {rendered:?}"
         );
     }
 
@@ -6259,6 +6343,7 @@ mod tab_expansion_tests {
             turn_index: None,
             status: ToolStatus::Done,
             output_preview: Some("1\talpha\n2\tbeta\n3\tgamma".to_string()),
+            live_output: String::new(),
         };
 
         let mut lines = Vec::new();
