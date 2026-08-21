@@ -2409,10 +2409,17 @@ async fn compact_conversation(
             app.context_used_tokens = mikmik_query::compact::estimate_context_size(messages);
             app.token_warning_threshold_shown = 0;
             let removed = before.saturating_sub(messages.len());
-            app.status_message = Some(format!(
-                "Compacted {removed} message{} into a summary.",
-                if removed == 1 { "" } else { "s" }
-            ));
+            // A conversation that already fits the keep-recent budget comes
+            // back untouched, and saying "compacted 0 messages" reads as a
+            // failure rather than as nothing needing to be done.
+            app.status_message = Some(if removed == 0 {
+                "Nothing to summarise: the conversation already fits.".to_string()
+            } else {
+                format!(
+                    "Compacted {removed} message{} into a summary.",
+                    if removed == 1 { "" } else { "s" }
+                )
+            });
             true
         }
         Err(e) => {

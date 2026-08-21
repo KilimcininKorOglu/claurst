@@ -501,7 +501,7 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
         write_line!(
             row,
             Line::from(Span::styled(
-                format!("  {}", shorten_home(path)),
+                format!("  {}", fit_path(path, inner_w.saturating_sub(2))),
                 Style::default().fg(HINT_FG).bg(MIKMIK_PANEL_BG)
             ))
         );
@@ -529,16 +529,33 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     );
 }
 
-/// The path with the home directory written as `~`, so it fits the dialog.
-fn shorten_home(path: &std::path::Path) -> String {
+/// The path as it fits the dialog: home written as `~`, and the head dropped
+/// before the tail.
+///
+/// The row exists to say which file `ctrl+g` opens, so the file name is the
+/// part that has to survive; a path cut at its right edge keeps the part the
+/// user already knows and loses the part they do not.
+fn fit_path(path: &std::path::Path, width: usize) -> String {
     let shown = path.display().to_string();
-    let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) else {
-        return shown;
-    };
-    match shown.strip_prefix(&home.to_string_lossy().to_string()) {
-        Some(rest) => format!("~{rest}"),
+    let shown = match std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .and_then(|home| {
+            shown
+                .strip_prefix(home.to_string_lossy().as_ref())
+                .map(|rest| format!("~{rest}"))
+        }) {
+        Some(shortened) => shortened,
         None => shown,
+    };
+
+    if shown.chars().count() <= width || width == 0 {
+        return shown;
     }
+    let tail: String = shown
+        .chars()
+        .skip(shown.chars().count() - width.saturating_sub(1))
+        .collect();
+    format!("…{tail}")
 }
 
 #[cfg(test)]
@@ -656,6 +673,26 @@ mod tests {
 
         state.request_edit();
         assert_eq!(state.take_edit_request(), None);
+    }
+
+    /// The row says which file ctrl+g opens, so the file name is the part
+    /// that has to survive a path too long for the dialog.
+    #[test]
+    fn a_long_path_keeps_its_file_name() {
+        let (state, _rx) = open_dialog("a plan");
+        let long = PathBuf::from(
+            "/private/tmp/claude-501/-Users-someone-Desktop-a-very-long-project/plans/sess-1.md",
+        );
+
+        let fitted = fit_path(&long, 40);
+        assert_eq!(fitted.chars().count(), 40);
+        assert!(fitted.starts_with('…'), "{fitted}");
+        assert!(fitted.ends_with("plans/sess-1.md"), "{fitted}");
+
+        // A path that fits is left alone.
+        let short = PathBuf::from("/tmp/plans/sess-1.md");
+        assert_eq!(fit_path(&short, 40), "/tmp/plans/sess-1.md");
+        let _ = state;
     }
 
     /// ctrl+g hands the session loop the path, because only it can leave the
