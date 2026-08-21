@@ -403,6 +403,14 @@ impl Tool for AgentTool {
             // session it was spawned from.
             degradation_summary: ctx.config.degradation_summary.unwrap_or(true),
             auto_poke: ctx.config.auto_poke.unwrap_or(true),
+            // Follows the session too. A sub-agent isolated in a worktree
+            // resolves a project root of its own and so reads an empty memory
+            // directory; that is the safe direction, since the worktree is a
+            // scratch checkout and nothing there should be remembered as the
+            // project's own.
+            auto_memory_enabled: mikmik_core::memdir::is_auto_memory_enabled(
+                ctx.config.auto_memory_enabled,
+            ),
             auto_compact: ctx.config.effective_auto_compact(),
             compact_threshold: ctx.config.effective_compact_threshold(),
             system_prompt: Some(system_prompt),

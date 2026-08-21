@@ -192,6 +192,11 @@ pub struct QueryConfig {
     /// input box for the companion to sit beside, so describing it there would
     /// spend tokens on something the user cannot see.
     pub companion_addendum: Option<String>,
+    /// Whether the project's memory directory is read into the system prompt.
+    ///
+    /// Resolved once here rather than re-read per turn, so every turn in a
+    /// session builds the same prompt shape.
+    pub auto_memory_enabled: bool,
 }
 
 impl Default for QueryConfig {
@@ -226,6 +231,7 @@ impl Default for QueryConfig {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             companion_addendum: None,
+            auto_memory_enabled: false,
         }
     }
 }
@@ -253,6 +259,9 @@ impl QueryConfig {
             auto_poke: cfg.auto_poke.unwrap_or(true),
             auto_compact: cfg.effective_auto_compact(),
             compact_threshold: cfg.effective_compact_threshold(),
+            auto_memory_enabled: mikmik_core::memdir::is_auto_memory_enabled(
+                cfg.auto_memory_enabled,
+            ),
             ..Default::default()
         }
     }
@@ -280,6 +289,9 @@ impl QueryConfig {
             auto_poke: cfg.auto_poke.unwrap_or(true),
             auto_compact: cfg.effective_auto_compact(),
             compact_threshold: cfg.effective_compact_threshold(),
+            auto_memory_enabled: mikmik_core::memdir::is_auto_memory_enabled(
+                cfg.auto_memory_enabled,
+            ),
             ..Default::default()
         }
     }
@@ -2347,6 +2359,7 @@ mod tests {
             enabled_tools: None,
             continuation: crate::continuation::ContinuationMode::Default,
             companion_addendum: None,
+            auto_memory_enabled: false,
         }
     }
 

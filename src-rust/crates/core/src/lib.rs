@@ -1345,6 +1345,13 @@ pub mod config {
         /// it through [`Config::effective_auto_compact`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub auto_compact: Option<bool>,
+        /// Whether the project's memory directory is kept and shown to the
+        /// model. Defaults to off.
+        ///
+        /// `Option` so `memdir::is_auto_memory_enabled` can still tell "unset"
+        /// from "set to false"; an env var overrides only the former.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub auto_memory_enabled: Option<bool>,
         /// Context fill, as a percentage 0-100, at which auto-compact fires.
         ///
         /// A percentage because that is the unit the settings screen offers
@@ -2858,6 +2865,10 @@ pub mod config {
             if config.auto_compact.is_none() {
                 config.auto_compact = self.auto_compact;
             }
+            // Same fold for the memory directory, for the same reason.
+            if config.auto_memory_enabled.is_none() {
+                config.auto_memory_enabled = self.auto_memory_enabled;
+            }
             // Merge top-level `providers` map into config.provider_configs.
             for (id, pc) in &self.providers {
                 config
@@ -3131,6 +3142,11 @@ pub mod config {
                 theme: base.config.theme,
                 output_style: over.config.output_style.or(base.config.output_style),
                 auto_compact: over.config.auto_compact.or(base.config.auto_compact),
+                // Taken from `base` alone, unlike `auto_compact` above: this
+                // one decides whether a directory on the user's machine starts
+                // collecting what they work on, which is not a repository's
+                // call to make.
+                auto_memory_enabled: base.config.auto_memory_enabled,
                 // When the context is compacted is the user's call, like
                 // `verbose` below: a repository has no stake in how much room
                 // the user keeps for their own conversation.

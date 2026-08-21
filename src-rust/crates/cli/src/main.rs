@@ -998,6 +998,17 @@ async fn main() -> anyhow::Result<()> {
         SWARM_INIT.get_or_init(mikmik_query::init_team_swarm_runner);
     }
 
+    // Create the project's memory directory up front. The model writes a
+    // memory with the ordinary Write tool, and that tool refuses a path whose
+    // parent does not exist, so the first memory of a session would fail
+    // without this.
+    if mikmik_core::memdir::is_auto_memory_enabled(config.auto_memory_enabled) {
+        let project_root = mikmik_core::session_storage::transcript_root_for(&cwd);
+        mikmik_core::memdir::ensure_memory_dir_exists(&mikmik_core::memdir::auto_memory_path(
+            &project_root,
+        ));
+    }
+
     // Build the full tool list: built-ins from cc-tools plus AgentTool from cc-query
     // (AgentTool lives in cc-query to avoid a circular cc-tools ↔ cc-query dependency).
     // Wrap in Arc so the list can be shared by the main loop AND the cron scheduler.
