@@ -79,21 +79,13 @@ impl SlashCommand for MemoryCommand {
                 }
                 let _ = std::fs::write(&target, "");
             }
-            let (editor, editor_hint) = mikmik_core::paths::preferred_editor();
-            let spawn_result = std::process::Command::new(&editor).arg(&target).status();
-            return match spawn_result {
-                Ok(_) => CommandResult::Message(format!(
-                    "Opened {} in your editor.\n{}",
-                    target.display(),
-                    editor_hint
-                )),
-                Err(e) => CommandResult::Message(format!(
-                    "Could not launch '{}': {}. Edit {} manually.\n{}",
-                    editor,
-                    e,
-                    target.display(),
-                    editor_hint
-                )),
+            // Handed to the session loop rather than launched here: this crate
+            // has no terminal to give the editor, and starting one under the
+            // TUI draws it over the frame.
+            let (_, editor_hint) = mikmik_core::paths::preferred_editor();
+            return CommandResult::OpenInEditor {
+                message: format!("Edited {}.\n{}", target.display(), editor_hint),
+                path: target,
             };
         }
 

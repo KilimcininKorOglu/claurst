@@ -138,6 +138,18 @@ pub enum CommandResult {
         /// Whether uncommitted changes were carried across (for the status line).
         moved_changes: bool,
     },
+    /// Open a file in the user's editor.
+    ///
+    /// Carried out by the session loop, which is the only place that can hand
+    /// the terminal over: an editor started while the TUI holds raw mode and
+    /// the alternate screen draws over the frame and gets redrawn on the next
+    /// one.
+    OpenInEditor {
+        /// The file to open. Created empty first if it does not exist.
+        path: std::path::PathBuf,
+        /// What to say once the editor has exited.
+        message: String,
+    },
     /// Ask the named accounts what models they serve and rewrite their lists.
     ///
     /// Discovery is async and needs the live provider registry, so the command

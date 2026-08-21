@@ -355,6 +355,9 @@ async fn apply(
         R::OpenRewindOverlay | R::OpenHooksOverlay | R::OpenImportConfigOverlay => Outcome::failed(
             "That command answers with a view, which this client has no way to show.",
         ),
+        // The editor would need a terminal this client does not own, so the
+        // path is all that can usefully be handed back.
+        R::OpenInEditor { path, .. } => Outcome::said(format!("Edit {} yourself.", path.display())),
     }
 }
 

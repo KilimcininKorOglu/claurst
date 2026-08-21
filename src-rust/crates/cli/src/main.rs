@@ -3928,6 +3928,36 @@ async fn run_interactive(
                                     )
                                     .await;
                                 }
+                                Some(CommandResult::OpenInEditor { path, message }) => {
+                                    // Same handover the plan dialog's ctrl+g
+                                    // makes: an editor started under the TUI
+                                    // draws over the frame and is redrawn on
+                                    // the next one.
+                                    if !path.exists() {
+                                        if let Some(parent) = path.parent() {
+                                            let _ = std::fs::create_dir_all(parent);
+                                        }
+                                        let _ = std::fs::write(&path, "");
+                                    }
+                                    let (editor, editor_hint) =
+                                        mikmik_core::paths::preferred_editor();
+                                    mikmik_tui::restore_terminal(&mut terminal).ok();
+                                    let status =
+                                        std::process::Command::new(&editor).arg(&path).status();
+                                    terminal = mikmik_tui::setup_terminal(
+                                        app.config.mouse_capture_enabled(),
+                                    )?;
+                                    app.kitty_keyboard_active =
+                                        mikmik_tui::keyboard_enhancement_active();
+                                    app.status_message = Some(match status {
+                                        Ok(_) => message,
+                                        Err(e) => format!(
+                                            "Could not launch '{editor}': {e}. \
+                                             Edit {} yourself. {editor_hint}",
+                                            path.display()
+                                        ),
+                                    });
+                                }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());
                                     app.open_rewind_flow();
