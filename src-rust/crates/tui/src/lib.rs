@@ -174,8 +174,6 @@ pub mod transcript_find;
 pub mod transcript_turn;
 /// Virtual scrollable list for efficient message rendering.
 pub mod virtual_list;
-/// Push-to-talk voice capture and Whisper transcription.
-pub mod voice_capture;
 /// Voice mode availability notice (shown when voice is available but not enabled).
 pub mod voice_mode_notice;
 
@@ -1171,7 +1169,6 @@ mod tests {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = make_app();
-        app.away_summary = Some("2 agent updates while you were away".to_string());
         app.remote_session_url = Some("https://example.com/session/123".to_string());
         app.bridge_state = crate::bridge_state::BridgeConnectionState::Connected {
             session_url: "https://example.com/session/123".to_string(),
@@ -1191,7 +1188,6 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
 
-        assert!(rendered.contains("2 agent updates while you were away"));
         assert!(rendered.contains("Remote session active"));
         assert!(rendered.contains("https://example.com/session/123"));
     }

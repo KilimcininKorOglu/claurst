@@ -315,21 +315,6 @@ fn startup_notice_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let max_width = width.saturating_sub(10) as usize;
 
-    if let Some(summary) = app.away_summary.as_deref() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {} ", crate::figures::REFERENCE_MARK),
-                Style::default()
-                    .fg(CLAUDE_ORANGE)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                truncate_end(summary, max_width),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-    }
-
     match &app.bridge_state {
         crate::bridge_state::BridgeConnectionState::Connected { peer_count, .. } => {
             let label = if *peer_count > 0 {

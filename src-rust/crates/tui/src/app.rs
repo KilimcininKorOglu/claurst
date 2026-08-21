@@ -1377,8 +1377,6 @@ pub struct App {
     // ---- Visual mode indicators -------------------------------------------
     /// Plan mode — input border turns blue, [PLAN] shown in status bar.
     pub plan_mode: bool,
-    /// "While you were away" summary text shown on the welcome screen.
-    pub away_summary: Option<String>,
     /// When streaming stalled (used to turn the spinner red after 3 s).
     pub stall_start: Option<std::time::Instant>,
 
@@ -1897,7 +1895,6 @@ impl App {
             file_history: None,
             current_turn: None,
             plan_mode: false,
-            away_summary: None,
             stall_start: None,
             settings_screen: SettingsScreen::new(),
             theme_screen: ThemeScreen::new(),
