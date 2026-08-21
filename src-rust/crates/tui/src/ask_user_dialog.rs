@@ -404,7 +404,7 @@ pub fn render_ask_user_dialog(state: &AskUserDialogState, area: Rect, buf: &mut 
 // Word-wrap helper
 // ---------------------------------------------------------------------------
 
-fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
+pub(crate) fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
         return vec![text.to_string()];
     }

@@ -1487,22 +1487,6 @@ pub fn render_plan_steps(steps: &[String]) -> Vec<Line<'static>> {
     lines
 }
 
-/// Render a plan approval prompt.
-pub fn render_plan_approval_prompt() -> Vec<Line<'static>> {
-    vec![Line::from(vec![
-        Span::styled(
-            "  Approve this plan? ".to_string(),
-            Style::default()
-                .fg(CLAUDE_ORANGE)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "[y] yes  [n] no  [e] edit".to_string(),
-            Style::default().fg(Color::White),
-        ),
-    ])]
-}
-
 /// Render a "compact boundary" separator.
 pub fn render_compact_boundary() -> Vec<Line<'static>> {
     vec![Line::from(vec![Span::styled(
@@ -2506,17 +2490,6 @@ mod tests {
         assert!(combined.contains("First step"));
         assert!(combined.contains("2."));
         assert!(combined.contains("Second step"));
-    }
-
-    #[test]
-    fn test_render_plan_approval_prompt() {
-        let result = render_plan_approval_prompt();
-        assert!(!result.is_empty());
-        let text = line_text(&result[0]);
-        assert!(text.contains("Approve this plan?"));
-        assert!(text.contains("[y]"));
-        assert!(text.contains("[n]"));
-        assert!(text.contains("[e]"));
     }
 
     #[test]

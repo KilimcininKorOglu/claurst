@@ -146,6 +146,8 @@ pub mod overage_upsell;
 pub mod overlays;
 /// Read-only viewer for [Pasted text #N ...] placeholders.
 pub mod paste_viewer;
+/// Plan approval dialog (ExitPlanMode tool).
+pub mod plan_approval_dialog;
 /// Plugin hint/recommendation UI.
 pub mod plugin_views;
 /// Complete prompt input with vim mode, history, typeahead, and paste handling.
