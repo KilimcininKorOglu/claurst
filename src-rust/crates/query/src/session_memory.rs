@@ -30,6 +30,30 @@ const MIN_MESSAGES_TO_EXTRACT: usize = 20;
 /// Minimum tool calls since last extraction before we run again.
 const MIN_TOOL_CALLS_BETWEEN_EXTRACTIONS: usize = 3;
 
+/// Name of the memory file extraction writes to, inside the project's memory
+/// directory.
+///
+/// One file rather than one per run: the directory's manifest lists every
+/// file, and a run every twenty messages would bury the memories a person
+/// wrote by hand.
+const SESSION_NOTES_FILE: &str = "session-notes.md";
+
+/// Header written when [`SESSION_NOTES_FILE`] is created.
+///
+/// `mikmik_core::memdir::parse_frontmatter_quick` reads these three keys, so
+/// the file shows up in the manifest with a name and a description instead of
+/// as a bare filename with nothing to score a search against.
+const FRONTMATTER: &str = "---\n\
+name: Session notes\n\
+description: Facts extracted automatically from past sessions in this project.\n\
+type: project\n\
+---\n";
+
+/// Where extraction writes, given a project's memory directory.
+pub fn session_notes_path(memory_dir: &Path) -> std::path::PathBuf {
+    memory_dir.join(SESSION_NOTES_FILE)
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -262,6 +286,11 @@ impl SessionMemoryExtractor {
 
     /// Persist extracted memories to `target_path` (creates directories and
     /// the file if they don't exist).  Appends under `## Auto-extracted memories`.
+    ///
+    /// A file created here opens with the frontmatter the memory directory
+    /// indexes on, so it appears in the manifest with a name and a description
+    /// rather than as a bare filename. Written once, on creation: a later run
+    /// appends to the section and leaves the header alone.
     pub async fn persist(memories: &[ExtractedMemory], target_path: &Path) -> anyhow::Result<()> {
         if memories.is_empty() {
             return Ok(());
@@ -275,7 +304,7 @@ impl SessionMemoryExtractor {
         // Read existing content (or start fresh)
         let existing = match fs::read_to_string(target_path).await {
             Ok(content) => content,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => FRONTMATTER.to_string(),
             Err(e) => return Err(e.into()),
         };
 
@@ -693,5 +722,71 @@ MEMORY: code_pattern | 7 | Uses builder pattern";
 
         assert!(memories.is_empty(), "an empty reply yields no memories");
         assert_eq!(backend.0.lock().as_deref(), Some("claude-opus-5"));
+    }
+
+    fn a_memory(content: &str) -> ExtractedMemory {
+        ExtractedMemory {
+            content: content.to_string(),
+            category: MemoryCategory::ProjectFact,
+            confidence: 0.9,
+        }
+    }
+
+    /// The file has to carry frontmatter or the memory directory lists it as a
+    /// bare filename with nothing to score a search against.
+    #[tokio::test]
+    async fn a_new_notes_file_opens_with_frontmatter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = session_notes_path(dir.path());
+
+        SessionMemoryExtractor::persist(&[a_memory("the build runs from src-rust")], &target)
+            .await
+            .expect("persist");
+
+        let written = std::fs::read_to_string(&target).expect("read back");
+        let (name, description, memory_type) =
+            mikmik_core::memdir::parse_frontmatter_quick(&written);
+
+        assert_eq!(name.as_deref(), Some("Session notes"));
+        assert!(description.is_some());
+        assert_eq!(memory_type, Some(mikmik_core::memdir::MemoryType::Project));
+        assert!(written.contains("the build runs from src-rust"));
+    }
+
+    /// A second run appends to the section; repeating the header would give
+    /// the file two frontmatter blocks and the parser would read neither.
+    #[tokio::test]
+    async fn a_second_run_appends_without_repeating_the_header() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = session_notes_path(dir.path());
+
+        SessionMemoryExtractor::persist(&[a_memory("first fact")], &target)
+            .await
+            .expect("first persist");
+        SessionMemoryExtractor::persist(&[a_memory("second fact")], &target)
+            .await
+            .expect("second persist");
+
+        let written = std::fs::read_to_string(&target).expect("read back");
+
+        assert_eq!(written.matches("name: Session notes").count(), 1);
+        assert_eq!(written.matches("## Auto-extracted memories").count(), 1);
+        assert!(written.contains("first fact"));
+        assert!(written.contains("second fact"));
+    }
+
+    /// The notes file lands in the memory directory, where the prompt looks.
+    #[tokio::test]
+    async fn the_notes_file_is_scanned_as_a_memory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = session_notes_path(dir.path());
+
+        SessionMemoryExtractor::persist(&[a_memory("a fact")], &target)
+            .await
+            .expect("persist");
+
+        let block = mikmik_core::memdir::build_memory_prompt_content(dir.path());
+        assert!(block.contains("session-notes.md"), "{block}");
+        assert!(block.contains("[project]"), "{block}");
     }
 }

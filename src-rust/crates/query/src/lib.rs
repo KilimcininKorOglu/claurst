@@ -1779,7 +1779,14 @@ async fn run_query_loop_inner(
 
                 // Asynchronously extract and persist session memories if warranted.
                 // Runs in a detached Tokio task so it doesn't block the query loop.
-                if session_memory::SessionMemoryExtractor::should_extract(messages) {
+                // Gated on the memory directory. Extraction used to run
+                // whatever the settings said and write to `.mikmik/AGENTS.md`
+                // in the checkout, which the memory loader never reads: it
+                // walks from cwd upwards, and that file sits one level down.
+                // So every run spent a model call on a file nothing opened.
+                if config.auto_memory_enabled
+                    && session_memory::SessionMemoryExtractor::should_extract(messages)
+                {
                     // Through the account that just served the turn, not a
                     // fresh Anthropic client built from `ANTHROPIC_API_KEY`.
                     // That gate meant a session on any other provider
@@ -1813,7 +1820,13 @@ async fn run_query_loop_inner(
                             .await
                         {
                             Ok(memories) if !memories.is_empty() => {
-                                let target = working_dir_clone.join(".mikmik").join("AGENTS.md");
+                                let project_root =
+                                    mikmik_core::session_storage::transcript_root_for(
+                                        &working_dir_clone,
+                                    );
+                                let target = session_memory::session_notes_path(
+                                    &mikmik_core::memdir::auto_memory_path(&project_root),
+                                );
                                 if let Err(e) = session_memory::SessionMemoryExtractor::persist(
                                     &memories, &target,
                                 )
@@ -1841,38 +1854,41 @@ async fn run_query_loop_inner(
                 // Some(task), we spawn a background subagent via AgentTool so
                 // the spawn doesn't call run_query_loop recursively from within
                 // its own future (which would make the future !Send).
-                {
-                    let mikmik_home = mikmik_core::config::Settings::config_dir();
-                    let memory_dir = Some(mikmik_home.join("memory"));
-                    let conversations_dir = Some(mikmik_home.join("conversations"));
-                    if let (Some(mem), Some(conv)) = (memory_dir, conversations_dir) {
-                        let dreamer = crate::auto_dream::AutoDream::new(mem, conv);
-                        if let Ok(Some(task)) = dreamer.maybe_trigger().await {
-                            // Run the consolidation subagent in a background Tokio
-                            // task. We use the AgentTool execute path (via
-                            // poll_background_agent / BACKGROUND_AGENTS) to avoid
-                            // re-entering run_query_loop from within the same
-                            // future graph.
-                            let agent_input = serde_json::json!({
-                                "description": "memory consolidation",
-                                "prompt": task.prompt,
-                                "max_turns": 20,
-                                "system_prompt": "You are performing automatic memory consolidation. Complete the task and return a brief summary.",
-                                "run_in_background": true,
-                                "isolation": null
-                            });
-                            let ctx_for_dream = tool_ctx.clone();
-                            tokio::spawn(async move {
-                                let agent = crate::agent_tool::AgentTool;
-                                let _result = mikmik_tools::Tool::execute(
-                                    &agent,
-                                    agent_input,
-                                    &ctx_for_dream,
-                                )
-                                .await;
-                                crate::auto_dream::AutoDream::finish_consolidation(&task).await;
-                            });
-                        }
+                if config.auto_memory_enabled {
+                    // Both paths were guesses at the config root and neither
+                    // directory has ever existed: memory lives under the
+                    // project directory and transcripts are the `.jsonl` files
+                    // beside it. `session_gate_passes` returns false as soon as
+                    // the conversations directory is missing, so consolidation
+                    // never ran at all.
+                    let project_root =
+                        mikmik_core::session_storage::transcript_root_for(&tool_ctx.working_dir);
+                    let memory_dir = mikmik_core::memdir::auto_memory_path(&project_root);
+                    let conversations_dir =
+                        mikmik_core::session_storage::transcript_dir(&project_root);
+                    let dreamer = crate::auto_dream::AutoDream::new(memory_dir, conversations_dir);
+                    if let Ok(Some(task)) = dreamer.maybe_trigger().await {
+                        // Run the consolidation subagent in a background Tokio
+                        // task. We use the AgentTool execute path (via
+                        // poll_background_agent / BACKGROUND_AGENTS) to avoid
+                        // re-entering run_query_loop from within the same
+                        // future graph.
+                        let agent_input = serde_json::json!({
+                            "description": "memory consolidation",
+                            "prompt": task.prompt,
+                            "max_turns": 20,
+                            "system_prompt": "You are performing automatic memory consolidation. Complete the task and return a brief summary.",
+                            "run_in_background": true,
+                            "isolation": null
+                        });
+                        let ctx_for_dream = tool_ctx.clone();
+                        tokio::spawn(async move {
+                            let agent = crate::agent_tool::AgentTool;
+                            let _result =
+                                mikmik_tools::Tool::execute(&agent, agent_input, &ctx_for_dream)
+                                    .await;
+                            crate::auto_dream::AutoDream::finish_consolidation(&task).await;
+                        });
                     }
                 }
 
