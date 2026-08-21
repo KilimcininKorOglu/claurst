@@ -279,6 +279,31 @@ pub fn transcript_path(project_root: &Path, session_id: &str) -> crate::Result<P
     Ok(transcript_dir(project_root).join(format!("{}.jsonl", session_id)))
 }
 
+/// Returns the full path to a session's plan file: `<config dir>/plans/<id>.md`.
+///
+/// The plan a session is working from is a document the user edits, so it lives
+/// as one file per session rather than inside the transcript. Not
+/// project-scoped, because a plan is written before any directory is decided.
+///
+/// # Errors
+/// Returns `crate::ClaudeError::Other` if `session_id` is empty or contains
+/// path components (`/`, `\`, or `..`), on the same grounds as
+/// [`transcript_path`].
+pub fn plan_path(session_id: &str) -> crate::Result<PathBuf> {
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return Err(crate::ClaudeError::Other(
+            "session_id contains illegal characters".into(),
+        ));
+    }
+    Ok(crate::config::Settings::config_dir()
+        .join("plans")
+        .join(format!("{}.md", session_id)))
+}
+
 // ---------------------------------------------------------------------------
 // Core I/O operations
 // ---------------------------------------------------------------------------
@@ -1499,6 +1524,30 @@ mod tests {
             .unwrap();
         let decoded = URL_SAFE_NO_PAD.decode(encoded_dir).unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), root.to_str().unwrap());
+    }
+
+    #[test]
+    fn a_plan_path_is_one_file_per_session() {
+        let path = plan_path("sess-1").expect("a plain id is a legal file name");
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("sess-1.md")
+        );
+        assert_eq!(
+            path.parent().and_then(|dir| dir.file_name()?.to_str()),
+            Some("plans")
+        );
+    }
+
+    #[test]
+    fn a_plan_path_refuses_to_escape_its_directory() {
+        for id in ["", "../../etc/passwd", "a/b", "a\\b"] {
+            assert!(
+                plan_path(id).is_err(),
+                "{id:?} was accepted as a plan file name"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

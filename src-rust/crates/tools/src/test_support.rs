@@ -5,6 +5,35 @@ use crate::ToolContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// `MIKMIK_HOME` is process-global, so the tests that redirect it run one at a
+/// time and put it back afterwards.
+pub(crate) static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Points `MIKMIK_HOME` at a directory for as long as it is held.
+///
+/// Take [`HOME_LOCK`] first: a test that writes into the config root and does
+/// not redirect it fails CI's "the tests left the config root alone" step.
+pub(crate) struct HomeGuard {
+    saved: Option<std::ffi::OsString>,
+}
+
+impl HomeGuard {
+    pub(crate) fn pointing_at(dir: &std::path::Path) -> Self {
+        let saved = std::env::var_os("MIKMIK_HOME");
+        std::env::set_var("MIKMIK_HOME", dir);
+        Self { saved }
+    }
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        match &self.saved {
+            Some(value) => std::env::set_var("MIKMIK_HOME", value),
+            None => std::env::remove_var("MIKMIK_HOME"),
+        }
+    }
+}
+
 /// Permission handler that approves everything, so `execute` runs unattended.
 pub(crate) struct AllowAllHandler;
 

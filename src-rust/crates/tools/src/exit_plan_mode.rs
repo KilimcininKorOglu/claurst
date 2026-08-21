@@ -6,7 +6,8 @@ use crate::{
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tracing::debug;
+use std::path::{Path, PathBuf};
+use tracing::{debug, warn};
 
 pub struct ExitPlanModeTool;
 
@@ -50,6 +51,15 @@ impl Tool for ExitPlanModeTool {
 
         debug!(summary = ?params.summary, "Exiting plan mode");
 
+        let plan = params
+            .summary
+            .clone()
+            .unwrap_or_else(|| "The model did not write out a plan.".to_string());
+        // Written on every path, headless included, because the file is the
+        // only lasting record of the plan: the tool input scrolls away with the
+        // transcript.
+        let plan_path = write_plan(&ctx.session_id, &plan);
+
         // Without a dialog to ask through, leaving plan mode is the model's own
         // decision, exactly as it was before approval existed. This is the
         // headless and non-interactive path, where blocking on an answer nobody
@@ -70,13 +80,10 @@ impl Tool for ExitPlanModeTool {
         };
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<PlanDecision>();
-        let plan = params
-            .summary
-            .clone()
-            .unwrap_or_else(|| "The model did not write out a plan.".to_string());
         if tx
             .send(PlanApprovalEvent {
                 plan: plan.clone(),
+                plan_path: plan_path.clone(),
                 reply_tx,
             })
             .is_err()
@@ -115,22 +122,73 @@ impl Tool for ExitPlanModeTool {
             msg.push_str(&format!("\nThe user added: {note}"));
         }
 
+        // The dialog can open the plan file in an editor while it waits, so the
+        // plan the user approved may not be the plan the model wrote. Read it
+        // back here rather than carrying the text through the dialog, so the
+        // file has one owner.
+        let edited = plan_path
+            .as_deref()
+            .and_then(|path| read_edited_plan(path, &plan));
+        if let Some(edited) = &edited {
+            msg.push_str(&format!(
+                "\nThe user edited the plan. The plan is now:\n\n{edited}"
+            ));
+        }
+
         ToolResult::success(msg).with_metadata(json!({
             "type": "exit_plan_mode",
-            "summary": params.summary,
+            "summary": edited.or(params.summary),
             "approved": decision.choice != PlanChoice::KeepPlanning,
         }))
     }
 }
 
+/// Write the plan where the user can open it, returning where it landed.
+///
+/// Best-effort: a plan that cannot be written still reaches the dialog, which
+/// then offers no way to edit it. The failure is logged rather than returned,
+/// because it changes nothing about what the model should do next.
+fn write_plan(session_id: &str, plan: &str) -> Option<PathBuf> {
+    let path = match mikmik_core::session_storage::plan_path(session_id) {
+        Ok(path) => path,
+        Err(error) => {
+            warn!(%error, session_id, "the session id cannot name a plan file");
+            return None;
+        }
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            warn!(%error, dir = %parent.display(), "could not create the plans directory");
+            return None;
+        }
+    }
+    if let Err(error) = std::fs::write(&path, plan) {
+        warn!(%error, path = %path.display(), "could not write the plan file");
+        return None;
+    }
+    Some(path)
+}
+
+/// The plan as it stands on disk, when that is not what was written there.
+fn read_edited_plan(path: &Path, written: &str) -> Option<String> {
+    let current = std::fs::read_to_string(path).ok()?;
+    (current.trim() != written.trim()).then(|| current.trim().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::allow_all_context;
+    use crate::test_support::{allow_all_context, HomeGuard, HOME_LOCK};
 
     /// Nothing to approve through, so the tool must not wait for an answer.
+    /// The plan is still written, because headless is where nobody is watching
+    /// the transcript.
     #[tokio::test]
     async fn without_a_dialog_the_tool_returns_at_once() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("a temp home");
+        let _home = HomeGuard::pointing_at(home.path());
+
         let ctx = allow_all_context(std::env::temp_dir());
         assert!(ctx.plan_approval_tx.is_none());
 
@@ -140,12 +198,21 @@ mod tests {
 
         assert!(!result.is_error);
         assert!(result.content.contains("do the thing"));
+
+        let written = mikmik_core::session_storage::plan_path(&ctx.session_id)
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok());
+        assert_eq!(written.as_deref(), Some("do the thing"));
     }
 
     /// A wired-up dialog blocks the tool until the user answers, and the answer
     /// reaches the model.
     #[tokio::test]
     async fn a_decision_is_reported_back_with_its_note() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("a temp home");
+        let _home = HomeGuard::pointing_at(home.path());
+
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PlanApprovalEvent>();
         let mut ctx = allow_all_context(std::env::temp_dir());
         ctx.non_interactive = false;
@@ -175,6 +242,85 @@ mod tests {
                 .and_then(|meta| meta.get("approved"))
                 .and_then(Value::as_bool),
             Some(false)
+        );
+    }
+
+    /// The dialog can open the plan in an editor while it waits, so what the
+    /// user approved may not be what the model wrote.
+    #[tokio::test]
+    async fn a_plan_edited_while_the_dialog_waited_reaches_the_model() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("a temp home");
+        let _home = HomeGuard::pointing_at(home.path());
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PlanApprovalEvent>();
+        let mut ctx = allow_all_context(std::env::temp_dir());
+        ctx.non_interactive = false;
+        ctx.plan_approval_tx = Some(tx);
+
+        let answerer = tokio::spawn(async move {
+            let event = rx.recv().await?;
+            // Stands in for the editor the user opened with ctrl+g.
+            let path = event.plan_path.clone()?;
+            std::fs::write(&path, "step one\nstep two, which the user added\n").ok()?;
+            let _ = event.reply_tx.send(PlanDecision {
+                choice: PlanChoice::ManualApproval,
+                note: None,
+            });
+            Some(path)
+        });
+
+        let result = ExitPlanModeTool
+            .execute(json!({ "summary": "step one" }), &ctx)
+            .await;
+
+        assert!(
+            answerer.await.ok().flatten().is_some(),
+            "the dialog was given no plan file to edit"
+        );
+        assert!(result.content.contains("The user edited the plan"));
+        assert!(result.content.contains("step two, which the user added"));
+        // The metadata carries the plan that was approved, not the one that
+        // was proposed, because that is the one being implemented.
+        assert_eq!(
+            result
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.get("summary"))
+                .and_then(Value::as_str),
+            Some("step one\nstep two, which the user added")
+        );
+    }
+
+    /// An untouched plan file must not be reported as an edit.
+    #[tokio::test]
+    async fn an_untouched_plan_is_not_reported_as_edited() {
+        let _lock = HOME_LOCK.lock().await;
+        let home = tempfile::tempdir().expect("a temp home");
+        let _home = HomeGuard::pointing_at(home.path());
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PlanApprovalEvent>();
+        let mut ctx = allow_all_context(std::env::temp_dir());
+        ctx.non_interactive = false;
+        ctx.plan_approval_tx = Some(tx);
+
+        tokio::spawn(async move {
+            let event = rx.recv().await?;
+            let _ = event.reply_tx.send(PlanDecision {
+                choice: PlanChoice::ManualApproval,
+                note: None,
+            });
+            Some(())
+        });
+
+        let result = ExitPlanModeTool
+            .execute(json!({ "summary": "step one" }), &ctx)
+            .await;
+
+        assert!(
+            !result.content.contains("edited the plan"),
+            "{}",
+            result.content
         );
     }
 

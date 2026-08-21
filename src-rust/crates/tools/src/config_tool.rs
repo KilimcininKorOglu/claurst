@@ -287,32 +287,7 @@ fn permission_mode_str(mode: &mikmik_core::config::PermissionMode) -> &'static s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::allow_all_context;
-
-    /// `MIKMIK_HOME` is process-global, so the tests that redirect it run one
-    /// at a time and put it back afterwards.
-    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    struct HomeGuard {
-        saved: Option<std::ffi::OsString>,
-    }
-
-    impl HomeGuard {
-        fn pointing_at(dir: &std::path::Path) -> Self {
-            let saved = std::env::var_os("MIKMIK_HOME");
-            std::env::set_var("MIKMIK_HOME", dir);
-            Self { saved }
-        }
-    }
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            match &self.saved {
-                Some(value) => std::env::set_var("MIKMIK_HOME", value),
-                None => std::env::remove_var("MIKMIK_HOME"),
-            }
-        }
-    }
+    use crate::test_support::{allow_all_context, HomeGuard, HOME_LOCK};
 
     async fn run(setting: &str, value: Option<Value>) -> ToolResult {
         let input = match value {

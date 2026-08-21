@@ -170,6 +170,10 @@ pub struct PlanDecision {
 pub struct PlanApprovalEvent {
     /// The plan to show, as the model wrote it.
     pub plan: String,
+    /// Where the plan was written, so the user can open it in an editor.
+    /// `None` when it could not be written, and the dialog then offers no
+    /// way to edit it.
+    pub plan_path: Option<PathBuf>,
     /// Send the decision back through this channel to resume execution.
     pub reply_tx: tokio::sync::oneshot::Sender<PlanDecision>,
 }
