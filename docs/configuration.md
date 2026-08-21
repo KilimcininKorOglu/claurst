@@ -164,9 +164,12 @@ permission, drops the notification without interrupting the turn.
 
 The sound is the notification's own, not the terminal bell, so it arrives with
 the banner and follows the system's Do Not Disturb. A notification that is not
-delivered makes no sound either. The name sent to the platform is `Ping` on
-macOS, `Default` on Windows and `message-new-instant` on the XDG backend; a
-Linux sound theme without that name leaves the notification silent.
+delivered makes no sound either. Each platform is asked for its own default
+alert sound, so what you hear is what you already set for notifications:
+`NSUserNotificationDefaultSoundName` on macOS and `Default` on Windows. The
+freedesktop spec has no equivalent token, so the XDG backend is sent
+`message-new-instant`; a sound theme without that name leaves the notification
+silent.
 
 ### Advisor
 

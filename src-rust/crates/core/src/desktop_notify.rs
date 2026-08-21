@@ -23,9 +23,14 @@ const MAX_BODY_CHARS: usize = 180;
 /// does not recognise leaves the notification silent rather than falling back:
 /// macOS resolves it against `/System/Library/Sounds`, Windows parses it into
 /// a `tauri-winrt-notification` `Sound`, and the XDG backend passes it as the
-/// freedesktop `sound-name` hint. So each gets a name from its own list.
+/// freedesktop `sound-name` hint.
+///
+/// So each name is the one that platform calls its own default, rather than a
+/// sound picked here: whatever the user set as their alert sound is what they
+/// already recognise as a notification. The freedesktop spec has no "default"
+/// token, so the generic message sound stands in for one there.
 #[cfg(target_os = "macos")]
-const NOTIFY_SOUND: &str = "Ping";
+const NOTIFY_SOUND: &str = "NSUserNotificationDefaultSoundName";
 #[cfg(target_os = "windows")]
 const NOTIFY_SOUND: &str = "Default";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
