@@ -5606,7 +5606,20 @@ async fn run_interactive(
                         mikmik_core::desktop_notify::NotifyEvent::PlanReady,
                         &event.plan,
                     );
-                    app.plan_approval_dialog.open(event.plan, event.reply_tx);
+                    // The percentage names what clearing the context would
+                    // free, so it comes from the same numbers the footer draws.
+                    let context_pct = (app.context_window_size > 0).then(|| {
+                        (app.context_used_tokens as f64 / app.context_window_size as f64 * 100.0)
+                            as u64
+                    });
+                    let restore_mode = app.permission_mode_after_plan();
+                    app.plan_approval_dialog.open(
+                        event.plan,
+                        event.plan_path,
+                        restore_mode,
+                        context_pct,
+                        event.reply_tx,
+                    );
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {

@@ -131,27 +131,26 @@ pub struct UserQuestionEvent {
 // ---------------------------------------------------------------------------
 
 /// What the user decided to do with a plan.
+///
+/// The two plain approvals do not name a permission mode, because the mode
+/// they restore is the one plan mode was entered from and only the front end
+/// knows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanChoice {
-    /// Implement it, and stop asking before each edit.
-    AutoAcceptEdits,
+    /// Summarise the conversation, then implement it.
+    ApproveAndClearContext,
+    /// Implement it now.
+    Approve,
     /// Implement it, but ask before each edit.
-    ManualApproval,
+    ApproveWithManualEdits,
     /// Do not implement it yet; the plan needs more work.
     KeepPlanning,
 }
 
 impl PlanChoice {
-    /// The permission mode this choice puts the session into.
-    ///
-    /// `None` for [`Self::KeepPlanning`]: refusing a plan leaves the session
-    /// exactly where it was, still in plan mode.
-    pub fn permission_mode(self) -> Option<mikmik_core::config::PermissionMode> {
-        match self {
-            Self::AutoAcceptEdits => Some(mikmik_core::config::PermissionMode::AcceptEdits),
-            Self::ManualApproval => Some(mikmik_core::config::PermissionMode::Default),
-            Self::KeepPlanning => None,
-        }
+    /// Whether this answer means the work may start.
+    pub fn is_approval(self) -> bool {
+        !matches!(self, Self::KeepPlanning)
     }
 }
 

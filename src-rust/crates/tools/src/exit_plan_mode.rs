@@ -97,22 +97,7 @@ impl Tool for ExitPlanModeTool {
             );
         };
 
-        // Each answer says what the session is now allowed to do, because the
-        // model has no other way to learn that the permission mode moved.
-        let mut msg = match decision.choice {
-            PlanChoice::AutoAcceptEdits => {
-                "The user approved the plan and turned on auto-accept for edits. \
-                 Start implementing it."
-            }
-            PlanChoice::ManualApproval => {
-                "The user approved the plan and will approve each edit. \
-                 Start implementing it."
-            }
-            PlanChoice::KeepPlanning => {
-                "The user did not approve the plan. Stay in plan mode and revise it."
-            }
-        }
-        .to_string();
+        let mut msg = message_for(decision.choice).to_string();
         if let Some(note) = decision
             .note
             .as_deref()
@@ -138,8 +123,35 @@ impl Tool for ExitPlanModeTool {
         ToolResult::success(msg).with_metadata(json!({
             "type": "exit_plan_mode",
             "summary": edited.or(params.summary),
-            "approved": decision.choice != PlanChoice::KeepPlanning,
+            "approved": decision.choice.is_approval(),
         }))
+    }
+}
+
+/// What the model is told about the answer.
+///
+/// Each answer says what the session is now allowed to do, because the tool
+/// result is all the model learns: it cannot see that the permission mode
+/// moved, and it cannot see that the conversation is about to be summarised.
+fn message_for(choice: PlanChoice) -> &'static str {
+    match choice {
+        PlanChoice::ApproveAndClearContext => {
+            "The user approved the plan and asked for the conversation to be \
+             cleared first. Stop here without starting the work: the \
+             conversation is about to be summarised and the plan will be sent \
+             to you again."
+        }
+        PlanChoice::Approve => {
+            "The user approved the plan and the session is back in the \
+             permission mode it was in before planning. Start implementing it."
+        }
+        PlanChoice::ApproveWithManualEdits => {
+            "The user approved the plan and will approve each edit. \
+             Start implementing it."
+        }
+        PlanChoice::KeepPlanning => {
+            "The user did not approve the plan. Stay in plan mode and revise it."
+        }
     }
 }
 
@@ -264,7 +276,7 @@ mod tests {
             let path = event.plan_path.clone()?;
             std::fs::write(&path, "step one\nstep two, which the user added\n").ok()?;
             let _ = event.reply_tx.send(PlanDecision {
-                choice: PlanChoice::ManualApproval,
+                choice: PlanChoice::ApproveWithManualEdits,
                 note: None,
             });
             Some(path)
@@ -307,7 +319,7 @@ mod tests {
         tokio::spawn(async move {
             let event = rx.recv().await?;
             let _ = event.reply_tx.send(PlanDecision {
-                choice: PlanChoice::ManualApproval,
+                choice: PlanChoice::ApproveWithManualEdits,
                 note: None,
             });
             Some(())
@@ -324,19 +336,24 @@ mod tests {
         );
     }
 
+    /// Each answer has to say something different to the model, because the
+    /// tool result is all it learns about what the user chose.
     #[test]
-    fn each_choice_maps_to_one_permission_mode() {
-        use mikmik_core::config::PermissionMode;
+    fn every_answer_tells_the_model_something_different() {
+        let choices = [
+            PlanChoice::ApproveAndClearContext,
+            PlanChoice::Approve,
+            PlanChoice::ApproveWithManualEdits,
+            PlanChoice::KeepPlanning,
+        ];
+        assert!(choices[..3].iter().all(|choice| choice.is_approval()));
+        assert!(!PlanChoice::KeepPlanning.is_approval());
 
-        assert_eq!(
-            PlanChoice::AutoAcceptEdits.permission_mode(),
-            Some(PermissionMode::AcceptEdits)
-        );
-        assert_eq!(
-            PlanChoice::ManualApproval.permission_mode(),
-            Some(PermissionMode::Default)
-        );
-        // Refusing a plan leaves the session in plan mode.
-        assert_eq!(PlanChoice::KeepPlanning.permission_mode(), None);
+        // The one that clears the context must tell the model to stop, or it
+        // starts work that the summary is about to throw away.
+        assert!(message_for(PlanChoice::ApproveAndClearContext).contains("Stop here"));
+        assert!(message_for(PlanChoice::Approve).contains("Start implementing"));
+        assert!(message_for(PlanChoice::ApproveWithManualEdits).contains("approve each edit"));
+        assert!(message_for(PlanChoice::KeepPlanning).contains("did not approve"));
     }
 }

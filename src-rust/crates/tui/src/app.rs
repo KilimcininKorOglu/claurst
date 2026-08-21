@@ -1614,6 +1614,10 @@ pub struct App {
     /// The permission mode in force when plan mode was entered, if it was
     /// entered during this session. Approving a plan restores it.
     pub permission_mode_before_plan: Option<mikmik_core::config::PermissionMode>,
+    /// A plan waiting on the conversation being cleared before it is sent
+    /// again. Set by the answer that clears the context, taken by the session
+    /// loop once the turn is over.
+    pub pending_plan_compaction: Option<String>,
 
     // ---- Context window & rate limit info ----------------------------------
     /// Total context window size for the current model (tokens).
@@ -2023,6 +2027,7 @@ impl App {
             plan_approval_rx: None,
             plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState::new(),
             permission_mode_before_plan: None,
+            pending_plan_compaction: None,
             context_window_size: 0,
             context_used_tokens: 0,
             rate_limit_5h_pct: None,
@@ -2751,11 +2756,21 @@ impl App {
     /// which moves the session itself. Refusing a plan changes nothing, so the
     /// next turn is still planning.
     pub fn apply_plan_decision(&mut self, choice: mikmik_tools::PlanChoice) {
-        let Some(mode) = choice.permission_mode() else {
+        use mikmik_core::config::PermissionMode;
+        use mikmik_tools::PlanChoice;
+
+        if !choice.is_approval() {
             self.status_message = Some("Still planning.".to_string());
             return;
-        };
+        }
 
+        // The two plain approvals put back the mode plan mode was entered
+        // from; only the third names one of its own.
+        let mode = match choice {
+            PlanChoice::ApproveWithManualEdits => PermissionMode::Default,
+            _ => self.permission_mode_after_plan(),
+        };
+        self.permission_mode_before_plan = None;
         self.config.permission_mode = mode;
         self.plan_mode = false;
         self.agent_mode = Some("build".to_string());
@@ -2763,15 +2778,33 @@ impl App {
         // list; without it the session would keep the plan-mode tool set.
         self.agent_mode_changed = true;
         self.accent_color = accent_for_mode(Some("build"));
-        self.status_message = Some(
-            match choice {
-                mikmik_tools::PlanChoice::AutoAcceptEdits => {
-                    "Plan approved. Edits are auto-accepted."
-                }
-                _ => "Plan approved. You will be asked before each edit.",
+
+        if choice == PlanChoice::ApproveAndClearContext {
+            // The session loop owns the conversation, so it does the clearing
+            // and sends the plan again once the turn is over.
+            self.pending_plan_compaction = Some(self.plan_approval_dialog.plan.clone());
+        }
+
+        self.status_message = Some(match choice {
+            PlanChoice::ApproveAndClearContext => {
+                "Plan approved. Clearing the context first.".to_string()
             }
-            .to_string(),
-        );
+            PlanChoice::ApproveWithManualEdits => {
+                "Plan approved. You will be asked before each edit.".to_string()
+            }
+            _ => format!(
+                "Plan approved. Back to {}.",
+                crate::plan_approval_dialog::mode_label(mode)
+            ),
+        });
+    }
+
+    /// Take the plan that is waiting on the context being cleared.
+    ///
+    /// Read once by the session loop after the turn ends: it clears the
+    /// conversation and sends the plan again, which is work only it can do.
+    pub fn take_pending_plan_compaction(&mut self) -> Option<String> {
+        self.pending_plan_compaction.take()
     }
 
     /// Record the permission mode plan mode is being entered from, or forget it
@@ -4522,7 +4555,18 @@ impl App {
                         self.apply_plan_decision(choice);
                     }
                 }
-                KeyCode::Up | KeyCode::BackTab => {
+                // Shift+Tab means "approve with this feedback", so it never
+                // sends the answer that refuses.
+                KeyCode::BackTab => {
+                    let choice = self.plan_approval_dialog.approve_with_feedback_choice();
+                    if self.plan_approval_dialog.approve_with_feedback() {
+                        self.apply_plan_decision(choice);
+                    }
+                }
+                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.plan_approval_dialog.request_edit();
+                }
+                KeyCode::Up => {
                     self.plan_approval_dialog.select_prev();
                 }
                 KeyCode::Down | KeyCode::Tab => {
@@ -10737,6 +10781,17 @@ mod tests {
         );
     }
 
+    /// A dialog on `app`, restoring whatever mode was recorded.
+    fn open_plan_dialog(
+        app: &mut App,
+    ) -> tokio::sync::oneshot::Receiver<mikmik_tools::PlanDecision> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let restore = app.permission_mode_after_plan();
+        app.plan_approval_dialog
+            .open("a plan".to_string(), None, restore, Some(54), tx);
+        rx
+    }
+
     /// Approving a plan has to move the session, not just answer the model:
     /// the permission mode, the agent mode and the tool list all follow from
     /// the answer.
@@ -10744,27 +10799,77 @@ mod tests {
     async fn approving_a_plan_leaves_plan_mode() {
         use mikmik_core::config::PermissionMode;
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let mut app = make_app();
-        app.plan_mode = true;
-        app.config.permission_mode = PermissionMode::Plan;
-        app.plan_approval_dialog.open("a plan".to_string(), tx);
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+        assert!(!app.intercept_slash_command("plan"));
+        let rx = open_plan_dialog(&mut app);
 
-        // "2" picks "approve, ask before each edit"; Enter sends it.
+        // "2" picks the plain approval; Enter sends it.
         app.handle_key_event(press_key(KeyCode::Char('2'), KeyModifiers::NONE));
         app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(!app.plan_approval_dialog.visible);
-        assert_eq!(app.config.permission_mode, PermissionMode::Default);
+        // The mode plan mode was entered from, not a fixed one.
+        assert_eq!(
+            app.config.permission_mode,
+            PermissionMode::BypassPermissions
+        );
         assert!(!app.plan_mode);
         assert_eq!(app.agent_mode.as_deref(), Some("build"));
         assert!(
             app.agent_mode_changed,
             "the loop would keep the plan-mode tool list"
         );
+        // Nothing to clear: that is the other answer.
+        assert_eq!(app.take_pending_plan_compaction(), None);
 
         let decision = rx.await.expect("the dialog answered");
-        assert_eq!(decision.choice, mikmik_tools::PlanChoice::ManualApproval);
+        assert_eq!(decision.choice, mikmik_tools::PlanChoice::Approve);
+    }
+
+    /// The third answer names its own mode rather than restoring one.
+    #[tokio::test]
+    async fn approving_with_manual_edits_asks_before_each_one() {
+        use mikmik_core::config::PermissionMode;
+
+        let mut app = make_app();
+        app.config.permission_mode = PermissionMode::BypassPermissions;
+        assert!(!app.intercept_slash_command("plan"));
+        let rx = open_plan_dialog(&mut app);
+
+        app.handle_key_event(press_key(KeyCode::Char('3'), KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.config.permission_mode, PermissionMode::Default);
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(
+            decision.choice,
+            mikmik_tools::PlanChoice::ApproveWithManualEdits
+        );
+    }
+
+    /// The first answer hands the plan to the session loop, which is the only
+    /// place that can clear the conversation and send it again.
+    #[tokio::test]
+    async fn clearing_the_context_hands_the_plan_to_the_loop() {
+        let mut app = make_app();
+        let rx = open_plan_dialog(&mut app);
+
+        app.handle_key_event(press_key(KeyCode::Char('1'), KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(
+            app.take_pending_plan_compaction().as_deref(),
+            Some("a plan")
+        );
+        // Taken once, or every later turn would compact again.
+        assert_eq!(app.take_pending_plan_compaction(), None);
+
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(
+            decision.choice,
+            mikmik_tools::PlanChoice::ApproveAndClearContext
+        );
     }
 
     /// Esc is not approval: the session stays exactly where it was.
@@ -10772,11 +10877,10 @@ mod tests {
     async fn dismissing_a_plan_changes_nothing() {
         use mikmik_core::config::PermissionMode;
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let mut app = make_app();
         app.plan_mode = true;
         app.config.permission_mode = PermissionMode::Plan;
-        app.plan_approval_dialog.open("a plan".to_string(), tx);
+        let rx = open_plan_dialog(&mut app);
 
         app.handle_key_event(press_key(KeyCode::Esc, KeyModifiers::NONE));
 
@@ -10791,11 +10895,10 @@ mod tests {
     /// Typing a reason must not silently retarget the answer.
     #[tokio::test]
     async fn a_note_does_not_change_the_picked_answer() {
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let mut app = make_app();
-        app.plan_approval_dialog.open("a plan".to_string(), tx);
+        let rx = open_plan_dialog(&mut app);
 
-        app.handle_key_event(press_key(KeyCode::Char('3'), KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::Char('4'), KeyModifiers::NONE));
         for c in "no".chars() {
             app.handle_key_event(press_key(KeyCode::Char(c), KeyModifiers::NONE));
         }
@@ -10804,6 +10907,42 @@ mod tests {
         let decision = rx.await.expect("the dialog answered");
         assert_eq!(decision.choice, mikmik_tools::PlanChoice::KeepPlanning);
         assert_eq!(decision.note.as_deref(), Some("no"));
+    }
+
+    /// Shift+Tab means "approve with this feedback", so it cannot send the
+    /// answer that refuses.
+    #[tokio::test]
+    async fn shift_tab_approves_and_carries_the_note() {
+        let mut app = make_app();
+        let rx = open_plan_dialog(&mut app);
+
+        // The cursor is on the answer that refuses, and there is a note.
+        app.handle_key_event(press_key(KeyCode::Char('4'), KeyModifiers::NONE));
+        for c in "use a trait".chars() {
+            app.handle_key_event(press_key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.handle_key_event(press_key(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+        assert!(!app.plan_mode, "shift+tab did not approve");
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(decision.choice, mikmik_tools::PlanChoice::Approve);
+        assert_eq!(decision.note.as_deref(), Some("use a trait"));
+    }
+
+    /// On an answer that already approves, shift+tab sends that one.
+    #[tokio::test]
+    async fn shift_tab_keeps_the_picked_approval() {
+        let mut app = make_app();
+        let rx = open_plan_dialog(&mut app);
+
+        app.handle_key_event(press_key(KeyCode::Char('3'), KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(
+            decision.choice,
+            mikmik_tools::PlanChoice::ApproveWithManualEdits
+        );
     }
 
     /// Tab still accepts a suggestion mid-turn, but the agent mode it would

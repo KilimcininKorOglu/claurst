@@ -1,26 +1,32 @@
 // plan_approval_dialog.rs — TUI overlay for approving a plan.
 //
 // Rendered when the model calls `ExitPlanMode`. The dialog shows the plan the
-// model wrote, three ways to answer it, and a free-text row whose contents
-// reach the model on every answer, so a rejection carries its reason.
+// model wrote, four ways to answer it, and a free-text row whose contents reach
+// the model on every answer, so a rejection carries its reason.
+//
+// The two plain approvals do not name a fixed permission mode: they restore the
+// one plan mode was entered from, which the caller passes to `open`.
 //
 // Layout:
-//   ╭─ Plan ready ────────────────────────────────────╮
-//   │                                                 │
-//   │  1. Move the loader behind a trait              │
-//   │  2. Point the two callers at it                 │
-//   │                                                 │
-//   │  ▶ 1  Approve and auto-accept edits             │
-//   │    2  Approve, ask before each edit             │
-//   │    3  Keep planning                             │
-//   │                                                 │
-//   │  ❯ _                                    (note)  │
-//   │                                                 │
-//   │  ↑↓ choose   Enter confirm   Esc keep planning  │
-//   ╰─────────────────────────────────────────────────╯
+//   ╭─ Plan ready ──────────────────────────────────────────────╮
+//   │                                                           │
+//   │  1. Move the loader behind a trait                        │
+//   │  2. Point the two callers at it                           │
+//   │                                                           │
+//   │  ▶ 1  Yes, clear context (54% used) and BYPASS PERMISSIONS│
+//   │    2  Yes, and switch to BYPASS PERMISSIONS for this …    │
+//   │    3  Yes, manually approve edits                         │
+//   │    4  Tell MikMik what to change                          │
+//   │                                                           │
+//   │  ❯ _                                                      │
+//   │  ~/.config/mikmik/plans/<session>.md                      │
+//   │  ↑↓ choose   Enter confirm   ctrl+g edit   Esc keep …     │
+//   ╰───────────────────────────────────────────────────────────╯
 
 use std::cell::Cell;
+use std::path::PathBuf;
 
+use mikmik_core::config::PermissionMode;
 use mikmik_tools::{PlanChoice, PlanDecision};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -41,18 +47,28 @@ const HINT_FG: Color = Color::Rgb(100, 100, 130);
 const INPUT_FG: Color = Color::Rgb(200, 255, 200);
 const NUMBER_FG: Color = Color::Rgb(150, 150, 200);
 
-/// The three answers, in the order they are listed.
-const CHOICES: [(PlanChoice, &str); 3] = [
-    (PlanChoice::AutoAcceptEdits, "Approve and auto-accept edits"),
-    (PlanChoice::ManualApproval, "Approve, ask before each edit"),
-    (PlanChoice::KeepPlanning, "Keep planning"),
+/// The four answers, in the order they are listed.
+const CHOICES: [PlanChoice; 4] = [
+    PlanChoice::ApproveAndClearContext,
+    PlanChoice::Approve,
+    PlanChoice::ApproveWithManualEdits,
+    PlanChoice::KeepPlanning,
 ];
 
 /// How far one PageUp / PageDown moves through the plan.
 const SCROLL_STEP: usize = 5;
 
+/// How a permission mode reads in an answer.
+pub(crate) fn mode_label(mode: PermissionMode) -> &'static str {
+    match mode {
+        PermissionMode::BypassPermissions => "BYPASS PERMISSIONS",
+        PermissionMode::AcceptEdits => "auto-accept edits",
+        PermissionMode::Default => "manual approval",
+        PermissionMode::Plan => "plan mode",
+    }
+}
+
 /// State for the plan approval overlay.
-#[derive(Default)]
 pub struct PlanApprovalDialogState {
     /// Whether the dialog is currently visible.
     pub visible: bool,
@@ -72,8 +88,39 @@ pub struct PlanApprovalDialogState {
     /// Largest useful [`Self::scroll`], written by the renderer because only it
     /// knows how tall the plan came out at this terminal size.
     max_scroll: Cell<usize>,
+    /// The mode an approval puts the session into: the one plan mode was
+    /// entered from.
+    pub restore_mode: PermissionMode,
+    /// How full the context is, for the answer that clears it. `None` when the
+    /// model's window is unknown.
+    pub context_pct: Option<u64>,
+    /// Where the plan is on disk, when it could be written. `None` removes the
+    /// path row and the offer to edit it.
+    pub plan_path: Option<PathBuf>,
+    /// Set when the user asks to edit the plan; the session loop takes it,
+    /// because only it can leave the alternate screen for an editor.
+    pub edit_requested: bool,
     /// Set when the dialog opens, consumed on the answer.
     pub(crate) reply_tx: Option<tokio::sync::oneshot::Sender<PlanDecision>>,
+}
+
+impl Default for PlanApprovalDialogState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            plan: String::new(),
+            choice_idx: 0,
+            note: String::new(),
+            in_note: false,
+            scroll: 0,
+            max_scroll: Cell::new(0),
+            restore_mode: PermissionMode::AcceptEdits,
+            context_pct: None,
+            plan_path: None,
+            edit_requested: false,
+            reply_tx: None,
+        }
+    }
 }
 
 impl PlanApprovalDialogState {
@@ -81,16 +128,62 @@ impl PlanApprovalDialogState {
         Self::default()
     }
 
-    /// Show `plan` and wait for one of the three answers.
-    pub fn open(&mut self, plan: String, reply_tx: tokio::sync::oneshot::Sender<PlanDecision>) {
+    /// Show `plan` and wait for one of the four answers.
+    ///
+    /// `restore_mode` is the permission mode an approval returns the session
+    /// to, and it names the first two answers.
+    pub fn open(
+        &mut self,
+        plan: String,
+        plan_path: Option<PathBuf>,
+        restore_mode: PermissionMode,
+        context_pct: Option<u64>,
+        reply_tx: tokio::sync::oneshot::Sender<PlanDecision>,
+    ) {
         self.plan = plan;
+        self.plan_path = plan_path;
+        self.restore_mode = restore_mode;
+        self.context_pct = context_pct;
         self.choice_idx = 0;
         self.note.clear();
         self.in_note = false;
         self.scroll = 0;
         self.max_scroll.set(0);
+        self.edit_requested = false;
         self.reply_tx = Some(reply_tx);
         self.visible = true;
+    }
+
+    /// The label for each answer, in the order they are listed.
+    fn labels(&self) -> [String; 4] {
+        let mode = mode_label(self.restore_mode);
+        let clear = match self.context_pct {
+            Some(pct) => format!("Yes, clear context ({pct}% used) and switch to {mode}"),
+            None => format!("Yes, clear context and switch to {mode}"),
+        };
+        [
+            clear,
+            format!("Yes, and switch to {mode} for this session"),
+            "Yes, manually approve edits".to_string(),
+            "Tell MikMik what to change".to_string(),
+        ]
+    }
+
+    /// Ask the session loop to open the plan in an editor.
+    ///
+    /// Does nothing when there is no file, which is the case when the plan
+    /// could not be written.
+    pub fn request_edit(&mut self) {
+        self.edit_requested = self.plan_path.is_some();
+    }
+
+    /// Take the pending request to edit the plan, if there is one.
+    pub fn take_edit_request(&mut self) -> Option<PathBuf> {
+        if !self.edit_requested {
+            return None;
+        }
+        self.edit_requested = false;
+        self.plan_path.clone()
     }
 
     /// Move the cursor up through the answers and the note row.
@@ -156,6 +249,24 @@ impl PlanApprovalDialogState {
         self.send(self.highlighted_choice())
     }
 
+    /// The answer `shift+tab` sends: the picked one when it approves, and a
+    /// plain approval otherwise.
+    ///
+    /// The shortcut means "approve with this feedback", so it cannot send the
+    /// answer that refuses. It also never picks the one that clears the
+    /// context, because a shortcut should not throw the conversation away.
+    pub fn approve_with_feedback_choice(&self) -> PlanChoice {
+        match self.highlighted_choice() {
+            PlanChoice::KeepPlanning => PlanChoice::Approve,
+            other => other,
+        }
+    }
+
+    /// Approve carrying whatever is in the note row.
+    pub fn approve_with_feedback(&mut self) -> bool {
+        self.send(self.approve_with_feedback_choice())
+    }
+
     /// Close without approving. The plan stands and the session stays in plan
     /// mode, which is the safe reading of a dismissed dialog.
     pub fn dismiss(&mut self) -> bool {
@@ -181,7 +292,7 @@ impl PlanApprovalDialogState {
     pub fn highlighted_choice(&self) -> PlanChoice {
         CHOICES
             .get(self.choice_idx)
-            .map(|(choice, _)| *choice)
+            .copied()
             .unwrap_or(PlanChoice::KeepPlanning)
     }
 }
@@ -196,23 +307,25 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
         return;
     }
 
-    let width = 72u16.min(area.width.saturating_sub(4));
+    let width = 76u16.min(area.width.saturating_sub(4));
     let inner_w = width.saturating_sub(4) as usize;
     let plan_lines = word_wrap(&state.plan, inner_w);
+    let labels = state.labels();
 
-    // Everything that is not the plan: two border rows, one row of top
-    // padding, the three answers between two spacers, the note row and the
-    // hint row. One short and the hint falls off the bottom.
-    const FIXED_ROWS: u16 = 10;
+    // Everything that is not the plan: two border rows, one row of top padding,
+    // the four answers between two spacers, the note row, the hint row, and the
+    // path row when there is a file. One short and the last row falls off the
+    // bottom.
+    let fixed_rows = 11 + u16::from(state.plan_path.is_some());
     let available = area.height.saturating_sub(2);
-    let height = (FIXED_ROWS + plan_lines.len() as u16).min(available).max(
+    let height = (fixed_rows + plan_lines.len() as u16).min(available).max(
         // A dialog too short to show its own answers cannot be used.
-        FIXED_ROWS.min(available),
+        fixed_rows.min(available),
     );
     let modal_area = centered_rect(width, height, area);
 
     // How much of the plan is left after the fixed rows have taken their share.
-    let plan_viewport = modal_area.height.saturating_sub(FIXED_ROWS) as usize;
+    let plan_viewport = modal_area.height.saturating_sub(fixed_rows) as usize;
     state
         .max_scroll
         .set(plan_lines.len().saturating_sub(plan_viewport));
@@ -315,7 +428,7 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     row += 1; // spacer
 
     // ---- the answers ----
-    for (i, (_, label)) in CHOICES.iter().enumerate() {
+    for (i, label) in labels.iter().enumerate() {
         // The marker follows the picked answer even while the cursor is down
         // in the note, so the user can see what Enter would send. Only the
         // highlight follows the cursor.
@@ -383,15 +496,30 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     write_line!(row, Line::from(spans));
     row += 1;
 
+    // ---- where the plan is ----
+    if let Some(path) = state.plan_path.as_ref() {
+        write_line!(
+            row,
+            Line::from(Span::styled(
+                format!("  {}", shorten_home(path)),
+                Style::default().fg(HINT_FG).bg(MIKMIK_PANEL_BG)
+            ))
+        );
+        row += 1;
+    }
+
     // ---- the hint ----
     // Kept short enough to fit the dialog: a truncated hint is how the user
-    // loses the last key on the row. Scrolling is only mentioned when there is
-    // something to scroll.
-    let hint = if state.max_scroll.get() > 0 {
-        "↑↓ choose   Enter confirm   PgUp/PgDn scroll   Esc keep planning"
-    } else {
-        "↑↓ choose   Enter confirm   Esc keep planning"
-    };
+    // loses the last key on the row. The two conditional keys are only offered
+    // when they do something.
+    let mut hint = String::from("↑↓ choose   Enter confirm");
+    if state.plan_path.is_some() {
+        hint.push_str("   ctrl+g edit");
+    }
+    if state.max_scroll.get() > 0 {
+        hint.push_str("   PgUp/PgDn scroll");
+    }
+    hint.push_str("   Esc keep planning");
     write_line!(
         row,
         Line::from(Span::styled(
@@ -401,12 +529,26 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     );
 }
 
+/// The path with the home directory written as `~`, so it fits the dialog.
+fn shorten_home(path: &std::path::Path) -> String {
+    let shown = path.display().to_string();
+    let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) else {
+        return shown;
+    };
+    match shown.strip_prefix(&home.to_string_lossy().to_string()) {
+        Some(rest) => format!("~{rest}"),
+        None => shown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    /// A dialog restoring bypass permissions, with a plan file and a known
+    /// context size, which is the case that draws every row.
     fn open_dialog(
         plan: &str,
     ) -> (
@@ -415,7 +557,32 @@ mod tests {
     ) {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut state = PlanApprovalDialogState::new();
-        state.open(plan.to_string(), tx);
+        state.open(
+            plan.to_string(),
+            Some(PathBuf::from("/tmp/plans/sess-1.md")),
+            PermissionMode::BypassPermissions,
+            Some(54),
+            tx,
+        );
+        (state, rx)
+    }
+
+    /// A dialog with nothing but the plan: no file, no known context size.
+    fn open_bare_dialog(
+        plan: &str,
+    ) -> (
+        PlanApprovalDialogState,
+        tokio::sync::oneshot::Receiver<PlanDecision>,
+    ) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut state = PlanApprovalDialogState::new();
+        state.open(
+            plan.to_string(),
+            None,
+            PermissionMode::AcceptEdits,
+            None,
+            tx,
+        );
         (state, rx)
     }
 
@@ -442,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn the_three_answers_and_the_note_row_are_drawn() {
+    fn the_four_answers_and_the_note_row_are_drawn() {
         let (state, _rx) = open_dialog("Move the loader behind a trait.");
         let rows = draw(&state, 100, 30);
         let screen = rows.join("\n");
@@ -452,15 +619,59 @@ mod tests {
             screen.contains("Move the loader behind a trait."),
             "{screen}"
         );
-        assert!(screen.contains("Approve and auto-accept edits"), "{screen}");
-        assert!(screen.contains("Approve, ask before each edit"), "{screen}");
-        assert!(screen.contains("Keep planning"), "{screen}");
+        // The mode named in the first two answers is the one plan mode was
+        // entered from, and the percentage says what clearing would free.
+        assert!(
+            screen.contains("Yes, clear context (54% used) and switch to BYPASS PERMISSIONS"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Yes, and switch to BYPASS PERMISSIONS for this session"),
+            "{screen}"
+        );
+        assert!(screen.contains("Yes, manually approve edits"), "{screen}");
+        assert!(screen.contains("Tell MikMik what to change"), "{screen}");
         assert!(screen.contains("type to add a note"), "{screen}");
+        assert!(screen.contains("plans/sess-1.md"), "{screen}");
         // The keys are only discoverable from this row, and it is the first
         // thing a dialog sized one row short drops.
         assert!(screen.contains("Enter confirm"), "{screen}");
+        assert!(screen.contains("ctrl+g edit"), "{screen}");
         // Whole, not cut off at the dialog's right edge.
         assert!(screen.contains("Esc keep planning"), "{screen}");
+    }
+
+    /// Without a plan file there is nothing to edit and no path to show.
+    #[test]
+    fn a_plan_that_could_not_be_written_offers_no_editor() {
+        let (mut state, _rx) = open_bare_dialog("a plan");
+        let screen = draw(&state, 100, 30).join("\n");
+
+        assert!(!screen.contains("ctrl+g"), "{screen}");
+        // The window size was unknown, so the answer cannot claim a percentage.
+        assert!(
+            screen.contains("Yes, clear context and switch to auto-accept edits"),
+            "{screen}"
+        );
+
+        state.request_edit();
+        assert_eq!(state.take_edit_request(), None);
+    }
+
+    /// ctrl+g hands the session loop the path, because only it can leave the
+    /// alternate screen for an editor.
+    #[test]
+    fn asking_to_edit_hands_over_the_path() {
+        let (mut state, _rx) = open_dialog("a plan");
+
+        assert_eq!(state.take_edit_request(), None);
+        state.request_edit();
+        assert_eq!(
+            state.take_edit_request(),
+            Some(PathBuf::from("/tmp/plans/sess-1.md"))
+        );
+        // Taken once: a second read must not reopen the editor every frame.
+        assert_eq!(state.take_edit_request(), None);
     }
 
     /// The dialog grows with the plan and keeps every fixed row visible.
@@ -490,9 +701,7 @@ mod tests {
         let (state, _rx) = open_dialog("a plan");
         let rows = draw(&state, 100, 30);
 
-        let highlighted = rows
-            .iter()
-            .find(|row| row.contains("Approve and auto-accept edits"));
+        let highlighted = rows.iter().find(|row| row.contains("Yes, clear context"));
         assert!(
             highlighted.is_some_and(|row| row.contains('▶')),
             "the first answer is not marked: {rows:#?}"
@@ -520,7 +729,7 @@ mod tests {
         let last = draw(&state, 100, 20).join("\n");
         assert!(last.contains("step 40"), "{last}");
         // Scrolling stops at the end rather than running off it.
-        assert!(last.contains("Approve and auto-accept edits"), "{last}");
+        assert!(last.contains("Yes, clear context"), "{last}");
     }
 
     /// While a note is being typed the answer is still armed, so the screen
@@ -532,7 +741,9 @@ mod tests {
         state.push_char('x');
 
         let rows = draw(&state, 100, 30);
-        let marked = rows.iter().find(|row| row.contains("Keep planning"));
+        let marked = rows
+            .iter()
+            .find(|row| row.contains("Yes, manually approve edits"));
         assert!(
             marked.is_some_and(|row| row.contains('▶')),
             "the picked answer lost its marker: {rows:#?}"
@@ -562,7 +773,7 @@ mod tests {
         assert!(!state.visible);
 
         let decision = rx.await.expect("the dialog answered");
-        assert_eq!(decision.choice, PlanChoice::ManualApproval);
+        assert_eq!(decision.choice, PlanChoice::Approve);
         assert_eq!(decision.note.as_deref(), Some("x"));
     }
 
@@ -583,22 +794,55 @@ mod tests {
     #[test]
     fn the_cursor_wraps_through_the_note_row() {
         let (mut state, _rx) = open_dialog("a plan");
-        assert_eq!(state.highlighted_choice(), PlanChoice::AutoAcceptEdits);
+        assert_eq!(
+            state.highlighted_choice(),
+            PlanChoice::ApproveAndClearContext
+        );
 
         state.select_prev();
         assert!(state.in_note, "up from the first answer lands on the note");
 
         state.select_next();
         assert!(!state.in_note);
-        assert_eq!(state.highlighted_choice(), PlanChoice::AutoAcceptEdits);
+        assert_eq!(
+            state.highlighted_choice(),
+            PlanChoice::ApproveAndClearContext
+        );
 
         // Down past the last answer lands on the note, and down again wraps.
-        state.select_next();
-        state.select_next();
+        for _ in 0..3 {
+            state.select_next();
+        }
         assert_eq!(state.highlighted_choice(), PlanChoice::KeepPlanning);
         state.select_next();
         assert!(state.in_note);
         state.select_next();
-        assert_eq!(state.highlighted_choice(), PlanChoice::AutoAcceptEdits);
+        assert_eq!(
+            state.highlighted_choice(),
+            PlanChoice::ApproveAndClearContext
+        );
+    }
+
+    /// Shift+Tab promotes the answer that refuses into a plain approval.
+    #[test]
+    fn the_feedback_shortcut_never_refuses() {
+        let (mut state, _rx) = open_dialog("a plan");
+
+        state.select_by_number(4);
+        assert_eq!(state.highlighted_choice(), PlanChoice::KeepPlanning);
+        assert_eq!(state.approve_with_feedback_choice(), PlanChoice::Approve);
+
+        // An answer that already approves is sent as it stands, including the
+        // one that clears the context.
+        state.select_by_number(1);
+        assert_eq!(
+            state.approve_with_feedback_choice(),
+            PlanChoice::ApproveAndClearContext
+        );
+        state.select_by_number(3);
+        assert_eq!(
+            state.approve_with_feedback_choice(),
+            PlanChoice::ApproveWithManualEdits
+        );
     }
 }
