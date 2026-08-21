@@ -41,6 +41,12 @@ pub fn build_tool_roster(
         tools.push(Box::new(mikmik_tools::AcpAgentTool));
     }
 
+    // And again for memory: with the feature off there is no directory to
+    // search, so the tool could only ever answer "nothing is there".
+    if mikmik_core::memdir::is_auto_memory_enabled(config.auto_memory_enabled) {
+        tools.push(Box::new(mikmik_tools::MemoryTool));
+    }
+
     if let Some(manager) = &mcp_manager {
         tools.extend(mikmik_tools::mcp_tools(manager));
         debug!(total_tools = tools.len(), "MCP tools registered");
@@ -86,6 +92,60 @@ mod tests {
             &with_advisor(Some("claude-haiku-4-5"))
         ))
         .contains(&"Advisor"));
+    }
+
+    /// Serialises the tests that clear the memory environment variables.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Clear the env vars that can override the setting, so the ambient
+    /// environment cannot decide this test's answer.
+    struct MemoryEnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl MemoryEnvGuard {
+        fn cleared() -> Self {
+            let keys = [
+                "MIKMIK_DISABLE_AUTO_MEMORY",
+                "MIKMIK_SIMPLE",
+                "MIKMIK_REMOTE",
+            ];
+            let saved = keys
+                .iter()
+                .map(|key| {
+                    let previous = std::env::var_os(key);
+                    std::env::remove_var(key);
+                    (*key, previous)
+                })
+                .collect();
+            Self { saved }
+        }
+    }
+
+    impl Drop for MemoryEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_memory_tool_is_offered_only_when_the_directory_is_kept() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MemoryEnvGuard::cleared();
+
+        // Off by default, so a session that never asked pays no schema tokens.
+        assert!(!names(&build_tool_roster(None, &Config::default())).contains(&"Memory"));
+
+        let on = Config {
+            auto_memory_enabled: Some(true),
+            ..Default::default()
+        };
+        assert!(names(&build_tool_roster(None, &on)).contains(&"Memory"));
     }
 
     #[test]

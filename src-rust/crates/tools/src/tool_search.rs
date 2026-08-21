@@ -59,10 +59,16 @@ fn keywords_for(name: &str) -> &'static [&'static str] {
 
 /// Tools that are registered outside `all_tools()` (e.g. the Agent tool lives
 /// in the query crate) but should still be discoverable here.
-static SUPPLEMENTAL_TOOLS: &[(&str, &str)] = &[(
-    "Agent",
-    "Launch a sub-agent to handle a complex, multi-step task in parallel.",
-)];
+static SUPPLEMENTAL_TOOLS: &[(&str, &str)] = &[
+    (
+        "Agent",
+        "Launch a sub-agent to handle a complex, multi-step task in parallel.",
+    ),
+    (
+        "Memory",
+        "Load the full text of memory files about a topic.",
+    ),
+];
 
 /// Collapse a possibly multi-line/verbose description into a single tidy line.
 fn one_line(desc: &str) -> String {

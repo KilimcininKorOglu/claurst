@@ -4720,6 +4720,7 @@ pub mod constants {
     pub const TOOL_NAME_WEB_FETCH: &str = "WebFetch";
     pub const TOOL_NAME_WEB_SEARCH: &str = "WebSearch";
     pub const TOOL_NAME_TODO_WRITE: &str = "TodoWrite";
+    pub const TOOL_NAME_MEMORY: &str = "Memory";
     pub const TOOL_NAME_TASK_CREATE: &str = "TaskCreate";
     pub const TOOL_NAME_TASK_GET: &str = "TaskGet";
     pub const TOOL_NAME_TASK_UPDATE: &str = "TaskUpdate";
