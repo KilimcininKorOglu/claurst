@@ -386,6 +386,43 @@ fn handle_exit_key(
         _ => false,
     }
 }
+
+/// The permission mode a session starts in.
+///
+/// `from_settings` is what the settings file already resolved to;
+/// `--dangerously-skip-permissions` outranks `--permission-mode`, and either
+/// flag outranks the file. Kept apart from `main` so the root block below can
+/// be shown to read the resolved mode rather than the flag that produced it.
+fn startup_permission_mode(
+    from_settings: PermissionMode,
+    skip_permissions_flag: bool,
+    mode_flag: Option<CliPermissionMode>,
+) -> PermissionMode {
+    if skip_permissions_flag {
+        PermissionMode::BypassPermissions
+    } else if let Some(mode) = mode_flag {
+        mode.into()
+    } else {
+        from_settings
+    }
+}
+
+/// Whether this process runs with root privileges.
+///
+/// `bypassPermissions` skips every permission check, so a root session would
+/// hand the model unrestricted access to the whole machine. Windows has no
+/// effective uid to ask, so the answer there is always `false`.
+fn running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        nix::unistd::Uid::effective().is_root()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Fast-path: handle --version before parsing everything
@@ -597,17 +634,21 @@ async fn main() -> anyhow::Result<()> {
     if let Some(asp) = cli.append_system_prompt.clone() {
         config.append_system_prompt = Some(asp);
     }
-    if cli.dangerously_skip_permissions {
-        // Mirror TS setup.ts: block bypass mode when running as root/sudo.
-        #[cfg(unix)]
-        if nix::unistd::Uid::effective().is_root() {
-            anyhow::bail!(
-                "--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons"
-            );
-        }
-        config.permission_mode = PermissionMode::BypassPermissions;
-    } else if let Some(mode) = cli.permission_mode {
-        config.permission_mode = mode.into();
+    config.permission_mode = startup_permission_mode(
+        config.permission_mode,
+        cli.dangerously_skip_permissions,
+        cli.permission_mode,
+    );
+    // Mirror TS setup.ts: block bypass mode when running as root/sudo.
+    //
+    // The check sits on the resolved mode rather than on
+    // `--dangerously-skip-permissions`, because `--permission-mode
+    // bypass-permissions` and a settings file holding `bypassPermissions`
+    // reach exactly the same mode and used to walk straight past it.
+    if config.permission_mode == PermissionMode::BypassPermissions && running_as_root() {
+        anyhow::bail!(
+            "bypassPermissions cannot be used with root/sudo privileges for security reasons"
+        );
     }
     config.additional_dirs = cli.add_dir.clone();
     if cli.no_auto_compact {
@@ -8345,6 +8386,56 @@ mod permission_mode_flag_tests {
         assert_eq!(
             cli.permission_mode.map(PermissionMode::from),
             Some(PermissionMode::Plan)
+        );
+    }
+
+    #[test]
+    fn three_sources_reach_bypass_and_the_root_block_sees_all_three() {
+        // The root block used to sit inside the
+        // `--dangerously-skip-permissions` arm, so the other two walked past
+        // it. They all resolve to one mode, which is what the block now reads.
+        assert_eq!(
+            startup_permission_mode(PermissionMode::Default, true, None),
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(
+            startup_permission_mode(
+                PermissionMode::Default,
+                false,
+                Some(CliPermissionMode::BypassPermissions)
+            ),
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(
+            startup_permission_mode(PermissionMode::BypassPermissions, false, None),
+            PermissionMode::BypassPermissions
+        );
+    }
+
+    #[test]
+    fn the_flags_outrank_the_settings_file_and_each_other() {
+        assert_eq!(
+            startup_permission_mode(
+                PermissionMode::BypassPermissions,
+                true,
+                Some(CliPermissionMode::Plan)
+            ),
+            PermissionMode::BypassPermissions,
+            "--dangerously-skip-permissions must win over --permission-mode"
+        );
+        assert_eq!(
+            startup_permission_mode(
+                PermissionMode::BypassPermissions,
+                false,
+                Some(CliPermissionMode::Default)
+            ),
+            PermissionMode::Default,
+            "--permission-mode must win over the settings file"
+        );
+        assert_eq!(
+            startup_permission_mode(PermissionMode::AcceptEdits, false, None),
+            PermissionMode::AcceptEdits,
+            "with no flag the settings file decides"
         );
     }
 }
