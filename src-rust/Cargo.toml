@@ -110,6 +110,11 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 # JSON Schema
 schemars = { version = "0.8", features = ["derive"] }
 
+# Desktop notifications. Pulls one backend per platform:
+# mac-notification-sys, tauri-winrt-notification, and pure-Rust D-Bus on
+# Linux — no system library is needed at build time.
+notify-rust = "4.18"
+
 # Workspace crates
 mikmik-core = { path = "crates/core" }
 mikmik-acp = { path = "crates/acp" }

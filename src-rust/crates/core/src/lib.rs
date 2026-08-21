@@ -80,6 +80,9 @@ pub use goal::{
 // Feature flag management via GrowthBook.
 pub mod feature_flags;
 
+// Desktop notifications for the moments a session needs the user back.
+pub mod desktop_notify;
+
 // MCP resource prompt template rendering with variable substitution.
 pub mod mcp_templates;
 
