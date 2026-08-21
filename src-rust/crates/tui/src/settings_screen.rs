@@ -86,6 +86,8 @@ pub struct SettingsScreen {
     // ---- Real settings fields ----
     pub auto_compact: bool,
     pub auto_memory: bool,
+    pub agents_md: bool,
+    pub claude_md: bool,
     pub notifications: bool,
     pub notify_on_question: bool,
     pub notify_on_plan_ready: bool,
@@ -138,6 +140,8 @@ impl SettingsScreen {
             saves: 0,
             auto_compact: false,
             auto_memory: false,
+            agents_md: true,
+            claude_md: false,
             notifications: true,
             notify_on_question: true,
             notify_on_plan_ready: true,
@@ -180,6 +184,11 @@ impl SettingsScreen {
         self.auto_compact = self.settings_snapshot.effective_auto_compact();
         self.auto_memory =
             mikmik_core::memdir::is_auto_memory_enabled(self.settings_snapshot.auto_memory_enabled);
+        let filenames = mikmik_core::claudemd::MemoryFilenames::from_config(
+            &self.settings_snapshot.effective_config(),
+        );
+        self.agents_md = filenames.agents_md;
+        self.claude_md = filenames.claude_md;
         self.notifications = self.settings_snapshot.notifications;
         self.notify_on_question = self.settings_snapshot.notify_on_question;
         self.notify_on_plan_ready = self.settings_snapshot.notify_on_plan_ready;
@@ -537,6 +546,20 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
                 .into(),
             kind: SettingKind::Bool,
             value: if screen.auto_memory { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "agents_md".into(),
+            label: "Read AGENTS.md".into(),
+            description: "Load AGENTS.md files into the prompt.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.agents_md { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "claude_md".into(),
+            label: "Read CLAUDE.md".into(),
+            description: "Load CLAUDE.md files alongside AGENTS.md.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.claude_md { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "notifications".into(),
@@ -1263,6 +1286,16 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                         // Both keys again, for the same reason as auto_compact.
                         screen.settings_snapshot.config.auto_memory_enabled = Some(new_value);
                     }
+                    "agents_md" => {
+                        screen.agents_md = new_value;
+                        screen.settings_snapshot.agents_md_enabled = Some(new_value);
+                        screen.settings_snapshot.config.agents_md_enabled = Some(new_value);
+                    }
+                    "claude_md" => {
+                        screen.claude_md = new_value;
+                        screen.settings_snapshot.claude_md_enabled = Some(new_value);
+                        screen.settings_snapshot.config.claude_md_enabled = Some(new_value);
+                    }
                     "notifications" => {
                         screen.notifications = new_value;
                         screen.settings_snapshot.notifications = new_value;
@@ -1622,6 +1655,49 @@ mod tests {
             Some(true),
             "the nested key the query loop reads stayed unset"
         );
+        assert_eq!(screen.save_error, None);
+    }
+
+    /// Two rows, two keys, and each writes the nested key the loader reads.
+    #[test]
+    fn the_two_memory_filename_rows_toggle_independently() {
+        let _guard = HomeGuard::new();
+
+        let mut screen = SettingsScreen::new();
+        screen.open();
+        let mut config = Config::default();
+
+        let index_of = |screen: &SettingsScreen, key: &str| {
+            all_entries(screen)
+                .iter()
+                .position(|e| e.key == key)
+                .unwrap_or_else(|| panic!("the {key} row is missing"))
+        };
+
+        // Today's behaviour: AGENTS.md on, CLAUDE.md off.
+        assert!(screen.agents_md);
+        assert!(!screen.claude_md);
+
+        screen.selected_idx = index_of(&screen, "claude_md");
+        toggle_or_cycle_current(&mut screen, &mut config);
+        assert!(screen.claude_md);
+        assert_eq!(screen.settings_snapshot.claude_md_enabled, Some(true));
+        assert_eq!(
+            screen.settings_snapshot.config.claude_md_enabled,
+            Some(true),
+            "the nested key the loader reads stayed unset"
+        );
+        assert!(screen.agents_md, "one row must not move the other");
+
+        screen.selected_idx = index_of(&screen, "agents_md");
+        toggle_or_cycle_current(&mut screen, &mut config);
+        assert!(!screen.agents_md);
+        assert_eq!(screen.settings_snapshot.agents_md_enabled, Some(false));
+        assert_eq!(
+            screen.settings_snapshot.config.agents_md_enabled,
+            Some(false)
+        );
+        assert!(screen.claude_md, "the other row stayed where it was");
         assert_eq!(screen.save_error, None);
     }
 
