@@ -932,6 +932,16 @@ async fn main() -> anyhow::Result<()> {
         Some(user_question_rx)
     };
 
+    // The same arrangement for ExitPlanMode, which blocks on the user's
+    // decision about a plan.
+    let (plan_approval_tx, plan_approval_rx) =
+        tokio::sync::mpsc::unbounded_channel::<mikmik_tools::PlanApprovalEvent>();
+    let plan_approval_rx = if is_non_interactive {
+        None
+    } else {
+        Some(plan_approval_rx)
+    };
+
     let tool_ctx = ToolContext {
         working_dir: cwd.clone(),
         permission_mode: config.permission_mode,
@@ -952,8 +962,11 @@ async fn main() -> anyhow::Result<()> {
         } else {
             Some(user_question_tx)
         },
-        // Wired to the approval dialog by the interactive loop below.
-        plan_approval_tx: None,
+        plan_approval_tx: if is_non_interactive {
+            None
+        } else {
+            Some(plan_approval_tx)
+        },
         // Placeholder token; `run_query_loop` rebinds it to the loop's actual
         // cancel token so the parallel tool executor honours Ctrl-C (issue #218).
         cancel_token: tokio_util::sync::CancellationToken::new(),
@@ -1107,6 +1120,7 @@ async fn main() -> anyhow::Result<()> {
             has_credentials,
             model_registry,
             user_question_rx,
+            plan_approval_rx,
             pending_project_mcp,
             mcp_project_root,
             project_trust_pending,
@@ -2876,6 +2890,7 @@ async fn run_interactive(
     has_credentials: bool,
     model_registry: Arc<mikmik_api::ModelRegistry>,
     user_question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::UserQuestionEvent>>,
+    plan_approval_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
     pending_project_mcp: Vec<mikmik_core::config::McpServerConfig>,
     mcp_project_root: Option<PathBuf>,
     project_trust_pending: Option<mikmik_core::project_trust::GatedProjectSettings>,
@@ -3010,6 +3025,9 @@ async fn run_interactive(
     // the dialog and return an answer to the query loop.
     if let Some(rx) = user_question_rx {
         app.user_question_rx = Some(rx);
+    }
+    if let Some(rx) = plan_approval_rx {
+        app.plan_approval_rx = Some(rx);
     }
 
     app.config.project_dir = Some(tool_ctx.working_dir.clone());
@@ -5574,6 +5592,25 @@ async fn run_interactive(
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     app.user_question_rx = None;
+                }
+            }
+        }
+
+        // Drain plan approval events, the same way. ExitPlanMode is blocked on
+        // the answer, so a plan that is never answered holds the turn open.
+        if let Some(ref mut rx) = app.plan_approval_rx {
+            match rx.try_recv() {
+                Ok(event) => {
+                    mikmik_core::desktop_notify::notify(
+                        &mikmik_core::config::Settings::load_sync().unwrap_or_default(),
+                        mikmik_core::desktop_notify::NotifyEvent::PlanReady,
+                        &event.plan,
+                    );
+                    app.plan_approval_dialog.open(event.plan, event.reply_tx);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    app.plan_approval_rx = None;
                 }
             }
         }

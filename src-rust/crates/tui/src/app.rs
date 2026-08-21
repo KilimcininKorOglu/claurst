@@ -1605,6 +1605,12 @@ pub struct App {
         Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::UserQuestionEvent>>,
     /// State for the model-initiated ask-user question dialog.
     pub ask_user_dialog: crate::ask_user_dialog::AskUserDialogState,
+    /// Receiver for `PlanApprovalEvent`s produced by the ExitPlanMode tool.
+    /// When a plan arrives, `plan_approval_dialog` is populated and shown.
+    pub plan_approval_rx:
+        Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
+    /// State for the plan approval dialog.
+    pub plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState,
 
     // ---- Context window & rate limit info ----------------------------------
     /// Total context window size for the current model (tokens).
@@ -2011,6 +2017,8 @@ impl App {
             model_fetch_rx: None,
             user_question_rx: None,
             ask_user_dialog: crate::ask_user_dialog::AskUserDialogState::new(),
+            plan_approval_rx: None,
+            plan_approval_dialog: crate::plan_approval_dialog::PlanApprovalDialogState::new(),
             context_window_size: 0,
             context_used_tokens: 0,
             rate_limit_5h_pct: None,
@@ -2733,6 +2741,35 @@ impl App {
             Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
     }
 
+    /// Put the session where an approved plan says it belongs.
+    ///
+    /// The tool result tells the model what happened; this is the other half,
+    /// which moves the session itself. Refusing a plan changes nothing, so the
+    /// next turn is still planning.
+    pub fn apply_plan_decision(&mut self, choice: mikmik_tools::PlanChoice) {
+        let Some(mode) = choice.permission_mode() else {
+            self.status_message = Some("Still planning.".to_string());
+            return;
+        };
+
+        self.config.permission_mode = mode;
+        self.plan_mode = false;
+        self.agent_mode = Some("build".to_string());
+        // The main loop reads this to rebuild the query config and the tool
+        // list; without it the session would keep the plan-mode tool set.
+        self.agent_mode_changed = true;
+        self.accent_color = accent_for_mode(Some("build"));
+        self.status_message = Some(
+            match choice {
+                mikmik_tools::PlanChoice::AutoAcceptEdits => {
+                    "Plan approved. Edits are auto-accepted."
+                }
+                _ => "Plan approved. You will be asked before each edit.",
+            }
+            .to_string(),
+        );
+    }
+
     /// Cycle to the next agent mode: build → plan → build.
     /// Sets `agent_mode_changed` so the main loop can update the query config
     /// and tool list accordingly.
@@ -3292,6 +3329,7 @@ impl App {
     pub fn blocking_modal_open(&self) -> bool {
         self.permission_request.is_some()
             || self.ask_user_dialog.visible
+            || self.plan_approval_dialog.visible
             || self.mcp_approval.visible
             || self.project_trust.visible
             || self.bypass_permissions_dialog.visible
@@ -3327,6 +3365,7 @@ impl App {
             || self.invalid_config_dialog.visible
             || self.bypass_permissions_dialog.visible
             || self.ask_user_dialog.visible
+            || self.plan_approval_dialog.visible
             || self.onboarding_dialog.visible
             || self.import_config_picker.visible
             || self.connect_dialog.visible
@@ -4425,6 +4464,48 @@ impl App {
                     self.device_auth_pending = None;
                 }
                 _ => {} // Ignore other keys while waiting
+            }
+            return false;
+        }
+
+        // Plan approval dialog (ExitPlanMode tool)
+        if self.plan_approval_dialog.visible {
+            match key.code {
+                KeyCode::Esc => {
+                    self.plan_approval_dialog.dismiss();
+                }
+                KeyCode::Enter => {
+                    let choice = self.plan_approval_dialog.highlighted_choice();
+                    if self.plan_approval_dialog.confirm() {
+                        self.apply_plan_decision(choice);
+                    }
+                }
+                KeyCode::Up | KeyCode::BackTab => {
+                    self.plan_approval_dialog.select_prev();
+                }
+                KeyCode::Down | KeyCode::Tab => {
+                    self.plan_approval_dialog.select_next();
+                }
+                KeyCode::PageUp => {
+                    self.plan_approval_dialog.scroll_up();
+                }
+                KeyCode::PageDown => {
+                    self.plan_approval_dialog.scroll_down();
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() && !self.plan_approval_dialog.in_note => {
+                    // Digits pick an answer until the user starts a note, after
+                    // which they are just text, as in the ask-user dialog.
+                    self.plan_approval_dialog
+                        .select_by_number((c as u8 - b'0') as usize);
+                }
+                KeyCode::Char(c) => {
+                    let c = self.shift_normalize(c, key.modifiers);
+                    self.plan_approval_dialog.push_char(c);
+                }
+                KeyCode::Backspace => {
+                    self.plan_approval_dialog.pop_char();
+                }
+                _ => {}
             }
             return false;
         }
@@ -7239,6 +7320,7 @@ impl App {
         !self.is_streaming
             && self.permission_request.is_none()
             && !self.ask_user_dialog.visible
+            && !self.plan_approval_dialog.visible
             && !self.history_search_overlay.visible
             && self.history_search.is_none()
             && !self.settings_screen.visible
@@ -10519,6 +10601,75 @@ mod tests {
         assert_eq!(app.prompt_input.cursor, 10, "goLineEnd did not move");
         app.handle_keybinding_action("goLineStart");
         assert_eq!(app.prompt_input.cursor, 0, "goLineStart did not move");
+    }
+
+    /// Approving a plan has to move the session, not just answer the model:
+    /// the permission mode, the agent mode and the tool list all follow from
+    /// the answer.
+    #[tokio::test]
+    async fn approving_a_plan_leaves_plan_mode() {
+        use mikmik_core::config::PermissionMode;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut app = make_app();
+        app.plan_mode = true;
+        app.config.permission_mode = PermissionMode::Plan;
+        app.plan_approval_dialog.open("a plan".to_string(), tx);
+
+        // "2" picks "approve, ask before each edit"; Enter sends it.
+        app.handle_key_event(press_key(KeyCode::Char('2'), KeyModifiers::NONE));
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!app.plan_approval_dialog.visible);
+        assert_eq!(app.config.permission_mode, PermissionMode::Default);
+        assert!(!app.plan_mode);
+        assert_eq!(app.agent_mode.as_deref(), Some("build"));
+        assert!(
+            app.agent_mode_changed,
+            "the loop would keep the plan-mode tool list"
+        );
+
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(decision.choice, mikmik_tools::PlanChoice::ManualApproval);
+    }
+
+    /// Esc is not approval: the session stays exactly where it was.
+    #[tokio::test]
+    async fn dismissing_a_plan_changes_nothing() {
+        use mikmik_core::config::PermissionMode;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut app = make_app();
+        app.plan_mode = true;
+        app.config.permission_mode = PermissionMode::Plan;
+        app.plan_approval_dialog.open("a plan".to_string(), tx);
+
+        app.handle_key_event(press_key(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!app.plan_approval_dialog.visible);
+        assert_eq!(app.config.permission_mode, PermissionMode::Plan);
+        assert!(app.plan_mode);
+
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(decision.choice, mikmik_tools::PlanChoice::KeepPlanning);
+    }
+
+    /// Typing a reason must not silently retarget the answer.
+    #[tokio::test]
+    async fn a_note_does_not_change_the_picked_answer() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut app = make_app();
+        app.plan_approval_dialog.open("a plan".to_string(), tx);
+
+        app.handle_key_event(press_key(KeyCode::Char('3'), KeyModifiers::NONE));
+        for c in "no".chars() {
+            app.handle_key_event(press_key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.handle_key_event(press_key(KeyCode::Enter, KeyModifiers::NONE));
+
+        let decision = rx.await.expect("the dialog answered");
+        assert_eq!(decision.choice, mikmik_tools::PlanChoice::KeepPlanning);
+        assert_eq!(decision.note.as_deref(), Some("no"));
     }
 
     /// Tab still accepts a suggestion mid-turn, but the agent mode it would

@@ -865,6 +865,16 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         render_ask_user_dialog(&app.ask_user_dialog, size, frame.buffer_mut());
     }
 
+    // The plan approval dialog blocks the turn the same way, so it sits at the
+    // same height in the stack.
+    if app.plan_approval_dialog.visible {
+        crate::plan_approval_dialog::render_plan_approval_dialog(
+            &app.plan_approval_dialog,
+            size,
+            frame.buffer_mut(),
+        );
+    }
+
     // First-launch onboarding dialog (shown after bypass dialog, below elicitation)
     if app.onboarding_dialog.visible {
         render_onboarding_dialog(frame, &app.onboarding_dialog, size);
