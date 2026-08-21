@@ -86,6 +86,9 @@ pub struct SettingsScreen {
     // ---- Real settings fields ----
     pub auto_compact: bool,
     pub notifications: bool,
+    pub notify_on_question: bool,
+    pub notify_on_plan_ready: bool,
+    pub notify_on_turn_complete: bool,
     pub show_turn_duration: bool,
     pub show_message_timestamps: bool,
     pub output_style: String,
@@ -133,6 +136,9 @@ impl SettingsScreen {
             saves: 0,
             auto_compact: false,
             notifications: true,
+            notify_on_question: true,
+            notify_on_plan_ready: true,
+            notify_on_turn_complete: true,
             show_turn_duration: false,
             show_message_timestamps: false,
             output_style: "default".to_string(),
@@ -169,6 +175,9 @@ impl SettingsScreen {
     fn apply_settings_from_snapshot(&mut self) {
         self.auto_compact = self.settings_snapshot.effective_auto_compact();
         self.notifications = self.settings_snapshot.notifications;
+        self.notify_on_question = self.settings_snapshot.notify_on_question;
+        self.notify_on_plan_ready = self.settings_snapshot.notify_on_plan_ready;
+        self.notify_on_turn_complete = self.settings_snapshot.notify_on_turn_complete;
         self.show_turn_duration = self.settings_snapshot.show_turn_duration;
         self.show_message_timestamps = self.settings_snapshot.show_message_timestamps;
         self.output_style = self
@@ -517,9 +526,30 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
         SettingsEntry {
             key: "notifications".into(),
             label: "Desktop notifications".into(),
-            description: "Notify when a turn completes.".into(),
+            description: "Master switch for the three notifications below.".into(),
             kind: SettingKind::Bool,
             value: if screen.notifications { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "notify_on_question".into(),
+            label: "Notify on question".into(),
+            description: "Notify when a question is waiting for an answer.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.notify_on_question { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "notify_on_plan_ready".into(),
+            label: "Notify on plan ready".into(),
+            description: "Notify when a plan is waiting for approval.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.notify_on_plan_ready { "true" } else { "false" }.to_string(),
+        },
+        SettingsEntry {
+            key: "notify_on_turn_complete".into(),
+            label: "Notify on turn complete".into(),
+            description: "Notify when a turn finishes and the prompt is free.".into(),
+            kind: SettingKind::Bool,
+            value: if screen.notify_on_turn_complete { "true" } else { "false" }.to_string(),
         },
         SettingsEntry {
             key: "show_turn_duration".into(),
@@ -1208,6 +1238,18 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                     "notifications" => {
                         screen.notifications = new_value;
                         screen.settings_snapshot.notifications = new_value;
+                    }
+                    "notify_on_question" => {
+                        screen.notify_on_question = new_value;
+                        screen.settings_snapshot.notify_on_question = new_value;
+                    }
+                    "notify_on_plan_ready" => {
+                        screen.notify_on_plan_ready = new_value;
+                        screen.settings_snapshot.notify_on_plan_ready = new_value;
+                    }
+                    "notify_on_turn_complete" => {
+                        screen.notify_on_turn_complete = new_value;
+                        screen.settings_snapshot.notify_on_turn_complete = new_value;
                     }
                     "show_turn_duration" => {
                         screen.show_turn_duration = new_value;
