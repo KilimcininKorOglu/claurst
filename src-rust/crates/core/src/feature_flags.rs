@@ -234,9 +234,17 @@ mod tests {
     #[test]
     fn test_cache_path() {
         let path = FeatureFlagManager::get_cache_path();
-        // "mikmik" (not ".mikmik"): the config dir is XDG ~/.config/mikmik.
-        assert!(path.to_string_lossy().contains("mikmik"));
-        assert!(path.to_string_lossy().contains("feature_flags.json"));
+        // Route the assertion through the resolver rather than hardcoding the
+        // directory name: `MIKMIK_HOME` can point anywhere, so a test that
+        // sets it would fail this on the name alone.
+        assert!(
+            path.starts_with(crate::config::Settings::config_dir()),
+            "{path:?}"
+        );
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("feature_flags.json")
+        );
     }
 
     #[test]
