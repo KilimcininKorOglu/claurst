@@ -480,6 +480,11 @@ Shift+Tab cycles the mode too, but only for the session. `/yolo` writes it to
 rather than to whatever mode preceded bypass: nothing records that, and
 guessing `acceptEdits` would hand back more than was taken away.
 
+Turning it on raises the bypass warning first, unless you have already accepted
+it once on this machine. Refusing puts the previous mode back, including the
+value `/yolo on` had already written to `settings.json`. See [Permission
+Modes](configuration.md#permission-modes).
+
 ---
 
 ### /keybindings

@@ -575,18 +575,34 @@ confirmation in the TUI, or are denied in headless mode.
 
 ### `acceptEdits`
 
-All tool calls — reads, writes, and shell commands — are automatically
-accepted without prompting. This is useful for trusted automation pipelines
-where you want maximum throughput.
+`Edit` is auto-approved. Everything else keeps the checks it has under
+`default`, so shell commands and other write tools still prompt. Explicit
+allow and deny rules are evaluated first either way.
 
 ### `bypassPermissions`
 
 All permission checks are skipped entirely. Every tool call is allowed
 unconditionally. This mode cannot be used when running as root or via `sudo`
-on Unix systems (MikMik blocks it).
+on Unix systems: MikMik refuses to start, whichever way the mode was set (the
+`--dangerously-skip-permissions` flag, `--permission-mode`, or the settings
+file), and refuses to switch into it mid-session.
 
 Use with caution: the model can read and modify any file reachable from the
 current working directory without any user confirmation.
+
+Because of that, the mode is gated behind a warning dialog. It appears when a
+session starts in `bypassPermissions` and again whenever the mode is switched
+to it while a session is running, by `shift+tab`, `/yolo on`, `/permissions set
+bypass-permissions`, or a settings file that a reload picks up. Declining at
+startup ends the session; declining a mid-session switch puts the previous mode
+back, on disk as well when the settings file already named `bypassPermissions`.
+
+Accepting writes `skipDangerousModePermissionPrompt: true` and the warning is
+never shown again on that machine, at startup or mid-session.
+
+The model cannot set this mode itself. The `Config` tool can read
+`permission_mode` but refuses to write it, because a turn that switched the
+checks off would be switching off the gate on its own next tool call.
 
 ### `plan`
 

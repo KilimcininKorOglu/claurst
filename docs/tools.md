@@ -788,6 +788,8 @@ Maximum sleep duration is 60000 ms (60 seconds) per call.
 
 Read or write a MikMik setting. Omitting `value` reads the current one; supplying it writes to `settings.json`, where the next session picks it up.
 
+`permission_mode` is the one exception: it can be read but not written. A turn that set `bypass_permissions` would be switching off the checks that gate its own next tool call, in this session and every later one. Only the user changes it, through `/permissions set`, `/yolo`, or `--permission-mode`.
+
 | Parameter | Type   | Required | Description                                              |
 |-----------|--------|----------|----------------------------------------------------------|
 | `setting` | string | yes      | Setting key, or `list` to see every key the tool accepts |
@@ -802,7 +804,7 @@ Accepted keys:
 | `effort`          | string  | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`                  |
 | `max_tokens`      | integer | Maximum output tokens per response                                                          |
 | `verbose`         | boolean | Verbose logging                                                                             |
-| `permission_mode` | string  | `default`, `accept_edits`, `bypass_permissions`, or `plan`                                  |
+| `permission_mode` | string  | `default`, `accept_edits`, `bypass_permissions`, or `plan`. Read-only                       |
 | `auto_compact`    | boolean | Auto-compact the conversation when the context fills                                        |
 
 ---
