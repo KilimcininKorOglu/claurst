@@ -16,7 +16,7 @@
 //   │                                                 │
 //   │  ❯ _                                    (note)  │
 //   │                                                 │
-//   │  ↑↓: choose  Enter: confirm  PgUp/PgDn: scroll  │
+//   │  ↑↓ choose   Enter confirm   Esc keep planning  │
 //   ╰─────────────────────────────────────────────────╯
 
 use std::cell::Cell;
@@ -316,15 +316,23 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
 
     // ---- the answers ----
     for (i, (_, label)) in CHOICES.iter().enumerate() {
-        let is_sel = !state.in_note && state.choice_idx == i;
-        let style_bg = if is_sel { SELECTED_BG } else { MIKMIK_PANEL_BG };
+        // The marker follows the picked answer even while the cursor is down
+        // in the note, so the user can see what Enter would send. Only the
+        // highlight follows the cursor.
+        let is_picked = state.choice_idx == i;
+        let has_cursor = is_picked && !state.in_note;
+        let style_bg = if has_cursor {
+            SELECTED_BG
+        } else {
+            MIKMIK_PANEL_BG
+        };
         write_line!(
             row,
             Line::from(vec![
                 Span::styled(
-                    if is_sel { "▶ " } else { "  " },
+                    if is_picked { "▶ " } else { "  " },
                     Style::default()
-                        .fg(if is_sel { SELECTED_FG } else { HINT_FG })
+                        .fg(if is_picked { SELECTED_FG } else { HINT_FG })
                         .bg(style_bg)
                 ),
                 Span::styled(
@@ -334,9 +342,9 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
                 Span::styled(
                     format!(" {label}"),
                     Style::default()
-                        .fg(if is_sel { SELECTED_FG } else { OPTION_FG })
+                        .fg(if is_picked { SELECTED_FG } else { OPTION_FG })
                         .bg(style_bg)
-                        .add_modifier(if is_sel {
+                        .add_modifier(if is_picked {
                             Modifier::BOLD
                         } else {
                             Modifier::empty()
@@ -376,10 +384,18 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     row += 1;
 
     // ---- the hint ----
+    // Kept short enough to fit the dialog: a truncated hint is how the user
+    // loses the last key on the row. Scrolling is only mentioned when there is
+    // something to scroll.
+    let hint = if state.max_scroll.get() > 0 {
+        "↑↓ choose   Enter confirm   PgUp/PgDn scroll   Esc keep planning"
+    } else {
+        "↑↓ choose   Enter confirm   Esc keep planning"
+    };
     write_line!(
         row,
         Line::from(Span::styled(
-            "↑↓: choose   1-3: pick   Enter: confirm   PgUp/PgDn: scroll   Esc: keep planning",
+            hint,
             Style::default().fg(HINT_FG).bg(MIKMIK_PANEL_BG)
         ))
     );
@@ -442,7 +458,9 @@ mod tests {
         assert!(screen.contains("type to add a note"), "{screen}");
         // The keys are only discoverable from this row, and it is the first
         // thing a dialog sized one row short drops.
-        assert!(screen.contains("Enter: confirm"), "{screen}");
+        assert!(screen.contains("Enter confirm"), "{screen}");
+        // Whole, not cut off at the dialog's right edge.
+        assert!(screen.contains("Esc keep planning"), "{screen}");
     }
 
     /// The dialog grows with the plan and keeps every fixed row visible.
@@ -461,7 +479,7 @@ mod tests {
                 "the last plan line is missing at {lines} lines:\n{screen}"
             );
             assert!(
-                screen.contains("Enter: confirm"),
+                screen.contains("Esc keep planning"),
                 "the hint row is missing at {lines} lines:\n{screen}"
             );
         }
@@ -503,6 +521,22 @@ mod tests {
         assert!(last.contains("step 40"), "{last}");
         // Scrolling stops at the end rather than running off it.
         assert!(last.contains("Approve and auto-accept edits"), "{last}");
+    }
+
+    /// While a note is being typed the answer is still armed, so the screen
+    /// has to keep saying which one Enter would send.
+    #[test]
+    fn the_picked_answer_stays_marked_while_a_note_is_typed() {
+        let (mut state, _rx) = open_dialog("a plan");
+        state.select_by_number(3);
+        state.push_char('x');
+
+        let rows = draw(&state, 100, 30);
+        let marked = rows.iter().find(|row| row.contains("Keep planning"));
+        assert!(
+            marked.is_some_and(|row| row.contains('▶')),
+            "the picked answer lost its marker: {rows:#?}"
+        );
     }
 
     #[test]
