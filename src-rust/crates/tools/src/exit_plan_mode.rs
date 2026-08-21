@@ -174,6 +174,13 @@ fn write_plan(session_id: &str, plan: &str) -> Option<PathBuf> {
             return None;
         }
     }
+    // Ends with a newline: this file is opened in an editor, and a plan that
+    // does not end its last line makes anything appended to it join that line.
+    let plan = if plan.ends_with('\n') {
+        plan.to_string()
+    } else {
+        format!("{plan}\n")
+    };
     if let Err(error) = std::fs::write(&path, plan) {
         warn!(%error, path = %path.display(), "could not write the plan file");
         return None;
@@ -214,7 +221,8 @@ mod tests {
         let written = mikmik_core::session_storage::plan_path(&ctx.session_id)
             .ok()
             .and_then(|path| std::fs::read_to_string(path).ok());
-        assert_eq!(written.as_deref(), Some("do the thing"));
+        // Ends its last line, or an editor appending to it joins that line.
+        assert_eq!(written.as_deref(), Some("do the thing\n"));
     }
 
     /// A wired-up dialog blocks the tool until the user answers, and the answer
