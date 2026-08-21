@@ -2778,6 +2778,31 @@ fn settle_pending_permission(
     })
 }
 
+/// The text of the last thing the model said, if it said anything.
+///
+/// Used as the body of the turn-complete notification, so that a user who
+/// stepped away reads the answer without switching windows. A turn that ended
+/// on a tool result or an empty message yields `None`, and the notification
+/// carries only its title.
+fn last_assistant_text(messages: &[mikmik_core::types::Message]) -> Option<String> {
+    let last = messages
+        .iter()
+        .rev()
+        .find(|message| message.role == mikmik_core::types::Role::Assistant)?;
+    let text = match &last.content {
+        mikmik_core::types::MessageContent::Text(text) => text.trim().to_string(),
+        mikmik_core::types::MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                mikmik_core::types::ContentBlock::Text { text } => Some(text.trim()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    (!text.is_empty()).then_some(text)
+}
+
 /// Derive the two goal surfaces from a single store read: the footer badge
 /// string (only while the goal is still running) and whether the transcript
 /// should mute the goal badge block.
@@ -5532,6 +5557,15 @@ async fn run_interactive(
                         });
                     }
                     pending_question_id = Some(question_id);
+                    // The terminal may not be the window in front. Read the
+                    // settings here rather than caching them at startup, so a
+                    // toggle in the settings screen takes effect on the very
+                    // next question.
+                    mikmik_core::desktop_notify::notify(
+                        &mikmik_core::config::Settings::load_sync().unwrap_or_default(),
+                        mikmik_core::desktop_notify::NotifyEvent::QuestionAsked,
+                        &event.question,
+                    );
                     app.ask_user_dialog
                         .open(event.question, event.options, event.reply_tx);
                 }
@@ -5903,6 +5937,15 @@ async fn run_interactive(
                 session.working_dir = Some(tool_ctx.working_dir.display().to_string());
                 // A point to come back to, recorded once the turn is whole.
                 mikmik_core::history::create_checkpoint(&mut session, None);
+                // The whole query loop is done here, tool round-trips included.
+                // `QueryEvent::TurnComplete` is the wrong hook: it fires once
+                // per model turn, so a single prompt that calls five tools
+                // would send five notifications.
+                mikmik_core::desktop_notify::notify(
+                    &mikmik_core::config::Settings::load_sync().unwrap_or_default(),
+                    mikmik_core::desktop_notify::NotifyEvent::TurnComplete,
+                    &last_assistant_text(&messages).unwrap_or_default(),
+                );
                 app.is_streaming = false;
                 app.status_message = None;
                 // Drain one queued message into the prompt and request an
@@ -7739,6 +7782,64 @@ mod remote_attachment_tests {
             }
             other => panic!("expected a text block, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod notification_body_tests {
+    use super::*;
+    use mikmik_core::types::{ContentBlock, Message, MessageContent};
+
+    #[test]
+    fn the_body_is_the_last_thing_the_model_said() {
+        let messages = vec![
+            Message::assistant("an older answer"),
+            Message::user("and then?"),
+            Message::assistant("  the newest answer  "),
+        ];
+
+        assert_eq!(
+            last_assistant_text(&messages).as_deref(),
+            Some("the newest answer")
+        );
+    }
+
+    #[test]
+    fn tool_calls_are_not_read_as_text() {
+        let mut message = Message::assistant(String::new());
+        message.content = MessageContent::Blocks(vec![
+            ContentBlock::Text {
+                text: "Reading the file.".to_string(),
+            },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({}),
+                thought_signature: None,
+            },
+        ]);
+
+        assert_eq!(
+            last_assistant_text(&[message]).as_deref(),
+            Some("Reading the file.")
+        );
+    }
+
+    #[test]
+    fn a_turn_with_nothing_to_say_has_no_body() {
+        // A turn that ended on a tool call alone: the notification still
+        // fires, it just carries its title.
+        let mut message = Message::assistant(String::new());
+        message.content = MessageContent::Blocks(vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "Bash".to_string(),
+            input: serde_json::json!({}),
+            thought_signature: None,
+        }]);
+
+        assert_eq!(last_assistant_text(&[message]), None);
+        assert_eq!(last_assistant_text(&[Message::user("hello")]), None);
+        assert_eq!(last_assistant_text(&[]), None);
     }
 }
 
