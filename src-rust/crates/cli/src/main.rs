@@ -2350,6 +2350,84 @@ async fn run_compaction(
     .await
 }
 
+/// Summarise the conversation in place and move every surface that follows it.
+///
+/// Returns whether the transcript was replaced, which the caller uses to decide
+/// whether to reload it.
+///
+/// Shared by `/compact` and by the plan answer that clears the context before
+/// the work starts: this is a long piece of bookkeeping (the app's copy, the
+/// session record, the transcript's tip, the footer's token count), and a
+/// second copy of it is how one surface ends up not moving.
+async fn compact_conversation(
+    instruction: Option<&str>,
+    messages: &mut Vec<mikmik_core::types::Message>,
+    app: &mut mikmik_tui::App,
+    session: &mut mikmik_core::history::ConversationSession,
+    transcript: &mut mikmik_core::session_storage::TranscriptRecorder,
+    config: &mikmik_core::Config,
+    client: &mikmik_api::AnthropicClient,
+    provider_registry: Option<&std::sync::Arc<mikmik_api::ProviderRegistry>>,
+    model_registry: &mikmik_api::ModelRegistry,
+    session_id: &str,
+) -> bool {
+    let before = messages.len();
+    let model = session_model_string(config, model_registry);
+    app.status_message = Some("Compacting the conversation…".to_string());
+    let run = run_compaction(
+        messages,
+        &model,
+        instruction,
+        session_id,
+        config,
+        client,
+        provider_registry,
+    )
+    .await;
+    // The chosen compact model could not write it and the turn's own did. Said
+    // before the outcome, so the reason arrives with it.
+    if let Some(note) = run.note {
+        app.push_notification(mikmik_tui::NotificationKind::Warning, note, None);
+    }
+    match run.result {
+        Ok(new_msgs) => {
+            *messages = new_msgs.clone();
+            app.replace_messages(new_msgs);
+            session.messages = messages.clone();
+            session.updated_at = chrono::Utc::now();
+            // The transcript keeps the turns the summary replaced; its tip has
+            // to follow the conversation or the next launch reloads them.
+            let tip = messages.last().and_then(|m| m.uuid.clone());
+            if let Err(e) = transcript.set_active_leaf(tip.as_deref()).await {
+                app.push_notification(
+                    mikmik_tui::NotificationKind::Error,
+                    format!("Could not move the transcript's tip: {e}"),
+                    None,
+                );
+            }
+            // The summary is the whole prompt now, so the footer has to say so.
+            app.context_used_tokens = mikmik_query::compact::estimate_context_size(messages);
+            app.token_warning_threshold_shown = 0;
+            let removed = before.saturating_sub(messages.len());
+            app.status_message = Some(format!(
+                "Compacted {removed} message{} into a summary.",
+                if removed == 1 { "" } else { "s" }
+            ));
+            true
+        }
+        Err(e) => {
+            // The conversation is untouched.
+            app.status_message = None;
+            app.push_notification(
+                mikmik_tui::NotificationKind::Error,
+                format!("Could not compact: {e}"),
+                None,
+            );
+            false
+        }
+    }
+}
+
 async fn persist_session(
     session: &mikmik_core::history::ConversationSession,
 ) -> anyhow::Result<()> {
@@ -3829,81 +3907,19 @@ async fn run_interactive(
                                     transcript_replaced = true;
                                 }
                                 Some(CommandResult::RunCompaction { instruction }) => {
-                                    let before = messages.len();
-                                    let model =
-                                        session_model_string(&cmd_ctx.config, &model_registry);
-                                    app.status_message =
-                                        Some("Compacting the conversation…".to_string());
-                                    let run = run_compaction(
-                                        &messages,
-                                        &model,
+                                    transcript_replaced |= compact_conversation(
                                         instruction.as_deref(),
-                                        &tool_ctx.session_id,
+                                        &mut messages,
+                                        &mut app,
+                                        &mut session,
+                                        &mut transcript,
                                         &cmd_ctx.config,
                                         client.as_ref(),
                                         base_query_config.provider_registry.as_ref(),
+                                        &model_registry,
+                                        &tool_ctx.session_id,
                                     )
                                     .await;
-                                    // The chosen compact model could not write
-                                    // it and the turn's own did. Said before the
-                                    // outcome, so the reason arrives with it.
-                                    if let Some(note) = run.note {
-                                        app.push_notification(
-                                            mikmik_tui::NotificationKind::Warning,
-                                            note,
-                                            None,
-                                        );
-                                    }
-                                    match run.result {
-                                        Ok(new_msgs) => {
-                                            messages = new_msgs.clone();
-                                            app.replace_messages(new_msgs);
-                                            session.messages = messages.clone();
-                                            session.updated_at = chrono::Utc::now();
-                                            // The transcript keeps the turns the
-                                            // summary replaced; its tip has to
-                                            // follow the conversation or the next
-                                            // launch reloads them.
-                                            let tip = messages.last().and_then(|m| m.uuid.clone());
-                                            if let Err(e) =
-                                                transcript.set_active_leaf(tip.as_deref()).await
-                                            {
-                                                app.push_notification(
-                                                    mikmik_tui::NotificationKind::Error,
-                                                    format!(
-                                                        "Could not move the transcript's tip: {e}"
-                                                    ),
-                                                    None,
-                                                );
-                                            }
-                                            // The summary is the whole prompt now,
-                                            // so the footer has to say so.
-                                            app.context_used_tokens =
-                                                mikmik_query::compact::estimate_context_size(
-                                                    &messages,
-                                                );
-                                            app.token_warning_threshold_shown = 0;
-                                            app.status_message = Some(format!(
-                                                "Compacted {} message{} into a summary.",
-                                                before.saturating_sub(messages.len()),
-                                                if before.saturating_sub(messages.len()) == 1 {
-                                                    ""
-                                                } else {
-                                                    "s"
-                                                }
-                                            ));
-                                            transcript_replaced = true;
-                                        }
-                                        Err(e) => {
-                                            // The conversation is untouched.
-                                            app.status_message = None;
-                                            app.push_notification(
-                                                mikmik_tui::NotificationKind::Error,
-                                                format!("Could not compact: {e}"),
-                                                None,
-                                            );
-                                        }
-                                    }
                                 }
                                 Some(CommandResult::OpenRewindOverlay) => {
                                     app.replace_messages(messages.clone());
