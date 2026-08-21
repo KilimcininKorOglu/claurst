@@ -44,12 +44,6 @@ sha2 = "0.10"
 open = "5"
 urlencoding = "2"
 
-[target.'cfg(unix)'.dependencies]
-# Only the root/sudo check in main.rs reaches for this, and that check is itself
-# cfg(unix). On Windows nix collapses to an empty crate, so leaving it in the
-# unconditional table only bought a wasted build of nix, libc and cfg_aliases.
-nix = { workspace = true }
-
 [build-dependencies]
 chrono = { workspace = true }
 

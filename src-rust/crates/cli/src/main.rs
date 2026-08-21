@@ -416,8 +416,6 @@ enum BypassGate {
     RememberMode,
     /// Bypass, and the user has not been warned: show the warning.
     Warn,
-    /// Bypass while running as root: put the previous mode back, no dialog.
-    RefuseForRoot,
 }
 
 /// Decide the gate from the mode alone.
@@ -426,38 +424,14 @@ enum BypassGate {
 /// settings file all write `config.permission_mode` and share nothing else, so
 /// watching the mode catches every one of them with a single check. Wiring the
 /// four call sites separately would leave the next one added unguarded.
-fn bypass_gate_for(
-    mode: PermissionMode,
-    gate_cleared: bool,
-    dialog_visible: bool,
-    is_root: bool,
-) -> BypassGate {
+fn bypass_gate_for(mode: PermissionMode, gate_cleared: bool, dialog_visible: bool) -> BypassGate {
     if mode != PermissionMode::BypassPermissions {
         return BypassGate::RememberMode;
-    }
-    if is_root {
-        return BypassGate::RefuseForRoot;
     }
     if gate_cleared || dialog_visible {
         return BypassGate::Nothing;
     }
     BypassGate::Warn
-}
-
-/// Whether this process runs with root privileges.
-///
-/// `bypassPermissions` skips every permission check, so a root session would
-/// hand the model unrestricted access to the whole machine. Windows has no
-/// effective uid to ask, so the answer there is always `false`.
-fn running_as_root() -> bool {
-    #[cfg(unix)]
-    {
-        nix::unistd::Uid::effective().is_root()
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
 }
 
 #[tokio::main]
@@ -676,17 +650,6 @@ async fn main() -> anyhow::Result<()> {
         cli.dangerously_skip_permissions,
         cli.permission_mode,
     );
-    // Mirror TS setup.ts: block bypass mode when running as root/sudo.
-    //
-    // The check sits on the resolved mode rather than on
-    // `--dangerously-skip-permissions`, because `--permission-mode
-    // bypass-permissions` and a settings file holding `bypassPermissions`
-    // reach exactly the same mode and used to walk straight past it.
-    if config.permission_mode == PermissionMode::BypassPermissions && running_as_root() {
-        anyhow::bail!(
-            "bypassPermissions cannot be used with root/sudo privileges for security reasons"
-        );
-    }
     config.additional_dirs = cli.add_dir.clone();
     if cli.no_auto_compact {
         config.auto_compact = Some(false);
@@ -3488,19 +3451,9 @@ async fn run_interactive(
             app.config.permission_mode,
             app.bypass_gate_cleared,
             app.bypass_permissions_dialog.visible,
-            running_as_root(),
         ) {
             BypassGate::RememberMode => app.mode_before_bypass = app.config.permission_mode,
             BypassGate::Warn => app.bypass_permissions_dialog.show(false),
-            BypassGate::RefuseForRoot => {
-                // No dialog: root has no acceptable answer to offer.
-                app.config.permission_mode = app.mode_before_bypass;
-                app.push_notification(
-                    mikmik_tui::NotificationKind::Error,
-                    "Bypass permissions cannot be used with root/sudo privileges.".to_string(),
-                    Some(8),
-                );
-            }
             BypassGate::Nothing => {}
         }
 
@@ -8449,10 +8402,9 @@ mod permission_mode_tests {
     }
 
     #[test]
-    fn three_sources_reach_bypass_and_the_root_block_sees_all_three() {
-        // The root block used to sit inside the
-        // `--dangerously-skip-permissions` arm, so the other two walked past
-        // it. They all resolve to one mode, which is what the block now reads.
+    fn three_sources_reach_the_same_bypass_mode() {
+        // The warning gate reads the resolved mode, so all three arrive at one
+        // place rather than each needing to be found and wired separately.
         assert_eq!(
             startup_permission_mode(PermissionMode::Default, true, None),
             PermissionMode::BypassPermissions
@@ -8503,7 +8455,7 @@ mod permission_mode_tests {
         // The gate reads the mode, so shift+tab, /yolo, /permissions set and
         // the settings file are all one case here.
         assert_eq!(
-            bypass_gate_for(PermissionMode::BypassPermissions, false, false, false),
+            bypass_gate_for(PermissionMode::BypassPermissions, false, false),
             BypassGate::Warn
         );
     }
@@ -8516,7 +8468,7 @@ mod permission_mode_tests {
             PermissionMode::Plan,
         ] {
             assert_eq!(
-                bypass_gate_for(mode, false, false, false),
+                bypass_gate_for(mode, false, false),
                 BypassGate::RememberMode,
                 "{mode:?}"
             );
@@ -8526,27 +8478,14 @@ mod permission_mode_tests {
     #[test]
     fn the_warning_is_not_repeated_once_it_has_been_answered() {
         assert_eq!(
-            bypass_gate_for(PermissionMode::BypassPermissions, true, false, false),
+            bypass_gate_for(PermissionMode::BypassPermissions, true, false),
             BypassGate::Nothing,
             "an accepted gate must not ask again"
         );
         assert_eq!(
-            bypass_gate_for(PermissionMode::BypassPermissions, false, true, false),
+            bypass_gate_for(PermissionMode::BypassPermissions, false, true),
             BypassGate::Nothing,
             "the dialog is already on screen"
         );
-    }
-
-    #[test]
-    fn root_is_refused_rather_than_asked() {
-        // There is no answer root could give that makes bypass acceptable, so
-        // the dialog is not offered at all, and a cleared gate does not help.
-        for cleared in [false, true] {
-            assert_eq!(
-                bypass_gate_for(PermissionMode::BypassPermissions, cleared, false, true),
-                BypassGate::RefuseForRoot,
-                "cleared={cleared}"
-            );
-        }
     }
 }

@@ -2663,7 +2663,6 @@ dependencies = [
  "mikmik-query",
  "mikmik-tools",
  "mikmik-tui",
- "nix 0.29.0",
  "open",
  "parking_lot",
  "reqwest",

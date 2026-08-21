@@ -582,10 +582,7 @@ allow and deny rules are evaluated first either way.
 ### `bypassPermissions`
 
 All permission checks are skipped entirely. Every tool call is allowed
-unconditionally. This mode cannot be used when running as root or via `sudo`
-on Unix systems: MikMik refuses to start, whichever way the mode was set (the
-`--dangerously-skip-permissions` flag, `--permission-mode`, or the settings
-file), and refuses to switch into it mid-session.
+unconditionally.
 
 Use with caution: the model can read and modify any file reachable from the
 current working directory without any user confirmation.
