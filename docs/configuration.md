@@ -152,14 +152,21 @@ arrives while the terminal is in the background.
 
 | Key                    | Type    | Default | Description                                                             |
 |------------------------|---------|---------|-------------------------------------------------------------------------|
-| `notifications`        | boolean | true    | Master switch. Off means nothing is sent, whatever the three below say.  |
+| `notifications`        | boolean | true    | Master switch. Off means nothing is sent, whatever the keys below say.   |
 | `notifyOnQuestion`     | boolean | true    | The model called `AskUserQuestion` and the turn is blocked on an answer. |
 | `notifyOnPlanReady`    | boolean | true    | A plan is waiting for approval (see [`plan`](#plan)).                    |
 | `notifyOnTurnComplete` | boolean | true    | The turn finished, tool round-trips included, and the prompt is free. The last thing the model said is used as the body. |
+| `notifySound`          | boolean | false   | Play a short sound with each notification.                              |
 
 Toggle them from the TUI with `/settings`. Delivery is best-effort: a machine
 with no notification daemon, or a terminal that was never granted notification
 permission, drops the notification without interrupting the turn.
+
+The sound is the notification's own, not the terminal bell, so it arrives with
+the banner and follows the system's Do Not Disturb. A notification that is not
+delivered makes no sound either. The name sent to the platform is `Ping` on
+macOS, `Default` on Windows and `message-new-instant` on the XDG backend; a
+Linux sound theme without that name leaves the notification silent.
 
 ### Advisor
 
