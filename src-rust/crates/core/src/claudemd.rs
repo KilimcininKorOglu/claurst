@@ -5,7 +5,7 @@
 //! Supports @include directives, YAML frontmatter, and mtime-based caching.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -27,6 +27,18 @@ pub enum MemoryScope {
     Local,
 }
 
+impl MemoryScope {
+    /// Label used in the prompt header.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Managed => "managed",
+            Self::User => "user",
+            Self::Project => "project",
+            Self::Local => "local",
+        }
+    }
+}
+
 /// Frontmatter parsed from a AGENTS.md file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemoryFrontmatter {
@@ -46,36 +58,6 @@ pub struct MemoryFileInfo {
     pub content: String,
     pub frontmatter: MemoryFrontmatter,
     pub mtime: Option<SystemTime>,
-}
-
-// ---------------------------------------------------------------------------
-// Cache
-// ---------------------------------------------------------------------------
-
-/// Simple mtime-keyed file cache.
-#[derive(Default)]
-pub struct MemoryCache {
-    entries: HashMap<PathBuf, (SystemTime, String)>,
-}
-
-impl MemoryCache {
-    /// Return cached content if the file hasn't changed since last read.
-    pub fn get(&self, path: &Path) -> Option<&str> {
-        let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
-        let (cached_mtime, content) = self.entries.get(path)?;
-        if *cached_mtime == mtime {
-            Some(content.as_str())
-        } else {
-            None
-        }
-    }
-
-    /// Store file content with its current mtime.
-    pub fn insert(&mut self, path: PathBuf, content: String) {
-        if let Ok(mtime) = std::fs::metadata(&path).and_then(|m| m.modified()) {
-            self.entries.insert(path, (mtime, content));
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -153,14 +135,6 @@ pub fn expand_includes(
                 continue;
             }
             if let Ok(included) = std::fs::read_to_string(&include_path) {
-                // Check max size.
-                if included.len() > 40 * 1024 {
-                    result.push_str(&format!(
-                        "<!-- @include {} exceeds 40KB limit -->\n",
-                        path_str
-                    ));
-                    continue;
-                }
                 visited.insert(canonical);
                 let expanded = expand_includes(
                     &included,
@@ -185,15 +159,12 @@ pub fn expand_includes(
 // Loading API
 // ---------------------------------------------------------------------------
 
-const MAX_FILE_SIZE: u64 = 40 * 1024; // 40 KB
-
-/// Load a single AGENTS.md file (respects MAX_FILE_SIZE, expands @includes).
+/// Load a single memory file: strip frontmatter, expand `@include`s.
+///
+/// No size limit. A memory file is something the user wrote on purpose, and
+/// silently dropping the second half of it is worse than a large prompt.
 pub fn load_memory_file(path: &Path, scope: MemoryScope) -> Option<MemoryFileInfo> {
     let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > MAX_FILE_SIZE {
-        eprintln!("WARNING: {} exceeds 40KB limit, skipping", path.display());
-        return None;
-    }
     let raw = std::fs::read_to_string(path).ok()?;
     let mtime = meta.modified().ok();
 
@@ -231,12 +202,14 @@ fn load_scope_files(dir: &Path, scope: MemoryScope, files: &mut Vec<MemoryFileIn
     }
 }
 
-/// Load all memory files for the given project root, in priority order.
+/// Load all memory files for the given project root, in prompt order.
 ///
 /// At each scope `AGENTS.md` is loaded first (universal standard), followed by
 /// `CLAUDE.md` if present (Claude-specific context). Either or both may exist.
 ///
-/// Returned list is ordered: Managed (highest) → User → Project → Local.
+/// Returned list is ordered Managed → User → Project → Local, and within one
+/// scope by `priority` ascending. Later entries reach the model later, so the
+/// narrower scope wins where two files say different things.
 pub fn load_all_memory_files(project_root: &Path) -> Vec<MemoryFileInfo> {
     let mut files = Vec::new();
 
@@ -278,15 +251,33 @@ pub fn load_all_memory_files(project_root: &Path) -> Vec<MemoryFileInfo> {
         &mut files,
     );
 
+    // Stable, and keyed on the scope first: the push order above is already
+    // the scope order, so this only reorders within a scope. A file with no
+    // `priority` sorts last there, which leaves an explicit priority in
+    // charge, and the tie case keeps AGENTS.md ahead of CLAUDE.md and the
+    // managed files in the alphabetical order they were read in.
+    files.sort_by_key(|f| (f.scope, f.frontmatter.priority.unwrap_or(u32::MAX)));
+
     files
 }
 
 /// Concatenate all memory file contents into a single system-prompt fragment.
+///
+/// Each file is headed with its scope and path. The model is told where an
+/// instruction came from, which is what lets it say "your project's AGENTS.md
+/// says X" rather than asserting X with no provenance.
 pub fn build_memory_prompt(files: &[MemoryFileInfo]) -> String {
     files
         .iter()
         .filter(|f| !f.content.trim().is_empty())
-        .map(|f| f.content.trim().to_string())
+        .map(|f| {
+            format!(
+                "# Memory ({}, from {})\n{}",
+                f.scope.as_str(),
+                f.path.display(),
+                f.content.trim()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -294,6 +285,46 @@ pub fn build_memory_prompt(files: &[MemoryFileInfo]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serialises the tests that redirect the config root.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Point the config root at a temporary directory for the duration of a
+    /// test, so `load_all_memory_files` does not read the real
+    /// `~/.config/mikmik` for its Managed and User scopes.
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
+            Self { saved, _dir: dir }
+        }
+
+        fn path(&self) -> &Path {
+            self._dir.path()
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
+            }
+        }
+    }
+
+    fn write(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+        std::fs::write(path, content).expect("write");
+    }
 
     #[test]
     fn parse_frontmatter_basic() {
@@ -314,9 +345,11 @@ mod tests {
 
     #[test]
     fn load_scope_prefers_agents_then_claude() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("AGENTS.md"), "agents content").unwrap();
-        std::fs::write(tmp.path().join("CLAUDE.md"), "claude content").unwrap();
+        write(&tmp.path().join("AGENTS.md"), "agents content");
+        write(&tmp.path().join("CLAUDE.md"), "claude content");
 
         let files = load_all_memory_files(tmp.path());
         // Filter to just the project-scope files from our temp dir.
@@ -341,8 +374,10 @@ mod tests {
 
     #[test]
     fn load_scope_claudemd_only_fallback() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("CLAUDE.md"), "claude only").unwrap();
+        write(&tmp.path().join("CLAUDE.md"), "claude only");
 
         let files = load_all_memory_files(tmp.path());
         let project: Vec<_> = files
@@ -351,6 +386,133 @@ mod tests {
             .collect();
         assert_eq!(project.len(), 1);
         assert!(project[0].path.ends_with("CLAUDE.md"));
+    }
+
+    /// Every documented location, in the documented order.
+    #[test]
+    fn all_four_scopes_are_read_in_order() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+
+        write(&home.path().join("rules/10-first.md"), "MANAGED-B");
+        write(&home.path().join("rules/01-zeroth.md"), "MANAGED-A");
+        write(&home.path().join("AGENTS.md"), "USER-AGENTS");
+        write(&home.path().join("CLAUDE.md"), "USER-CLAUDE");
+        write(&project.path().join("AGENTS.md"), "PROJECT-AGENTS");
+        write(&project.path().join("CLAUDE.md"), "PROJECT-CLAUDE");
+        write(&project.path().join(".mikmik/AGENTS.md"), "LOCAL-AGENTS");
+        write(&project.path().join(".mikmik/CLAUDE.md"), "LOCAL-CLAUDE");
+
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let order: Vec<&str> = [
+            "MANAGED-A",
+            "MANAGED-B",
+            "USER-AGENTS",
+            "USER-CLAUDE",
+            "PROJECT-AGENTS",
+            "PROJECT-CLAUDE",
+            "LOCAL-AGENTS",
+            "LOCAL-CLAUDE",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut cursor = 0;
+        for marker in &order {
+            let at = prompt[cursor..]
+                .find(marker)
+                .unwrap_or_else(|| panic!("{marker} missing or out of order:\n{prompt}"));
+            cursor += at + marker.len();
+        }
+    }
+
+    /// The docs promise the lower number is prepended first.
+    #[test]
+    fn priority_orders_files_inside_one_scope() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+
+        write(
+            &home.path().join("rules/a.md"),
+            "---\npriority: 10\n---\nTEN",
+        );
+        write(
+            &home.path().join("rules/b.md"),
+            "---\npriority: 5\n---\nFIVE",
+        );
+        write(&home.path().join("rules/c.md"), "NOPRIORITY");
+
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+        let five = prompt.find("FIVE").expect("FIVE missing");
+        let ten = prompt.find("TEN").expect("TEN missing");
+        let none = prompt.find("NOPRIORITY").expect("NOPRIORITY missing");
+
+        assert!(five < ten, "priority 5 must precede priority 10:\n{prompt}");
+        assert!(ten < none, "a file with no priority must sort last");
+    }
+
+    /// A large memory file is the user's decision, not something to truncate.
+    #[test]
+    fn a_large_file_and_a_large_include_pass_whole() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+
+        let filler = "x".repeat(60 * 1024);
+        write(
+            &project.path().join("big.md"),
+            &format!("{filler}\nINCLUDE-END"),
+        );
+        write(
+            &project.path().join("AGENTS.md"),
+            &format!("{filler}\nFILE-END\n@include ./big.md\n"),
+        );
+
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+
+        assert!(prompt.contains("FILE-END"), "a 60 KB file was cut");
+        assert!(prompt.contains("INCLUDE-END"), "a 60 KB @include was cut");
+    }
+
+    #[test]
+    fn frontmatter_is_stripped_from_the_prompt() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+        write(
+            &project.path().join("AGENTS.md"),
+            "---\nmemory_type: project\npriority: 3\n---\nBODY-TEXT\n",
+        );
+
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+
+        assert!(prompt.contains("BODY-TEXT"));
+        assert!(
+            !prompt.contains("memory_type:"),
+            "frontmatter leaked:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("priority:"),
+            "frontmatter leaked:\n{prompt}"
+        );
+    }
+
+    #[test]
+    fn every_file_is_headed_with_its_scope_and_path() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("AGENTS.md");
+        write(&path, "BODY");
+
+        let prompt = build_memory_prompt(&load_all_memory_files(project.path()));
+
+        assert!(
+            prompt.contains(&format!("# Memory (project, from {})", path.display())),
+            "no provenance header:\n{prompt}"
+        );
     }
 
     #[test]
