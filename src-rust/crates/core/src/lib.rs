@@ -1544,6 +1544,17 @@ pub mod config {
         /// [`include_ignored_files`](Self::include_ignored_files).
         #[serde(default, rename = "timelineEnabled")]
         pub timeline_enabled: bool,
+        /// Whether a running tool's output is shown as it arrives.
+        ///
+        /// Off by default: the finished result is what a transcript keeps, and
+        /// a long command that prints steadily would otherwise redraw the pane
+        /// on every chunk. Only the Bash tool produces output while it runs;
+        /// every other tool returns in one piece and is unaffected.
+        ///
+        /// Stated in the positive for the same reason as
+        /// [`timeline_enabled`](Self::timeline_enabled).
+        #[serde(default, rename = "liveToolOutput")]
+        pub live_tool_output: bool,
         /// Base address of the SearXNG instance WebSearch prefers, for example
         /// `http://localhost:8080`. `None` means no instance is configured, and
         /// the tool then falls back to the `SEARXNG_URL` environment variable.
@@ -3346,6 +3357,9 @@ pub mod config {
                 // Whether the timeline panel is on is a layout preference, so
                 // it follows `cursor_blink_enabled` above.
                 timeline_enabled: base.config.timeline_enabled,
+                // Whether a running tool draws its output is a display
+                // preference, so it follows `timeline_enabled` above.
+                live_tool_output: base.config.live_tool_output,
                 // SECURITY: a search endpoint receives whatever the model
                 // searches for, so pointing it at a host of the repository's
                 // choosing hands that stream away.
@@ -4440,6 +4454,34 @@ pub mod config {
             let config: Config =
                 serde_json::from_str(r#"{"timelineEnabled":true}"#).expect("config");
             assert!(config.timeline_enabled);
+        }
+
+        #[test]
+        fn live_tool_output_starts_off_and_reads_its_json_key() {
+            assert!(!Config::default().live_tool_output);
+
+            let config: Config =
+                serde_json::from_str(r#"{"liveToolOutput":true}"#).expect("config");
+            assert!(config.live_tool_output);
+        }
+
+        /// Only the user decides whether a running command draws to their
+        /// screen; a repository must not be able to turn it on for them.
+        #[test]
+        fn only_the_user_can_turn_live_tool_output_on() {
+            let mut enabled = Settings::default();
+            enabled.config.live_tool_output = true;
+
+            assert!(
+                Settings::merge_with(enabled.clone(), Settings::default(), ProjectRunnables::Deny)
+                    .config
+                    .live_tool_output
+            );
+            assert!(
+                !Settings::merge_with(Settings::default(), enabled, ProjectRunnables::Deny)
+                    .config
+                    .live_tool_output
+            );
         }
 
         /// Only the user's own settings decide whether the timeline panel is

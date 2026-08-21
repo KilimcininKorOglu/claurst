@@ -110,6 +110,7 @@ pub struct SettingsScreen {
     pub include_ignored_files: bool,
     pub web_search_fallback: bool,
     pub timeline_enabled: bool,
+    pub live_tool_output: bool,
     /// Empty when no SearXNG instance is configured.
     pub searxng_url: String,
     /// The model that writes every summary, or empty for "the one this turn
@@ -164,6 +165,7 @@ impl SettingsScreen {
             include_ignored_files: false,
             web_search_fallback: false,
             timeline_enabled: false,
+            live_tool_output: false,
             searxng_url: String::new(),
             compact_model: String::new(),
             output_format: "text".to_string(),
@@ -229,6 +231,7 @@ impl SettingsScreen {
             .effective_include_ignored_files();
         self.web_search_fallback = self.settings_snapshot.config.web_search_fallback;
         self.timeline_enabled = self.settings_snapshot.config.timeline_enabled;
+        self.live_tool_output = self.settings_snapshot.config.live_tool_output;
         self.searxng_url = self
             .settings_snapshot
             .config
@@ -748,6 +751,19 @@ fn all_entries(screen: &SettingsScreen) -> Vec<SettingsEntry> {
                     .into(),
             kind: SettingKind::Bool,
             value: if screen.timeline_enabled {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string(),
+        },
+        SettingsEntry {
+            key: "live_tool_output".into(),
+            label: "Live tool output".into(),
+            description: "Show a running command's output as it arrives instead of only when it finishes."
+                .into(),
+            kind: SettingKind::Bool,
+            value: if screen.live_tool_output {
                 "true"
             } else {
                 "false"
@@ -1404,6 +1420,11 @@ fn toggle_or_cycle_current(screen: &mut SettingsScreen, config: &mut Config) {
                         screen.settings_snapshot.config.web_search_fallback = new_value;
                         config.web_search_fallback = new_value;
                     }
+                    "live_tool_output" => {
+                        screen.live_tool_output = new_value;
+                        screen.settings_snapshot.config.live_tool_output = new_value;
+                        config.live_tool_output = new_value;
+                    }
                     "timeline_enabled" => {
                         screen.timeline_enabled = new_value;
                         screen.settings_snapshot.config.timeline_enabled = new_value;
@@ -1894,6 +1915,7 @@ mod tests {
             }),
             ("Web search fallback", |config| config.web_search_fallback),
             ("Execution timeline", |config| config.timeline_enabled),
+            ("Live tool output", |config| config.live_tool_output),
             ("File injection (@)", |config| {
                 config.file_injection_enabled.is_some()
             }),
