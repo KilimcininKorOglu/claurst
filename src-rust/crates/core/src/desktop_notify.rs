@@ -17,6 +17,20 @@ use tracing::debug;
 /// of its own accord; cutting here keeps that cut predictable.
 const MAX_BODY_CHARS: usize = 180;
 
+/// The sound played alongside a notification, when the user asked for one.
+///
+/// Each platform reads the name through a different vocabulary, and a name it
+/// does not recognise leaves the notification silent rather than falling back:
+/// macOS resolves it against `/System/Library/Sounds`, Windows parses it into
+/// a `tauri-winrt-notification` `Sound`, and the XDG backend passes it as the
+/// freedesktop `sound-name` hint. So each gets a name from its own list.
+#[cfg(target_os = "macos")]
+const NOTIFY_SOUND: &str = "Ping";
+#[cfg(target_os = "windows")]
+const NOTIFY_SOUND: &str = "Default";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const NOTIFY_SOUND: &str = "message-new-instant";
+
 /// A moment worth interrupting the user for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyEvent {
@@ -56,6 +70,14 @@ pub fn should_notify(settings: &Settings, event: NotifyEvent) -> bool {
     settings.notifications && event.enabled_in(settings)
 }
 
+/// Whether `event` should also make a sound.
+///
+/// A sub-setting of [`should_notify`]: an event that is not sent cannot be
+/// heard either, and turning the sound off leaves the banner alone.
+pub fn should_play_sound(settings: &Settings, event: NotifyEvent) -> bool {
+    settings.notify_sound && should_notify(settings, event)
+}
+
 /// Send one notification, if the settings allow it.
 ///
 /// Returns without touching the notification server when the event is
@@ -67,16 +89,18 @@ pub fn notify(settings: &Settings, event: NotifyEvent, body: &str) {
 
     let summary = event.summary();
     let body = trim_body(body);
+    let with_sound = should_play_sound(settings, event);
 
     // Off the caller's thread: `show()` talks to D-Bus or the platform's
     // notification service, and the caller is usually the TUI event loop,
     // where a blocked frame is visible as a stutter.
     std::thread::spawn(move || {
-        if let Err(error) = notify_rust::Notification::new()
-            .summary(summary)
-            .body(&body)
-            .show()
-        {
+        let mut notification = notify_rust::Notification::new();
+        notification.summary(summary).body(&body);
+        if with_sound {
+            notification.sound_name(NOTIFY_SOUND);
+        }
+        if let Err(error) = notification.show() {
             // Not an error the user can act on mid-turn: no daemon, no
             // permission, no session bus. Logged so it is still diagnosable.
             debug!(%error, summary, "desktop notification was not delivered");
@@ -101,13 +125,14 @@ fn trim_body(body: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Settings with every notification switch on.
+    /// Settings with every notification switch on, sound included.
     fn all_on() -> Settings {
         Settings {
             notifications: true,
             notify_on_question: true,
             notify_on_plan_ready: true,
             notify_on_turn_complete: true,
+            notify_sound: true,
             ..Default::default()
         }
     }
@@ -147,6 +172,73 @@ mod tests {
             for other in EVENTS.into_iter().filter(|other| *other != event) {
                 assert!(
                     should_notify(&settings, other),
+                    "turning off {event:?} also silenced {other:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_sound_switch_is_on_for_every_event_at_once() {
+        let settings = all_on();
+        for event in EVENTS {
+            assert!(
+                should_play_sound(&settings, event),
+                "{event:?} was sent without a sound"
+            );
+        }
+    }
+
+    #[test]
+    fn silencing_the_sound_leaves_the_notification_alone() {
+        let settings = Settings {
+            notify_sound: false,
+            ..all_on()
+        };
+        for event in EVENTS {
+            assert!(
+                !should_play_sound(&settings, event),
+                "{event:?} still made a sound"
+            );
+            assert!(
+                should_notify(&settings, event),
+                "turning the sound off also silenced {event:?} entirely"
+            );
+        }
+    }
+
+    #[test]
+    fn the_master_switch_silences_the_sound_too() {
+        // Sound on, notifications off: nothing is delivered, so there is
+        // nothing left to make a noise.
+        let settings = Settings {
+            notifications: false,
+            ..all_on()
+        };
+        for event in EVENTS {
+            assert!(
+                !should_play_sound(&settings, event),
+                "{event:?} made a sound with notifications switched off"
+            );
+        }
+    }
+
+    #[test]
+    fn an_event_switched_off_makes_no_sound_of_its_own() {
+        for event in EVENTS {
+            let mut settings = all_on();
+            match event {
+                NotifyEvent::QuestionAsked => settings.notify_on_question = false,
+                NotifyEvent::PlanReady => settings.notify_on_plan_ready = false,
+                NotifyEvent::TurnComplete => settings.notify_on_turn_complete = false,
+            }
+            assert!(
+                !should_play_sound(&settings, event),
+                "{event:?} was switched off but still made a sound"
+            );
+            for other in EVENTS.into_iter().filter(|other| *other != event) {
+                assert!(
+                    should_play_sound(&settings, other),
                     "turning off {event:?} also silenced {other:?}"
                 );
             }

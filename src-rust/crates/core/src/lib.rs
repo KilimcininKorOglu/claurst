@@ -1939,6 +1939,12 @@ pub mod config {
         /// Defaults to true.
         #[serde(default = "default_true", rename = "notifyOnTurnComplete")]
         pub notify_on_turn_complete: bool,
+        /// Play a short sound with each notification. Defaults to false.
+        ///
+        /// Opt-in: a sound reaches further than a banner, so it is the user's
+        /// to ask for rather than something a fresh install starts doing.
+        #[serde(default, rename = "notifySound")]
+        pub notify_sound: bool,
         /// Whether to show turn duration in output. Defaults to false.
         #[serde(default, rename = "showTurnDuration")]
         pub show_turn_duration: bool,
@@ -3384,6 +3390,7 @@ pub mod config {
                 notify_on_question: base.notify_on_question,
                 notify_on_plan_ready: base.notify_on_plan_ready,
                 notify_on_turn_complete: base.notify_on_turn_complete,
+                notify_sound: base.notify_sound,
                 show_turn_duration: base.show_turn_duration,
                 show_message_timestamps: base.show_message_timestamps,
                 advisor_model: over.advisor_model.clone().or(base.advisor_model.clone()),
@@ -3785,6 +3792,7 @@ pub mod config {
                 notify_on_question: true,
                 notify_on_plan_ready: true,
                 notify_on_turn_complete: true,
+                notify_sound: true,
                 show_turn_duration: true,
                 show_message_timestamps: true,
                 reduce_motion: true,
@@ -3811,6 +3819,9 @@ pub mod config {
             assert!(!merged.notify_on_question);
             assert!(!merged.notify_on_plan_ready);
             assert!(!merged.notify_on_turn_complete);
+            // A repository deciding when the developer's speakers make a noise
+            // is the same overreach again.
+            assert!(!merged.notify_sound);
             assert!(!merged.show_turn_duration);
             assert!(!merged.show_message_timestamps);
             assert!(!merged.reduce_motion);
