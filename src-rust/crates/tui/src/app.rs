@@ -8883,6 +8883,35 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
+    // `Settings::config_dir()` reads process-global env, and the writers below
+    // resolve the config root through it. Without this the transcript and the
+    // tip history land in the developer's real config directory.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        #[allow(dead_code)]
+        dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
+            Self { saved, dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
+            }
+        }
+    }
+
     fn make_app() -> App {
         let config = Config::default();
         let cost_tracker = mikmik_core::cost::CostTracker::new();
@@ -9927,6 +9956,8 @@ mod tests {
 
     #[test]
     fn test_bash_prefix_allowlist_after_p_key() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
         use crate::dialogs::PermissionRequest;
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -9960,6 +9991,8 @@ mod tests {
 
     #[test]
     fn test_bash_prefix_allowlist_via_enter_on_p_option() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
         use crate::dialogs::PermissionRequest;
         use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 

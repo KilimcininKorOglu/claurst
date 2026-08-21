@@ -67,6 +67,21 @@ jobs:
         # parallel execution, flaking non-deterministically across runners.
         run: cargo test --workspace --locked -- --test-threads=1
 
+      # A test that resolves the config root without pointing MIKMIK_HOME at a
+      # tempdir writes into the developer's real directory. That is invisible
+      # locally until it has accumulated for weeks, so the runner checks that
+      # the root was never created.
+      - name: Assert the tests left the config root alone
+        if: runner.os != 'Windows'
+        run: |
+          root="${XDG_CONFIG_HOME:-$HOME/.config}/mikmik"
+          if [ -e "$root" ]; then
+            echo "::error::tests wrote into $root — point MIKMIK_HOME at a tempfile::tempdir() in the test that did"
+            find "$root" | head -50
+            exit 1
+          fi
+          echo "config root untouched: $root"
+
       # Enforced (#227): clippy is clean under `-D warnings`, aside from a few
       # documented crate-level / targeted `#[allow]`s for noisy or risky lints.
       # rustfmt stays advisory below only because CRLF-terminated files can make

@@ -311,6 +311,35 @@ pub fn select_tip(session_num: u64) -> Option<&'static Tip> {
 mod tests {
     use super::*;
 
+    // `Settings::config_dir()` reads process-global env, and the writers below
+    // resolve the config root through it. Without this the transcript and the
+    // tip history land in the developer's real config directory.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        #[allow(dead_code)]
+        dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
+            Self { saved, dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
+            }
+        }
+    }
+
     #[test]
     fn all_tips_non_empty() {
         assert!(!all_tips().is_empty(), "tip registry must not be empty");
@@ -375,6 +404,8 @@ mod tests {
 
     #[test]
     fn select_tip_respects_cooldown() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = HomeGuard::new();
         // Record all tips as shown in session 1000, then ask for session 1001.
         // Tips with cooldown > 1 should not be returned.
         let mut history = TipHistory::default();

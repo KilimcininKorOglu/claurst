@@ -1091,6 +1091,35 @@ mod tests {
     use crate::types::{Message, MessageContent, Role};
     use tempfile::tempdir;
 
+    // `Settings::config_dir()` reads process-global env, and the writers below
+    // resolve the config root through it. Without this the transcript and the
+    // tip history land in the developer's real config directory.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct HomeGuard {
+        saved: Option<std::ffi::OsString>,
+        #[allow(dead_code)]
+        dir: tempfile::TempDir,
+    }
+
+    impl HomeGuard {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let saved = std::env::var_os("MIKMIK_HOME");
+            std::env::set_var("MIKMIK_HOME", dir.path());
+            Self { saved, dir }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(value) => std::env::set_var("MIKMIK_HOME", value),
+                None => std::env::remove_var("MIKMIK_HOME"),
+            }
+        }
+    }
+
     fn make_msg(role: Role) -> Message {
         Message {
             role,
@@ -1505,6 +1534,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_reaches_the_transcript_chained_to_the_one_before() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         let dir = tempdir().unwrap();
         let mut recorder = recorder_in(dir.path());
         let mut messages = vec![user("first"), assistant("reply")];
@@ -1541,6 +1572,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_message_already_on_disk_is_not_written_twice() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         let dir = tempdir().unwrap();
         let mut recorder = recorder_in(dir.path());
         let mut messages = vec![user("only"), assistant("once")];
@@ -1563,6 +1596,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_stamped_uuid_is_written_back_into_the_message() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         // `/rewind` looks an entry up by the message's uuid while the branch
         // walk follows the entry's, so the two have to be one value.
         let dir = tempdir().unwrap();
@@ -1587,6 +1622,8 @@ mod tests {
 
     #[tokio::test]
     async fn clearing_abandons_the_branch_without_deleting_it() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         let dir = tempdir().unwrap();
         let mut recorder = recorder_in(dir.path());
         let mut messages = vec![user("before"), assistant("before reply")];
@@ -1611,6 +1648,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_resumed_recorder_continues_the_file_instead_of_repeating_it() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         let dir = tempdir().unwrap();
         let mut first = recorder_in(dir.path());
         let mut messages = vec![user("one"), assistant("two")];
@@ -1687,6 +1726,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_after_a_restore_stays_on_the_active_branch() {
+        let _lock = ENV_LOCK.lock().await;
+        let _home = HomeGuard::new();
         // The leaf named the restore point; entries appended after it are on
         // the active branch only once a newer leaf names their tip.
         let dir = tempdir().unwrap();
