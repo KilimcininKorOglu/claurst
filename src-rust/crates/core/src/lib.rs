@@ -1919,9 +1919,23 @@ pub mod config {
         /// Whether to show git branch in footer. Defaults to true.
         #[serde(default = "default_true", rename = "showGitBranch")]
         pub show_git_branch: bool,
-        /// Whether to enable desktop notifications. Defaults to true.
+        /// Master switch for desktop notifications. Defaults to true.
+        ///
+        /// Off means no notification is sent for any event, whatever the
+        /// per-event settings below say.
         #[serde(default = "default_true", rename = "notifications")]
         pub notifications: bool,
+        /// Notify when the model asks a question and the turn is waiting on
+        /// an answer. Defaults to true.
+        #[serde(default = "default_true", rename = "notifyOnQuestion")]
+        pub notify_on_question: bool,
+        /// Notify when a plan is ready for approval. Defaults to true.
+        #[serde(default = "default_true", rename = "notifyOnPlanReady")]
+        pub notify_on_plan_ready: bool,
+        /// Notify when a turn finishes and the prompt is free again.
+        /// Defaults to true.
+        #[serde(default = "default_true", rename = "notifyOnTurnComplete")]
+        pub notify_on_turn_complete: bool,
         /// Whether to show turn duration in output. Defaults to false.
         #[serde(default, rename = "showTurnDuration")]
         pub show_turn_duration: bool,
@@ -3364,6 +3378,9 @@ pub mod config {
                 // an `over || base` merge could only turn them on.
                 auto_copy_on_highlight: base.auto_copy_on_highlight,
                 notifications: base.notifications,
+                notify_on_question: base.notify_on_question,
+                notify_on_plan_ready: base.notify_on_plan_ready,
+                notify_on_turn_complete: base.notify_on_turn_complete,
                 show_turn_duration: base.show_turn_duration,
                 show_message_timestamps: base.show_message_timestamps,
                 advisor_model: over.advisor_model.clone().or(base.advisor_model.clone()),
@@ -3762,6 +3779,9 @@ pub mod config {
             let project = Settings {
                 auto_copy_on_highlight: true,
                 notifications: true,
+                notify_on_question: true,
+                notify_on_plan_ready: true,
+                notify_on_turn_complete: true,
                 show_turn_duration: true,
                 show_message_timestamps: true,
                 reduce_motion: true,
@@ -3783,6 +3803,11 @@ pub mod config {
 
             assert!(!merged.auto_copy_on_highlight);
             assert!(!merged.notifications);
+            // A repository deciding when the developer's machine pops a
+            // notification is the same overreach as deciding the theme.
+            assert!(!merged.notify_on_question);
+            assert!(!merged.notify_on_plan_ready);
+            assert!(!merged.notify_on_turn_complete);
             assert!(!merged.show_turn_duration);
             assert!(!merged.show_message_timestamps);
             assert!(!merged.reduce_motion);
