@@ -98,6 +98,19 @@ fn build_model_registry() -> ModelRegistry {
     registry
 }
 
+/// The context a sub-agent runs under.
+///
+/// A sub-agent has no plan mode of its own, and the approval dialog it could
+/// open belongs to the session the user is watching: answering it would move
+/// the main session's permission mode on a plan the user never asked for. So
+/// the plan approval channel does not come along, which leaves `ExitPlanMode`
+/// on its non-blocking path there.
+fn subagent_context(parent: &ToolContext) -> ToolContext {
+    let mut ctx = parent.clone();
+    ctx.plan_approval_tx = None;
+    ctx
+}
+
 /// The model string the subagent's own `QueryConfig` will carry.
 ///
 /// Canonical, because the subagent resolves it against its own config and a
@@ -456,7 +469,7 @@ impl Tool for AgentTool {
                 .collect();
 
             let client_bg = client.clone();
-            let ctx_bg = ctx.clone();
+            let ctx_bg = subagent_context(ctx);
             let config_bg = query_config.clone();
             let cost_tracker_bg = ctx.cost_tracker.clone();
             let description_bg = params.description.clone();
@@ -544,11 +557,12 @@ impl Tool for AgentTool {
         )
         .await;
 
+        let sub_ctx = subagent_context(ctx);
         let outcome = run_query_loop(
             client.as_ref(),
             &mut messages,
             &agent_tools,
-            ctx,
+            &sub_ctx,
             &query_config,
             ctx.cost_tracker.clone(),
             None, // no event forwarding for sub-agents
@@ -732,11 +746,12 @@ pub fn init_team_swarm_runner() {
                 // this team sub-agent as well (issue #218).
                 let cancel = ctx.cancel_token.child_token();
                 let mut messages = vec![mikmik_core::types::Message::user(prompt)];
+                let sub_ctx = subagent_context(&ctx);
                 let outcome = crate::run_query_loop(
                     client.as_ref(),
                     &mut messages,
                     &agent_tools,
-                    &ctx,
+                    &sub_ctx,
                     &query_config,
                     ctx.cost_tracker.clone(),
                     None,
@@ -774,6 +789,67 @@ mod tests {
     fn a_directory_that_does_not_exist_contributes_nothing() {
         let defs = plugin_agent_definitions(&[PathBuf::from("/nonexistent/agents")]);
         assert!(defs.is_empty());
+    }
+
+    /// A parent context, permissive and otherwise unremarkable.
+    fn parent_context() -> ToolContext {
+        struct AllowAll;
+        impl mikmik_core::permissions::PermissionHandler for AllowAll {
+            fn check_permission(
+                &self,
+                _request: &mikmik_core::permissions::PermissionRequest,
+            ) -> mikmik_core::permissions::PermissionDecision {
+                mikmik_core::permissions::PermissionDecision::Allow
+            }
+            fn request_permission(
+                &self,
+                _request: &mikmik_core::permissions::PermissionRequest,
+            ) -> mikmik_core::permissions::PermissionDecision {
+                mikmik_core::permissions::PermissionDecision::Allow
+            }
+        }
+
+        ToolContext {
+            working_dir: PathBuf::from("/workspace"),
+            permission_mode: mikmik_core::config::PermissionMode::Default,
+            permission_handler: Arc::new(AllowAll),
+            cost_tracker: mikmik_core::cost::CostTracker::new(),
+            session_id: "parent-session".to_string(),
+            file_history: Arc::new(parking_lot::Mutex::new(
+                mikmik_core::file_history::FileHistory::new(),
+            )),
+            current_turn: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            non_interactive: false,
+            mcp_manager: None,
+            config: mikmik_core::config::Config::default(),
+            managed_agent_config: None,
+            completion_notifier: None,
+            pending_permissions: None,
+            permission_manager: None,
+            user_question_tx: None,
+            plan_approval_tx: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            current_call: None,
+            editor: None,
+        }
+    }
+
+    /// A sub-agent must not be able to open the plan dialog: the session it
+    /// would interrupt is the parent's, and the answer would move the parent's
+    /// permission mode on a plan the user never asked for.
+    #[test]
+    fn a_sub_agent_cannot_reach_the_plan_dialog() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut parent = parent_context();
+        parent.plan_approval_tx = Some(tx);
+
+        let child = subagent_context(&parent);
+
+        assert!(child.plan_approval_tx.is_none());
+        // Everything else still comes along, including the session id, which is
+        // what the plan file's own numbering has to survive.
+        assert_eq!(child.session_id, parent.session_id);
+        assert!(parent.plan_approval_tx.is_some(), "the parent kept its own");
     }
 
     fn config_on(account: &str) -> mikmik_core::Config {
