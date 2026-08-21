@@ -200,9 +200,10 @@ pub fn render_plan_approval_dialog(state: &PlanApprovalDialogState, area: Rect, 
     let inner_w = width.saturating_sub(4) as usize;
     let plan_lines = word_wrap(&state.plan, inner_w);
 
-    // Everything that is not the plan: padding, the three answers with their
-    // spacer, the note row, and the hint row.
-    const FIXED_ROWS: u16 = 9;
+    // Everything that is not the plan: two border rows, one row of top
+    // padding, the three answers between two spacers, the note row and the
+    // hint row. One short and the hint falls off the bottom.
+    const FIXED_ROWS: u16 = 10;
     let available = area.height.saturating_sub(2);
     let height = (FIXED_ROWS + plan_lines.len() as u16).min(available).max(
         // A dialog too short to show its own answers cannot be used.
@@ -439,6 +440,31 @@ mod tests {
         assert!(screen.contains("Approve, ask before each edit"), "{screen}");
         assert!(screen.contains("Keep planning"), "{screen}");
         assert!(screen.contains("type to add a note"), "{screen}");
+        // The keys are only discoverable from this row, and it is the first
+        // thing a dialog sized one row short drops.
+        assert!(screen.contains("Enter: confirm"), "{screen}");
+    }
+
+    /// The dialog grows with the plan and keeps every fixed row visible.
+    #[test]
+    fn the_hint_row_survives_a_taller_plan() {
+        for lines in 1..=6 {
+            let plan = (1..=lines)
+                .map(|n| format!("step {n}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let (state, _rx) = open_dialog(&plan);
+            let screen = draw(&state, 100, 30).join("\n");
+
+            assert!(
+                screen.contains(&format!("step {lines}")),
+                "the last plan line is missing at {lines} lines:\n{screen}"
+            );
+            assert!(
+                screen.contains("Enter: confirm"),
+                "the hint row is missing at {lines} lines:\n{screen}"
+            );
+        }
     }
 
     #[test]
