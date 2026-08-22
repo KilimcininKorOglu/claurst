@@ -826,12 +826,17 @@ takes no arguments.
 ---
 
 ### /context
+**Aliases:** `/ctx`, `/ctx-viz`, `/context-visualizer`
 
-Analyze context window usage. Shows a breakdown of tokens consumed by system prompt, conversation history, file contents, and tool results. Helps identify what to compact or drop.
+Report context window usage. Prints two figures: the token count the API returned for the last request, measured against the active model's own window, and an estimate of the current messages split into conversation, tool results and attachments. Ends with a compaction recommendation once the window passes 75% full.
 
 ```
 /context
 ```
+
+The system prompt and the tool definitions are not broken out; nothing records their size. The measured figure includes them.
+
+See [Advanced Features](advanced.md#context-window-management) for what each figure covers and why they describe different moments.
 
 ---
 

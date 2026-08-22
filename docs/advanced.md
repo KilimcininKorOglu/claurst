@@ -84,20 +84,34 @@ Runs compaction immediately. Optionally pass custom instructions to guide the su
 /context
 ```
 
-Displays the current token usage relative to the model's context window. Two fractions of the window drive the colour, and both are defined once in the `constants` module of `mikmik-core`:
+Aliases: `/ctx`, `/ctx-viz`, `/context-visualizer`.
+
+Reports two figures, because they describe different moments and neither one alone is the whole answer.
+
+**Measured at the last request.** The token count the API itself returned for the last turn (`usage.total_input()`, which adds the plain input, the cache writes and the cache reads). This covers everything the request carried: the system prompt, the tool definitions and the messages. It is exact, and it is as of that request, so messages added since are not in it.
+
+The denominator is the active model's own context window, resolved through `ModelRegistry::context_window_for` from the route. It is not a constant: Opus 5 carries 1M tokens and a Haiku carries 200K.
+
+**Estimated now.** A per-category breakdown of the current message list:
+
+| Category     | What lands here                                                        |
+|--------------|------------------------------------------------------------------------|
+| Conversation | User and assistant turns, including each tool call and its arguments   |
+| Tool results | Every message carrying a `ToolResult` block                            |
+| Attachments  | An `@file` injection, a paste placeholder, or IDE-supplied context     |
+
+The estimate counts roughly four characters per token and pads the result by a third. It counts the same way compaction does, so `/context` and the auto-compact threshold cannot disagree about how large a conversation is.
+
+The system prompt and the tool definitions are absent from this section on purpose. Nothing records their size, and re-assembling the system prompt outside `build_system_prompt` would drift from what a run actually sends. The measured figure above already covers them.
+
+Once the window passes 75% full, the command ends with a compaction recommendation: collapse repeated reads when tool results dominate, a partial summary in between, and a full `/compact` past 90%.
+
+Two fractions of the window drive the footer bar's colour, and both are defined once in the `constants` module of `mikmik-core`:
 
 - **Warning:** at or above 80% of the window, the bar turns yellow.
 - **Critical:** at or above 95%, it turns red.
 
-The footer bar, the compact warning and `/ctx-viz` all read the same two constants, so they agree at every point.
-
-### ctx-viz
-
-```
-/ctx-viz
-```
-
-Opens an interactive visualisation of which parts of the context are consuming the most tokens. Useful for identifying large files or long tool outputs that could be trimmed.
+The footer bar and the compact warning read the same two constants, so they agree at every point.
 
 ---
 
