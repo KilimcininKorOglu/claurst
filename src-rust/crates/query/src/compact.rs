@@ -57,9 +57,11 @@ const KEEP_RECENT_TOKENS: u64 = 16_000;
 /// Max consecutive auto-compact failures before giving up (circuit breaker).
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
-// Percentage thresholds for token warning states (mirrors TS autoCompact.ts)
-const WARNING_PCT: f64 = 0.80; // 80 % full → yellow warning
-const CRITICAL_PCT: f64 = 0.95; // 95 % full → red critical
+// Percentage thresholds for token warning states. Shared with the TUI through
+// `core`, so the footer and the `/context` overlay report the same window.
+use mikmik_core::constants::{
+    CONTEXT_CRITICAL_FRACTION as CRITICAL_PCT, CONTEXT_WARNING_FRACTION as WARNING_PCT,
+};
 
 // ---------------------------------------------------------------------------
 // Public types

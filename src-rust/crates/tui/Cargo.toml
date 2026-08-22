@@ -4,11 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [features]
+# Extra footer gauge fed by MIKMIK_TOKEN_BUDGET. Nothing in `core` is gated by
+# it, so it forwards nowhere.
+token_budget = []
 # Enable real microphone capture for voice PTT mode.
 voice = ["mikmik-core/voice", "dep:cpal", "dep:hound"]
 
 # UI & Interaction features (pass-through from cc-core)
-token_budget = ["mikmik-core/token_budget"]
 ultraplan = ["mikmik-core/ultraplan"]
 ultrathink = ["mikmik-core/ultrathink"]
 history_picker = ["mikmik-core/history_picker"]

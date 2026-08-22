@@ -43,7 +43,6 @@ pub mod project_trust;
 pub mod spinner;
 pub mod status_notices;
 pub mod timeline;
-pub mod token_budget;
 pub mod truncate;
 pub mod workspace;
 pub use spinner::{
@@ -4772,6 +4771,17 @@ pub mod constants {
     pub const DEFAULT_MAX_TOKENS: u32 = 32_000;
     pub const MAX_TOKENS_HARD_LIMIT: u32 = 65_536;
     pub const DEFAULT_COMPACT_THRESHOLD: u8 = 90;
+
+    /// The fill fraction at which a full context window starts being reported.
+    ///
+    /// Every surface that colours or announces the context window reads these
+    /// two, so the footer, the `/context` overlay and the warning the model is
+    /// sent cannot disagree about how full the window is. Compare with `>=`:
+    /// one surface using `>` put the exact boundary in a different state from
+    /// the others.
+    pub const CONTEXT_WARNING_FRACTION: f64 = 0.80;
+    /// The fill fraction at which the report turns critical.
+    pub const CONTEXT_CRITICAL_FRACTION: f64 = 0.95;
     pub const MAX_TURNS_DEFAULT: u32 = 10;
     /// The turn limit that means "no limit".
     ///

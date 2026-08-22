@@ -52,7 +52,7 @@ use crate::theme_screen::render_theme_screen;
 use crate::transcript_turn::{build_transcript_turns, TranscriptTurn};
 use crate::virtual_list::{VirtualItem, VirtualList};
 use crate::voice_mode_notice::render_voice_mode_notice;
-use mikmik_core::constants::APP_VERSION;
+use mikmik_core::constants::{APP_VERSION, CONTEXT_CRITICAL_FRACTION, CONTEXT_WARNING_FRACTION};
 use mikmik_core::timeline::{TimelineRow, TimelineStatus};
 use mikmik_core::types::Role;
 use ratatui::buffer::Buffer;
@@ -4262,6 +4262,23 @@ fn render_legacy_history_search(
 // Complete status line (T2-8)
 // -----------------------------------------------------------------------
 
+/// How full a context window looks, as one colour.
+///
+/// Every surface that colours the window goes through here: the footer, the
+/// compact warning beside it, and the `/context` overlay. They each carried
+/// their own copy of the two thresholds, and the overlay compared with `>`
+/// while the others used `>=`, so a window at exactly 95 % was red in the
+/// footer and yellow in the overlay.
+pub(crate) fn context_fill_color(fraction: f64) -> Color {
+    if fraction >= CONTEXT_CRITICAL_FRACTION {
+        Color::Red
+    } else if fraction >= CONTEXT_WARNING_FRACTION {
+        Color::Yellow
+    } else {
+        Color::Green
+    }
+}
+
 /// Complete status line data for rendering.
 #[derive(Debug, Clone, Default)]
 pub struct StatusLineData {
@@ -4306,13 +4323,7 @@ pub fn render_full_status_line(
     // Context window
     if data.tokens_total > 0 {
         let pct = data.tokens_used as f64 / data.tokens_total as f64;
-        let ctx_color = if pct >= 0.95 {
-            Color::Red
-        } else if pct >= 0.80 {
-            Color::Yellow
-        } else {
-            Color::Green
-        };
+        let ctx_color = context_fill_color(pct);
         let used_k = data.tokens_used / 1000;
         let total_k = data.tokens_total / 1000;
         spans.push(Span::styled(
@@ -4333,12 +4344,8 @@ pub fn render_full_status_line(
 
     // Compact warning
     if let Some(pct) = data.compact_warning_pct {
-        if pct >= 0.80 {
-            let color = if pct >= 0.95 {
-                Color::Red
-            } else {
-                Color::Yellow
-            };
+        if pct >= CONTEXT_WARNING_FRACTION {
+            let color = context_fill_color(pct);
             spans.push(Span::styled(
                 format!("⚠ ctx {:.0}% ", pct * 100.0),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -4578,6 +4585,52 @@ mod tool_block_tests {
             input_json: input.into(),
             live_output: String::new(),
         }
+    }
+
+    /// The three bands, and both boundaries, from the one rule every surface
+    /// now reads.
+    #[test]
+    fn the_context_colour_changes_at_the_shared_thresholds() {
+        assert_eq!(context_fill_color(0.0), Color::Green);
+        assert_eq!(context_fill_color(0.79), Color::Green);
+        // The boundary itself, which is where the overlay used to disagree with
+        // the footer.
+        assert_eq!(context_fill_color(CONTEXT_WARNING_FRACTION), Color::Yellow);
+        assert_eq!(context_fill_color(0.94), Color::Yellow);
+        assert_eq!(context_fill_color(CONTEXT_CRITICAL_FRACTION), Color::Red);
+        assert_eq!(context_fill_color(1.0), Color::Red);
+    }
+
+    /// The auto-compact machinery reports the same window, so the colour and
+    /// the warning the model is sent cannot describe different states.
+    #[test]
+    fn the_warning_state_turns_at_the_same_points_as_the_colour() {
+        use mikmik_query::compact::{calculate_token_warning_state_for_window, TokenWarningState};
+
+        // Large enough that `WARNING_THRESHOLD_BUFFER_TOKENS` cannot reach the
+        // boundary being measured and answer for it.
+        let window = 1_000_000u64;
+        let at = |fraction: f64| (window as f64 * fraction) as u64;
+        let state = |tokens: u64| calculate_token_warning_state_for_window(tokens, window);
+
+        // Both sides of each boundary. Checking the boundary alone only catches
+        // a threshold that drifted upwards.
+        assert_eq!(
+            state(at(CONTEXT_WARNING_FRACTION) - 1),
+            TokenWarningState::Ok
+        );
+        assert_eq!(
+            state(at(CONTEXT_WARNING_FRACTION)),
+            TokenWarningState::Warning
+        );
+        assert_eq!(
+            state(at(CONTEXT_CRITICAL_FRACTION) - 1),
+            TokenWarningState::Warning
+        );
+        assert_eq!(
+            state(at(CONTEXT_CRITICAL_FRACTION)),
+            TokenWarningState::Critical
+        );
     }
 
     fn palette() -> crate::theme_colors::ColorPalette {

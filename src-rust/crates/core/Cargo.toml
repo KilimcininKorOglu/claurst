@@ -16,7 +16,6 @@ default = ["ultraplan"]
 ultraplan = []
 ultrathink = []
 history_picker = []
-token_budget = []
 message_actions = []
 quick_search = []
 away_summary = []
@@ -57,7 +56,7 @@ ccr_remote_setup = []
 dev_full = [
     "voice",
     "ultraplan", "ultrathink", "history_picker",
-    "token_budget", "message_actions", "quick_search", "away_summary",
+    "message_actions", "quick_search", "away_summary",
     "hook_prompts", "kairos_brief", "kairos_channels", "lodestone",
     "agent_triggers", "agent_triggers_remote",
     "extract_memories", "verification_agent", "builtin_explore_plan_agents",

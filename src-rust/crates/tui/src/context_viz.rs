@@ -78,13 +78,7 @@ pub fn render_context_viz(
     } else {
         0.0
     };
-    let ctx_color = if ctx_pct > 0.95 {
-        Color::Red
-    } else if ctx_pct > 0.80 {
-        Color::Yellow
-    } else {
-        Color::Green
-    };
+    let ctx_color = crate::render::context_fill_color(ctx_pct as f64);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
