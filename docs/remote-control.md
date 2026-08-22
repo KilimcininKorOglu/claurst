@@ -212,6 +212,7 @@ The **client surface** is ours, and a native app should use it:
 | `POST` | `/api/client/sessions/{id}/mcp-approval`       | `{"request_id", "decision"}`                |
 | `POST` | `/api/client/sessions/{id}/bypass`             | `{"request_id", "accept"}`                  |
 | `POST` | `/api/client/sessions/{id}/answer`             | `{"question_id", "answer"}`                 |
+| `POST` | `/api/client/sessions/{id}/rename`             | Rename the session                          |
 | `POST` | `/api/client/sessions/{id}/cancel`             | Body optional                               |
 
 Authentication accepts a bearer token or the cookie. A native client should use the bearer token; the cookie exists because a browser `EventSource` cannot set request headers.

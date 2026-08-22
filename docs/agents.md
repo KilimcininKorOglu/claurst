@@ -1,6 +1,6 @@
 # Agents and Multi-Agent Features
 
-MikMik has a named-agent system that lets you select a pre-configured persona with its own tool permissions, model, system prompt, and turn budget. For larger tasks it also supports a coordinator mode where a top-level agent orchestrates a pool of parallel worker agents.
+MikMik has a named-agent system that lets you select a pre-configured persona with its own tool permissions, model, system prompt, and turn budget. For larger tasks the model spawns sub-agents that work in parallel, and managed agents put a manager and its executors on separate models and budgets.
 
 ---
 
@@ -34,7 +34,7 @@ Read-only analysis. Cannot write files or execute commands. Intended for underst
 
 Default system prompt prefix:
 
-> You are the plan agent. You can read files and analyze code but cannot write files or execute commands. Focus on understanding the codebase and describing what changes should be made.
+> You are the plan agent. You can read and search but cannot write files or run commands. Read the code before you describe a change to it, and never plan from a guess. Use AskUserQuestion whenever the request leaves a choice open, and ask before you write the plan. State every assumption you could not resolve. When the plan is ready, call ExitPlanMode with the whole plan as the summary, and wait for the user's answer before starting any work.
 
 ### explore
 
@@ -72,13 +72,17 @@ mikmik --agent plan --provider openai --model o3 "review this architecture"
 
 ## The /agents Command
 
-Within an interactive session, `/agents` lists all available named agents (built-in and custom):
+`/agents` opens the agents view. It also takes subcommands:
 
 ```
-/agents
+/agents list
+/agents create <name>
+/agents edit <name>
+/agents delete <name>
 ```
 
-Output shows the agent name, description, access level, and max turn limit. Agents with `visible: false` in their definition are hidden from this list.
+Definitions live in `.mikmik/agents/` and in `settings.json`. Agents with
+`visible: false` are left out of the listing.
 
 ---
 
@@ -144,111 +148,33 @@ mikmik --agent test-writer "write tests for the payment processor"
 
 ---
 
-## Coordinator Mode
+## Running work in parallel
 
-Coordinator mode enables a single top-level agent to orchestrate multiple parallel worker agents. The coordinator delegates research, implementation, and verification tasks to workers, then synthesises their results.
+Sub-agents are spawned by the model, with the `Agent` tool, not by a mode you
+switch on. Each one gets a fresh context, its own turn limit, and reports back a
+single result. `isolation: "worktree"` gives an agent its own git worktree, which
+is what stops two agents writing over each other.
 
-### Enabling Coordinator Mode
+| Tool          | Purpose                                          |
+|---------------|--------------------------------------------------|
+| `Agent`       | Run a sub-agent on a task of its own             |
+| `SendMessage` | Send a message to a running agent                |
+| `TeamCreate`  | Create a named team of agents on a shared task   |
+| `TeamDelete`  | Dismantle a team                                 |
+| `TaskCreate`  | Create a tracked background task                 |
+| `TaskGet`     | Read one task's details                          |
+| `TaskUpdate`  | Change a task's status or metadata               |
+| `TaskList`    | List the active tasks                            |
+| `TaskStop`    | Cancel a running task                            |
+| `TaskOutput`  | Read what a task produced                        |
 
-Set the `MIKMIK_COORDINATOR_MODE` environment variable to `1` before launching:
+An agent never receives the `Agent` tool, so it cannot spawn further agents.
 
-```bash
-MIKMIK_COORDINATOR_MODE=1 mikmik "refactor the entire authentication subsystem"
-```
+`/tasks` asks the model to list the tasks and their status.
 
-Or within a shell session:
-
-```bash
-export MIKMIK_COORDINATOR_MODE=1
-mikmik
-```
-
-The value `"0"` and `"false"` disable coordinator mode even if the variable is set. Any other non-empty value enables it.
-
-### How the Coordinator Works
-
-When coordinator mode is active, MikMik injects a coordinator system prompt that instructs the model to orchestrate rather than act directly. The recommended workflow is:
-
-1. **Research Phase** — Spawn workers in parallel to gather information about the codebase or requirements.
-2. **Synthesis Phase** — Collect worker findings and build a complete understanding before proceeding.
-3. **Implementation Phase** — Delegate implementation tasks to workers, each responsible for a well-defined scope.
-4. **Verification Phase** — Spawn verification workers to validate results, run tests, and confirm correctness.
-
-Worker prompts must be fully self-contained: workers cannot see the coordinator's conversation history.
-
-### Coordinator-Only Tools
-
-The following tools are available to the coordinator but are not passed to worker agents:
-
-| Tool              | Purpose                                       |
-|-------------------|-----------------------------------------------|
-| `Agent`           | Spawn a new worker agent with a given prompt  |
-| `SendMessage`     | Continue communication with a running worker  |
-| `TaskStop`        | Cancel a worker that is no longer needed      |
-| `TeamCreate`      | Create a named team of workers                |
-| `TeamDelete`      | Dismantle a team                              |
-| `SyntheticOutput` | Inject synthetic output into the conversation |
-
-### Worker Tool Set
-
-Workers receive all standard tools (file operations, Bash, web search, MCP tools, skills) but do not receive the coordinator-only tools listed above. This prevents workers from spawning their own sub-coordinators or interfering with task management.
-
-In simple mode (`MIKMIK_SIMPLE=1`), workers are further restricted to `["Bash", "Read", "Edit"]`.
-
-### Banned Tools in Coordinator Mode
-
-The coordinator itself does not use `Bash` directly — shell execution is delegated to workers. This enforces the principle that the coordinator orchestrates rather than executes.
-
----
-
-## Task Management Tools
-
-These tools are available in coordinator mode for tracking parallel work:
-
-| Tool         | Description                              |
-|--------------|------------------------------------------|
-| `TaskCreate` | Create a new tracked task                |
-| `TaskGet`    | Retrieve task details by ID              |
-| `TaskUpdate` | Update task status or metadata           |
-| `TaskList`   | List all active tasks                    |
-| `TaskStop`   | Cancel a running task (coordinator only) |
-| `TaskOutput` | Read output produced by a task           |
-
-### /tasks Command
-
-Within an interactive session, `/tasks` shows the current task list with status, worker assignments, and results:
-
-```
-/tasks
-```
-
----
-
-## Parallel Agent Execution
-
-The coordinator spawns workers via the `Agent` tool. Workers run asynchronously; the coordinator can spawn multiple workers simultaneously and wait for all of them before proceeding to synthesis.
-
-**Example coordinator workflow (expressed as a prompt):**
-
-```
-I need to refactor the authentication module. Let me plan this in parallel:
-
-1. Use Agent to spawn a worker that reads and summarises all files in src/auth/
-2. Use Agent to spawn a worker that identifies all callers of the auth API across the codebase
-3. Wait for both workers to finish
-4. Synthesise findings
-5. Use Agent to spawn implementation workers for each logical unit of work
-6. Run verification workers on the result
-```
-
-**Example coordinator session prompt:**
-
-```bash
-MIKMIK_COORDINATOR_MODE=1 mikmik \
-  "Audit the entire src/payments directory for security issues. \
-   Use parallel workers to examine each file, then produce a \
-   consolidated security report with severity rankings."
-```
+For a manager and executors on different models, with their own turn budgets,
+concurrency limits and budget splits, see
+[Managed agents](#managed-agents-preview) below.
 
 ---
 
@@ -312,25 +238,11 @@ MIKMIK_COORDINATOR_MODE=1 mikmik \
 
 ---
 
-## Session Continuity and Mode Matching
-
-When resuming a saved session, MikMik detects whether the original session used coordinator mode and automatically sets `MIKMIK_COORDINATOR_MODE` to match. A warning is printed when the environment is changed to prevent mode confusion in long-running workflows.
-
----
-
 ## Managed Agents (Preview)
 
-Managed agents provide a formal **manager-executor** architecture that is distinct from coordinator mode. In coordinator mode, the orchestrator and workers all share the same configuration. With managed agents, you explicitly configure separate models, turn budgets, concurrency limits, and budget splits for the manager and for executors.
+Managed agents provide a formal **manager-executor** architecture. The manager reasons about the plan and delegates; the executors carry out individual tasks. You configure separate models, turn budgets, concurrency limits and budget splits for each role.
 
-### When to use managed agents vs coordinator mode
-
-|                     | Coordinator mode              | Managed agents                                 |
-|---------------------|-------------------------------|------------------------------------------------|
-| **Setup**           | `MIKMIK_COORDINATOR_MODE=1`  | `/managed-agents enable`                       |
-| **Model selection** | All agents use the same model | Manager and executors can use different models |
-| **Budget control**  | Global session limits         | Per-role USD caps or percentage splits         |
-| **Presets**         | None                          | Several built-in presets available             |
-| **Use case**        | Homogeneous parallel workers  | Heterogeneous manager/worker separation        |
+The manager does not execute tools itself. Executors run concurrently up to the `concurrent` limit, and `isolation` gives each one its own worktree.
 
 ### Enabling and configuring
 
