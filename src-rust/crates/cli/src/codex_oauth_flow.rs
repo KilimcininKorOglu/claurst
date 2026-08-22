@@ -13,41 +13,17 @@ use mikmik_core::codex_oauth::{
 };
 use mikmik_core::oauth_config::CodexTokens;
 use mikmik_tui::DeviceAuthEvent;
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-/// Generate a PKCE code verifier (random 64-byte base64url string).
-pub fn generate_code_verifier() -> String {
-    let mut bytes = [0u8; 48];
-    // Use UUID v4 for randomness (reuse the approach from oauth_config.rs)
-    let u1 = uuid::Uuid::new_v4();
-    let u2 = uuid::Uuid::new_v4();
-    bytes[..16].copy_from_slice(u1.as_bytes());
-    bytes[16..32].copy_from_slice(u2.as_bytes());
-    // For remaining bytes, use UUID truncation
-    let u3 = uuid::Uuid::new_v4();
-    bytes[32..48].copy_from_slice(&u3.as_bytes()[..16]);
-
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-/// Compute PKCE code challenge (SHA-256 of verifier, base64url encoded).
-pub fn compute_code_challenge(verifier: &str) -> String {
-    let hash = Sha256::digest(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(hash)
-}
-
-/// Generate a random OAuth state parameter.
-pub fn generate_state() -> String {
-    let bytes = uuid::Uuid::new_v4();
-    URL_SAFE_NO_PAD
-        .encode(bytes.as_bytes())
-        .chars()
-        .take(32)
-        .collect()
-}
+// PKCE values come from `mikmik_core::oauth`, which draws them from the OS
+// RNG. This flow used to build its own out of UUID v4 values, which spend a
+// fixed version and variant nibble each and are not offered as a source of
+// unpredictable bytes.
+use mikmik_core::oauth::{
+    generate_code_challenge as compute_code_challenge, generate_code_verifier, generate_state,
+};
 
 /// Build the OpenAI authorization URL for Codex OAuth.
 pub fn build_auth_url(code_challenge: &str, state: &str) -> String {
@@ -80,9 +56,9 @@ pub async fn run_oauth_flow_with_label(
     event_tx: mpsc::Sender<DeviceAuthEvent>,
     label: Option<&str>,
 ) -> anyhow::Result<CodexTokens> {
-    let verifier = generate_code_verifier();
+    let verifier = generate_code_verifier()?;
     let challenge = compute_code_challenge(&verifier);
-    let state = generate_state();
+    let state = generate_state()?;
 
     // Bind local server for callback
     let listener = TcpListener::bind(format!("127.0.0.1:{}", CODEX_OAUTH_PORT))
@@ -258,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_generate_code_verifier_format() {
-        let verifier = generate_code_verifier();
+        let verifier = generate_code_verifier().expect("the OS RNG answers");
         // Base64url encoding: [A-Za-z0-9_-]
         assert!(verifier
             .chars()
@@ -280,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_generate_state_format() {
-        let state = generate_state();
+        let state = generate_state().expect("the OS RNG answers");
         assert!(!state.is_empty());
         assert!(state
             .chars()

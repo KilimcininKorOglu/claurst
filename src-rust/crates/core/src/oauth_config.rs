@@ -255,53 +255,6 @@ pub fn get_oauth_config() -> &'static OAuthConfig {
 // PKCE helpers (mirrors src/services/oauth/crypto.ts)
 // ---------------------------------------------------------------------------
 
-/// PKCE code-challenge / code-verifier helpers.
-pub mod pkce {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    use sha2::{Digest, Sha256};
-
-    /// Generate a cryptographically random code verifier (43–128 chars of
-    /// Base64url characters, as required by RFC 7636).
-    ///
-    /// Uses `getrandom` via the `rand` crate's OS RNG through the `uuid`
-    /// crate's v4 generator — both already in-tree.  Falls back to a
-    /// time+pid mix if the OS RNG is unavailable.
-    pub fn generate_code_verifier() -> String {
-        // 32 random bytes → 43-char Base64url string (same as the TS impl).
-        let bytes = random_bytes_32();
-        URL_SAFE_NO_PAD.encode(bytes)
-    }
-
-    /// Compute `BASE64URL(SHA256(verifier))` — the S256 code challenge.
-    pub fn code_challenge(verifier: &str) -> String {
-        let hash = Sha256::digest(verifier.as_bytes());
-        URL_SAFE_NO_PAD.encode(hash)
-    }
-
-    /// Generate a random state parameter (16 Base64url chars).
-    pub fn generate_state() -> String {
-        let bytes = random_bytes_32();
-        let encoded = URL_SAFE_NO_PAD.encode(bytes);
-        // Take first 43 chars for a compact state parameter
-        encoded.chars().take(43).collect()
-    }
-
-    // ------------------------------------------------------------------
-    // Internal: produce 32 random bytes.
-    // We derive them from a UUID v4 (which already pulls from the OS RNG
-    // via the `uuid` crate) so we don't need to add a new `rand` dep.
-    // ------------------------------------------------------------------
-    fn random_bytes_32() -> [u8; 32] {
-        // Two UUID v4 values give us 32 bytes of OS-backed randomness.
-        let u1 = uuid::Uuid::new_v4();
-        let u2 = uuid::Uuid::new_v4();
-        let mut out = [0u8; 32];
-        out[..16].copy_from_slice(u1.as_bytes());
-        out[16..].copy_from_slice(u2.as_bytes());
-        out
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Token and profile types
 // ---------------------------------------------------------------------------
@@ -566,38 +519,6 @@ mod tests {
     fn test_staging_config_urls_are_https() {
         assert!(STAGING_OAUTH.token_url.starts_with("https://"));
         assert!(STAGING_OAUTH.api_key_url.starts_with("https://"));
-    }
-
-    #[test]
-    fn test_pkce_code_challenge_is_base64url() {
-        let verifier = pkce::generate_code_verifier();
-        assert!(!verifier.is_empty());
-        // Base64url characters only (no +, /, =)
-        assert!(!verifier.contains('+'));
-        assert!(!verifier.contains('/'));
-        assert!(!verifier.contains('='));
-
-        let challenge = pkce::code_challenge(&verifier);
-        assert!(!challenge.is_empty());
-        assert!(!challenge.contains('+'));
-        assert!(!challenge.contains('/'));
-        assert!(!challenge.contains('='));
-    }
-
-    #[test]
-    fn test_verifier_length_meets_rfc7636_minimum() {
-        let verifier = pkce::generate_code_verifier();
-        // RFC 7636 §4.1: code_verifier length ∈ [43, 128]
-        assert!(
-            verifier.len() >= 43,
-            "verifier too short: {} chars",
-            verifier.len()
-        );
-        assert!(
-            verifier.len() <= 128,
-            "verifier too long: {} chars",
-            verifier.len()
-        );
     }
 
     #[test]

@@ -85,9 +85,9 @@ pub async fn run_oauth_login_flow_with_label(
     label: Option<&str>,
 ) -> anyhow::Result<LoginResult> {
     // 1. PKCE
-    let code_verifier = oauth::generate_code_verifier();
+    let code_verifier = oauth::generate_code_verifier()?;
     let code_challenge = oauth::generate_code_challenge(&code_verifier);
-    let state = oauth::generate_state();
+    let state = oauth::generate_state()?;
 
     // 2. Bind random localhost port for the callback server
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -141,9 +141,9 @@ pub async fn run_oauth_login_flow_tui(
     label: Option<&str>,
 ) -> anyhow::Result<LoginResult> {
     // 1. PKCE
-    let code_verifier = oauth::generate_code_verifier();
+    let code_verifier = oauth::generate_code_verifier()?;
     let code_challenge = oauth::generate_code_challenge(&code_verifier);
-    let state = oauth::generate_state();
+    let state = oauth::generate_state()?;
 
     // 2. Bind random localhost port for the callback server
     let listener = TcpListener::bind("127.0.0.1:0")

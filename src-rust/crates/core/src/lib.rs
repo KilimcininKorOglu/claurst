@@ -7196,15 +7196,35 @@ pub mod oauth {
 
     // ---- PKCE helpers ----
 
-    /// Generate a 32-byte random code verifier, base64url-encoded (no padding).
-    pub fn generate_code_verifier() -> String {
-        use base64::Engine;
+    /// 32 bytes straight from the operating system's RNG.
+    ///
+    /// These bytes stand between an intercepted authorization code and the
+    /// account it belongs to, so they come from the one source that promises
+    /// to be unpredictable. Deriving them from UUID v4 values, as this used
+    /// to, spends two 128-bit values to buy 244 bits: the version and variant
+    /// bits of a v4 UUID are fixed, so six of every 256 are constants an
+    /// attacker already knows.
+    ///
+    /// # Errors
+    /// Returns an error when the OS RNG is unavailable. There is no fallback
+    /// on purpose: a predictable verifier reads as a working login while
+    /// giving away the protection PKCE exists to provide.
+    fn random_bytes_32() -> crate::Result<[u8; 32]> {
         let mut bytes = [0u8; 32];
-        let u1 = uuid::Uuid::new_v4();
-        let u2 = uuid::Uuid::new_v4();
-        bytes[..16].copy_from_slice(u1.as_bytes());
-        bytes[16..].copy_from_slice(u2.as_bytes());
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        getrandom::getrandom(&mut bytes).map_err(|error| {
+            crate::ClaudeError::Other(format!(
+                "the system random number generator failed: {error}"
+            ))
+        })?;
+        Ok(bytes)
+    }
+
+    /// Generate a 32-byte random code verifier, base64url-encoded (no padding).
+    ///
+    /// 43 characters, which is the minimum RFC 7636 §4.1 allows.
+    pub fn generate_code_verifier() -> crate::Result<String> {
+        use base64::Engine;
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes_32()?))
     }
 
     /// Derive the PKCE code challenge from a verifier: BASE64URL(SHA256(verifier)).
@@ -7216,14 +7236,9 @@ pub mod oauth {
     }
 
     /// Generate a random OAuth state parameter for CSRF protection.
-    pub fn generate_state() -> String {
+    pub fn generate_state() -> crate::Result<String> {
         use base64::Engine;
-        let mut bytes = [0u8; 32];
-        let u1 = uuid::Uuid::new_v4();
-        let u2 = uuid::Uuid::new_v4();
-        bytes[..16].copy_from_slice(u1.as_bytes());
-        bytes[16..].copy_from_slice(u2.as_bytes());
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes_32()?))
     }
 
     // ---- URL builder ----
@@ -8065,7 +8080,7 @@ mod tests {
 
     #[test]
     fn test_pkce_code_verifier_length() {
-        let verifier = crate::oauth::generate_code_verifier();
+        let verifier = crate::oauth::generate_code_verifier().expect("the OS RNG answers");
         // 32 bytes base64url-encoded (no padding) = ceil(32 * 4/3) = 43 chars
         assert_eq!(
             verifier.len(),
@@ -8080,7 +8095,7 @@ mod tests {
 
     #[test]
     fn test_pkce_code_challenge_format() {
-        let verifier = crate::oauth::generate_code_verifier();
+        let verifier = crate::oauth::generate_code_verifier().expect("the OS RNG answers");
         let challenge = crate::oauth::generate_code_challenge(&verifier);
         // SHA256 = 32 bytes → 43 base64url chars
         assert_eq!(
@@ -8104,18 +8119,51 @@ mod tests {
 
     #[test]
     fn test_pkce_verifier_unique() {
-        let v1 = crate::oauth::generate_code_verifier();
-        let v2 = crate::oauth::generate_code_verifier();
+        let v1 = crate::oauth::generate_code_verifier().expect("the OS RNG answers");
+        let v2 = crate::oauth::generate_code_verifier().expect("the OS RNG answers");
         assert_ne!(v1, v2, "Code verifiers should be unique");
     }
 
     #[test]
     fn test_pkce_state_length_and_format() {
-        let state = crate::oauth::generate_state();
+        let state = crate::oauth::generate_state().expect("the OS RNG answers");
         assert_eq!(state.len(), 43);
         assert!(state
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    /// The bit that decides whether an intercepted authorization code is
+    /// worth anything.
+    ///
+    /// A verifier built from UUID v4 values carries a fixed version nibble at
+    /// byte 6 and fixed variant bits at byte 8 of every UUID it splices in, so
+    /// the same half-byte appears at the same offset in every sample. Bytes
+    /// from the OS RNG have no such structure. Measured on the decoded bytes,
+    /// not the base64 text: the encoding straddles bit boundaries and smears a
+    /// fixed nibble across two characters, which hides it.
+    #[test]
+    fn a_verifier_carries_no_fixed_byte_position_across_samples() {
+        use base64::Engine;
+
+        let samples: Vec<Vec<u8>> = (0..64)
+            .map(|_| {
+                let text = crate::oauth::generate_code_verifier().expect("the OS RNG answers");
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(text)
+                    .expect("the verifier is the base64url this module wrote")
+            })
+            .collect();
+
+        for offset in 0..samples[0].len() {
+            let seen: std::collections::HashSet<u8> =
+                samples.iter().map(|sample| sample[offset] >> 4).collect();
+            assert!(
+                seen.len() > 1,
+                "byte {offset} holds the same high nibble in all 64 samples, \
+                 so the verifier carries structure instead of randomness"
+            );
+        }
     }
 
     // ---- Auth URL building tests --------------------------------------------

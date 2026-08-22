@@ -107,7 +107,10 @@ the Anthropic Console or Claude.ai in your browser.
 mikmik auth login
 ```
 
-1. MikMik generates a PKCE code verifier and code challenge.
+1. MikMik generates a PKCE code verifier and code challenge. The verifier and
+   the CSRF state are 32 bytes from the operating system's random number
+   generator. A machine whose OS RNG is unavailable fails the login rather
+   than falling back to something weaker.
 2. A temporary localhost HTTP server starts on a random port to receive the
    callback.
 3. The authorization URL is printed to the terminal and MikMik attempts to
