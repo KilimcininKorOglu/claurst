@@ -16,57 +16,34 @@ impl SlashCommand for ContextCommand {
     fn name(&self) -> &str {
         "context"
     }
+    fn aliases(&self) -> Vec<&str> {
+        // `/ctx-viz` was a second command that estimated the same thing and got
+        // every part of it wrong. Its names still reach this one.
+        vec!["ctx", "ctx-viz", "context-visualizer"]
+    }
     fn description(&self) -> &str {
-        "Show context window usage (tokens used / available)"
+        "Show context window usage, broken down by category"
     }
     fn help(&self) -> &str {
         "Usage: /context\n\n\
-         Displays the current context window utilization:\n\
-         - Estimated tokens consumed by current conversation\n\
-         - Context window limit for the active model\n\
-         - Percentage used"
+         Reports two figures, because they describe different moments:\n\
+         - What the API counted for the last request, against this model's window.\n\
+           That figure covers the system prompt and the tool definitions too.\n\
+         - An estimate of the current messages, split into conversation,\n\
+           tool results and attachments.\n\n\
+         Recommends a compaction strategy once the window is filling up."
     }
 
     async fn execute(&self, _args: &str, ctx: &mut CommandContext) -> CommandResult {
-        let model = ctx.config.effective_model();
+        use mikmik_query::context_analyzer::{analyze_context, format_context_report};
 
-        // Every currently-supported Claude model family (3.5, opus, sonnet,
-        // haiku) shares a 200k-token context window, so this is constant for now.
-        let context_window: u64 = 200_000;
-
-        let used_tokens = ctx.cost_tracker.total_tokens();
-        let pct = if context_window > 0 {
-            (used_tokens as f64 / context_window as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        let bar_width = 40usize;
-        let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
-        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
-
-        // Estimate approximate message tokens from the message list
-        let msg_char_count: usize = ctx.messages.iter().map(|m| m.get_all_text().len()).sum();
-        // Rough estimate: ~4 chars per token for message text
-        let msg_token_estimate = msg_char_count / 4;
-
-        CommandResult::Message(format!(
-            "Context Window Usage\n\
-             ────────────────────\n\
-             Model:          {model}\n\
-             Context window: {window:>10} tokens\n\
-             API tokens used:{used:>10} tokens  ({pct:.1}%)\n\
-             Est. msg size:  {msg:>10} tokens  (approx)\n\
-             Messages:       {msgs:>10}\n\n\
-             [{bar}] {pct:.1}%\n\n\
-             Use /compact to reduce context usage.",
-            model = model,
-            window = context_window,
-            used = used_tokens,
-            pct = pct,
-            msg = msg_token_estimate,
-            msgs = ctx.messages.len(),
-            bar = bar,
+        let analysis = analyze_context(&ctx.messages);
+        CommandResult::Message(format_context_report(
+            &analysis,
+            ctx.config.effective_model(),
+            ctx.context_used_tokens,
+            ctx.context_window,
+            ctx.messages.len(),
         ))
     }
 }

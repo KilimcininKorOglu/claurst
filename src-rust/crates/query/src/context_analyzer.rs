@@ -1,270 +1,348 @@
-//! Context window analysis utilities.
-//! Mirrors src/utils/analyzeContext.ts (1,382 lines).
-//! Used by the /ctx-viz slash command.
+//! Context window analysis.
+//!
+//! Two numbers describe a session's context, and they come from different
+//! places. The API reports what it actually counted for the last request, which
+//! is exact but covers only the messages that existed then. This module
+//! estimates the current message list and splits it by category, which is
+//! approximate but current and decomposable.
+//!
+//! Neither the system prompt nor the tool definitions can be counted here.
+//! Nothing records their size, and re-assembling the system prompt outside
+//! `build_system_prompt` would drift from what a run sends. So this module
+//! reports the conversation, and the caller reports the measured total beside
+//! it rather than inventing a number for the difference.
 
-use mikmik_core::types::{ContentBlock, Message, MessageContent};
+use mikmik_core::types::{ContentBlock, Message, MessageContent, ToolResultContent};
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/// Token category for context window breakdown.
+/// A category of the conversation's token use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextCategory {
-    SystemPrompt,
-    ToolDefinitions,
     ConversationHistory,
     ToolResults,
     Attachments,
-    Unknown,
 }
 
 impl ContextCategory {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::SystemPrompt => "System prompt",
-            Self::ToolDefinitions => "Tool definitions",
-            Self::ConversationHistory => "Conversation history",
+            Self::ConversationHistory => "Conversation",
             Self::ToolResults => "Tool results",
             Self::Attachments => "Attachments",
-            Self::Unknown => "Other",
         }
     }
 }
 
-/// Token count breakdown by category.
+/// An estimated token breakdown of the current message list.
 #[derive(Debug, Clone, Default)]
 pub struct ContextAnalysis {
-    pub system_prompt_tokens: u64,
-    pub tool_definitions_tokens: u64,
     pub conversation_history_tokens: u64,
     pub tool_results_tokens: u64,
     pub attachments_tokens: u64,
+    /// The three categories added together.
     pub total_tokens: u64,
-    /// Overall compressibility estimate (0.0 = not compressible, 1.0 = highly compressible).
+    /// How much of the total a summariser could plausibly reclaim, 0.0 to 1.0.
     pub compressibility: f64,
 }
 
 impl ContextAnalysis {
-    /// Percentage of total tokens used by each category.
+    pub fn category_tokens(&self, cat: ContextCategory) -> u64 {
+        match cat {
+            ContextCategory::ConversationHistory => self.conversation_history_tokens,
+            ContextCategory::ToolResults => self.tool_results_tokens,
+            ContextCategory::Attachments => self.attachments_tokens,
+        }
+    }
+
+    /// Share of the estimated total this category holds, as a percentage.
     pub fn category_pct(&self, cat: ContextCategory) -> f64 {
         if self.total_tokens == 0 {
             return 0.0;
         }
-        let count = match cat {
-            ContextCategory::SystemPrompt => self.system_prompt_tokens,
-            ContextCategory::ToolDefinitions => self.tool_definitions_tokens,
-            ContextCategory::ConversationHistory => self.conversation_history_tokens,
-            ContextCategory::ToolResults => self.tool_results_tokens,
-            ContextCategory::Attachments => self.attachments_tokens,
-            ContextCategory::Unknown => 0,
-        };
-        (count as f64 / self.total_tokens as f64) * 100.0
+        (self.category_tokens(cat) as f64 / self.total_tokens as f64) * 100.0
     }
 }
 
-/// Compaction strategy recommendation.
-#[derive(Debug, Clone)]
+/// What to do about a context that is filling up.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CompactionStrategy {
-    /// Full history compaction — all messages summarised.
+    /// Summarise the whole history.
     FullCompact { expected_reduction_pct: f64 },
-    /// Partial compaction — only oldest N messages.
+    /// Summarise the oldest messages only.
     PartialCompact {
         messages_to_compact: usize,
         expected_reduction_pct: f64,
     },
-    /// Collapse repeated file reads.
+    /// Collapse repeated file reads before summarising anything.
     CollapseReads { expected_reduction_pct: f64 },
     /// Nothing needed.
     None,
 }
 
 // ---------------------------------------------------------------------------
-// Token estimation (mirrors cc-core::message_utils)
+// Token estimation
 // ---------------------------------------------------------------------------
 
-fn estimate_chars(s: &str) -> u64 {
-    (s.len() as f64 / 4.0).ceil() as u64
+/// Characters a block contributes to the request body.
+///
+/// The single counter in this crate. `compact` sums it to decide when to
+/// compact, and `analyze_context` sums it per category, so the two cannot
+/// disagree about how large a conversation is.
+pub fn block_chars(block: &ContentBlock) -> usize {
+    match block {
+        ContentBlock::Text { text } => text.len(),
+        ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
+        ContentBlock::ToolResult { content, .. } => match content {
+            ToolResultContent::Text(t) => t.len(),
+            ToolResultContent::Blocks(blocks) => blocks.iter().map(block_chars).sum(),
+        },
+        ContentBlock::Thinking { thinking, .. } => thinking.len(),
+        ContentBlock::RedactedThinking { data } => data.len(),
+        _ => 200, // images and documents carry no text to measure
+    }
 }
 
-fn content_tokens(content: &MessageContent) -> u64 {
-    match content {
-        MessageContent::Text(s) => estimate_chars(s),
-        MessageContent::Blocks(blocks) => blocks
-            .iter()
-            .map(|b| match b {
-                ContentBlock::Text { text } => estimate_chars(text),
-                ContentBlock::Thinking { thinking, .. } => estimate_chars(thinking),
-                ContentBlock::ToolUse { name, input, .. } => {
-                    estimate_chars(name) + estimate_chars(&input.to_string())
-                }
-                ContentBlock::ToolResult { content, .. } => {
-                    use mikmik_core::types::ToolResultContent;
-                    match content {
-                        ToolResultContent::Text(t) => estimate_chars(t),
-                        ToolResultContent::Blocks(inner) => inner
-                            .iter()
-                            .map(|ib| {
-                                if let ContentBlock::Text { text } = ib {
-                                    estimate_chars(text)
-                                } else {
-                                    10
-                                }
-                            })
-                            .sum(),
-                    }
-                }
-                _ => 10,
-            })
-            .sum(),
+/// Characters a whole message contributes.
+pub fn message_chars(message: &Message) -> usize {
+    match &message.content {
+        MessageContent::Text(t) => t.len(),
+        MessageContent::Blocks(blocks) => blocks.iter().map(block_chars).sum(),
     }
+}
+
+/// Turn a character count into an estimated token count.
+///
+/// Roughly four characters per token, padded by a third because the estimate
+/// runs low on structured content.
+pub fn chars_to_tokens(chars: usize) -> u64 {
+    ((chars / 4) * 4 / 3) as u64
 }
 
 // ---------------------------------------------------------------------------
 // Analysis
 // ---------------------------------------------------------------------------
 
-/// Analyse the context window usage by category.
+/// Does this message carry a tool result?
 ///
-/// `system_prompt` and `tool_defs_json` are the separately-tracked strings;
-/// `messages` are the in-context conversation turns.
-pub fn analyze_context(
-    system_prompt: Option<&str>,
-    tool_defs_json: Option<&str>,
-    messages: &[Message],
-) -> ContextAnalysis {
-    let sp_tokens = system_prompt.map_or(0, estimate_chars);
-    let td_tokens = tool_defs_json.map_or(0, estimate_chars);
+/// The turn loop appends every tool result as a user message holding only
+/// `ToolResult` blocks, so the block type is the only reliable signal. Reading
+/// the message's text instead finds nothing at all, because a `ToolResult`
+/// block is not a `Text` block.
+fn is_tool_result(message: &Message) -> bool {
+    matches!(&message.content, MessageContent::Blocks(blocks)
+        if blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })))
+}
 
-    let mut conv_tokens: u64 = 0;
-    let mut tool_result_tokens: u64 = 0;
-    let mut attach_tokens: u64 = 0;
+/// Does this message carry an injected attachment?
+fn is_attachment(message: &Message) -> bool {
+    let marks = ["[Attachment:", "[IDE:", "[Pasted", "<file path=\""];
+    match &message.content {
+        MessageContent::Text(text) => marks.iter().any(|m| text.contains(m)),
+        MessageContent::Blocks(blocks) => blocks.iter().any(|b| match b {
+            ContentBlock::Text { text } => marks.iter().any(|m| text.contains(m)),
+            _ => false,
+        }),
+    }
+}
 
-    for msg in messages {
-        let is_tool_result = matches!(&msg.content, MessageContent::Blocks(b)
-            if b.iter().any(|bl| matches!(bl, ContentBlock::ToolResult { .. })));
+/// Estimate the current message list and split it by category.
+pub fn analyze_context(messages: &[Message]) -> ContextAnalysis {
+    let mut conversation_history_tokens = 0u64;
+    let mut tool_results_tokens = 0u64;
+    let mut attachments_tokens = 0u64;
 
-        let toks = content_tokens(&msg.content);
-
-        if is_tool_result {
-            tool_result_tokens += toks;
+    for message in messages {
+        let tokens = chars_to_tokens(message_chars(message));
+        if is_tool_result(message) {
+            tool_results_tokens += tokens;
+        } else if is_attachment(message) {
+            attachments_tokens += tokens;
         } else {
-            // Heuristic: assistant messages containing "attachment" text go to attachments.
-            let text = match &msg.content {
-                MessageContent::Text(s) => s.as_str(),
-                _ => "",
-            };
-            if text.contains("[Attachment:") || text.contains("[IDE:") || text.contains("[Pasted") {
-                attach_tokens += toks;
-            } else {
-                conv_tokens += toks;
-            }
+            conversation_history_tokens += tokens;
         }
     }
 
-    let total = sp_tokens + td_tokens + conv_tokens + tool_result_tokens + attach_tokens;
+    let total_tokens = conversation_history_tokens + tool_results_tokens + attachments_tokens;
 
-    // Compressibility: tool results are highly compressible; conversation is moderate.
-    let compressibility = if total == 0 {
+    // A summariser reclaims most of a tool result and about half of a
+    // conversation turn. An attachment is the file the user asked about, so
+    // treat it as incompressible.
+    let compressibility = if total_tokens == 0 {
         0.0
     } else {
-        let compressible = tool_result_tokens as f64 * 0.9 + conv_tokens as f64 * 0.5;
-        compressible / total as f64
+        let compressible =
+            tool_results_tokens as f64 * 0.9 + conversation_history_tokens as f64 * 0.5;
+        compressible / total_tokens as f64
     };
 
     ContextAnalysis {
-        system_prompt_tokens: sp_tokens,
-        tool_definitions_tokens: td_tokens,
-        conversation_history_tokens: conv_tokens,
-        tool_results_tokens: tool_result_tokens,
-        attachments_tokens: attach_tokens,
-        total_tokens: total,
+        conversation_history_tokens,
+        tool_results_tokens,
+        attachments_tokens,
+        total_tokens,
         compressibility,
     }
 }
 
-/// Suggest a compaction strategy based on the analysis.
-pub fn suggest_compaction(analysis: &ContextAnalysis, context_limit: u64) -> CompactionStrategy {
-    if context_limit == 0 || analysis.total_tokens == 0 {
+/// Recommend a compaction strategy.
+///
+/// `filled_tokens` is what the context actually holds, which is the measured
+/// figure from the last request when there is one. It is not the analysis
+/// total: the analysis covers the messages only, and the system prompt and the
+/// tool definitions fill the window too.
+pub fn suggest_compaction(
+    analysis: &ContextAnalysis,
+    filled_tokens: u64,
+    context_limit: u64,
+    message_count: usize,
+) -> CompactionStrategy {
+    if context_limit == 0 || filled_tokens == 0 {
         return CompactionStrategy::None;
     }
 
-    let usage_pct = analysis.total_tokens as f64 / context_limit as f64;
-
-    if usage_pct < 0.75 {
+    let usage = filled_tokens as f64 / context_limit as f64;
+    if usage < 0.75 {
         return CompactionStrategy::None;
     }
 
-    // If tool results dominate (> 40%), suggest collapsing reads first.
-    let tool_result_pct = analysis.tool_results_tokens as f64 / analysis.total_tokens as f64;
-    if tool_result_pct > 0.4 && usage_pct < 0.90 {
-        return CompactionStrategy::CollapseReads {
-            expected_reduction_pct: tool_result_pct * 0.7 * 100.0,
-        };
-    }
-
-    // If usage > 90%, suggest full compact.
-    if usage_pct > 0.90 {
+    if usage > 0.90 {
         return CompactionStrategy::FullCompact {
             expected_reduction_pct: analysis.compressibility * 70.0,
         };
     }
 
-    // Otherwise partial compact of oldest 50% of conversation.
-    let messages_to_compact = (analysis.conversation_history_tokens / 2 / 50).max(1) as usize;
+    // Between the two thresholds, collapsing repeated reads is cheaper than a
+    // summary, but only when tool results are what fills the window.
+    let tool_result_share = if analysis.total_tokens == 0 {
+        0.0
+    } else {
+        analysis.tool_results_tokens as f64 / analysis.total_tokens as f64
+    };
+    if tool_result_share > 0.4 {
+        return CompactionStrategy::CollapseReads {
+            expected_reduction_pct: tool_result_share * 70.0,
+        };
+    }
+
     CompactionStrategy::PartialCompact {
-        messages_to_compact,
+        messages_to_compact: (message_count / 2).max(1),
         expected_reduction_pct: 40.0,
     }
 }
 
-/// Format the context analysis as a human-readable breakdown string.
+impl CompactionStrategy {
+    /// One line of advice, or nothing when the context has room.
+    pub fn advice(&self) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::FullCompact {
+                expected_reduction_pct,
+            } => Some(format!(
+                "Run /compact to summarise the history (~{expected_reduction_pct:.0}% smaller)."
+            )),
+            Self::CollapseReads {
+                expected_reduction_pct,
+            } => Some(format!(
+                "Tool results dominate. Run /compact to reclaim ~{expected_reduction_pct:.0}%."
+            )),
+            Self::PartialCompact {
+                messages_to_compact,
+                expected_reduction_pct,
+            } => Some(format!(
+                "Run /compact to summarise the oldest {messages_to_compact} messages \
+                 (~{expected_reduction_pct:.0}% smaller)."
+            )),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+const BAR_WIDTH: usize = 40;
+
+fn bar(pct: f64) -> String {
+    let filled = ((pct / 100.0) * BAR_WIDTH as f64).round() as usize;
+    let filled = filled.min(BAR_WIDTH);
+    "█".repeat(filled) + &"░".repeat(BAR_WIDTH - filled)
+}
+
+/// Render the context report `/context` prints.
 ///
-/// Used by the /ctx-viz slash command.
-pub fn format_ctx_viz(analysis: &ContextAnalysis, context_limit: u64) -> String {
-    let categories = [
-        (ContextCategory::SystemPrompt, analysis.system_prompt_tokens),
-        (
-            ContextCategory::ToolDefinitions,
-            analysis.tool_definitions_tokens,
-        ),
-        (
-            ContextCategory::ConversationHistory,
-            analysis.conversation_history_tokens,
-        ),
-        (ContextCategory::ToolResults, analysis.tool_results_tokens),
-        (ContextCategory::Attachments, analysis.attachments_tokens),
-    ];
-
+/// `measured_input_tokens` is the API's own count for the last request, and 0
+/// when no request has been sent yet. It is reported separately from the
+/// estimate because the two describe different moments: the measurement covers
+/// the messages that existed at the last request, the estimate covers the
+/// messages that exist now.
+pub fn format_context_report(
+    analysis: &ContextAnalysis,
+    model: &str,
+    measured_input_tokens: u64,
+    context_limit: u64,
+    message_count: usize,
+) -> String {
     let mut lines = Vec::new();
-    let usage_pct = if context_limit > 0 {
-        analysis.total_tokens as f64 / context_limit as f64 * 100.0
-    } else {
-        0.0
-    };
 
-    lines.push(format!(
-        "Context window: ~{:.0}K / {:.0}K tokens ({:.1}%)",
-        analysis.total_tokens as f64 / 1000.0,
-        context_limit as f64 / 1000.0,
-        usage_pct
-    ));
+    lines.push("Context Window".to_string());
+    lines.push("─".repeat(56));
+    lines.push(format!("Model:          {model}"));
+    lines.push(format!("Window:         {context_limit} tokens"));
     lines.push(String::new());
 
-    let bar_width = 40usize;
-    for (cat, tokens) in &categories {
-        if *tokens == 0 {
-            continue;
-        }
-        let pct = analysis.category_pct(*cat);
-        let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
-        let bar = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+    if measured_input_tokens > 0 {
+        let pct = measured_input_tokens as f64 / context_limit as f64 * 100.0;
         lines.push(format!(
-            "{:<24} [{bar}] {:.1}% (~{:.0}K)",
-            cat.label(),
-            pct,
-            *tokens as f64 / 1000.0,
+            "Measured at the last request: {measured_input_tokens} tokens ({pct:.1}%)"
         ));
+        lines.push(format!("[{}] {pct:.1}%", bar(pct)));
+        lines.push(
+            "  Counted by the API. Covers the system prompt and the tool definitions too."
+                .to_string(),
+        );
+    } else {
+        lines.push("Measured at the last request: nothing sent yet.".to_string());
+    }
+    lines.push(String::new());
+
+    lines.push(format!(
+        "Estimated now, from {message_count} messages: {} tokens",
+        analysis.total_tokens
+    ));
+    if analysis.total_tokens == 0 {
+        lines.push("  The conversation is empty.".to_string());
+    } else {
+        for cat in [
+            ContextCategory::ConversationHistory,
+            ContextCategory::ToolResults,
+            ContextCategory::Attachments,
+        ] {
+            let tokens = analysis.category_tokens(cat);
+            if tokens == 0 {
+                continue;
+            }
+            let pct = analysis.category_pct(cat);
+            lines.push(format!(
+                "  {:<14} [{}] {pct:>5.1}%  {tokens} tokens",
+                cat.label(),
+                bar(pct)
+            ));
+        }
+        lines.push(format!(
+            "  Compressible: ~{:.0}% of the conversation.",
+            analysis.compressibility * 100.0
+        ));
+    }
+
+    let filled = measured_input_tokens.max(analysis.total_tokens);
+    if let Some(advice) =
+        suggest_compaction(analysis, filled, context_limit, message_count).advice()
+    {
+        lines.push(String::new());
+        lines.push(advice);
     }
 
     lines.join("\n")
@@ -273,7 +351,8 @@ pub fn format_ctx_viz(analysis: &ContextAnalysis, context_limit: u64) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mikmik_core::types::{Message, MessageContent, Role};
+    use mikmik_core::types::{Message, MessageContent, Role, ToolResultContent};
+    use serde_json::json;
 
     fn text_msg(role: Role, text: &str) -> Message {
         Message {
@@ -286,39 +365,119 @@ mod tests {
         }
     }
 
+    fn tool_result_msg(body: &str) -> Message {
+        Message::user_blocks(vec![ContentBlock::ToolResult {
+            tool_use_id: "t1".to_string(),
+            content: ToolResultContent::Text(body.to_string()),
+            is_error: None,
+        }])
+    }
+
+    fn tool_use_msg(input: &str) -> Message {
+        Message {
+            role: Role::Assistant,
+            content: MessageContent::Blocks(vec![ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "Read".to_string(),
+                input: json!({ "file_path": input }),
+                thought_signature: None,
+            }]),
+            uuid: None,
+            cost: None,
+            snapshot_patch: None,
+            timestamp: None,
+        }
+    }
+
     #[test]
-    fn analyze_basic() {
-        let msgs = vec![
-            text_msg(Role::User, "Hello"),
-            text_msg(Role::Assistant, "Hi there"),
+    fn a_tool_result_is_counted_as_one() {
+        // The turn loop stores a tool result as a user message of ToolResult
+        // blocks, which carries no Text block at all. Reading the message's
+        // text finds an empty string, so a text-based split reported zero tool
+        // results however many ran.
+        let messages = vec![tool_result_msg(&"x".repeat(4000))];
+        let analysis = analyze_context(&messages);
+        assert!(
+            analysis.tool_results_tokens > 500,
+            "a 4000-character tool result counted as {} tokens",
+            analysis.tool_results_tokens
+        );
+        assert_eq!(
+            analysis.conversation_history_tokens, 0,
+            "a tool result must not land in the conversation category"
+        );
+    }
+
+    #[test]
+    fn a_tool_call_counts_its_arguments() {
+        // `get_all_text` drops a ToolUse block, so a turn of nothing but tool
+        // calls used to weigh nothing.
+        let messages = vec![tool_use_msg(&"/some/long/path".repeat(200))];
+        let analysis = analyze_context(&messages);
+        assert!(
+            analysis.conversation_history_tokens > 500,
+            "a tool call with a 3000-character argument counted as {} tokens",
+            analysis.conversation_history_tokens
+        );
+    }
+
+    #[test]
+    fn the_categories_add_up_to_the_total() {
+        let messages = vec![
+            text_msg(Role::User, "hello"),
+            tool_result_msg("result body"),
+            text_msg(Role::User, "[Pasted text #1 +40 lines]"),
         ];
-        let analysis = analyze_context(Some("You are helpful."), None, &msgs);
-        assert!(analysis.total_tokens > 0);
-        assert!(analysis.conversation_history_tokens > 0);
-        assert!(analysis.compressibility >= 0.0 && analysis.compressibility <= 1.0);
+        let analysis = analyze_context(&messages);
+        assert_eq!(
+            analysis.total_tokens,
+            analysis.conversation_history_tokens
+                + analysis.tool_results_tokens
+                + analysis.attachments_tokens
+        );
+        assert!(analysis.attachments_tokens > 0, "a paste is an attachment");
     }
 
     #[test]
-    fn suggest_none_for_low_usage() {
+    fn compaction_advice_follows_what_the_window_holds() {
         let analysis = ContextAnalysis {
-            total_tokens: 10_000,
             conversation_history_tokens: 10_000,
+            total_tokens: 10_000,
+            compressibility: 0.5,
             ..Default::default()
         };
-        let strategy = suggest_compaction(&analysis, 200_000);
-        assert!(matches!(strategy, CompactionStrategy::None));
+        // The messages are small, but the window is nearly full because the
+        // system prompt and the tool definitions fill it too. Judging by the
+        // analysis total alone would advise nothing.
+        assert!(matches!(
+            suggest_compaction(&analysis, 195_000, 200_000, 20),
+            CompactionStrategy::FullCompact { .. }
+        ));
+        assert_eq!(
+            suggest_compaction(&analysis, 10_000, 200_000, 20),
+            CompactionStrategy::None
+        );
     }
 
     #[test]
-    fn format_ctx_viz_basic() {
-        let analysis = ContextAnalysis {
-            total_tokens: 50_000,
-            conversation_history_tokens: 30_000,
-            tool_results_tokens: 20_000,
-            ..Default::default()
-        };
-        let output = format_ctx_viz(&analysis, 200_000);
-        assert!(output.contains("Context window"));
-        assert!(output.contains("Conversation history"));
+    fn the_report_names_the_window_it_was_given() {
+        let analysis = analyze_context(&[text_msg(Role::User, "hi")]);
+        let report = format_context_report(&analysis, "claude-opus-5", 250_000, 1_000_000, 1);
+        assert!(
+            report.contains("1000000 tokens"),
+            "the report must print the window it was given:\n{report}"
+        );
+        assert!(
+            report.contains("250000 tokens (25.0%)"),
+            "25% of a 1M window is not the 200k default:\n{report}"
+        );
+    }
+
+    #[test]
+    fn the_report_says_so_before_the_first_request() {
+        let analysis = analyze_context(&[]);
+        let report = format_context_report(&analysis, "claude-opus-5", 0, 200_000, 0);
+        assert!(report.contains("nothing sent yet"));
+        assert!(report.contains("The conversation is empty."));
     }
 }

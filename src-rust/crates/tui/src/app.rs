@@ -2975,18 +2975,9 @@ impl App {
         // the lookup asked one provider about another's model, missed, and
         // fell back to a default window that is wrong for both.
         let route = self.route();
-        let provider = route.account.as_str();
-        if let Some(entry) = self.model_registry.get(provider, route.model.as_str()) {
-            self.context_window_size = entry.info.context_window as u64;
-        } else {
-            // Fallback: common defaults
-            self.context_window_size = match provider {
-                "anthropic" => 200_000,
-                "openai" => 128_000,
-                "google" => 1_048_576,
-                _ => 128_000,
-            };
-        }
+        self.context_window_size = self
+            .model_registry
+            .context_window_for(route.account.as_str(), route.model.as_str());
     }
 
     /// Record a chosen effort level.

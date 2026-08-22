@@ -533,6 +533,8 @@ mod tests {
         );
 
         CommandContext {
+            context_window: 200_000,
+            context_used_tokens: 0,
             config,
             cost_tracker: CostTracker::new(),
             messages: vec![],
@@ -699,6 +701,8 @@ mod tests {
     async fn a_provider_that_is_not_there_leaves_the_companion_unhatched() {
         // No provider_configs and no key: nothing to call.
         let ctx = CommandContext {
+            context_window: 200_000,
+            context_used_tokens: 0,
             config: Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],

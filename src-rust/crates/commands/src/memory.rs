@@ -257,6 +257,8 @@ mod tests {
 
     fn ctx_in(dir: &std::path::Path, auto_memory: Option<bool>) -> CommandContext {
         CommandContext {
+            context_window: 200_000,
+            context_used_tokens: 0,
             config: mikmik_core::config::Config {
                 auto_memory_enabled: auto_memory,
                 ..Default::default()

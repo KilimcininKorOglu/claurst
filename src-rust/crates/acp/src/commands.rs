@@ -114,7 +114,16 @@ pub async fn run(
     let mut config = runtime.config.clone();
     crate::session_config::apply_overrides(&mut config, &overrides);
     let before = config.clone();
+    let route = config.resolve_route(config.effective_model());
+    let context_window = runtime
+        .model_registry
+        .context_window_for(&route.account, &route.model);
     let mut ctx = mikmik_commands::CommandContext {
+        context_window,
+        // An ACP session records no per-turn usage, so there is no measured
+        // figure to report. `/context` says so rather than showing the
+        // session-wide total, which is not what the window holds.
+        context_used_tokens: 0,
         config,
         cost_tracker: session.cost_tracker.clone(),
         messages: session.messages.lock().clone(),

@@ -174,32 +174,15 @@ pub fn estimate_context_size(messages: &[Message]) -> u64 {
 }
 
 /// Rough token estimate: sum of character lengths divided by 4, padded by 4/3.
+///
+/// Counts through `context_analyzer`, so this and `/context` cannot disagree
+/// about how large the same conversation is.
 pub(crate) fn estimate_tokens_for_messages(messages: &[Message]) -> usize {
     let chars: usize = messages
         .iter()
-        .map(|m| match &m.content {
-            MessageContent::Text(t) => t.len(),
-            MessageContent::Blocks(blocks) => blocks.iter().map(estimate_block_chars).sum(),
-        })
+        .map(crate::context_analyzer::message_chars)
         .sum();
-    // chars / 4 = rough tokens, then * 4/3 padding
-    (chars / 4) * 4 / 3
-}
-
-fn estimate_block_chars(block: &ContentBlock) -> usize {
-    match block {
-        ContentBlock::Text { text } => text.len(),
-        ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
-        ContentBlock::ToolResult { content, .. } => match content {
-            mikmik_core::types::ToolResultContent::Text(t) => t.len(),
-            mikmik_core::types::ToolResultContent::Blocks(blocks) => {
-                blocks.iter().map(estimate_block_chars).sum()
-            }
-        },
-        ContentBlock::Thinking { thinking, .. } => thinking.len(),
-        ContentBlock::RedactedThinking { data } => data.len(),
-        _ => 200, // default for images/documents
-    }
+    crate::context_analyzer::chars_to_tokens(chars) as usize
 }
 
 // ---------------------------------------------------------------------------

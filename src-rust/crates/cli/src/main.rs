@@ -536,8 +536,16 @@ async fn main() -> anyhow::Result<()> {
                 let settings = Settings::load().await.unwrap_or_default();
                 let config = settings.effective_config();
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                // A named command runs before any session, so there is no turn
+                // to have measured and no registry loaded to ask. The provider
+                // default is the most this path can say.
+                let context_window = mikmik_api::ModelRegistry::default_context_window(
+                    &config.resolve_route(config.effective_model()).account,
+                );
                 let cmd_ctx = mikmik_commands::CommandContext {
                     config,
+                    context_window,
+                    context_used_tokens: 0,
                     cost_tracker: CostTracker::new(),
                     messages: vec![],
                     working_dir: cwd,
@@ -3449,6 +3457,10 @@ async fn run_interactive(
     let mut messages = initial_messages;
     let mut cmd_ctx = CommandContext {
         config: live_config,
+        // Refreshed from the app before every command; see the assignment
+        // beside `cmd_ctx.messages`.
+        context_window: app.context_window_size,
+        context_used_tokens: app.context_used_tokens,
         cost_tracker: cost_tracker.clone(),
         messages: messages.clone(),
         working_dir: tool_ctx.working_dir.clone(),
@@ -3952,6 +3964,12 @@ async fn run_interactive(
                             // The app owns the level; a picker can have moved
                             // it since the last command ran.
                             cmd_ctx.effort_level = app.effort_explicit.then_some(app.effort_level);
+                            // The app owns both context figures too. The window
+                            // changes when the model changes, and the measured
+                            // fill changes every turn, so reading them once at
+                            // construction would report the first turn forever.
+                            cmd_ctx.context_window = app.context_window_size;
+                            cmd_ctx.context_used_tokens = app.context_used_tokens;
                             let cli_result = execute_command(&input, &mut cmd_ctx).await;
                             // Start optimistically true; set false for Silent/None below.
                             let mut handled_by_cli = cli_result.is_some();

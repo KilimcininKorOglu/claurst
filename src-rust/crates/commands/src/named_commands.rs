@@ -1241,6 +1241,8 @@ mod tests {
 
     fn make_ctx() -> CommandContext {
         CommandContext {
+            context_window: 200_000,
+            context_used_tokens: 0,
             config: mikmik_core::config::Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],

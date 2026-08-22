@@ -828,6 +828,36 @@ impl ModelRegistry {
         self.entries.get(&key)
     }
 
+    /// How many tokens this model's context window holds.
+    ///
+    /// Every surface that reports context fill has to agree on the denominator,
+    /// so they all resolve it here. Hardcoding a window is wrong for any model
+    /// that does not share it, which is most of them: Opus 5 carries 1M and
+    /// Gemini carries more.
+    ///
+    /// `provider_id` and `model_id` come from
+    /// [`Config::resolve_route`](mikmik_core::config::Config::resolve_route),
+    /// never from `config.provider` plus a prefix strip, because the two
+    /// disagree whenever the chosen model names a different account.
+    pub fn context_window_for(&self, provider_id: &str, model_id: &str) -> u64 {
+        if let Some(entry) = self.get(provider_id, model_id) {
+            if entry.info.context_window > 0 {
+                return entry.info.context_window as u64;
+            }
+        }
+        Self::default_context_window(provider_id)
+    }
+
+    /// The window to assume for a provider whose model is not in the registry.
+    pub fn default_context_window(provider_id: &str) -> u64 {
+        match provider_id {
+            ProviderId::ANTHROPIC => 200_000,
+            ProviderId::OPENAI => 128_000,
+            ProviderId::GOOGLE => 1_048_576,
+            _ => 128_000,
+        }
+    }
+
     /// Resolve a model string into `(ProviderId, ModelId)`.
     ///
     /// Accepts either `"provider/model"` or a bare model name (which defaults
@@ -2172,6 +2202,37 @@ mod tests {
         }
     }
 
+    /// Every surface that reports context fill divides by this number, so a
+    /// model whose window is not the Anthropic default has to resolve to its
+    /// own. `/context` used to hardcode 200_000 and call it "all current
+    /// Claude models".
+    #[test]
+    fn the_context_window_comes_from_the_catalogue() {
+        let reg = ModelRegistry::new();
+        assert_eq!(
+            reg.context_window_for(
+                mikmik_core::provider_id::ProviderId::ANTHROPIC,
+                "claude-opus-5"
+            ),
+            1_000_000,
+            "Opus 5 carries a 1M window, not the 200k Anthropic default"
+        );
+        assert_eq!(
+            reg.context_window_for(
+                mikmik_core::provider_id::ProviderId::ANTHROPIC,
+                "claude-3-5-haiku-latest"
+            ),
+            200_000
+        );
+        assert_eq!(
+            reg.context_window_for(
+                mikmik_core::provider_id::ProviderId::ANTHROPIC,
+                "claude-there-is-no-such-model"
+            ),
+            200_000,
+            "a model the catalogue does not cover falls back to its provider's default"
+        );
+    }
 
     #[test]
     fn an_account_the_user_named_still_gets_its_vendors_default() {

@@ -50,6 +50,19 @@ pub struct CommandContext {
     /// declares, so a command that changes one of those fields has to be able
     /// to say that its change will not take effect yet.
     pub active_agent: Option<mikmik_core::AgentDefinition>,
+    /// The active model's context window, in tokens.
+    ///
+    /// Resolved through `ModelRegistry::context_window_for`, because the window
+    /// is per model and a command that assumes one reports the wrong share of
+    /// it for every model that carries another.
+    pub context_window: u64,
+    /// Tokens the API counted for the last request, and 0 before the first one.
+    ///
+    /// This is the last turn's `usage.total_input()`, the same figure the
+    /// footer draws. It is not `cost_tracker.total_tokens()`, which accumulates
+    /// over the session and passes the window without the context ever being
+    /// full.
+    pub context_used_tokens: u64,
 }
 
 /// Result of running a slash command.
@@ -295,7 +308,7 @@ pub struct ImportConfigCommand;
 pub struct ThinkingCommand;
 // New commands
 // Batch-1 new commands
-// New commands: teleport, btw, ctx-viz, sandbox-toggle
+// New commands: teleport, btw, sandbox-toggle
 pub struct NamedCommandAdapter {
     pub slash_name: &'static str,
     pub target_name: &'static str,
@@ -499,7 +512,7 @@ fn command_category(name: &str) -> &'static str {
         "model" | "config" | "theme" | "color" | "vim" | "fast" | "effort" | "voice"
         | "statusline" | "output-style" | "keybindings" | "privacy-settings"
         | "rate-limit-options" | "sandbox-toggle" | "timeline" => "Settings",
-        "cost" | "stats" | "usage" | "extra-usage" | "context" | "ctx-viz" => "Usage & Cost",
+        "cost" | "stats" | "usage" | "extra-usage" | "context" => "Usage & Cost",
         "status" | "doctor" | "terminal-setup" | "version" | "update" | "upgrade"
         | "release-notes" => "System",
         "login" | "logout" | "refresh" | "permissions" => "Auth & Permissions",
@@ -1503,10 +1516,9 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(ThinkBackCommand),
         Box::new(ThinkBackPlayCommand),
         Box::new(ColorSetCommand),
-        // New commands: teleport, btw, ctx-viz, sandbox-toggle
+        // New commands: teleport, btw, sandbox-toggle
         Box::new(TeleportCommand),
         Box::new(BtwCommand),
-        Box::new(CtxVizCommand),
         Box::new(SandboxToggleCommand),
         // Advisor
         Box::new(AdvisorCommand),
@@ -1751,6 +1763,8 @@ mod tests {
 
     fn make_ctx() -> CommandContext {
         CommandContext {
+            context_window: 200_000,
+            context_used_tokens: 0,
             config: mikmik_core::config::Config::default(),
             cost_tracker: CostTracker::new(),
             messages: vec![],
@@ -1841,6 +1855,87 @@ mod tests {
             accepted.len(),
             "the usage line drops styles /config set would take"
         );
+    }
+
+    /// `/context` reports the window it was handed, not a constant.
+    ///
+    /// It used to hardcode 200_000 and call it "all current Claude models".
+    /// Opus 5 carries 1M and Gemini carries more, so the percentage was wrong
+    /// for every model that does not share the Anthropic default.
+    #[tokio::test]
+    async fn the_context_report_uses_the_window_it_was_given() {
+        let mut ctx = make_ctx();
+        ctx.context_window = 1_000_000;
+        ctx.context_used_tokens = 250_000;
+
+        let CommandResult::Message(text) =
+            crate::display::ContextCommand.execute("", &mut ctx).await
+        else {
+            panic!("/context should print a report");
+        };
+
+        assert!(
+            text.contains("1000000 tokens"),
+            "the report names a window that is not the one it was given:\n{text}"
+        );
+        assert!(
+            text.contains("(25.0%)"),
+            "250k of a 1M window is 25%, not {}:\n{text}",
+            "50%"
+        );
+    }
+
+    /// The measured figure is the last turn's, never the session total.
+    ///
+    /// `/context` used to divide `cost_tracker.total_tokens()` by the window.
+    /// That tracker accumulates every turn's usage and is never reset, so the
+    /// percentage passed 100% while the context still had room.
+    #[tokio::test]
+    async fn the_context_report_ignores_the_accumulating_tracker() {
+        let mut ctx = make_ctx();
+        ctx.context_window = 200_000;
+        ctx.context_used_tokens = 20_000;
+        // Five turns of 60k each: far past the window, and no reason to be.
+        for _ in 0..5 {
+            ctx.cost_tracker.add_usage(
+                "claude-opus-5",
+                mikmik_core::cost::ModelPricing::default(),
+                60_000,
+                0,
+                0,
+                0,
+            );
+        }
+        assert!(
+            ctx.cost_tracker.total_tokens() > ctx.context_window,
+            "the test needs a tracker total that exceeds the window"
+        );
+
+        let CommandResult::Message(text) =
+            crate::display::ContextCommand.execute("", &mut ctx).await
+        else {
+            panic!("/context should print a report");
+        };
+
+        assert!(
+            text.contains("20000 tokens (10.0%)"),
+            "the report should show the last turn's 20k, not the tracker's total:\n{text}"
+        );
+    }
+
+    /// `/ctx-viz` was folded into `/context`; its names must still resolve.
+    #[test]
+    fn the_old_context_visualizer_names_still_resolve() {
+        for name in ["context", "ctx", "ctx-viz", "context-visualizer"] {
+            let command =
+                find_command(name).unwrap_or_else(|| panic!("/{name} resolves to nothing"));
+            assert_eq!(
+                command.name(),
+                "context",
+                "/{name} should reach /context, not /{}",
+                command.name()
+            );
+        }
     }
 
     #[tokio::test]
