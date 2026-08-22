@@ -208,8 +208,6 @@ mod turns;
 pub use turns::*;
 mod yolo;
 pub use yolo::*;
-mod speech;
-pub use speech::*;
 mod config_cmd;
 pub use config_cmd::*;
 mod plugin;
@@ -1374,9 +1372,6 @@ pub fn all_commands() -> Vec<Box<dyn SlashCommand>> {
         Box::new(AccountsCommand),
         Box::new(SwitchCommand),
         Box::new(RefreshCommand),
-        Box::new(CavemanCommand),
-        Box::new(RockyCommand),
-        Box::new(NormalCommand),
         Box::new(InitCommand),
         Box::new(ReviewCommand),
         Box::new(HooksCommand),

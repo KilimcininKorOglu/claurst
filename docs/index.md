@@ -62,8 +62,8 @@ Set a durable objective with `/goal` and MikMik works autonomously across turns 
 ### Managed agents (preview)
 Configure a manager-executor architecture with `/managed-agents` where a manager model delegates subtasks to parallel executor agents with full budget split controls.
 
-### Speech modes
-Activate `/caveman` or `/rocky` to compress model responses by 40–85%, saving tokens in long sessions. Deactivate with `/normal`.
+### Output styles
+Pick the voice the model writes in with `/output-style` or from the settings screen: controlled technical writing (`asd-ste100`), or a persona at three intensities (`caveman`, `rocky`).
 
 ---
 
@@ -169,9 +169,6 @@ Inside the interactive TUI, type `/` to see all available commands. Common ones:
 | `/compact`          | Compress conversation history                                            |
 | `/cost`             | Token usage and cost for this session                                    |
 | `/insights`         | Session statistics and tool usage report                                 |
-| `/caveman`          | Activate telegraphic speech mode (save tokens)                           |
-| `/rocky`            | Activate Rocky (Project Hail Mary) speech mode                           |
-| `/normal`           | Deactivate speech modes                                                  |
 | `/rewind`           | Go back to a previous message                                            |
 | `/copy`             | Copy last response to clipboard                                          |
 | `/export`           | Save session transcript                                                  |

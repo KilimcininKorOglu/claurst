@@ -319,48 +319,31 @@ Configuration persists to `~/.config/mikmik/settings.json` under `managed_agents
 
 ---
 
-## Speech modes
+## Personas and writing styles
 
-Speech modes change how the model structures its responses, trading naturalness for brevity. Useful in long sessions where verbose responses consume too many tokens or take too long to read.
+A persona is an output style, selected through `/output-style` or the settings
+screen, not a mode with its own command.
 
-### Caveman mode
+| Style | What it does |
+|---|---|
+| `asd-ste100` | Controlled technical writing: short sentences, active voice, one instruction each, technical terms untranslated |
+| `caveman-lite` | Trimmed prose. Full sentences, nothing wasted |
+| `caveman` | Drops articles and unnecessary verbs; compressed but readable |
+| `caveman-ultra` | Fewest words that still carry the answer. Fragments over sentences |
+| `rocky-lite` | Ordinary grammar with Rocky's vocabulary |
+| `rocky` | Rocky from *Project Hail Mary*: dropped articles, `', question?'`, triple emphasis |
+| `rocky-ultra` | Rocky throughout, emphasis used freely |
 
-Strips pleasantries, hedging phrases, transitional sentences, and articles. Output is dense and telegraphic.
-
-```
-/caveman             — full caveman mode (~75% token reduction)
-/caveman lite        — remove pleasantries only (~40% reduction)
-/caveman full        — compress sentences, drop articles (~75% reduction, default)
-/caveman ultra       — maximum compression, imperative only (~85% reduction)
-```
-
-**Example (normal mode):**
-> "I'd be happy to help with that. Let me take a look at the file and see what changes might be appropriate here."
-
-**Example (caveman full):**
-> "Look at file. Make changes."
-
-### Rocky mode
-
-The model adopts the communication style of Rocky from *Project Hail Mary* — an Eridian alien engineer with a distinctive grammar, heavy emphasis, and alien perspective on human tasks.
+Code blocks, technical terms, error messages, file paths and git operations are
+unchanged by every persona: the style governs prose only.
 
 ```
-/rocky             — full Rocky mode (~75% token reduction)
-/rocky lite        — grammar rules only, minimal emphasis (~40% reduction)
-/rocky full        — full grammar + regular emphasis (~75% reduction, default)
-/rocky ultra       — maximum personality, frequent emphasis, alien observations
+/output-style caveman-ultra
+/output-style default          — back to the standard voice
 ```
 
-**Example (rocky full):**
-> "Read file. *Yes!* Change function. Return value wrong! Fix now. *Eridians not make this mistake.*"
-
-### Deactivating speech modes
-
-```
-/normal
-```
-
-Resets to the model's standard response style. Any active mode (caveman or rocky) is immediately deactivated.
+Typing `caveman`, `rocky` or `normal` as a single word inside a prompt applies
+the persona to that one turn without persisting it.
 
 ---
 

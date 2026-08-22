@@ -128,9 +128,10 @@ impl SlashCommand for OutputStyleCommand {
         "Usage: /output-style [style-name]\n\n\
          With no argument: list available styles and show the current one.\n\
          With a style name: switch to that style (persisted to settings).\n\n\
-         Built-in styles: default, concise, explanatory, learning, caveman, rocky\n\
-         Personas (caveman/rocky) are also reachable via /caveman, /rocky, and\n\
-         by typing the single word inline in a prompt (transient for one turn).\n\
+         Built-in styles: default, concise, explanatory, learning, asd-ste100,\n\
+         caveman-lite, caveman, caveman-ultra, rocky-lite, rocky, rocky-ultra.\n\
+         A persona is also reachable by typing its name inline in a prompt,\n\
+         which applies for that one turn only.\n\
          Plugin-defined and user styles are listed automatically.\n\n\
          Changes take effect on the next request."
     }

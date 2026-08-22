@@ -18,7 +18,7 @@ This document is the complete reference for every slash command available in Mik
 10. [Planning & Review](#planning--review) — `/plan`, `/ultraplan`, `/ultrareview`
 11. [MCP & Integrations](#mcp--integrations) — `/mcp`, `/skills`, `ultracode`, `/plugin`, `/chrome`
 12. [Authentication](#authentication) — `/login`, `/logout`, `/accounts`, `/switch`, `/refresh`
-13. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/caveman`, `/rocky`, `/normal`, `/mobile`, `/color`, `/stickers`, `/buddy`
+13. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/mobile`, `/color`, `/stickers`, `/buddy`
 14. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
 15. [Export & Sharing](#export--sharing) — `/export`, `/copy`
 16. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
@@ -555,13 +555,35 @@ Configure and manage Model Context Protocol (MCP) servers. MCP servers expose ad
 
 ### /output-style
 
-Select how the model's output is rendered in the terminal. Choices include `auto`, `plain`, `markdown`, `streaming`, and others depending on terminal capabilities.
+Select the voice the model writes in. The chosen style's prompt is added to the
+system prompt, so it changes how answers are written, never what the model may
+do. The choice is persisted and takes effect on the next request.
 
 ```
-/output-style
-/output-style plain
-/output-style markdown
+/output-style                    — list the styles and show the current one
+/output-style asd-ste100
+/output-style default            — back to the standard voice
 ```
+
+| Style | What it does |
+|---|---|
+| `default` | Standard MikMik responses |
+| `concise` | Short and direct, minimal explanation |
+| `explanatory` | Reasoning, alternatives and pitfalls spelled out |
+| `learning` | Explains patterns and decisions as it implements them |
+| `asd-ste100` | Controlled technical writing: short sentences, active voice, one instruction each, technical terms untranslated |
+| `caveman-lite` / `caveman` / `caveman-ultra` | Telegraphic prose at three intensities |
+| `rocky-lite` / `rocky` / `rocky-ultra` | Rocky from *Project Hail Mary*, at three intensities |
+
+Code blocks, technical terms, error messages, file paths and git operations are
+unchanged by every style.
+
+Your own styles go in `~/.config/mikmik/output-styles/` or a repository's
+`.mikmik/output-styles/`, as `.md` or `.json`; they are listed automatically.
+Plugin-defined styles are listed too.
+
+Typing `caveman`, `rocky` or `normal` as a single word inside a prompt applies
+that persona to one turn without persisting it.
 
 ---
 
@@ -1207,46 +1229,6 @@ Documented above under [Configuration & Settings](#configuration--settings).
 ### /terminal-setup
 
 Documented above under [Code & Git](#code--git).
-
----
-
-### /caveman
-
-Activate caveman speech mode. In caveman mode the model strips pleasantries, hedging, articles, and transitional phrases from its responses, producing dense, telegraphic output. Useful for reducing verbosity and saving tokens on long sessions.
-
-```
-/caveman             — activate full caveman mode (~75% token reduction)
-/caveman lite        — remove pleasantries only (~40% reduction)
-/caveman full        — compress sentences and drop articles (default, ~75% reduction)
-/caveman ultra       — maximum compression, imperative phrases only (~85% reduction)
-```
-
-Deactivate with `/normal`.
-
----
-
-### /rocky
-
-Activate Rocky speech mode. Rocky is the Eridian alien engineer from *Project Hail Mary* who communicates in a distinctive pidgin English with specific grammar rules and expressive emphasis. In rocky mode the model adopts Rocky's communication style.
-
-```
-/rocky             — activate full Rocky mode (~75% token reduction)
-/rocky lite        — grammar rules only, minimal emphasis (~40% reduction)
-/rocky full        — full Rocky grammar + regular emphasis (default, ~75% reduction)
-/rocky ultra       — maximum Rocky personality, frequent emphasis, alien observations
-```
-
-Deactivate with `/normal`.
-
----
-
-### /normal
-
-Deactivate any active speech mode (caveman or rocky) and return the model to its standard response style.
-
-```
-/normal
-```
 
 ---
 
