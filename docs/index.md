@@ -38,8 +38,8 @@ MikMik runs a multi-turn loop: it streams a response from the model, executes an
 - **Desktop automation** — screenshot, click, type (optional feature)
 - **Task management** — create, track, and complete tasks
 
-### 15+ LLM providers
-Anthropic Claude (default), OpenAI, Google Gemini, AWS Bedrock, Azure OpenAI, Ollama, Groq, Mistral, DeepSeek, xAI, Cohere, OpenRouter, Together AI, Perplexity, GitHub Copilot, Cerebras, LM Studio, and LLaMA.cpp.
+### 50+ LLM providers
+Anthropic Claude (default), OpenAI, Google Gemini, AWS Bedrock, Azure OpenAI, GitHub Copilot, Codex, Cohere and MiniMax have native wire-format implementations. Around forty more speak the OpenAI format: Groq, Mistral, DeepSeek, xAI, OpenRouter, Together AI, Perplexity, Cerebras, and the rest. Local runtimes are Ollama, LM Studio, llama.cpp and MLX LM.
 
 ### AMOLED terminal UI
 A ratatui-based TUI with real-time streaming, syntax-highlighted code blocks, diff viewer, permission dialogs, slash command autocomplete, session browser, and a full keybinding system.
@@ -54,10 +54,10 @@ Type `@path/to/file` anywhere in a prompt to inject the file's contents inline. 
 Extend MikMik with TOML-manifest plugins that add custom slash commands, MCP servers, hooks, output styles, and tool overlays.
 
 ### Multi-agent orchestration
-Run named agents (`build`, `plan`, `explore`) or spawn parallel sub-agents in coordinator mode. Agents communicate via a shared task registry and message channels.
+Run named agents (`build`, `plan`, `explore`), or let the model spawn parallel sub-agents with the `Agent` tool. Agents communicate through a shared task registry and message channels, and `isolation: "worktree"` keeps parallel writers apart.
 
 ### Goal system
-Set a durable objective with `/goal` and MikMik works autonomously across turns until the goal is verified complete — using the `GoalComplete` for audited completion rather than just stopping.
+Set a durable objective with `/goal` and MikMik works autonomously across turns until the goal is verified complete — using the `GoalComplete` tool for audited completion rather than just stopping.
 
 ### Managed agents (preview)
 Configure a manager-executor architecture with `/managed-agents` where a manager model delegates subtasks to parallel executor agents with full budget split controls.
@@ -81,9 +81,10 @@ curl -fsSL https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/
 irm https://github.com/KilimcininKorOglu/mikmik/releases/latest/download/install.ps1 | iex
 ```
 
-The installer auto-detects your platform/arch, drops `mikmik` into
-`~/.config/mikmik/bin/`, and adds it to your `PATH`. See
-[Installation](installation) for flags, manual download, and uninstall steps.
+The installer auto-detects your platform and architecture, drops `mikmik` into
+`~/.local/bin` (or `%LOCALAPPDATA%\Programs\mikmik` on Windows), and adds that
+directory to your `PATH`. See [Installation](installation) for flags, manual
+download, and uninstall steps.
 
 **2. Set your API key**
 
@@ -115,7 +116,7 @@ MikMik reads `~/.config/mikmik/settings.json` at startup. The most common settin
     "model": "claude-opus-4-6",
     "permission_mode": "default",
     "auto_compact": true,
-    "compact_threshold": 0.8
+    "compact_threshold": 90
   }
 }
 ```

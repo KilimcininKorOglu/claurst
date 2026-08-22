@@ -751,6 +751,7 @@ is registered under its id and reads one environment variable:
 | `neuralwatt`    | NeuralWatt    | `NEURALWATT_API_KEY`   | `https://api.neuralwatt.com/v1`                   |
 | `novita`        | Novita        | `NOVITA_API_KEY`       | `https://api.novita.ai/v3/openai`                 |
 | `nvidia`        | Nvidia NIM    | `NVIDIA_API_KEY`       | `https://integrate.api.nvidia.com/v1`             |
+| `qwen`          | Qwen (Alibaba)| `DASHSCOPE_API_KEY`    | `https://dashscope.aliyuncs.com/compatible-mode/v1`|
 | `opencode-go`   | OpenCode Go   | `OPENCODE_API_KEY`     | `https://opencode.ai/zen/go/v1`                   |
 | `opencode-zen`  | OpenCode Zen  | `OPENCODE_API_KEY`     | `https://opencode.ai/zen/v1`                      |
 | `ovhcloud`      | OVHcloud      | `OVHCLOUD_API_KEY`     | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`|
@@ -766,6 +767,7 @@ is registered under its id and reads one environment variable:
 | `zhipuai`       | Zhipu AI      | `ZHIPU_API_KEY`        | `https://open.bigmodel.cn/api/paas/v4`            |
 
 `api_base` in the provider's `settings.json` entry overrides the base URL.
+`alibaba` is accepted as an alias for `qwen`.
 
 Three more have their own handling: `codex` (OpenAI ChatGPT subscription, see
 [Authentication](auth)), `google-vertex`, and `free`.

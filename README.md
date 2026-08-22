@@ -220,7 +220,7 @@ Native wire-format implementations, each with its own request shaping, streaming
 | **MiniMax** | |
 | **Free Mode** | Rotating free endpoints, configured through `/connect`. `[EXPERIMENTAL]` |
 
-On top of those, MikMik ships roughly a hundred **OpenAI-compatible** endpoints — Groq, DeepSeek, Mistral, xAI, OpenRouter, Together, Perplexity, DeepInfra, Cerebras, Venice, SambaNova, Fireworks, Nebius, Moonshot, Qwen and more — plus local runtimes (**Ollama**, **LM Studio**, **llama.cpp**, and **MLX LM** on Apple Silicon) and two escape hatches, `custom-openai` and `custom-anthropic`, for anything not on the list.
+On top of those, MikMik ships around forty **OpenAI-compatible** endpoints — Groq, DeepSeek, Mistral, xAI, OpenRouter, Together, Perplexity, DeepInfra, Cerebras, Venice, SambaNova, Fireworks, Nebius, Moonshot, Qwen and more — plus local runtimes (**Ollama**, **LM Studio**, **llama.cpp**, and **MLX LM** on Apple Silicon) and two escape hatches, `custom-openai` and `custom-anthropic`, for anything not on the list.
 
 Setup instructions, env vars and `settings.json` shapes are in [docs/providers.md](docs/providers.md); local runtimes have their own page in [docs/local-models.md](docs/local-models.md). The authoritative list lives in `src-rust/crates/api/src/providers/`.
 
@@ -247,7 +247,6 @@ For more info on how to configure MikMik, [head over to our docs](https://kilimc
 ## Contributing
 
 MikMik is built for the community, by the community and we'd love your help making it better.
-Please read [AGENTS.md](AGENTS.md) first — it carries the project-specific rules for both humans and agents: build and test commands, the code-quality bar, the provider-addition checklist, and the git rules.
 
 Before opening a PR, from `src-rust/`:
 
