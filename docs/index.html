@@ -509,6 +509,10 @@
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v6l3 3M8 7a4 4 0 100 8"/></svg>
       Hooks
     </a>
+    <a class="sidebar-link" data-page="remote-control" onclick="loadPage('remote-control')">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="1" width="6" height="14" rx="1.5"/><path d="M7 3.5h2"/></svg>
+      Remote Control
+    </a>
     <a class="sidebar-link" data-page="advanced" onclick="loadPage('advanced')">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8h3l2-5 2 10 2-5 1 3 2-3h2"/></svg>
       Advanced Features
@@ -560,6 +564,7 @@ const PAGES = [
   { id: 'plugins',       title: 'Plugins' },
   { id: 'agents',        title: 'Agents' },
   { id: 'hooks',         title: 'Hooks' },
+  { id: 'remote-control', title: 'Remote Control' },
   { id: 'advanced',      title: 'Advanced Features' },
 ];
 
@@ -653,6 +658,12 @@ async function loadPage(pageId, pushState = true) {
     el.className = 'md-body';
     el.innerHTML = marked.parse(md);
 
+    // Route the cross-page links back through the viewer. They are written
+    // as `configuration.md#interface` or as a bare `remote-control`, so the
+    // browser followed them out of the single-page viewer and fetched the raw
+    // markdown, or a path the site does not serve at all.
+    wireCrossPageLinks(el);
+
     // Build TOC
     buildToc(el);
 
@@ -681,6 +692,29 @@ async function loadPage(pageId, pushState = true) {
       </div>`;
     document.getElementById('page-nav').style.display = 'none';
   }
+}
+
+// A heading id is the slugified heading text with an `h-` prefix, so a
+// fragment written against the source markdown needs the prefix added.
+function scrollToFragment(fragment) {
+  if (!fragment) return;
+  const el = document.getElementById(fragment)
+    || document.getElementById('h-' + fragment);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function wireCrossPageLinks(contentEl) {
+  contentEl.querySelectorAll('a[href]').forEach(a => {
+    const match = /^([a-z0-9-]+)(?:\.md)?(?:#(.+))?$/i.exec(a.getAttribute('href') || '');
+    if (!match) return;
+    const [, pageId, fragment] = match;
+    if (!PAGES.some(p => p.id === pageId)) return;
+    a.setAttribute('href', '#' + pageId);
+    a.onclick = (e) => {
+      e.preventDefault();
+      loadPage(pageId).then(() => setTimeout(() => scrollToFragment(fragment), 80));
+    };
+  });
 }
 
 function buildToc(contentEl) {
