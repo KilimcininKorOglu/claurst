@@ -272,16 +272,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-### Option A: Install via Cargo
-
-```bash
-cargo install mikmik --force
-```
-
-This downloads, compiles, and installs the binary to `~/.cargo/bin/mikmik`.
-That directory is added to `PATH` automatically by `rustup`.
-
-### Option B: Clone and Build
+### Clone and build
 
 ```bash
 git clone https://github.com/KilimcininKorOglu/mikmik.git
@@ -319,20 +310,19 @@ sudo dnf install -y alsa-lib-devel openssl-devel
 sudo pacman -S alsa-lib openssl
 ```
 
-### Optional cargo features
+### Cargo features
 
-| Feature        | Description                                   |
-|----------------|-----------------------------------------------|
-| `voice`        | Microphone input / voice prompting            |
-| `computer-use` | Screenshot capture and mouse/keyboard control |
-| `dev_full`     | All experimental features combined            |
-
-To enable a feature:
+The `mikmik` package has one feature, `voice`, and it is on by default. Turn it
+off to build without the microphone support, which is what drops the ALSA
+dependency on Linux:
 
 ```bash
-cargo build --release --package mikmik --features voice
-cargo build --release --package mikmik --features dev_full
+cargo build --release --package mikmik --no-default-features
 ```
+
+`mikmik-tools` carries `computer-use` (screenshot capture and mouse/keyboard
+control) and `mikmik-core` carries `dev_full`. Neither is reachable from the
+`mikmik` package: naming one there is an error.
 
 ### Cross-compiling for Linux aarch64
 
@@ -373,17 +363,6 @@ deliberately omits `-f`: that switch would turn off filename completion for the
 whole command, and `--add-dir` and `--system-prompt-file` both take a path.
 
 Richer completion scripts may be added in a future release.
-
----
-
-## Upgrading a source install
-
-```bash
-cargo install mikmik --force
-```
-
-For binary installs (the recommended path), use `mikmik upgrade` — see
-the [Upgrading](#upgrading) section above.
 
 ---
 
