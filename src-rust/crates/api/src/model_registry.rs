@@ -1973,20 +1973,30 @@ mod tests {
     }
 
     #[test]
-    fn opus_4_8_surfaces_as_anthropic_default_and_in_list() {
+    fn the_newest_opus_surfaces_as_anthropic_default_and_in_list() {
         // Headline bug: the newest Opus in the catalog must be the default and
         // must appear in the listing — driven purely by the snapshot.
+        //
+        // Which Opus that is comes from the catalogue, not from a name typed
+        // here. Naming one made the test fail the day a newer Opus was added,
+        // which says nothing about whether the default is chosen correctly.
         let reg = ModelRegistry::new();
+        let listed = reg.list_by_provider("anthropic");
+        let newest_opus = listed
+            .iter()
+            .map(|e| e.info.id.to_string())
+            .filter(|id| id.contains("opus"))
+            .min_by(|a, b| cmp_ids_newest_first(a, b))
+            .expect("the catalogue lists at least one Opus");
+
         assert_eq!(
             reg.best_model_for_provider("anthropic").as_deref(),
-            Some("claude-opus-4-8"),
+            Some(newest_opus.as_str()),
             "anthropic default must be the newest catalog Opus"
         );
         assert!(
-            reg.list_by_provider("anthropic")
-                .iter()
-                .any(|e| &*e.info.id == "claude-opus-4-8"),
-            "claude-opus-4-8 must be listed"
+            listed.iter().any(|e| *e.info.id == newest_opus),
+            "{newest_opus} must be listed"
         );
     }
 
