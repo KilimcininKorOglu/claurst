@@ -21,29 +21,32 @@ This document is the complete reference for every slash command available in Mik
 13. [Display & Terminal](#display--terminal) — `/theme`, `/output-style`, `/statusline`, `/timeline`, `/vim`, `/terminal-setup`, `/mobile`, `/color`, `/stickers`, `/buddy`
 14. [Diagnostics & Info](#diagnostics--info) — `/doctor`, `/version`, `/update`
 15. [Export & Sharing](#export--sharing) — `/export`, `/copy`
-16. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/brief`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
+16. [Advanced & Internal](#advanced--internal) — `/thinking`, `/connect`, `/fork`, `/effort`, `/summary`, `/remote-control`, `/remote-env`, `/sandbox-toggle`, `/think-back`, `/thinkback-play`
 17. [Command Availability](#command-availability)
 
 ---
 
 ## Command System Overview
 
-Commands are registered in a priority-ordered registry. When you type a command name, MikMik resolves it through this chain:
+A command name is resolved in this order. The first match wins, so a built-in
+name cannot be shadowed:
 
-```
-bundledSkills -> builtinPluginSkills -> skillDirCommands ->
-workflowCommands -> pluginCommands -> pluginSkills -> COMMANDS()
-```
+1. **Built-in commands**, by name or by alias.
+2. **Templates** from the `commands` map in `settings.json`.
+3. **Skills** discovered in `.mikmik/skills/`, `.agents/skills/`, the config
+   directory, and the paths and git URLs `skills` names.
+4. **Plugin commands**, from every enabled plugin's `commands/` directory.
 
-### Command Types
+Commands support aliases: `/h`, `/?` and `/help` all reach the same handler.
 
-| Type        | Behavior                                                                  |
-|-------------|---------------------------------------------------------------------------|
-| `local`     | Runs synchronously; returns text output directly                          |
-| `local-jsx` | Renders an interactive TUI component (model picker, theme selector, etc.) |
-| `prompt`    | Expands to a prompt sent to the model via the main inference loop         |
+### What a command returns
 
-Commands support aliases — for example `/h`, `/?`, and `/help` all invoke the same handler.
+A command either prints text, opens a picker, sends a prompt to the model, or
+changes the session. Some change the configuration and print at the same time,
+which is why `/effort high` both switches the level and says so.
+
+A command marked hidden is left out of `/help` and the palette. It still runs
+when typed.
 
 ### Usage Syntax
 
@@ -51,7 +54,7 @@ Commands support aliases — for example `/h`, `/?`, and `/help` all invoke the 
 /command-name [arguments]
 ```
 
-Arguments are passed as a single string after the command name. Most commands that accept arguments are documented with an `argumentHint` shown in the command palette.
+Everything after the command name arrives as a single string.
 
 ---
 
@@ -98,7 +101,7 @@ leaves the display still until it finishes or the timeout fires.
 ### /help
 **Aliases:** `h`, `?`
 
-Display all available commands with their descriptions. Respects `isHidden` flags — internal or rarely-needed commands are suppressed unless you are an Anthropic employee.
+Display the available commands with their descriptions, grouped by category. Commands marked hidden are left out; they still run when typed.
 
 ```
 /help
@@ -187,24 +190,25 @@ Both toggles are off again every time the browser opens. Resuming moves the work
 ### /session
 **Aliases:** `remote`
 
-Manage active and stored sessions. Subcommands allow listing, switching, deleting, and attaching to remote sessions.
+Show the current session, or list the stored ones.
 
 ```
-/session
-/session list
-/session delete <session-id>
-/session attach <session-id>
+/session         — the current session; the remote URL when the bridge is up
+/session list    — the ten most recent sessions
 ```
+
+Resume one with `/resume <id>`.
 
 ---
 
 ### /fork
 
-Fork the current session into a new independent session that begins from the current conversation state. Useful for exploring two different approaches without losing either.
+Fork the current session into a new independent one, so two approaches can be
+explored without losing either. The argument is a message index, not a name.
 
 ```
-/fork
-/fork <new-session-name>
+/fork        — fork at the current end of the conversation
+/fork 5      — fork after message 5
 ```
 
 ---
@@ -319,21 +323,29 @@ See also `/effort` for a higher-level interface to thinking depth.
 
 ### /effort
 
-Set the thinking effort level. This is a convenience wrapper over `/thinking` that maps human-readable levels to token budgets.
+Set the reasoning effort level. With no argument it reports the level in force,
+and says `unset` when nothing was chosen: unset is not the same as `medium`,
+because it sends no reasoning configuration at all.
 
-| Level    | Description                         |
-|----------|-------------------------------------|
-| `low`    | Minimal thinking; fastest responses |
-| `medium` | Balanced thinking and speed         |
-| `high`   | Deep reasoning; slower responses    |
-| `max`    | Maximum token budget for thinking   |
+| Level       | Description                                                    |
+|-------------|----------------------------------------------------------------|
+| `none`      | Thinking disabled; the model answers directly                  |
+| `minimal`   | The smallest reasoning budget                                  |
+| `low`       | Quick, with minimal overhead                                   |
+| `medium`    | Balanced. `normal` is accepted as an alias                     |
+| `high`      | Deep reasoning; slower responses                               |
+| `xhigh`     | Extended reasoning for hard problems                           |
+| `max`       | Maximum available budget                                       |
+| `ultracode` | Maximum reasoning plus the ultracode delegation workflow       |
 
 ```
-/effort low
-/effort medium
+/effort              — report the level in force
 /effort high
-/effort max
+/effort ultracode
 ```
+
+Only `low`, `high` and `normal` also move the output token limit, to 4096,
+32768, and back to the model default. The other levels leave it alone.
 
 ---
 
@@ -397,24 +409,23 @@ Setting persists to `~/.config/mikmik/ui-settings.json`.
 ### /config
 **Aliases:** `settings`
 
-View or modify MikMik configuration values. Without arguments, renders an interactive settings panel. With arguments, acts as a key-value accessor.
+Show or change configuration values. With no arguments it prints the whole
+configuration as JSON and the usage below it.
 
 ```
-/config
-/config get <key>
-/config set <key> <value>
-/config reset <key>
+/config                                — print the configuration
+/config get <key>                      — read one value
+/config set theme dark
+/config set output-style asd-ste100
+/config set model claude-opus-4-6
+/config set permission-mode accept-edits
+/config unset model                    — back to the provider default
+/config unset output-style
 ```
 
-Common keys:
-
-| Key           | Description                       |
-|---------------|-----------------------------------|
-| `model`       | Default model name                |
-| `theme`       | Color theme name                  |
-| `vim`         | Vim mode enabled (`true`/`false`) |
-| `outputStyle` | Output rendering style            |
-| `autoApprove` | Auto-approve tool calls           |
+Four keys are readable and writable here: `theme`, `output-style`, `model` and
+`permission-mode`. Everything else is edited in `/settings` or in
+`settings.json`. `unset` accepts `model` and `output-style` only.
 
 ---
 
@@ -502,30 +513,35 @@ See [keybindings.md](./keybindings.md) for the full keybindings reference.
 ### /permissions
 **Aliases:** `allowed-tools`
 
-View and manage tool permission rules. Permissions control which tools can run without prompting, which are blocked, and which always require confirmation.
+View and manage tool permission rules. Permissions control which tools run
+without prompting, which are blocked, and which always ask.
 
 ```
-/permissions
-/permissions list
-/permissions allow <tool-name>
-/permissions deny <tool-name>
-/permissions reset
+/permissions                    — show the current permissions
+/permissions set <mode>         — default, accept-edits, bypass-permissions, plan
+/permissions allow Bash         — allow one tool
+/permissions deny Write         — deny one tool
+/permissions reset              — clear the overrides
 ```
+
+`/permissions set bypass-permissions` raises the bypass warning first. See
+[Permission Modes](configuration.md#permission-modes).
 
 ---
 
 ### /hooks
 
-Manage event hooks. Hooks are shell commands or scripts that execute when lifecycle events fire (e.g., before/after tool calls, on session start/end).
+Show the event hooks configured in `settings.json`. In the TUI it opens an
+overlay that also adds, edits and removes them; elsewhere it prints the listing.
+It takes no arguments.
 
 ```
 /hooks
-/hooks list
-/hooks add <event> <command>
-/hooks remove <hook-id>
 ```
 
-Available events: `pre-tool`, `post-tool`, `session-start`, `session-end`, `message-send`, `message-receive`.
+Settings hooks fire on six events: `PreToolUse`, `PostToolUse`, `PostModelTurn`,
+`Stop`, `UserPromptSubmit` and `Notification`. Plugins declare hooks separately,
+on a longer list of events. See [Hooks](hooks.md).
 
 ---
 
@@ -541,15 +557,23 @@ Open MikMik privacy settings. Launches a browser to the Anthropic privacy portal
 
 ### /mcp
 
-Configure and manage Model Context Protocol (MCP) servers. MCP servers expose additional tools and resources to the agent.
+Manage Model Context Protocol (MCP) servers. They extend MikMik with external
+tools, resources, and prompt templates.
 
 ```
-/mcp
-/mcp list
-/mcp add <name> <command>
-/mcp remove <name>
-/mcp restart <name>
+/mcp                          — list the configured servers with live status
+/mcp list                     — the same
+/mcp status                   — detailed connection status for every server
+/mcp auth <server>            — show the OAuth instructions for a server
+/mcp connect <server>         — reconnect a disconnected server
+/mcp logs <server>            — recent errors and logs for a server
+/mcp resources [server]       — list resources from connected servers
+/mcp prompts [server]         — list prompt templates from connected servers
+/mcp get-prompt <server> <prompt> [key=value ...]   — expand a prompt template
 ```
+
+Servers are added and removed by editing the `mcpServers` key in
+`~/.config/mikmik/settings.json`, not through this command.
 
 ---
 
@@ -659,15 +683,25 @@ Toggle vim keybinding mode on or off. In vim mode the input field behaves like a
 
 ### /voice
 
-Configure voice input/output. Requires a supported audio backend. Subcommands control microphone selection, TTS voice, and push-to-talk behavior.
+Enable or disable voice input (push-to-talk). There is no speech output.
 
 ```
-/voice
+/voice           — toggle
 /voice on
 /voice off
-/voice mic <device>
-/voice tts <voice-name>
+/voice status
 ```
+
+`Alt+V` starts recording; `Alt+V` or `Esc` stops it and transcribes. The setting
+persists to `~/.config/mikmik/ui-settings.json`.
+
+Transcription goes to a Whisper-compatible API. `OPENAI_API_KEY` is the key it
+looks for, with `ANTHROPIC_API_KEY` as a fallback. Point it at a local server
+with `WHISPER_ENDPOINT_URL`, for example
+`http://localhost:8080/v1/audio/transcriptions`.
+
+On Linux, ALSA must be installed (`sudo apt install libasound2-dev`), and a
+build made with `--no-default-features` has no voice support at all.
 
 ---
 
@@ -685,46 +719,57 @@ Run the terminal capability detection and setup wizard. Checks for true-color su
 
 ### /commit
 
-Stage and commit changes to the current git repository. The model drafts a commit message based on the diff. You can review and edit the message before confirming.
+Ask the model to commit the changes that are already staged. It reads
+`git diff --cached`, writes a message following the repository's conventions,
+and runs `git commit`. It does not stage anything itself.
 
 ```
 /commit
-/commit "optional message override"
+/commit fix the parser         — pass your own message
 ```
 
 ---
 
 ### /diff
 
-Show file diffs for changes made during the current session. Displays a unified diff of all files MikMik has written or edited since the session started.
+Show git diff output for the working directory.
 
 ```
-/diff
-/diff <file-path>
+/diff           — every unstaged change
+/diff --stat    — a summary of the changed files
+/diff --staged  — the staged changes
+/diff <ref>     — against a branch, tag, or commit
 ```
 
 ---
 
 ### /undo
 
-Undo file changes made during the current session. Restores files to their state before MikMik's last write operation. Can be called multiple times to step further back.
+Revert every file change the most recent assistant turn made. It takes no
+arguments.
 
 ```
 /undo
-/undo <file-path>
 ```
+
+`/revert [<n>|<uuid>]` reverts a specific turn instead, and `/checkpoints` lists
+the turns that changed files.
 
 ---
 
 ### /review
 
-Initiate a code review pass over recent changes. The model examines all modified files and produces inline comments and a summary of issues found.
+Send a diff to the model for a structured review, and optionally post the
+result as a comment on the matching GitHub pull request.
 
 ```
-/review
-/review <file-path>
-/review --since HEAD~3
+/review              — the staged changes (`git diff --cached`)
+/review main         — `git diff main...HEAD`
+/review origin/main
 ```
+
+Posting to GitHub needs `GITHUB_TOKEN` with repo scope. The PR number is
+detected from `git remote`, or taken from `CLAUDE_PR_NUMBER`.
 
 ---
 
@@ -741,7 +786,9 @@ Run a security-focused review pass. The model looks specifically for vulnerabili
 
 ### /init
 
-Initialize MikMik project configuration in the current directory. Creates a `CLAUDE.md` file that acts as persistent project-level context injected at the start of every session.
+Create an `AGENTS.md` in the working directory from a template. That file is
+read at the start of every session and injected into the system prompt. An
+existing `AGENTS.md` is left alone.
 
 ```
 /init
@@ -751,13 +798,16 @@ Initialize MikMik project configuration in the current directory. Creates a `CLA
 
 ### /search
 
-Search the codebase using natural language or regex patterns. Wraps the GrepTool and GlobTool with a higher-level interface.
+Search past sessions, not the codebase. Titles and message content are matched
+in the local SQLite session database, and the 50 best matches are returned,
+newest first.
 
 ```
 /search <query>
-/search "TODO" --type ts
-/search "function.*export" --regex
+/search refactor authentication
 ```
+
+To search the codebase, ask the model: it has `Grep` and `Glob`.
 
 ---
 
@@ -765,12 +815,12 @@ Search the codebase using natural language or regex patterns. Wraps the GrepTool
 
 ### /files
 
-List all files currently tracked (read or written) in the active session. Useful for reviewing what context the model has access to.
+List the files mentioned in the conversation. Paths are found in the message
+text and checked against the filesystem, so only ones that exist are listed. It
+takes no arguments.
 
 ```
 /files
-/files --written
-/files --read
 ```
 
 ---
@@ -789,15 +839,22 @@ Analyze context window usage. Shows a breakdown of tokens consumed by system pro
 
 ### /memory
 
-Manage session memory. Memory entries are short notes persisted across sessions. The model can read these at session start to maintain continuity.
+Show and edit the `AGENTS.md` files that give the session its project context.
 
 ```
-/memory
-/memory list
-/memory add <note>
-/memory delete <id>
-/memory clear
+/memory                 — show every AGENTS.md that was found
+/memory edit            — open the project AGENTS.md in your editor
+/memory edit global     — open ~/.config/mikmik/AGENTS.md
+/memory clear           — empty the project AGENTS.md
+/memory clear global    — empty the global one
 ```
+
+Locations, in priority order: `<project>/.mikmik/AGENTS.md`,
+`<project>/AGENTS.md`, then `~/.config/mikmik/AGENTS.md`. Use `/init` to create
+one from a template.
+
+While auto memory is on, `/memory` also reports that directory and what it
+holds; see [Configuration](configuration.md#auto-memory).
 
 ---
 
@@ -878,13 +935,16 @@ Tools
 
 ### /agents
 
-Manage sub-agents. Sub-agents are parallel model instances that can be spawned to work on independent tasks simultaneously.
+Manage the agent definitions in `.mikmik/agents/`. An agent is a named
+configuration: a prompt, a model, an access level and a turn limit. Running
+agents are watched with `/tasks` and the `monitor` tool, not here.
 
 ```
-/agents
-/agents list
-/agents stop <agent-id>
-/agents output <agent-id>
+/agents                       — open the agents view
+mikmik agents list
+mikmik agents create <name>
+mikmik agents edit <name>
+mikmik agents delete <name>
 ```
 
 ---
@@ -892,14 +952,15 @@ Manage sub-agents. Sub-agents are parallel model instances that can be spawned t
 ### /tasks
 **Aliases:** `bashes`
 
-Manage tracked background tasks. Tasks are shell commands or model invocations running asynchronously. Monitor progress, fetch output, or stop tasks from this interface.
+Ask the model to list the background tasks and their status. It takes no
+arguments: the command expands to a prompt, and the model answers with the
+`TaskList` tool.
 
 ```
 /tasks
-/tasks list
-/tasks output <task-id>
-/tasks stop <task-id>
 ```
+
+Use the `monitor` tool through the model to fetch a task's output or stop it.
 
 ---
 
@@ -988,23 +1049,34 @@ To activate an agent, start MikMik with `--agent <name>`. See [agents.md](./agen
 
 ### /plan
 
-Enter plan mode (read-only). In plan mode the model can read files and reason about changes but cannot write, edit, or execute anything. Use this to draft an approach before allowing writes.
+Enter plan mode (read-only). In plan mode the model reads files and reasons
+about changes but writes, edits and commands are blocked. Use it to draft an
+approach before allowing writes.
 
 ```
 /plan
+/plan <description>       — name the task the plan is for
+/plan exit                — leave plan mode
 ```
 
-To exit plan mode, use `/plan off` or the `/exit-plan` internal action.
+`Tab` on an empty prompt leaves plan mode too. The model leaves it by calling
+`ExitPlanMode` and having the plan approved; the model enters it by calling
+`EnterPlanMode`. See [Plan mode](configuration.md#plan).
 
 ---
 
 ### /ultraplan
 
-Extended planning mode with deeper reasoning. Like `/plan` but with an elevated thinking budget to allow more thorough analysis before acting.
+Extended planning with a raised thinking budget, for more thorough analysis
+before acting.
 
 ```
-/ultraplan
+/ultraplan                        — medium effort
+/ultraplan --effort=high
+/ultraplan --effort=maximum
 ```
+
+`--effort` accepts `medium`, `high` or `maximum` only.
 
 ---
 
@@ -1022,9 +1094,8 @@ Run an exhaustive multi-dimensional code review over the current working directo
 Each finding is tagged by category and severity.
 
 ```
-/ultrareview
-/ultrareview <path>
-/ultrareview <PR-number>
+/ultrareview            — the working directory
+/ultrareview <path>     — one file or directory
 ```
 
 ---
@@ -1039,15 +1110,18 @@ Documented above under [Configuration & Settings](#configuration--settings).
 
 ### /skills
 
-List and manage skills. Skills are bundled prompt-commands that extend MikMik's capabilities without writing code. They appear alongside built-in commands in the registry.
+List the skills the model can load. It takes no arguments.
 
 ```
 /skills
-/skills list
-/skills enable <skill-name>
-/skills disable <skill-name>
-/skills reload
 ```
+
+Two sets are listed. Prompt templates in `.mikmik/commands/` and
+`<config dir>/commands/` are named without a leading slash: the `Skill` tool
+loads them by name, and the slash router does not read that directory.
+Discovered skills, from `.mikmik/skills/`, `.agents/skills/`, the config
+directory, and the paths and git URLs `skills` names, are slash commands and are
+listed as such.
 
 ---
 
@@ -1243,27 +1317,34 @@ Documented above under [Code & Git](#code--git).
 
 ### /mobile
 
-Display a QR code and download links for the Claude mobile app. Supports a `session` subcommand that generates a QR code linking directly to an active remote MikMik session.
+Display a QR code and download links for the Claude mobile app.
 
 ```
-/mobile             — show QR code for claude.ai/mobile (works for both platforms)
-/mobile ios         — show QR code for the iOS App Store
-/mobile android     — show QR code for Google Play
-/mobile session     — show QR code linking to the active remote session (requires --remote)
+/mobile             — QR code for claude.ai/mobile, which covers both platforms
+/mobile ios         — QR code for the iOS App Store
+/mobile android     — QR code for Google Play
+/mobile session     — QR code linking to the active remote session
 ```
+
+`session` needs a remote session to be running; see
+[`/remote-control`](#remote-control).
 
 ---
 
 ### /color
 
-Set the prompt bar color for the current session. Accepts standard color names or hex values. The color resets when the session ends unless saved via `/config`.
+Set the accent colour of the prompt bar.
 
 ```
-/color               — open the interactive color picker
-/color <name>        — set to a named color (e.g., blue, red, green)
-/color #ff6b6b       — set to a hex color value
-/color default       — reset to the theme default
+/color               — report the current colour
+/color blue          — a named colour
+/color #ff6b6b       — a hex code, `#RGB` or `#RRGGBB`
+/color default       — back to the theme default
 ```
+
+Named colours: red, green, blue, yellow, cyan, magenta, white, orange, purple.
+The choice is written to `~/.config/mikmik/ui-settings.json` and applied at the
+next start.
 
 ---
 
@@ -1352,13 +1433,14 @@ Check for available updates. Queries the GitHub releases API and displays the la
 
 ### /export
 
-Export the current session transcript. Supported formats include Markdown, JSON, and plain text. The output is written to a file or printed to stdout.
+Export the current conversation as Markdown or JSON. Without `--output` it
+prints to the terminal.
 
 ```
-/export
-/export --format markdown
-/export --format json --output session.json
-/export --stdout
+/export                                      — JSON, to the terminal
+/export --format markdown                    — readable Markdown
+/export --format json --output chat.json
+/export --output conversation.md             — the extension picks Markdown
 ```
 
 ---
@@ -1427,16 +1509,6 @@ Generate a summary of the current session. The model produces a condensed descri
 
 ---
 
-### /brief
-
-Output a brief status message for use in non-interactive contexts. Renders minimal session info without the full TUI.
-
-```
-/brief
-```
-
----
-
 ### /remote-control
 **Aliases:** `rc`
 
@@ -1457,13 +1529,18 @@ With no argument it reports the relay address it resolved and which source each 
 
 ### /remote-env
 
-Manage environment variables sent to remote sessions.
+Manage the environment variables stored under the `env` key in `settings.json`
+and forwarded to remote sessions.
 
 ```
-/remote-env list
+/remote-env                    — list them
+/remote-env list               — the same
 /remote-env set <KEY> <VALUE>
 /remote-env unset <KEY>
 ```
+
+This is the only reader of the `env` key in the shipped binary; the tool runner
+does not consult it.
 
 ---
 
@@ -1518,36 +1595,13 @@ Replay a previous extended-thinking trace as a formatted, step-numbered walkthro
 
 ## Command Availability
 
-Not all commands are available in all contexts.
+Every command is registered unconditionally. The list does not change with the
+provider, the account, or how the session was started, so a command that exists
+here exists everywhere.
 
-### Remote Mode
+Two commands report a limit at run time rather than being hidden:
 
-When running with `--remote`, only a restricted set of commands is available:
-
-`session`, `exit`, `clear`, `help`, `theme`, `vim`, `cost`, `usage`, `plan`, `keybindings`, `statusline`
-
-### Bridge Mode
-
-Over the Remote Control bridge (used by IDE integrations), only `local`-type commands are forwarded:
-
-`compact`, `clear`, `cost`, `files`
-
-### Internal-Only Commands
-
-The following commands are only available when the `USER_TYPE` environment variable is set to `ant` (Anthropic internal builds):
-
-`commit-push-pr`, `ctx_viz`, `good-claude`, `issue`, `init-verifiers`, `mock-limits`, `bridge-kick`, `ultraplan`, `summary`, `teleport`, `ant-trace`, `perf-issue`, `env`, `oauth-refresh`, `debug-tool-call`, `autofix-pr`, `bughunter`, `backfill-sessions`, `break-cache`
-
-### Availability-Restricted Commands
-
-Some commands are available only under certain account or platform conditions:
-
-| Command             | Restriction                                                            |
-|---------------------|------------------------------------------------------------------------|
-| `/fast`             | Available when a fast-mode model is configured for the active provider |
-| `/privacy-settings` | Opens Anthropic privacy portal (useful for claude.ai accounts)         |
-| `/sandbox-toggle`   | Functional on macOS, Linux, WSL2 only; no-op on native Windows         |
-
-### Feature-Flagged Commands
-
-Some commands check `isEnabled()` at runtime. For example, voice-related commands check for audio device availability; the desktop command checks for a display server.
+| Command           | What it reports                                                                 |
+|-------------------|---------------------------------------------------------------------------------|
+| `/sandbox-toggle` | Sandboxed execution needs macOS, Linux or WSL2. On native Windows it says so.   |
+| `/voice`          | Voice needs a microphone, and needs a build that was not made with `--no-default-features`. |
