@@ -589,14 +589,23 @@ that persona to one turn without persisting it.
 
 ### /theme
 
-Open the interactive theme picker. Preview and select a color theme for the MikMik TUI.
+Open the interactive theme picker. Preview and select a colour theme for the
+MikMik TUI.
 
 ```
 /theme
 /theme dark
 /theme light
-/theme solarized
+/theme deuteranopia
 ```
+
+The theme decides the colours the interface puts on a state: an error, a
+success, a warning, and the accent that marks who a line came from. Layout
+colours (borders, padding, the input frame) are the same under every theme.
+
+`deuteranopia` is the reason the distinction matters. Red-green colour
+blindness makes the usual error red and success green hard to tell apart, so
+that theme replaces the pair with blue, yellow and grey.
 
 ---
 

@@ -1406,6 +1406,12 @@ pub struct App {
     // ---- Visual mode indicators -------------------------------------------
     /// Plan mode — input border turns blue, [PLAN] shown in status bar.
     pub plan_mode: bool,
+    /// The colours the selected theme puts on error, success and warning.
+    ///
+    /// Held rather than derived per frame: rendering asks for it on every
+    /// draw, and rebuilding it from the theme name each time would allocate a
+    /// palette per line. Refreshed by `apply_theme`.
+    pub palette: crate::theme_colors::ColorPalette,
     /// When streaming stalled (used to turn the spinner red after 3 s).
     pub stall_start: Option<std::time::Instant>,
 
@@ -1833,6 +1839,8 @@ impl App {
     pub fn new(config: Config, cost_tracker: Arc<CostTracker>) -> Self {
         let effective = config.effective_route();
         let model_name = config.canonical_model(&effective.account, &effective.model);
+        // Read before the struct takes ownership of `config` below.
+        let palette = crate::theme_colors::ColorPalette::for_config_theme(&config.theme);
         let user_keybindings = UserKeybindings::load(&Settings::config_dir());
         // Build the model registry up front so user metadata overrides
         // (issue #309) are layered on before the struct owns `config`.
@@ -1929,6 +1937,7 @@ impl App {
             file_history: None,
             current_turn: None,
             plan_mode: false,
+            palette,
             stall_start: None,
             settings_screen: SettingsScreen::new(),
             theme_screen: ThemeScreen::new(),
@@ -2981,6 +2990,7 @@ impl App {
             other => Theme::Custom(other.to_string()),
         };
         self.config.theme = theme;
+        self.palette = crate::theme_colors::ColorPalette::for_config_theme(&self.config.theme);
         // Persist to settings file
         let mut settings = Settings::load_sync().unwrap_or_default();
         settings.config.theme = self.config.theme.clone();

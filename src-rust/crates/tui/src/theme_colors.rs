@@ -6,6 +6,10 @@
 use ratatui::style::Color;
 
 /// Color palette for a specific theme.
+///
+/// `Copy` because it is eleven `Color`s and nothing else: rendering reads it
+/// every frame, and a clone at each call site would be noise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorPalette {
     /// Error messages and alerts (normally red, but color-blind friendly)
     pub error: Color,
@@ -184,29 +188,94 @@ impl ColorPalette {
     }
 }
 
-/// Get appropriate color for a given theme based on message type/role.
-pub fn get_message_indicator_color(theme_name: &str, role: &str) -> Color {
-    let palette = ColorPalette::for_theme(theme_name);
-    match role {
-        "user" => palette.accent,
-        "assistant" => palette.secondary_accent,
-        "system" => palette.disabled,
-        "tool" => palette.action,
-        _ => palette.text_light,
+impl ColorPalette {
+    /// The palette a `Theme` selects.
+    ///
+    /// A custom theme falls back to the default palette rather than failing:
+    /// the name may belong to a theme the picker offers but this table has no
+    /// colours for.
+    pub fn for_config_theme(theme: &mikmik_core::config::Theme) -> Self {
+        use mikmik_core::config::Theme;
+        Self::for_theme(match theme {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+            Theme::Deuteranopia => "deuteranopia",
+            Theme::Default => "default",
+            Theme::Custom(name) => name.as_str(),
+        })
+    }
+
+    /// The colour that marks who or what a line came from.
+    pub fn message_indicator(&self, role: &str) -> Color {
+        match role {
+            "user" => self.accent,
+            "assistant" => self.secondary_accent,
+            "system" => self.disabled,
+            "tool" => self.action,
+            _ => self.text_light,
+        }
     }
 }
 
-/// Get error indicator color for given theme (always prominent, never red in deuteranopia).
-pub fn get_error_color(theme_name: &str) -> Color {
-    ColorPalette::for_theme(theme_name).error
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mikmik_core::config::Theme;
 
-/// Get success indicator color for given theme (blue instead of green in deuteranopia).
-pub fn get_success_color(theme_name: &str) -> Color {
-    ColorPalette::for_theme(theme_name).success
-}
+    #[test]
+    fn deuteranopia_separates_the_pair_red_green_blindness_confuses() {
+        // The whole point of the theme: an error and a success that a
+        // deuteranopic reader cannot tell apart are the same message.
+        let default = ColorPalette::for_theme("default");
+        let deuteranopia = ColorPalette::for_theme("deuteranopia");
 
-/// Get warning indicator color for given theme (yellow/gold instead of orange in deuteranopia).
-pub fn get_warning_color(theme_name: &str) -> Color {
-    ColorPalette::for_theme(theme_name).warning
+        assert_ne!(deuteranopia.error, default.error);
+        assert_ne!(deuteranopia.success, default.success);
+        assert_ne!(
+            deuteranopia.error, deuteranopia.success,
+            "error and success must stay distinguishable"
+        );
+    }
+
+    #[test]
+    fn every_theme_the_picker_offers_resolves_to_a_palette() {
+        for theme in [
+            Theme::Default,
+            Theme::Dark,
+            Theme::Light,
+            Theme::Deuteranopia,
+            Theme::Custom("dracula".to_string()),
+            // A name with no colours of its own falls back rather than failing.
+            Theme::Custom("no-such-theme".to_string()),
+        ] {
+            let palette = ColorPalette::for_config_theme(&theme);
+            assert_ne!(
+                palette.error, palette.success,
+                "{theme:?} must not paint error and success the same"
+            );
+        }
+    }
+
+    #[test]
+    fn a_custom_name_with_no_colours_falls_back_to_the_default_palette() {
+        assert_eq!(
+            ColorPalette::for_config_theme(&Theme::Custom("no-such-theme".to_string())),
+            ColorPalette::for_theme("default")
+        );
+    }
+
+    #[test]
+    fn each_role_gets_its_own_indicator() {
+        let palette = ColorPalette::for_theme("default");
+        assert_eq!(palette.message_indicator("user"), palette.accent);
+        assert_eq!(
+            palette.message_indicator("assistant"),
+            palette.secondary_accent
+        );
+        assert_eq!(palette.message_indicator("tool"), palette.action);
+        assert_eq!(
+            palette.message_indicator("anything else"),
+            palette.text_light
+        );
+    }
 }

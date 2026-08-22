@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use crate::overlays::{MIKMIK_ACCENT, MIKMIK_MUTED, MIKMIK_PANEL_BORDER, MIKMIK_TEXT};
+use crate::overlays::{MIKMIK_MUTED, MIKMIK_PANEL_BORDER, MIKMIK_TEXT};
 use unicode_width::UnicodeWidthStr;
 
 /// Severity / visual style of a notification.
@@ -113,12 +113,17 @@ use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
 impl NotificationKind {
-    pub fn color(&self) -> Color {
+    /// The colour this kind is drawn in, under the active theme.
+    ///
+    /// Taken from the palette rather than fixed, because a red error and a
+    /// green success are the pair a deuteranopic reader cannot tell apart, and
+    /// that is exactly what the `deuteranopia` theme exists to change.
+    pub fn color(&self, palette: &crate::theme_colors::ColorPalette) -> Color {
         match self {
-            NotificationKind::Info => MIKMIK_ACCENT,
-            NotificationKind::Warning => Color::Yellow,
-            NotificationKind::Error => Color::Red,
-            NotificationKind::Success => Color::Rgb(80, 200, 120),
+            NotificationKind::Info => palette.info,
+            NotificationKind::Warning => palette.warning,
+            NotificationKind::Error => palette.error,
+            NotificationKind::Success => palette.success,
         }
     }
 
@@ -138,7 +143,12 @@ impl NotificationKind {
 ///   row 0: ▐ [icon] [message truncated]          [Esc] ▌
 ///   row 1: ▐ [progress bar for timed notifs]            ▌
 ///   row 2: (bottom border row, blank)
-pub fn render_notification_banner(frame: &mut Frame, queue: &NotificationQueue, area: Rect) {
+pub fn render_notification_banner(
+    frame: &mut Frame,
+    queue: &NotificationQueue,
+    area: Rect,
+    palette: &crate::theme_colors::ColorPalette,
+) {
     let notif = match queue.current() {
         Some(n) => n,
         None => return,
@@ -163,7 +173,7 @@ pub fn render_notification_banner(frame: &mut Frame, queue: &NotificationQueue, 
         height: toast_height,
     };
 
-    let color = notif.kind.color();
+    let color = notif.kind.color(palette);
     let bg = Color::Rgb(18, 18, 22); // slightly elevated from terminal bg
 
     // Clear the area so the toast has a distinct background.

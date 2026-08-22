@@ -466,6 +466,11 @@ struct MessageLinesCacheKey {
     // blocks. Hashed rather than owned so building a key stays allocation-free
     // on the per-frame path.
     advisor_model_hash: u64,
+    // And for the palette, which colours the error state of a tool block. A
+    // theme switch changes no message and no version, so without this the
+    // cached lines would keep the colours of the theme that was in force when
+    // they were built.
+    palette: crate::theme_colors::ColorPalette,
 }
 
 #[derive(Clone)]
@@ -499,6 +504,8 @@ struct CompletedMsgCacheKey {
     show_timestamps: bool,
     // See `MessageLinesCacheKey::advisor_model_hash`.
     advisor_model_hash: u64,
+    // See `MessageLinesCacheKey::palette`.
+    palette: crate::theme_colors::ColorPalette,
 }
 
 /// Hash the configured advisor model so a change invalidates the transcript
@@ -986,7 +993,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
     // Render non-error notifications as toast banners (unless another modal is open)
     if !modal_active && app.notifications.current().is_some() {
-        render_notification_banner(frame, &app.notifications, size);
+        render_notification_banner(frame, &app.notifications, size, &app.palette);
     }
 
     // ---- Text selection highlight (topmost post-pass) ---------------------
@@ -1931,7 +1938,13 @@ fn append_turn_items(
 
     for block in &turn.tool_blocks {
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, block, frame_count, ctx.advisor_model);
+        render_tool_block_lines(
+            &mut lines,
+            block,
+            frame_count,
+            ctx.advisor_model,
+            &ctx.palette,
+        );
         if !lines.is_empty() {
             sections.push((
                 SectionContent::Plain(lines),
@@ -2097,6 +2110,7 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model: app.config.advisor_model.as_deref(),
         goal_completed: app.goal_completed,
+        palette: app.palette,
     };
     let turns = build_transcript_turns(app);
     let mut turn_map = std::collections::HashMap::new();
@@ -2120,6 +2134,7 @@ fn build_all_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
                 block,
                 app.frame_count,
                 app.config.advisor_model.as_deref(),
+                &app.palette,
             );
             push_rendered_items(&mut items, lines, None, false);
             push_blank_item(&mut items);
@@ -2156,6 +2171,7 @@ fn render_message_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         thinking_expanded_len: app.thinking_expanded.len(),
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model_hash: advisor_model_hash(app),
+        palette: app.palette,
     };
     if let Some(lines) = MESSAGE_LINES_CACHE.with(|cache| {
         cache
@@ -2197,6 +2213,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model: app.config.advisor_model.as_deref(),
         goal_completed: app.goal_completed,
+        palette: app.palette,
     };
     let turns = build_transcript_turns(app);
 
@@ -2224,6 +2241,7 @@ fn render_streaming_items(app: &App, width: u16) -> Vec<RenderedLineItem> {
         thinking_expanded_len: app.thinking_expanded.len(),
         show_timestamps: app.settings_screen.show_message_timestamps,
         advisor_model_hash: advisor_model_hash(app),
+        palette: app.palette,
     };
 
     // Committed prefix: messages before the live turn. Stable across streaming
@@ -2706,13 +2724,14 @@ fn render_tool_block_lines(
     block: &crate::app::ToolUseBlock,
     frame_count: u64,
     advisor_model: Option<&str>,
+    palette: &crate::theme_colors::ColorPalette,
 ) {
     let input_val: serde_json::Value =
         serde_json::from_str(&block.input_json).unwrap_or(serde_json::Value::Null);
     let normalized = block.name.to_ascii_lowercase();
     let running = block.status == ToolStatus::Running;
     let accent = if block.status == ToolStatus::Error {
-        Color::Rgb(255, 140, 0)
+        palette.error
     } else {
         CLAUDE_ORANGE
     };
@@ -2822,7 +2841,7 @@ fn render_tool_block_lines(
         ]));
 
         let preview_style = match block.status {
-            ToolStatus::Error => Style::default().fg(Color::Rgb(255, 140, 0)),
+            ToolStatus::Error => Style::default().fg(palette.error),
             _ => Style::default().fg(Color::DarkGray),
         };
         for line_text in preview.lines() {
@@ -4561,15 +4580,19 @@ mod tool_block_tests {
         }
     }
 
+    fn palette() -> crate::theme_colors::ColorPalette {
+        crate::theme_colors::ColorPalette::for_theme("default")
+    }
+
     fn render(b: &ToolUseBlock) -> Vec<String> {
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, b, 0, None);
+        render_tool_block_lines(&mut lines, b, 0, None, &palette());
         lines.iter().map(flatten_line_text).collect()
     }
 
     fn render_with_advisor(b: &ToolUseBlock, model: &str) -> Vec<String> {
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, b, 0, Some(model));
+        render_tool_block_lines(&mut lines, b, 0, Some(model), &palette());
         lines.iter().map(flatten_line_text).collect()
     }
 
@@ -4606,6 +4629,29 @@ mod tool_block_tests {
         assert!(
             !running.iter().any(|line| line.contains(TOOL_OUTPUT_RULE)),
             "{running:?}"
+        );
+    }
+
+    #[test]
+    fn the_error_colour_comes_from_the_theme() {
+        // The theme setting used to change nothing on screen; this is the
+        // first place it does.
+        fn error_accent(theme: &str) -> ratatui::style::Color {
+            let mut lines = Vec::new();
+            render_tool_block_lines(
+                &mut lines,
+                &block("Bash", ToolStatus::Error, r#"{"command":"ls"}"#, Some("no")),
+                0,
+                None,
+                &crate::theme_colors::ColorPalette::for_theme(theme),
+            );
+            lines[0].spans[0].style.fg.expect("the header is coloured")
+        }
+
+        assert_ne!(
+            error_accent("deuteranopia"),
+            error_accent("default"),
+            "a deuteranopic reader must not get the default red"
         );
     }
 
@@ -6347,7 +6393,13 @@ mod tab_expansion_tests {
         };
 
         let mut lines = Vec::new();
-        render_tool_block_lines(&mut lines, &block, 0, None);
+        render_tool_block_lines(
+            &mut lines,
+            &block,
+            0,
+            None,
+            &crate::theme_colors::ColorPalette::for_theme("default"),
+        );
 
         let rendered: Vec<String> = lines.iter().map(flatten).collect();
         for line in &rendered {

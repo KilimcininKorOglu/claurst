@@ -54,6 +54,8 @@ pub struct RenderContext<'a> {
     /// the muted `GOAL COMPLETE` variant of the goal badge; the goal store is
     /// not reachable from the renderer, so the caller supplies it.
     pub goal_completed: bool,
+    /// The colours the active theme puts on the states a renderer marks.
+    pub palette: crate::theme_colors::ColorPalette,
 }
 
 /// Shared empty collections so `RenderContext::default()` can hand out
@@ -73,6 +75,7 @@ impl Default for RenderContext<'static> {
             expanded_thinking: &EMPTY_EXPANDED_THINKING,
             show_timestamps: false,
             advisor_model: None,
+            palette: crate::theme_colors::ColorPalette::for_theme("default"),
             goal_completed: false,
         }
     }

@@ -283,7 +283,7 @@ the session only and writes nothing.
 
 | Key             | Type           | Default     | Description                                                                                                                                                 |
 |-----------------|----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `theme`         | string         | `"default"` | Color theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`.                                                                         |
+| `theme`         | string         | `"default"` | Colour theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`. Sets the error, success, warning and accent colours; layout colours are fixed. |
 | `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.config/mikmik/output-styles/`. |
 | `output_format` | string         | `"text"`    | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`.                                                                    |
 | `verbose`       | boolean        | false       | Enable debug-level log output.                                                                                                                              |
