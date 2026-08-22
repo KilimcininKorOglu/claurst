@@ -1209,42 +1209,46 @@ Useful for testing web applications, scraping, or automating browser-based workf
 
 ## Authentication
 
-MikMik supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.config/mikmik/accounts/<provider>/<id>/` and the registry at `~/.config/mikmik/accounts.json` tracks which one is active.
+MikMik supports **multiple named accounts per provider**, Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login stores its credentials in `~/.config/mikmik/auth.json`, keyed by account name, and registers the account under `providers` in `settings.json`. The `provider` field in `settings.json` names the active one.
 
 See [Authentication Guide](./auth.md#multiple-accounts) for the full story and on-disk layout.
 
 ### /login
 
-Authenticate with Anthropic or Codex via OAuth PKCE. Opens a browser for the flow and saves tokens under the active profile (or creates a new profile if none exists).
+Authenticate with Anthropic or Codex via OAuth PKCE. Opens a browser for the flow, then stores the credential in `auth.json` and registers the account in `settings.json`.
 
 ```
 /login                            — Claude.ai OAuth (Bearer token, default)
 /login --console                  — Console OAuth (creates an API key)
 /login --codex                    — Codex / ChatGPT OAuth
-/login --label work               — name the new profile "work"
-/login --codex --label personal   — Codex login, name the profile "personal"
+/login --label work               — name the new account "work"
+/login --codex --label personal   — Codex login, name the account "personal"
 ```
 
-If a profile matching the JWT's email or account_id already exists, that profile is refreshed in place — re-logging-in is idempotent. Use `--label` to either name a fresh profile or to disambiguate.
+`--label` also accepts `-l <name>` and `--label=<name>`.
+
+If a stored account carries the same email address or account UUID, that account is refreshed in place, so re-logging-in is idempotent. The match wins over `--label`: a label names a **new** account only, it cannot rename an existing one.
+
+Without `--label`, the name comes from the email local part, then the account UUID, then the literal `account`. A name already taken gets a `-2`, `-3` suffix.
 
 ---
 
 ### /logout
 
-Remove credentials. By default removes only the **active** profile for the provider; other stored profiles remain switchable.
+Remove credentials. By default removes only the **active** account for the provider; the other stored accounts remain switchable.
 
 ```
-/logout                — clear active Anthropic profile (drops it from registry)
-/logout --codex        — clear active Codex profile
-/logout --all          — purge every Anthropic profile + clear any API key in settings
-/logout --codex --all  — purge every Codex profile
+/logout                — clear the active Anthropic account and the API key in settings
+/logout --codex        — clear the active Codex account
+/logout --all          — remove every Anthropic account and clear the API key
+/logout --codex --all  — remove every Codex account
 ```
 
 ---
 
 ### /accounts
 
-List every stored account across providers. The active profile in each provider is marked with `*`.
+List every stored account, grouped by the protocol it speaks. There is one active account overall, and it is marked with `*`.
 
 ```
 /accounts
@@ -1253,33 +1257,41 @@ List every stored account across providers. The active profile in each provider 
 Sample output:
 
 ```
-Anthropic:
-  * personal [pro]    kuber@personal.example
-    work     [max]    kuber@company.example
-Codex:
-    work              kuber@company.example
+anthropic:
+  * personal [pro]  kuber@personal.example
+    work [max]  kuber@company.example
+codex:
+    chatgpt  acct_01H...
 ```
+
+An Anthropic OAuth row carries the subscription tier in brackets and the email address. A Codex row carries the account id. A plain API key row carries neither, because a key stores no identity.
+
+With nothing stored, the command says so and points at `/connect`.
 
 ---
 
 ### /switch
 
-Switch the active account for a provider. Anthropic by default; pass `--codex` for Codex. Run `/accounts` first to see available profile ids.
+Point the session at a stored account. Every account is switched the same way, whatever protocol it speaks, so the command takes a name and no flags. Run `/accounts` first to see the names.
 
 ```
-/switch work                     — set active Anthropic profile to "work"
-/switch --codex personal         — set active Codex profile to "personal"
+/switch work                     — make "work" the active account
+/switch chatgpt                  — make the Codex account "chatgpt" active
 ```
+
+An unknown name is refused, and the error lists the names that are stored.
 
 ---
 
 ### /refresh
 
-Refresh the provider authentication state. Forces a token refresh without full re-authentication. Useful when a session token has expired mid-session.
+**Clear** the saved provider state, not refresh a token. The command wipes the saved provider selection, drops the API key, provider and model from the running config, and rebuilds the client, the provider registry and the model registry from scratch. Afterwards run `/connect` to authenticate and pick a provider again.
 
 ```
 /refresh
 ```
+
+The command takes no arguments and refuses to run while a response is streaming.
 
 ---
 
