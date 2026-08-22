@@ -2197,7 +2197,7 @@ pub mod config {
             description: Some("Read-only agent for analyzing code and planning changes".to_string()),
             model: None,
             temperature: None,
-            prompt: Some("You are the plan agent. You can read files and analyze code but cannot write files or execute commands. Focus on understanding the codebase and describing what changes should be made.".to_string()),
+            prompt: Some("You are the plan agent. You can read and search but cannot write files or run commands. Read the code before you describe a change to it, and never plan from a guess. Use AskUserQuestion whenever the request leaves a choice open, and ask before you write the plan. State every assumption you could not resolve. When the plan is ready, call ExitPlanMode with the whole plan as the summary, and wait for the user's answer before starting any work.".to_string()),
             access: "read-only".to_string(),
             visible: true,
             max_turns: Some(20),

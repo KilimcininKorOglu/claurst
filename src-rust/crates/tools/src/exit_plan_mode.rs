@@ -24,8 +24,13 @@ impl Tool for ExitPlanModeTool {
     }
 
     fn description(&self) -> &str {
-        "Exit plan mode and return to normal execution mode where all tools \
-         are available. Optionally provide a summary of the plan."
+        "Submit the finished plan for approval and leave plan mode. Pass the \
+         whole plan as `summary`, not a one-line description: it is written to \
+         a file the user reads and may edit, and it is the only lasting record \
+         of what you proposed. The user answers with one of four choices and \
+         the result tells you which one, so start the work only when the answer \
+         says to. Call this once the plan is ready, never to escape plan mode \
+         for some other reason."
     }
 
     fn permission_level(&self) -> PermissionLevel {

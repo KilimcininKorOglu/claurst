@@ -21,9 +21,17 @@ impl Tool for EnterPlanModeTool {
     }
 
     fn description(&self) -> &str {
-        "Enter plan mode. In plan mode, the assistant can only read files and \
-         think, but cannot execute commands or write files. Use this to step back \
-         and plan a complex change before implementing it."
+        "Enter plan mode before starting significant work. In plan mode you can \
+         read, search and think, but you cannot write files or run commands. \
+         Call it when the change touches the architecture, the data model or a \
+         public interface, when it spans more than two or three files, when the \
+         task is a new feature, a migration or a refactor, when a bug's cause is \
+         not confirmed yet, or when the request allows more than one reasonable \
+         reading. Do not call it for a typo, a one-line fix, a question about \
+         the code, or work the user already specified step by step. While \
+         planning, read the code rather than guessing, and use AskUserQuestion \
+         for anything the request leaves open. Call ExitPlanMode when the plan \
+         is ready, to submit it for approval."
     }
 
     fn permission_level(&self) -> PermissionLevel {
