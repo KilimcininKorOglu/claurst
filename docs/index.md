@@ -45,7 +45,7 @@ Anthropic Claude (default), OpenAI, Google Gemini, AWS Bedrock, Azure OpenAI, Ol
 A ratatui-based TUI with real-time streaming, syntax-highlighted code blocks, diff viewer, permission dialogs, slash command autocomplete, session browser, and a full keybinding system.
 
 ### Multi-account credentials
-Store multiple named Anthropic (Claude.ai / Console) and Codex (ChatGPT) accounts in one install and switch between them instantly with `/switch` or `mikmik auth switch <id>`. Identity is detected from the OAuth JWT, so re-logging-in the same account is idempotent. See [Authentication](auth#multi-account-profiles).
+Store multiple named Anthropic (Claude.ai / Console) and Codex (ChatGPT) accounts in one install and switch between them instantly with `/switch` or `mikmik auth switch <id>`. Identity is detected from the OAuth JWT, so re-logging-in the same account is idempotent. See [Authentication](auth#multiple-accounts).
 
 ### @file injection
 Type `@path/to/file` anywhere in a prompt to inject the file's contents inline. Typeahead autocomplete suggests paths as you type, with size/binary safety checks before submit. See [@file Injection](keybindings#file-injection-with-typeahead).
@@ -57,7 +57,7 @@ Extend MikMik with TOML-manifest plugins that add custom slash commands, MCP ser
 Run named agents (`build`, `plan`, `explore`) or spawn parallel sub-agents in coordinator mode. Agents communicate via a shared task registry and message channels.
 
 ### Goal system
-Set a durable objective with `/goal` and MikMik works autonomously across turns until the goal is verified complete — using the `GoalCompleteTool` for audited completion rather than just stopping.
+Set a durable objective with `/goal` and MikMik works autonomously across turns until the goal is verified complete — using the `GoalComplete` for audited completion rather than just stopping.
 
 ### Managed agents (preview)
 Configure a manager-executor architecture with `/managed-agents` where a manager model delegates subtasks to parallel executor agents with full budget split controls.

@@ -2,7 +2,7 @@
 
 MikMik needs credentials to call the Anthropic API (or another provider's
 API). This document covers every supported authentication method, multi-account
-profile switching, how tokens are stored, how to check and clear credentials,
+account switching, how credentials are stored, how to check and clear them,
 and how to authenticate with non-Anthropic providers.
 
 ---
@@ -14,18 +14,15 @@ MikMik checks for credentials in the following priority order:
 1. `--api-key` flag (highest priority, session-only)
 2. `api_key` field in `~/.config/mikmik/settings.json`
 3. `ANTHROPIC_API_KEY` environment variable
-4. Tokens for the **active Anthropic profile** under
-   `~/.config/mikmik/accounts/anthropic/<id>/oauth_tokens.json`
-5. Legacy `~/.config/mikmik/oauth_tokens.json` (auto-migrated to a profile on first
-   read)
+4. The credential for the active Anthropic account in
+   `~/.config/mikmik/auth.json`
 
 The first non-empty credential found is used. Provider-specific credentials
 (OpenAI, Google, etc.) follow the same pattern but use their own environment
 variables and provider config entries.
 
-Codex (OpenAI ChatGPT subscription) accounts follow a parallel system —
-multiple profiles stored under `~/.config/mikmik/accounts/codex/<id>/`, with the
-active profile selected via the account registry.
+Codex (OpenAI ChatGPT subscription) accounts work the same way: each login is
+an account with its own credential in `auth.json`.
 
 ---
 
@@ -119,8 +116,9 @@ mikmik auth login
 5. The browser redirects to `http://localhost:<port>/callback` with an
    authorization code.
 6. MikMik exchanges the code for tokens via the token endpoint.
-7. Tokens are saved under `~/.config/mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json`
-   and the profile is registered as **active** in `~/.config/mikmik/accounts.json`.
+7. Tokens are saved in `~/.config/mikmik/auth.json` under the account's name,
+   a matching `providers` entry is written to `settings.json`, and that account
+   becomes the active one.
 
 This flow produces a Bearer token (`user:inference` scope) used directly for
 API calls.
@@ -132,15 +130,15 @@ mikmik auth login --console
 ```
 
 This uses the Anthropic Console authorization endpoint. After token exchange,
-MikMik calls the Console API to create a new API key, stores it in the
-active profile's `oauth_tokens.json`, and uses it as a standard API key for
-subsequent requests (not as a Bearer token).
+MikMik calls the Console API to create a new API key, stores it with the
+account's credential, and uses it as a standard API key for subsequent requests
+rather than as a Bearer token.
 
-### Naming the profile
+### Naming the account
 
-Add `--label <name>` to give the new profile a human-friendly name (otherwise
-the id is derived from the JWT email's local-part). This becomes the id you
-use when running `mikmik auth switch`:
+Add `--label <name>` to name the new account (otherwise the name is derived from
+the JWT email's local-part). That name is what `mikmik auth switch` takes, and
+what `"<account>/<model>"` addresses:
 
 ```bash
 mikmik auth login --label work
@@ -157,48 +155,74 @@ when prompted.
 
 ---
 
-## Multi-Account Profiles
+## Multiple accounts
 
 MikMik stores **multiple named accounts per provider** and lets you switch
-between them without re-logging-in. Supported providers today: **Anthropic**
-(Claude.ai / Console) and **Codex** (OpenAI ChatGPT subscription).
+between them without re-logging-in. Two vendors keep separate accounts today:
+**Anthropic** (Claude.ai / Console) and **Codex** (OpenAI ChatGPT
+subscription). Every other provider stores one credential.
 
 This is useful for separating work and personal accounts, juggling
 Pro/Max/Team plans, or testing against multiple organizations.
 
 ### On-disk layout
 
+An account is two things: a credential in `auth.json`, and an entry in the
+`providers` map of `settings.json`. Both are keyed by the account's name.
+
 ```
 ~/.config/mikmik/
-├── accounts.json                              # registry (active + metadata)
-└── accounts/
-    ├── anthropic/
-    │   ├── work/oauth_tokens.json
-    │   └── personal/oauth_tokens.json
-    └── codex/
-        └── work/codex_tokens.json
+├── auth.json          # credentials, keyed by account name
+└── settings.json      # the `providers` entry for each account, and the active one
 ```
 
-`accounts.json` schema (excerpt):
+`auth.json`:
 
 ```json
 {
-  "version": 1,
-  "providers": {
-    "anthropic": {
-      "active": "personal",
-      "profiles": {
-        "work":     { "id": "work",     "email": "kuber@company.example",  "subscription_tier": "max", "added_at": "2026-05-25T19:00:00Z" },
-        "personal": { "id": "personal", "email": "kuber@personal.example", "subscription_tier": "pro", "added_at": "2026-05-25T19:05:00Z" }
-      }
-    },
-    "codex": {
-      "active": "work",
-      "profiles": { "work": { "id": "work", "email": "kuber@company.example" } }
-    }
+  "credentials": {
+    "personal": { "type": "anthropic-oauth", "access_token": "…", "refresh_token": "…" },
+    "work":     { "type": "anthropic-oauth", "access_token": "…", "refresh_token": "…" },
+    "chatgpt":  { "type": "codex-oauth",     "access_token": "…", "refresh_token": "…" },
+    "openai":   { "type": "api",             "key": "sk-…" }
   }
 }
 ```
+
+The `type` field says which wire protocol the credential belongs to: `api` for a
+plain key, `oauth` for a device-flow token, `anthropic-oauth`, or `codex-oauth`.
+
+`settings.json` carries the matching `providers` entry, with `protocol` naming
+the vendor when the account is not named after it:
+
+```json
+{
+  "provider": "personal",
+  "providers": {
+    "personal": { "enabled": true, "protocol": "anthropic" },
+    "work":     { "enabled": true, "protocol": "anthropic" },
+    "chatgpt":  { "enabled": true, "protocol": "codex" }
+  }
+}
+```
+
+Because an account has a name of its own, `"<account>/<model>"` addresses it
+directly: `anthropic:personal/sonnet` for the advisor, `work/claude-opus-4-6`
+in the model picker.
+
+Account names are slugified: lower-cased, with anything outside `[a-z0-9_-]`
+replaced by a dash, and a `-2`, `-3` suffix when the name is taken.
+
+### Migration from the old layout
+
+Accounts used to live in an `accounts.json` registry plus one token file per
+profile under `accounts/<provider>/<id>/`. That is read once, at startup, and
+folded into the two files above. The old registry and directory are moved to
+`accounts-backup-<timestamp>/` rather than deleted, and the run says what it
+moved.
+
+Two older layouts are migrated the same way:
+`~/.config/mikmik/oauth_tokens.json` and `~/.config/mikmik/codex_tokens.json`.
 
 ### CLI
 
@@ -206,28 +230,28 @@ Pro/Max/Team plans, or testing against multiple organizations.
 providers:
 
 ```bash
-# Add accounts (each login becomes its own profile)
+# Add accounts (each login becomes its own account)
 mikmik auth login                       # Claude.ai (default)
 mikmik auth login --console             # Console / API-key flow
-mikmik auth login --label work          # name the profile
+mikmik auth login --label work          # name the account
 mikmik codex login                      # ChatGPT/Codex OAuth
 mikmik codex login --label personal
 
 # Inspect
-mikmik auth status                      # show active Anthropic profile
-mikmik auth list                        # all Anthropic profiles
-mikmik codex list                       # all Codex profiles
+mikmik auth status                      # show the active Anthropic account
+mikmik auth list                        # every Anthropic account
+mikmik codex list                       # every Codex account
 mikmik accounts                         # both at once (use --json for JSON)
 
 # Switch the active account
 mikmik auth switch work
 mikmik codex switch personal
 
-# Remove a stored profile
-mikmik auth remove work                 # delete profile + tokens dir
+# Remove a stored account
+mikmik auth remove work                 # delete the credential and its providers entry
 mikmik codex remove personal
 
-# Logout (clears tokens for the active profile)
+# Logout (clears the active account's credential)
 mikmik auth logout
 mikmik codex logout
 ```
@@ -250,37 +274,24 @@ commands — Anthropic is the default, pass `--codex` to target Codex:
 /login                          # OAuth login (Claude.ai)
 /login --console                # API-key flow
 /login --codex                  # add a Codex account
-/login --label work             # name the new profile
+/login --label work             # name the new account
 /logout                         # clear active Anthropic credentials
 /logout --codex                 # clear active Codex credentials
-/logout --all                   # purge every stored Anthropic profile
+/logout --all                   # purge every stored Anthropic account
 /accounts                       # list every stored account
 /switch personal                # set active Anthropic to "personal"
 /switch --codex work            # set active Codex to "work"
 ```
 
-`/accounts` lists every profile with a `*` next to the active one and shows
+`/accounts` lists every account with a `*` next to the active one and shows
 email and subscription tier when known.
 
 ### Identity detection
 
 When you log in, MikMik decodes the JWT id_token (or access token for Codex)
-to extract your email and provider-side account_id. If a stored profile
-already matches that identity, the existing profile is refreshed instead of
-a duplicate being created — re-logging-in the same account is idempotent.
-
-### Backward compatibility
-
-If you previously used MikMik (with the older single-file storage), your
-existing tokens are auto-migrated on first read:
-
-- `~/.config/mikmik/oauth_tokens.json` → `~/.config/mikmik/accounts/anthropic/<derived>/oauth_tokens.json`
-- `~/.config/mikmik/codex_tokens.json` → `~/.config/mikmik/accounts/codex/<derived>/codex_tokens.json`
-
-The legacy files are removed after a successful migration. No manual action
-needed.
-
----
+to extract your email and provider-side account_id. If a stored account already
+matches that identity, its credential is refreshed instead of a duplicate being
+created, so re-logging-in the same account is idempotent.
 
 ## Method 3: Device Code Flow
 
@@ -301,50 +312,13 @@ ANTHROPIC_API_KEY="sk-ant-..." mikmik --print "summarize the last 10 commits"
 
 ## Token Storage
 
-### Anthropic OAuth tokens (per profile)
-
-Each Anthropic account profile has its own file:
-
-```
-~/.config/mikmik/accounts/anthropic/<profile-id>/oauth_tokens.json
-```
-
-The file contains the access token, optional refresh token, expiry timestamp,
-granted scopes, and account email. Example structure:
-
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_at_ms": 1700000000000,
-  "scopes": ["user:inference", "user:profile"],
-  "email": "you@example.com",
-  "api_key": "sk-ant-..."
-}
-```
-
-The active profile pointer lives in `~/.config/mikmik/accounts.json` (see
-[Multi-Account Profiles](#multi-account-profiles)). Files are written with
-user-only permissions (`600` on Unix). Do not commit them to version control.
-
-### Codex tokens (per profile)
-
-```
-~/.config/mikmik/accounts/codex/<profile-id>/codex_tokens.json
-```
-
-Contains the OpenAI access token, refresh token, account_id, and expiry.
-
-### Provider credential store
-
-API keys for non-Anthropic providers without dedicated OAuth flows are stored in:
+Every credential lives in one file:
 
 ```
 ~/.config/mikmik/auth.json
 ```
 
-This file is keyed by provider ID and contains either an `api` credential
-(plain key) or an `oauth` credential (access + refresh token pair):
+It is keyed by account name, and each entry names its own type:
 
 ```json
 {
@@ -355,14 +329,26 @@ This file is keyed by provider ID and contains either an `api` credential
       "access": "...",
       "refresh": "...",
       "expires": 1700000000
-    }
+    },
+    "personal": {
+      "type": "anthropic-oauth",
+      "access_token": "...",
+      "refresh_token": "...",
+      "expires_at_ms": 1700000000000,
+      "scopes": ["user:inference", "user:profile"],
+      "email": "you@example.com",
+      "api_key": "sk-ant-..."
+    },
+    "chatgpt": { "type": "codex-oauth", "access_token": "...", "refresh_token": "..." }
   }
 }
 ```
 
-> **Note:** `~/.config/mikmik/auth.json` is the multi-provider credential cache for
-> simple API-key providers. It is **distinct** from `~/.config/mikmik/accounts.json`,
-> which is the multi-account registry for Anthropic/Codex OAuth profiles.
+An Anthropic credential's scope list is what decides whether it is used as a
+Bearer token or as a minted API key.
+
+The file is written with user-only permissions (`600` on Unix). Do not commit
+it to version control.
 
 ---
 
@@ -413,15 +399,15 @@ fi
 
 ## Logging Out
 
-By default, `logout` removes the **active** account's tokens and drops that
-profile from the registry; other stored profiles are untouched, so a stored
-secondary profile becomes the candidate for next selection.
+By default, `logout` removes the **active** account's credential; other stored
+accounts are untouched, so a stored secondary account becomes the candidate for
+next selection.
 
 ```bash
-# Remove the active Anthropic profile
+# Remove the active Anthropic account
 mikmik auth logout
 
-# Remove the active Codex profile
+# Remove the active Codex account
 mikmik codex logout
 
 # Or from inside the REPL
@@ -429,7 +415,7 @@ mikmik codex logout
 /logout --codex
 ```
 
-To purge every stored profile for a provider (and clear any API key in
+To purge every stored account for a provider (and clear any API key in
 `settings.json`):
 
 ```
@@ -440,7 +426,7 @@ To purge every stored profile for a provider (and clear any API key in
 API keys set via environment variables are not affected by `logout`; remove
 them from your shell profile manually.
 
-To delete a specific stored profile without making it active first:
+To delete a specific stored account without making it active first:
 
 ```bash
 mikmik auth remove work
@@ -462,8 +448,8 @@ is expired, it automatically attempts a silent refresh:
 
 If the refresh fails (network error, expired refresh token, revoked grant),
 MikMik falls back to any configured API key. If no API key is available,
-authentication fails and you must run `mikmik auth login` (optionally with
-`--label <name>` to reuse a profile id) again.
+authentication fails and you must run `mikmik auth login` again, optionally with
+`--label <name>` to reuse an account name.
 
 ---
 
@@ -474,7 +460,7 @@ providers. Each provider looks for credentials in this order:
 
 1. `api_key` in the provider's entry under `providers` in `settings.json`
 2. The provider-specific environment variable (see table below)
-3. The credential stored in `~/.config/mikmik/auth.json`
+3. The credential stored in `~/.config/mikmik/auth.json` under that account's name
 
 ### Provider environment variables
 
@@ -576,15 +562,11 @@ mikmik --provider llamacpp --api-base http://localhost:8080
 - Restrict permissions on `~/.config/mikmik/` to your user only:
   ```bash
   chmod 700 ~/.config/mikmik
-  chmod 700 ~/.config/mikmik/accounts
-  chmod 600 ~/.config/mikmik/accounts.json
   chmod 600 ~/.config/mikmik/auth.json
   chmod 600 ~/.config/mikmik/settings.json
-  find ~/.config/mikmik/accounts -type f -name '*tokens.json' -exec chmod 600 {} +
   ```
-  MikMik already sets `0600` on `accounts.json` automatically on Unix; the
-  command above is the belt-and-braces version that also covers the per-
-  profile token files.
+  MikMik already sets `0600` on `auth.json` on Unix; the command above also
+  covers `settings.json`, which holds a key when one was written there.
 - Do not commit `~/.config/mikmik/` to version control.
 - Add `.mikmik/` to your project's `.gitignore` to prevent accidentally
   committing project-level settings files that may contain keys.

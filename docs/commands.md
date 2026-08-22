@@ -1211,7 +1211,7 @@ Useful for testing web applications, scraping, or automating browser-based workf
 
 MikMik supports **multiple named accounts per provider** — Anthropic (Claude.ai or Console) and Codex (OpenAI ChatGPT subscription). Each login creates a profile under `~/.config/mikmik/accounts/<provider>/<id>/` and the registry at `~/.config/mikmik/accounts.json` tracks which one is active.
 
-See [Authentication Guide](./auth.md#multi-account-profiles) for the full story and on-disk layout.
+See [Authentication Guide](./auth.md#multiple-accounts) for the full story and on-disk layout.
 
 ### /login
 
