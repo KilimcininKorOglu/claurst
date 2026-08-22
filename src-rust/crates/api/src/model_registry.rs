@@ -2119,6 +2119,50 @@ mod tests {
         );
     }
 
+    /// The name heuristic prices a model the catalogue does not cover, so its
+    /// tiers have to match what the catalogue charges for the models it does.
+    ///
+    /// `OPUS` sat on the Opus 4.1 rate of $15/$75 while every Opus from 4.5
+    /// onwards costs $5/$25, so an unlisted Opus was billed at three times its
+    /// price. `HAIKU` sat on the Haiku 3.5 rate the same way.
+    #[test]
+    fn the_pricing_heuristic_matches_the_catalogue_for_current_models() {
+        let reg = ModelRegistry::new();
+        for model in [
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+            "claude-fable-5",
+        ] {
+            let entry = reg
+                .get(mikmik_core::provider_id::ProviderId::ANTHROPIC, model)
+                .unwrap_or_else(|| panic!("{model} is not in the bundled catalogue"));
+            let heuristic = mikmik_core::cost::ModelPricing::for_model(model);
+            let catalogue_input = entry
+                .cost
+                .input
+                .or(entry.cost_input)
+                .unwrap_or_else(|| panic!("{model} carries no input price"));
+            let catalogue_output = entry
+                .cost
+                .output
+                .or(entry.cost_output)
+                .unwrap_or_else(|| panic!("{model} carries no output price"));
+
+            assert_eq!(
+                heuristic.input_per_mtk, catalogue_input,
+                "the heuristic charges {} per input MTok for {model}; the catalogue says {}",
+                heuristic.input_per_mtk, catalogue_input
+            );
+            assert_eq!(
+                heuristic.output_per_mtk, catalogue_output,
+                "the heuristic charges {} per output MTok for {model}; the catalogue says {}",
+                heuristic.output_per_mtk, catalogue_output
+            );
+        }
+    }
+
+
     #[test]
     fn an_account_the_user_named_still_gets_its_vendors_default() {
         // `best_model_for_provider` is keyed by catalogue name, so an account

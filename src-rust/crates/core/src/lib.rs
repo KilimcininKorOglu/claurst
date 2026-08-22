@@ -6314,15 +6314,32 @@ pub mod cost {
     }
 
     impl ModelPricing {
-        /// Pricing for Claude Opus 4 family.
+        // These are the fallback rates, used only for a model the catalogue
+        // does not cover. `pricing_for_route` reads the real per-model figures
+        // from the registry first, and the registry refreshes from models.dev.
+        //
+        // Keep each constant on the current generation's rate. An Opus tier
+        // left on the Opus 4.1 price billed every later Opus at three times
+        // what it costs.
+
+        /// Claude Opus, 4.5 onwards. Opus 5 shares these rates.
         pub const OPUS: Self = Self {
-            input_per_mtk: 15.0,
-            output_per_mtk: 75.0,
-            cache_creation_per_mtk: 18.75,
-            cache_read_per_mtk: 1.5,
+            input_per_mtk: 5.0,
+            output_per_mtk: 25.0,
+            cache_creation_per_mtk: 6.25,
+            cache_read_per_mtk: 0.5,
         };
 
-        /// Pricing for Claude Sonnet 4 family.
+        /// Claude Fable 5.
+        pub const FABLE: Self = Self {
+            input_per_mtk: 10.0,
+            output_per_mtk: 50.0,
+            cache_creation_per_mtk: 12.5,
+            cache_read_per_mtk: 1.0,
+        };
+
+        /// Claude Sonnet, 4.0 through 4.6. Also the rate for a model from
+        /// another vendor that the catalogue does not cover.
         pub const SONNET: Self = Self {
             input_per_mtk: 3.0,
             output_per_mtk: 15.0,
@@ -6330,12 +6347,20 @@ pub mod cost {
             cache_read_per_mtk: 0.3,
         };
 
-        /// Pricing for Claude Haiku family.
+        /// Claude Sonnet 5, which costs less than Sonnet 4.x.
+        pub const SONNET_5: Self = Self {
+            input_per_mtk: 2.0,
+            output_per_mtk: 10.0,
+            cache_creation_per_mtk: 2.5,
+            cache_read_per_mtk: 0.2,
+        };
+
+        /// Claude Haiku 4.5.
         pub const HAIKU: Self = Self {
-            input_per_mtk: 0.80,
-            output_per_mtk: 4.0,
-            cache_creation_per_mtk: 1.0,
-            cache_read_per_mtk: 0.08,
+            input_per_mtk: 1.0,
+            output_per_mtk: 5.0,
+            cache_creation_per_mtk: 1.25,
+            cache_read_per_mtk: 0.1,
         };
 
         /// Free model pricing (no cost).
@@ -6359,10 +6384,16 @@ pub mod cost {
                 || is_free_upstream_model(model)
             {
                 Self::FREE
+            } else if model.contains("fable") {
+                Self::FABLE
             } else if model.contains("opus") {
                 Self::OPUS
             } else if model.contains("haiku") {
                 Self::HAIKU
+            } else if model.contains("sonnet-5") {
+                // `claude-sonnet-4-5` does not contain `sonnet-5`, so the two
+                // tiers stay apart.
+                Self::SONNET_5
             } else {
                 // Default to Sonnet pricing for unknown models
                 Self::SONNET
