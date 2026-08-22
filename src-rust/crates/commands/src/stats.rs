@@ -1314,15 +1314,9 @@ mod tests {
 
     #[test]
     fn a_row_too_small_for_four_places_widens_the_whole_column() {
+        let opus = mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6");
         let tracker = mikmik_core::CostTracker::new();
-        tracker.add_usage(
-            "claude-opus-4-6",
-            mikmik_core::cost::ModelPricing::for_model("claude-opus-4-6"),
-            100_000,
-            20_000,
-            0,
-            0,
-        );
+        tracker.add_usage("claude-opus-4-6", opus, 100_000, 20_000, 0, 0);
         tracker.add_usage(
             "claude-haiku-4-5",
             mikmik_core::cost::ModelPricing::for_model("claude-haiku-4-5"),
@@ -1332,10 +1326,15 @@ mod tests {
             0,
         );
 
+        // Derived from the rate card, not typed. Spelling the figure out here
+        // tied a column-width test to the Opus price, so correcting that price
+        // failed a test about neither.
+        let dear = format!("${:.6}", opus.cost_of(100_000, 20_000, 0, 0));
+
         let block = by_model_block(&tracker);
         assert!(
-            block.contains("$3.000000"),
-            "the dear row must widen too:\n{block}"
+            block.contains(&dear),
+            "the dear row must widen too, expected {dear}:\n{block}"
         );
         assert!(
             !block.contains("$0.000000\n"),
