@@ -128,6 +128,7 @@ mod tests {
             user_question_tx: None,
             plan_approval_tx: None,
             tool_output_tx: None,
+            plan_mode_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,

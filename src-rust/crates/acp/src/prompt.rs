@@ -101,6 +101,7 @@ pub async fn handle(
         user_question_tx: None,
         plan_approval_tx: None,
         tool_output_tx: None,
+        plan_mode_tx: None,
         // Bind to this turn's cancel token so the parallel tool executor and any
         // sub-agents observe cancellation (issue #218). `run_query_loop` also
         // rebinds this to the token it is driven by.

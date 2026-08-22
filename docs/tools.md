@@ -696,7 +696,11 @@ Switch the agent into plan mode. In plan mode, all write and execute tools are b
 |-----------|--------|----------|--------------------------------|
 | `reason`  | string | no       | Why plan mode is being entered |
 
-Exits automatically when `/plan off` is invoked or when `ExitPlanModeTool` is called.
+The switch is real and takes effect immediately: the permission mode becomes `plan` and the tool list is rebuilt without the write and execute tools, exactly as `/plan` and `Tab` do. No approval is asked for, because the tool can only narrow what the agent may do. The mode in force beforehand is remembered, so leaving plan mode restores it.
+
+Only the interactive TUI can switch modes. In headless runs (`--print`) and over ACP there is nowhere to apply the switch, so the tool returns an error saying the mode did not change.
+
+Exits when `/plan` is invoked again, when `Tab` switches back to build mode, or when `ExitPlanModeTool` is called and the plan is approved.
 
 ---
 

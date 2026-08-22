@@ -43,11 +43,36 @@ impl Tool for EnterPlanModeTool {
         })
     }
 
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let params: EnterPlanModeInput =
             serde_json::from_value(input).unwrap_or(EnterPlanModeInput { reason: None });
 
         debug!(reason = ?params.reason, "Entering plan mode");
+
+        // The tool used to report success and change nothing: the result went
+        // to the model and its metadata reached no reader, so the session
+        // stayed in whatever mode it was in while the model believed it was
+        // planning. The switch travels a channel now, the way ExitPlanMode's
+        // decision does.
+        let Some(tx) = ctx.plan_mode_tx.as_ref() else {
+            return ToolResult::error(
+                "Plan mode is not available in this session, so nothing changed. \
+                 You still have every tool you had; do not act as though writes \
+                 and commands are blocked."
+                    .to_string(),
+            );
+        };
+
+        if tx
+            .send(crate::EnterPlanModeEvent {
+                reason: params.reason.clone(),
+            })
+            .is_err()
+        {
+            return ToolResult::error(
+                "The session is no longer listening, so plan mode was not entered.".to_string(),
+            );
+        }
 
         let msg = if let Some(reason) = &params.reason {
             format!("Entered plan mode: {}", reason)
@@ -59,5 +84,45 @@ impl Tool for EnterPlanModeTool {
             "type": "enter_plan_mode",
             "reason": params.reason,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::allow_all_context;
+
+    fn context() -> ToolContext {
+        allow_all_context(std::env::temp_dir())
+    }
+
+    #[tokio::test]
+    async fn the_request_reaches_the_session_with_its_reason() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut ctx = context();
+        ctx.plan_mode_tx = Some(tx);
+
+        let result = EnterPlanModeTool
+            .execute(json!({ "reason": "the migration needs a plan" }), &ctx)
+            .await;
+
+        assert!(!result.is_error, "the tool reported a failure");
+        let event = rx.try_recv().expect("no request reached the session");
+        assert_eq!(event.reason.as_deref(), Some("the migration needs a plan"));
+    }
+
+    #[tokio::test]
+    async fn without_a_channel_the_tool_says_the_mode_did_not_change() {
+        let result = EnterPlanModeTool.execute(json!({}), &context()).await;
+
+        assert!(
+            result.is_error,
+            "a session that cannot switch modes was reported as switched"
+        );
+        assert!(
+            result.content.contains("nothing changed"),
+            "the model is not told the mode stayed put: {}",
+            result.content
+        );
     }
 }

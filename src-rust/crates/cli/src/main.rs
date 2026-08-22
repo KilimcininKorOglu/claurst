@@ -994,6 +994,16 @@ async fn main() -> anyhow::Result<()> {
         Some(tool_output_rx)
     };
 
+    // And for EnterPlanMode, which changes the session's mode rather than
+    // asking about it, so it needs no reply either.
+    let (plan_mode_tx, plan_mode_rx) =
+        tokio::sync::mpsc::unbounded_channel::<mikmik_tools::EnterPlanModeEvent>();
+    let plan_mode_rx = if is_non_interactive {
+        None
+    } else {
+        Some(plan_mode_rx)
+    };
+
     let tool_ctx = ToolContext {
         working_dir: cwd.clone(),
         permission_mode: config.permission_mode,
@@ -1023,6 +1033,11 @@ async fn main() -> anyhow::Result<()> {
             None
         } else {
             Some(tool_output_tx)
+        },
+        plan_mode_tx: if is_non_interactive {
+            None
+        } else {
+            Some(plan_mode_tx)
         },
         // Placeholder token; `run_query_loop` rebinds it to the loop's actual
         // cancel token so the parallel tool executor honours Ctrl-C (issue #218).
@@ -1190,6 +1205,7 @@ async fn main() -> anyhow::Result<()> {
             user_question_rx,
             plan_approval_rx,
             tool_output_rx,
+            plan_mode_rx,
             pending_project_mcp,
             mcp_project_root,
             project_trust_pending,
@@ -3046,6 +3062,7 @@ async fn run_interactive(
     user_question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::UserQuestionEvent>>,
     plan_approval_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::PlanApprovalEvent>>,
     tool_output_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::ToolOutputChunk>>,
+    plan_mode_rx: Option<tokio::sync::mpsc::UnboundedReceiver<mikmik_tools::EnterPlanModeEvent>>,
     pending_project_mcp: Vec<mikmik_core::config::McpServerConfig>,
     mcp_project_root: Option<PathBuf>,
     project_trust_pending: Option<mikmik_core::project_trust::GatedProjectSettings>,
@@ -3186,6 +3203,9 @@ async fn run_interactive(
     }
     if let Some(rx) = tool_output_rx {
         app.tool_output_rx = Some(rx);
+    }
+    if let Some(rx) = plan_mode_rx {
+        app.plan_mode_rx = Some(rx);
     }
 
     app.config.project_dir = Some(tool_ctx.working_dir.clone());
@@ -5762,6 +5782,29 @@ async fn run_interactive(
                     }
                 }
                 app.invalidate_transcript();
+            }
+        }
+
+        // Drain EnterPlanMode requests. The tool does not wait for an answer:
+        // it only narrows what the model may do, so it needs no approval.
+        if let Some(ref mut rx) = app.plan_mode_rx {
+            let mut entered = None;
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => entered = Some(event),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        app.plan_mode_rx = None;
+                        break;
+                    }
+                }
+            }
+            if let Some(event) = entered {
+                app.enter_plan_mode();
+                app.status_message = Some(match event.reason {
+                    Some(reason) => format!("Plan mode: {}", reason),
+                    None => "Plan mode.".to_string(),
+                });
             }
         }
 
@@ -8387,6 +8430,7 @@ mod bang_command_tests {
             user_question_tx: None,
             plan_approval_tx: None,
             tool_output_tx: None,
+            plan_mode_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,

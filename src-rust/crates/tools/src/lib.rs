@@ -166,6 +166,17 @@ pub struct PlanDecision {
     pub note: Option<String>,
 }
 
+/// Sent when `EnterPlanMode` asks the session to stop being able to act.
+///
+/// No reply channel: the switch takes writing and command execution away, so
+/// there is nothing to approve. The tool reports what it asked for and the
+/// turn carries on under the new mode.
+#[derive(Debug, Clone)]
+pub struct EnterPlanModeEvent {
+    /// Why the model wants to plan, when it said.
+    pub reason: Option<String>,
+}
+
 /// A piece of output a tool produced while it was still running.
 ///
 /// Sent through a side-channel rather than a `QueryEvent`, because the turn
@@ -438,6 +449,10 @@ pub struct ToolContext {
     /// `config.live_tool_output` is off, so nothing is produced that nothing
     /// would draw.
     pub tool_output_tx: Option<tokio::sync::mpsc::UnboundedSender<ToolOutputChunk>>,
+    /// Channel `EnterPlanMode` uses to put the session into plan mode. `None`
+    /// in headless / non-interactive mode, where nothing owns the mode, and the
+    /// tool then says the switch did not happen rather than claiming it did.
+    pub plan_mode_tx: Option<tokio::sync::mpsc::UnboundedSender<EnterPlanModeEvent>>,
     /// Cancellation token for the owning query loop (issue #218). The parallel
     /// tool executor selects on this to abandon in-flight tools when the user
     /// cancels, and long-running tools may observe it to bail out early. Defaults
@@ -914,6 +929,7 @@ mod tests {
             user_question_tx: None,
             plan_approval_tx: None,
             tool_output_tx: None,
+            plan_mode_tx: None,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             current_call: None,
             editor: None,
