@@ -254,31 +254,20 @@ A few UI details confuse people running local models:
 
 ---
 
-## Is `MIKMIK_COORDINATOR_MODE=1` a real thing?
+## `MIKMIK_COORDINATOR_MODE=1` does nothing
 
-Short answer: **the name exists in the source, but setting it currently does
-nothing — don't cargo-cult it for local models (or any models).**
+The name exists in the source, as a constant in
+`crates/query/src/coordinator.rs`. Nothing reads it: the module has no caller,
+and the system-prompt builder leaves `coordinator_mode` at `false`. Exporting
+the variable has no observable effect.
 
-Details, from grepping this repository:
+You do not need it. MikMik plans and calls tools on every run; there is no
+separate switch that turns agentic behaviour on.
 
-- The string `MIKMIK_COORDINATOR_MODE` appears exactly once in the Rust
-  runtime, as a constant in `crates/query/src/coordinator.rs`. There is a
-  `coordinator` module (multi-worker orchestration) and a [Agents](agents) doc
-  page describing a coordinator/worker model.
-- **But nothing in the live agent loop reads it.** `is_coordinator_mode()` (the
-  function that would check the env var) has no callers outside the module's own
-  unit tests, and the system-prompt builder hardcodes `coordinator_mode: false`.
-  So exporting `MIKMIK_COORDINATOR_MODE=1` before launching MikMik has no
-  observable effect in this version.
-- **You don't need it anyway.** MikMik is agentic by default — it plans and
-  calls tools on every run. There is no separate "enable agentic mode" switch to
-  flip. If an assistant told you to set `MIKMIK_COORDINATOR_MODE=1` to "turn on
-  agentic workflows," that advice was wrong.
-
-If you specifically want parallel sub-agent orchestration, see
-[Agents](agents) and [`/managed-agents`](commands) for what is actually wired
-up today. Note that orchestration multiplies context and demands strong,
-reliable tool calling, so it is generally a poor fit for small local models.
+For parallel sub-agents, the model spawns them itself with the `Agent` tool, and
+[`/managed-agents`](commands) puts a manager and its executors on separate
+models and budgets. See [Agents](agents). Both multiply context and demand
+reliable tool calling, so both are a poor fit for a small local model.
 
 ---
 

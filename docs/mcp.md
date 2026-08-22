@@ -128,7 +128,12 @@ Add servers to the `config.mcp_servers` array in `~/.config/mikmik/settings.json
 }
 ```
 
-Project-level MCP servers can be added to a `.mikmik/settings.json` in your project root. Project settings take precedence over global settings.
+Project-level MCP servers can be added to a `.mikmik/settings.json` in the
+project root, but they do not launch on sight. A server declared by a repository
+runs a command that arrived with the checkout, so it waits for an explicit trust
+prompt the first time. Approve it in the TUI, or pass `--trust-project-mcp` (or
+set `trustProjectMcpServers`) for headless runs. Headless without either skips
+the server and says so.
 
 ---
 
@@ -137,12 +142,19 @@ Project-level MCP servers can be added to a `.mikmik/settings.json` in your proj
 Use `/mcp` inside an interactive session to inspect and manage MCP servers at runtime.
 
 ```
-/mcp                     — show status of all configured servers
-/mcp status              — same as above
-/mcp connect <name>      — connect to a server by name
-/mcp disconnect <name>   — disconnect a server
-/mcp restart <name>      — disconnect then reconnect a server
+/mcp                          — list the configured servers with live status
+/mcp list                     — the same
+/mcp status                   — detailed connection status for every server
+/mcp auth <server>            — show the OAuth instructions for a server
+/mcp connect <server>         — reconnect a disconnected server
+/mcp logs <server>            — recent errors and logs for a server
+/mcp resources [server]       — list resources from connected servers
+/mcp prompts [server]         — list prompt templates from connected servers
+/mcp get-prompt <server> <prompt> [key=value ...]   — expand a prompt template
 ```
+
+Servers are added and removed by editing `settings.json`, not through this
+command.
 
 The status display shows the connection state and discovered tool count for each server:
 
@@ -197,7 +209,8 @@ When an MCP server disconnects or fails to connect, MikMik starts a background r
 - Backoff factor: **2x** after each failed attempt
 - Maximum delay: **60 seconds**
 
-The loop exits as soon as the server connects successfully. A new loop can be started again if the server disconnects again later. The `/mcp restart <name>` command cancels any running loop and starts a fresh connection attempt immediately.
+The loop exits as soon as the server connects. A new one starts if the server
+disconnects again later. `/mcp connect <name>` starts a fresh attempt at once.
 
 Server statuses during reconnection:
 
