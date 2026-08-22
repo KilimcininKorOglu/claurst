@@ -624,23 +624,29 @@ A style governs prose only. Code blocks, technical terms, error messages, file p
 
 ## Custom commands
 
-A custom command is a markdown file. Two directories are read:
+There are two ways to add one.
 
-| Directory                  | Scope                          |
-|----------------------------|--------------------------------|
-| `.mikmik/commands/`        | The project                    |
-| `<config dir>/commands/`   | Every project                  |
+**In `settings.json`,** under the `commands` map:
 
-The file name is the command name, so `.mikmik/commands/review.md` becomes `/review`. The body is the prompt the command expands to.
-
-```markdown
-Review the output of `git diff --staged`.
-Focus on correctness, edge cases, and naming.
+```json
+{
+  "commands": {
+    "review": {
+      "template": "Review the output of `git diff --staged`. Focus on correctness, edge cases, and naming.",
+      "description": "Review the staged git diff",
+      "agent": "plan"
+    }
+  }
+}
 ```
+
+`$ARGUMENTS` in the template is replaced with whatever the user types after the command name. `agent` and `model` are optional overrides. See [Configuration](configuration.md#custom-slash-commands).
+
+**As a markdown file,** in `.mikmik/commands/` for one project or `<config dir>/commands/` for every project. The file name is the command name, so `.mikmik/commands/review.md` becomes `/review`, and the body is the prompt.
 
 Custom commands appear alongside built-in commands in the `/` menu, and plugins contribute their own `commands/` directory the same way.
 
-Skills work through a second set of directories, `.mikmik/skills/`, `.agents/skills/` and `<config dir>/skills/`. Project skill directories are found by walking up from the working directory, so a skill defined at the repository root is visible from every subdirectory. A skill defined twice keeps the first one found and reports the duplicate.
+Skills work through a third set of directories, `.mikmik/skills/`, `.agents/skills/` and `<config dir>/skills/`. Project skill directories are found by walking up from the working directory, so a skill defined at the repository root is visible from every subdirectory. A skill defined twice keeps the first one found and reports the duplicate.
 
 ---
 

@@ -246,7 +246,7 @@ Agents that speak the [Agent Client Protocol](https://agentclientprotocol.com/),
 }
 ```
 
-The tool is only offered to the model when this block names at least one agent. Everything the sub-agent asks to do is approved through the same permission prompt as a local tool. See [Tools](tools#acpagenttool) for the full behaviour.
+The tool is only offered to the model when this block names at least one agent. Everything the sub-agent asks to do is approved through the same permission prompt as a local tool. See [Tools](tools#acpagent) for the full behaviour.
 
 This block is read from the user settings file only. An agent definition names an executable the model can invoke, so a repository able to add one would gain arbitrary code execution on your machine.
 
@@ -262,7 +262,7 @@ The `config` object holds runtime behaviour options.
 |--------------|-----------------|------------------|--------------------------------------------------------------------------------------------------------------------------------------|
 | `api_key`    | string \| null  | null             | Anthropic API key. Overrides `ANTHROPIC_API_KEY` env var. Prefer the env var in shared environments.                                 |
 | `model`      | string \| null  | provider default | Model ID to use. When absent, the provider's default is used (e.g. `claude-sonnet-4-6` for Anthropic, `gpt-4o` for OpenAI).          |
-| `max_tokens` | integer \| null | 8192             | Maximum tokens per model response.                                                                                                    |
+| `max_tokens` | integer \| null | 32000            | Maximum tokens per model response.                                                                                                    |
 | `provider`   | string \| null  | `"anthropic"`    | Active provider. See the [Providers](#providers) section.                                                                             |
 | `effort`     | string \| null  | unset            | Reasoning effort a session starts at: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`. Unset leaves it to the turn. |
 
@@ -284,7 +284,7 @@ the session only and writes nothing.
 | Key             | Type           | Default     | Description                                                                                                                                                 |
 |-----------------|----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `theme`         | string         | `"default"` | Colour theme for the TUI. One of `"default"`, `"dark"`, `"light"`, `"deuteranopia"`. Sets the error, success, warning and accent colours; layout colours are fixed. |
-| `output_style`  | string \| null | null        | Named output style. Built-in values: `"default"`, `"concise"`, `"verbose"`. Custom styles can be added as Markdown files under `~/.config/mikmik/output-styles/`. |
+| `output_style`  | string \| null | null        | Named output style. Eleven ship built in: `"default"`, `"concise"`, `"explanatory"`, `"learning"`, `"asd-ste100"`, `"caveman-lite"`, `"caveman"`, `"caveman-ultra"`, `"rocky-lite"`, `"rocky"`, `"rocky-ultra"`. More can be added as `.md` or `.json` files under `~/.config/mikmik/output-styles/`. |
 | `output_format` | string         | `"text"`    | Output format for headless (`--print`) mode. One of `"text"`, `"json"`, `"stream-json"`.                                                                    |
 | `verbose`       | boolean        | false       | Enable debug-level log output.                                                                                                                              |
 
@@ -293,7 +293,11 @@ the session only and writes nothing.
 | Key                 | Type    | Default | Description                                                                            |
 |---------------------|---------|---------|----------------------------------------------------------------------------------------|
 | `auto_compact`      | boolean | true    | Automatically compact the conversation context when the context window nears capacity. |
-| `compact_threshold` | float   | 0.85    | Fraction of the context window that triggers auto-compaction (0.0–1.0).                |
+| `compact_threshold` | integer | 90      | Percent of the context window that triggers auto-compaction. Clamped to 100.           |
+
+`compact_threshold` was a fraction in the range 0.0-1.0 before, so a value
+below 1 is still read and scaled: `0.9` means 90. Only the user settings file
+sets it; a project file naming the key is ignored.
 
 ### Turn behaviour
 
@@ -342,8 +346,8 @@ The same two can be set per run from the command line, which overrides the setti
 | `disallowed_tools` | array of strings | []       | Always deny these tools, regardless of other settings.                                     |
 
 Tool names match the internal names: `Bash`, `Read`, `Write`, `Edit`, `Glob`,
-`Grep`, `WebSearch`, `WebFetch`, `TodoWrite`, `TodoRead`, and MCP tool names
-prefixed with their server name (`myserver_toolname`).
+`Grep`, `WebSearch`, `WebFetch`, `TodoWrite`, and MCP tool names prefixed with
+their server name (`myserver_toolname`).
 
 ### Tool behaviour
 
@@ -960,7 +964,7 @@ the name the account is filed under.
 | `ANTHROPIC_BASE_URL`   | Override the Anthropic API base URL.                                            |
 | `MIKMIK_PROVIDER`     | Active provider. Equivalent to `--provider`.                                    |
 | `MIKMIK_API_BASE`     | Override the API base URL for the active provider. Equivalent to `--api_base`.  |
-| `MIKMIK_GOALS`        | Set to `0` to disable the goal system (`/goal` command and `GoalCompleteTool`). |
+| `MIKMIK_GOALS`        | Set to `0` to disable the goal system (`/goal` command and `GoalComplete`). |
 | `OPENAI_API_KEY`       | API key for the `openai` provider.                                              |
 | `GOOGLE_API_KEY`       | API key for the `google` provider.                                              |
 | `GROQ_API_KEY`         | API key for the `groq` provider.                                                |
@@ -1108,9 +1112,13 @@ matches. They are defined in the `formatter` map:
 
 | Field        | Description                                                       |
 |--------------|-------------------------------------------------------------------|
-| `command`    | Command array. The filename is appended as the final argument.    |
+| `command`    | Command array. `$FILE` or `{file}` marks where the path goes; without either, it is appended as the final argument. |
 | `extensions` | File extensions this formatter handles (include the leading dot). |
 | `disabled`   | Set to true to temporarily disable without removing the entry.    |
+
+Only the first formatter whose extensions match runs. It is given 30 seconds,
+and its failures are ignored: a file that did not get formatted is not worth
+interrupting a turn for.
 
 ---
 
@@ -1131,8 +1139,8 @@ matches. They are defined in the `formatter` map:
     // Model — leave null to use the provider's default
     "model": null,
 
-    // Cap responses at 8 192 tokens
-    "max_tokens": 8192,
+    // Cap responses at 32 000 tokens
+    "max_tokens": 32000,
 
     // In the TUI, ask before writing files or running commands
     "permission_mode": "default",
@@ -1140,9 +1148,9 @@ matches. They are defined in the `formatter` map:
     // Dark theme for the TUI
     "theme": "dark",
 
-    // Compact when context window is 85% full
+    // Compact when the context window is 85% full
     "auto_compact": true,
-    "compact_threshold": 0.85,
+    "compact_threshold": 85,
 
     // Show debug logs
     "verbose": false,
