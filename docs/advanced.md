@@ -12,34 +12,34 @@ Extended thinking gives the model additional computation budget to reason throug
 
 ```
 /thinking          Toggle extended thinking on or off for the session
-/effort <level>    Set the effort level: low, medium, high, or max
+/effort <level>    Set the effort level; see the ladder below
 ```
 
 ### CLI flags
 
 ```
 mikmik --thinking <tokens>    Set a specific token budget for thinking
-mikmik --effort <level>       Set the effort level (low/medium/high/max)
+mikmik --effort <level>       Set the effort level
 ```
 
 ### Effort levels
 
-| Level    | Description                                              |
-|----------|----------------------------------------------------------|
-| `low`    | Minimal thinking; fastest responses                      |
-| `medium` | Moderate reasoning; balanced speed and quality           |
-| `high`   | Deep reasoning; best quality for most tasks              |
-| `max`    | Maximum available budget; reserved for Opus-class models |
+The ladder is defined once, in the `effort` module of `mikmik-core`, in ascending order:
 
-The `max` level is only supported by models that expose it in the API (currently the Opus 4.6 generation). Attempting to set `max` on an unsupported model will fall back to `high`.
+| Level       | Description                                                        |
+|-------------|--------------------------------------------------------------------|
+| `none`      | Thinking disabled; the model answers directly                      |
+| `minimal`   | The smallest reasoning budget                                      |
+| `low`       | Quick implementation with minimal overhead                         |
+| `medium`    | Balanced reasoning; the default. `normal` is accepted as an alias  |
+| `high`      | Deep reasoning; best quality for most tasks                        |
+| `xhigh`     | Extended reasoning for hard problems                               |
+| `max`       | Maximum available budget                                           |
+| `ultracode` | Maximum reasoning plus the ultracode delegation workflow           |
 
-Effort levels `low`, `medium`, and `high` persist to `~/.claude.json` across sessions. The `max` level is session-scoped for regular users. Numeric budget values (raw token counts) are always session-scoped.
+`/effort` with no argument reports the level in force, and says `unset` when nothing was chosen. Unset is not the same as `medium`: it sends no reasoning configuration at all.
 
-**Environment variable override:** `CLAUDE_CODE_EFFORT_LEVEL` overrides the persisted setting for the current process. If this variable is set and conflicts with a `/effort` command, MikMik displays a warning.
-
-### How the API maps levels
-
-The effort parameter is passed directly to the Anthropic API for supported models. When no effort parameter is sent (the default), the API uses `high`. The displayed status bar reflects the effective level as `resolveAppliedEffort` computes it: env override, then session state, then persisted setting.
+Only `low`, `high` and `normal` also move the output token limit (4096, 32768, and back to the model default). The other levels leave it alone.
 
 ---
 
@@ -49,37 +49,22 @@ The context window has a finite size. Auto-compaction automatically summarises t
 
 ### How it works
 
-MikMik tracks token usage after every model turn. When usage crosses the auto-compact threshold — which is the effective context window size minus a 13,000-token buffer — it runs `compactConversation` to summarise the history and replaces the messages with a compact summary plus any trailing context.
+MikMik tracks token usage after every model turn. When input tokens reach `compact_threshold` percent of the context window, it summarises the history and replaces the messages with the summary plus any trailing context.
 
 The `PreCompact` hook fires before compaction (exit code 2 blocks it). The `PostCompact` hook fires after.
 
+Compaction runs through a `CompactBackend`, so it works on both dispatch arms: the raw Anthropic client, and any registered provider. `compact_model` picks a different model for the summary than the turn itself uses.
+
 ### Controlling auto-compaction
 
-**Disable for a process:**
+Two settings in [Configuration](configuration) govern it:
 
-```bash
-DISABLE_AUTO_COMPACT=1 mikmik
-```
+| Setting             | Default | Effect                                                 |
+|---------------------|---------|--------------------------------------------------------|
+| `auto_compact`      | `true`  | Set to `false` to keep `/compact` manual only           |
+| `compact_threshold` | `90`    | Percent of the context window that triggers compaction  |
 
-This disables automatic compaction while keeping `/compact` available manually.
-
-**Disable compaction entirely:**
-
-```bash
-DISABLE_COMPACT=1 mikmik
-```
-
-**Override the threshold window (for testing):**
-
-```bash
-CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 mikmik
-```
-
-Sets the threshold to 80% of the effective context window instead of the default buffer-based calculation.
-
-**Toggle in global config:**
-
-`autoCompactEnabled` in `~/.claude.json` (boolean, default `true`). The `/compact` command respects this; auto-compact also checks it via `getGlobalConfig().autoCompactEnabled`.
+`compact_threshold` is clamped to 100. Only the user scope sets it; a project `settings.json` cannot. A value below 1 is read as the old fraction format and scaled, so `0.9` means 90.
 
 ### Manual compaction
 
@@ -99,16 +84,17 @@ Runs compaction immediately. Optionally pass custom instructions to guide the su
 /context
 ```
 
-Displays the current token usage relative to the model's context window. Shows the percentage remaining and warns when approaching the warning or error thresholds.
+Displays the current token usage relative to the model's context window. Two fractions of the window drive the colour, and both are defined once in the `constants` module of `mikmik-core`:
 
-- **Warning threshold:** 20,000 tokens before the effective window limit.
-- **Error threshold:** 20,000 tokens before the effective window limit (triggers a more prominent visual).
-- **Blocking limit:** 3,000 tokens before the effective window — further input is blocked until compaction.
+- **Warning:** at or above 80% of the window, the bar turns yellow.
+- **Critical:** at or above 95%, it turns red.
+
+The footer bar, the compact warning and `/ctx-viz` all read the same two constants, so they agree at every point.
 
 ### ctx-viz
 
 ```
-/ctx_viz
+/ctx-viz
 ```
 
 Opens an interactive visualisation of which parts of the context are consuming the most tokens. Useful for identifying large files or long tool outputs that could be trimmed.
@@ -150,10 +136,6 @@ The `parentUuid` field forms a linked chain that allows MikMik to reconstruct th
 
 Special entry types include `summary` (compaction summaries), `custom-title` (from `/rename`), and various ephemeral progress indicators that are filtered out when reading the transcript for display.
 
-### SDK access
-
-The public SDK exports `getSessionMessages`, `listSessions`, `getSessionInfo`, `renameSession`, `tagSession`, and `forkSession` for programmatic access to session data.
-
 ---
 
 ## Worktree support
@@ -162,8 +144,8 @@ Subagents spawned via the `Agent` tool can operate in isolated git worktrees to 
 
 ### Tools
 
-- `EnterWorktreeTool` — checks out a new worktree and switches the agent's working directory to it.
-- `ExitWorktreeTool` — removes the worktree and returns the agent to the original directory.
+- `EnterWorktree` — checks out a new worktree and switches the agent's working directory to it.
+- `ExitWorktree` — removes the worktree and returns the agent to the original directory.
 
 ### Custom worktree backends
 
@@ -190,9 +172,13 @@ mikmik --permission-mode plan
 When in plan mode:
 - Write and execute operations require explicit permission.
 - The model can read files, search, and reason freely.
-- Exiting plan mode (via `ExitPlanModeTool`) returns to the normal permission model.
+- Exiting plan mode (via `ExitPlanMode`) returns to the permission mode that was in force before.
 
-The `EnterPlanModeTool` and `ExitPlanModeTool` internal tools manage transitions. A `plan_mode_exit` attachment is injected into the conversation when the mode changes to guide the model's next steps.
+The model switches itself in with `EnterPlanMode` when a request needs research before code. The switch is real and takes effect on the running turn: the permission mode becomes `plan`, the tool roster is rebuilt, and the previous permission mode is remembered so that leaving plan mode restores it. No approval is asked, because the change is restrictive.
+
+`EnterPlanMode` needs the TUI. In headless (`--print`) and ACP sessions there is nothing to switch, so the tool says the mode did not change rather than reporting success.
+
+`ExitPlanMode` is the other half: the model presents the plan and the user approves or rejects it. Tab on an empty prompt cycles the agent mode, and Shift+Tab cycles the permission mode; both routes leave plan mode through the same path, so `/plan` followed by Tab does not leave the session running under plan mode's permissions.
 
 ---
 
@@ -209,7 +195,7 @@ The goal system lets MikMik work autonomously across multiple turns toward a sin
 
 Once a goal is set, MikMik begins working immediately. It continues across turns without waiting for user input until one of these conditions is met:
 
-- The model calls `GoalCompleteTool` with an audit summary and evidence
+- The model calls `GoalComplete` with an audit summary and evidence
 - You run `/goal pause` or `/goal clear`
 - The runaway guard fires (200-turn hard limit)
 - A token budget is set and exhausted
@@ -227,7 +213,7 @@ Once a goal is set, MikMik begins working immediately. It continues across turns
 
 ### How completion works
 
-When the model believes the objective has been met, it calls `GoalCompleteTool` rather than simply responding. This tool requires two arguments:
+When the model believes the objective has been met, it calls `GoalComplete` rather than simply responding. This tool requires two arguments:
 
 - `audit_summary` — a concise description of what was accomplished
 - `evidence` — specific, verifiable evidence (files changed, tests passing, output produced)
@@ -240,7 +226,7 @@ MikMik displays both to the user before marking the goal complete. The model is 
 |-------------|-----------------------------------------------------|
 | `Active`    | Goal is set and work is ongoing                     |
 | `Paused`    | Work paused by user; goal is preserved              |
-| `Completed` | Model called `GoalCompleteTool` with accepted audit |
+| `Completed` | Model called `GoalComplete` with accepted audit |
 | `Failed`    | Runaway guard fired or budget exhausted             |
 
 ### Disabling the goal system
@@ -249,7 +235,7 @@ MikMik displays both to the user before marking the goal complete. The model is 
 MIKMIK_GOALS=0 mikmik
 ```
 
-Set `MIKMIK_GOALS=0` in the environment to completely disable goal-related commands and the `GoalCompleteTool`. Useful in environments where autonomous multi-turn execution is undesirable.
+Set `MIKMIK_GOALS=0` in the environment to completely disable goal-related commands and the `GoalComplete`. Useful in environments where autonomous multi-turn execution is undesirable.
 
 ---
 
@@ -297,14 +283,17 @@ Model format: `provider/model` (e.g., `anthropic/claude-opus-4-6`, `openai/gpt-4
 
 Control how the total token/cost budget is divided between the manager and executors:
 
-| Policy       | Command                        | Description                                     |
-|--------------|--------------------------------|-------------------------------------------------|
-| `shared`     | `budget-split shared`          | All agents draw from a single shared pool       |
-| `percentage` | `budget-split percentage:20`   | Manager gets 20%, executors share the rest      |
-| `fixed`      | `budget-split fixed:0.50:2.00` | Manager capped at $0.50, each executor at $2.00 |
+| Policy       | Command                                            | Description                                     |
+|--------------|----------------------------------------------------|-------------------------------------------------|
+| `shared`     | `/managed-agents configure budget-split shared`     | All agents draw from a single shared pool       |
+| `percentage` | `/managed-agents configure budget-split percentage:20` | Manager gets 20%, executors share the rest   |
+| `fixed`      | `/managed-agents configure budget-split fixed:0.50:2.00` | Manager capped at $0.50, each executor at $2.00 |
 
 ```
 /managed-agents budget 5.00           — set a total $5 budget (0 to clear)
+/managed-agents disable               — turn managed agents off
+/managed-agents reset                 — remove the configuration entirely
+/managed-agents setup                 — print the setup instructions
 ```
 
 ### Viewing configuration
@@ -410,7 +399,7 @@ Every MikMik user gets a persistent companion derived deterministically from the
 
 The companion's visual traits (species, eyes, hat, rarity, shiny status, stats) are generated by hashing the user ID with a seeded PRNG (Mulberry32). This means the companion is always the same for a given user — it cannot be faked by editing config files, because the bones are regenerated from the hash on every read.
 
-Only the soul (name, personality) is persisted to `~/.claude.json` under the `companion` key, and only after it has been "hatched" (named by the model on first encounter).
+Only the soul (name, personality) is persisted, to `companion.json` in the config directory, and only after it has been "hatched" (named by the model on first encounter).
 
 ### Species
 
@@ -434,15 +423,13 @@ Each companion has five stats: DEBUGGING, PATIENCE, CHAOS, WISDOM, SNARK. One st
 
 ### Persistence
 
-The stored companion format in `~/.claude.json`:
+The stored format in `companion.json`:
 
 ```json
 {
-  "companion": {
-    "name": "Vortox",
-    "personality": "a chaotic little axolotl who celebrates every bug as a feature",
-    "hatchedAt": 1712345678901
-  }
+  "name": "Vortox",
+  "personality": "a chaotic little axolotl who celebrates every bug as a feature",
+  "hatched_at": "2026-04-05T18:14:38Z"
 }
 ```
 
@@ -456,9 +443,11 @@ The bones (species, rarity, stats, eyes, hat, shiny) are never stored and are al
 /voice
 ```
 
-Experimental voice input using the device microphone. When active, spoken input is transcribed and submitted as a prompt. The integration uses the Deepgram streaming STT API.
+Voice input using the device microphone. When active, spoken input is transcribed and submitted as a prompt. Transcription goes to an OpenAI Whisper-compatible endpoint, `https://api.openai.com/v1/audio/transcriptions` by default, with the `whisper-1` model. Both the URL and the model are configurable, so any compatible server works.
 
-The `/voice` command is a toggle. `CLAUDE_CODE_ENABLE_VOICE=1` can be used to pre-enable voice mode.
+The `/voice` command is a toggle. `MIKMIK_VOICE_ENABLED=1` pre-enables voice mode and `MIKMIK_VOICE_DISABLED=1` turns it off.
+
+Voice is a compile-time Cargo feature. A build made with `--no-default-features` drops it, along with the ALSA dependency it needs on Linux.
 
 ---
 
@@ -492,11 +481,9 @@ The relay ships in `relay/` and runs in Docker. Setup, the settings block, the p
 
 Shows the current remote session URL and a QR code for scanning on mobile.
 
-The bridge operates in two topologies:
-- **In-process bridge** — the connection lives inside the MikMik process. If the process dies, the connection is lost.
-- **Daemon bridge** — the connection lives in a parent daemon process. The agent can be respawned while the remote session stays connected. This is the `connectRemoteControl` SDK primitive.
+The connection lives inside the MikMik process. If the process dies, the connection is lost.
 
-SSH sessions work similarly: `mikmik --ssh` enables a remote-accessible session that can be connected to from another machine.
+The web client sees the same permission prompts the terminal does, including the `bypassPermissions` warning gate, and answers them over the same path.
 
 ---
 
@@ -554,17 +541,22 @@ For VS Code, which has no ACP client of its own, the repository ships an extensi
 
 ## AGENTS.md hierarchical memory
 
-MikMik reads instruction files from the filesystem before every session and whenever a relevant file changes. The lookup order is:
+MikMik reads instruction files before every session. Four scopes are loaded, in this order:
 
-1. **Managed** — `/etc/claude-code/AGENTS.md` and `/etc/claude-code/CLAUDE.md` (administrator-controlled, always loaded).
-2. **User** — `~/.config/mikmik/AGENTS.md` then `~/.config/mikmik/CLAUDE.md` (personal global instructions).
-3. **Project** — `AGENTS.md`, `CLAUDE.md`, `.mikmik/AGENTS.md`, and `.mikmik/CLAUDE.md` in each directory from the filesystem root down to the current working directory. Files are loaded from the root toward the CWD so that parent-directory rules are visible when processing child-directory rules.
+1. **Managed** — every `*.md` file in `<config dir>/rules/`, sorted by name.
+2. **User** — `<config dir>/AGENTS.md`, then `<config dir>/CLAUDE.md`.
+3. **Project** — `AGENTS.md`, then `CLAUDE.md`, in the project root.
+4. **Local** — `.mikmik/AGENTS.md`, then `.mikmik/CLAUDE.md`, in the project root.
 
 `AGENTS.md` is preferred (universal cross-tool standard); `CLAUDE.md` is loaded next at every scope for compatibility with other Claude tooling. If both exist at the same scope, both are loaded.
 
-Files can `@include` other files using a frontmatter include directive. Included files are resolved relative to the including file.
+The project root is the git repository the working directory sits in, or the working directory itself when there is none. A session started in a subdirectory therefore reads the repository's files, not the subdirectory's.
 
-The `InstructionsLoaded` hook event fires for every file that is loaded, with the `load_reason` field indicating why (e.g. `session_start`, `nested_traversal`, `path_glob_match`, `include`, `compact`).
+Each file may pull in others with a line starting `@include `. The path resolves relative to the including file, `~` is expanded, nesting is bounded, and a cycle is skipped with an HTML comment rather than a failure. A missing include leaves a comment too, so nothing fails silently.
+
+YAML frontmatter is stripped before the content reaches the model.
+
+The `InstructionsLoaded` hook event fires when instruction files are loaded.
 
 The `/memory` command opens the memory management UI for viewing, editing, and organising instruction files.
 
@@ -578,26 +570,29 @@ The `/memory` command opens the memory management UI for viewing, editing, and o
 |---------------------|-----------------------------------------------------------------------------|
 | `default`           | Prompts the user before executing dangerous or write operations.            |
 | `plan`              | Read-only; write and execute require explicit approval.                     |
-| `autoAccept`        | Accepts all tool calls without prompting. Use with caution.                 |
+| `acceptEdits`       | Accepts file edits without prompting; other tools still prompt.             |
 | `bypassPermissions` | Skips the permission system entirely. Intended for trusted automation only. |
 
 The active mode is set with `--permission-mode <mode>` or via the `PermissionRequest` hook.
 
 ### Tool risk classification
 
-Every tool is classified into a risk tier that determines the default permission behaviour:
+Every tool declares a permission level that determines the default behaviour:
 
-| Tier        | Examples                                | Default behaviour      |
-|-------------|-----------------------------------------|------------------------|
-| `forbidden` | Directly destructive operations         | Always blocked         |
-| `dangerous` | Broad filesystem writes, network access | Prompt required        |
-| `execute`   | Bash, shell commands                    | Prompt required        |
-| `write`     | FileWrite, FileEdit, TodoWrite          | Prompt in default mode |
-| `readonly`  | FileRead, Glob, Grep, WebFetch          | Allowed automatically  |
+| Level       | Examples                        | Default behaviour                     |
+|-------------|---------------------------------|---------------------------------------|
+| `Forbidden` | Directly destructive commands   | Always blocked, in every mode         |
+| `Dangerous` | Sandbox bypass                  | Prompt required                       |
+| `Execute`   | Bash                            | Prompt required                       |
+| `Write`     | Write, Edit                     | Prompt in default mode                |
+| `ReadOnly`  | Read, Glob, Grep, WebFetch      | Allowed automatically                 |
+| `None`      | Purely informational tools      | Allowed automatically                 |
+
+`None` and `ReadOnly` never reach the permission manager at all, so no rule can gate them.
 
 ### Bash command risk classification
 
-Within `BashTool`, commands are further classified by analysing the command string against known patterns. Commands matching dangerous patterns (e.g. `rm -rf`, `dd if=`, pipe chains with destructive intent) receive a higher risk rating and may be blocked depending on the active permission mode.
+Within the Bash tool, commands are further classified by analysing the command string against known patterns. A command the classifier rates `Critical` (`rm -rf /`, a fork bomb, `dd if=`) is raised to `Forbidden`, which no permission mode can approve.
 
 The `PermissionRequest` hook can intercept any tool call before the user prompt is displayed, allowing automated allow/deny decisions based on context.
 
@@ -609,51 +604,60 @@ The `PermissionRequest` hook can intercept any tool call before the user prompt 
 /output-style [style]
 ```
 
-Controls how MikMik formats its responses. Available styles vary by configuration; the command opens an interactive picker when called without arguments.
+Controls how MikMik writes its responses. The command opens a picker when called without arguments. Eleven styles ship built in:
 
-Output styles affect markdown rendering, code block formatting, and verbosity of tool call summaries in the terminal UI.
+| Style | What it does |
+|---|---|
+| `default` | The standard voice |
+| `concise` | Shorter answers, less preamble |
+| `explanatory` | Explains the reasoning behind each step |
+| `learning` | Teaches while it works |
+| `asd-ste100` | Controlled technical writing (see Personas above) |
+| `caveman-lite`, `caveman`, `caveman-ultra` | Three compression levels |
+| `rocky-lite`, `rocky`, `rocky-ultra` | Three intensity levels |
+
+More styles are loaded from disk as `.md` (`# Label`, description, then the prompt) or `.json` files.
+
+A style governs prose only. Code blocks, technical terms, error messages, file paths and git operations are unchanged.
 
 ---
 
 ## Custom commands
 
-Custom slash commands can be defined in `.claude/settings.json` under a `customCommands` key. A custom command is a template that expands to a prompt when invoked.
+A custom command is a markdown file. Two directories are read:
 
-```json
-{
-  "customCommands": [
-    {
-      "name": "review",
-      "description": "Review the staged git diff",
-      "command": "Review the output of `git diff --staged`. Focus on correctness, edge cases, and naming."
-    },
-    {
-      "name": "standup",
-      "description": "Summarise today's work",
-      "command": "Summarise what I worked on today based on the git log since midnight."
-    }
-  ]
-}
+| Directory                  | Scope                          |
+|----------------------------|--------------------------------|
+| `.mikmik/commands/`        | The project                    |
+| `<config dir>/commands/`   | Every project                  |
+
+The file name is the command name, so `.mikmik/commands/review.md` becomes `/review`. The body is the prompt the command expands to.
+
+```markdown
+Review the output of `git diff --staged`.
+Focus on correctness, edge cases, and naming.
 ```
 
-Custom commands appear alongside built-in commands in the `/` menu.
+Custom commands appear alongside built-in commands in the `/` menu, and plugins contribute their own `commands/` directory the same way.
+
+Skills work through a second set of directories, `.mikmik/skills/`, `.agents/skills/` and `<config dir>/skills/`. Project skill directories are found by walking up from the working directory, so a skill defined at the repository root is visible from every subdirectory. A skill defined twice keeps the first one found and reports the duplicate.
 
 ---
 
 ## Formatters
 
-Auto-formatters run automatically after file writes when configured. The typical setup uses a `PostToolUse` hook on `FileWrite` or `FileEdit`:
+Auto-formatters run automatically after file writes when configured. The typical setup uses a `PostToolUse` hook on `Write` or `Edit`:
 
 ```json
 {
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "FileWrite",
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'FILE=$(jq -r .inputs.file_path); prettier --write \"$FILE\" 2>/dev/null || true'"
+            "command": "bash -c 'FILE=$(jq -r .tool_input.file_path); prettier --write \"$FILE\" 2>/dev/null || true'"
           }
         ]
       }
@@ -691,7 +695,7 @@ Path arguments then accept `&<root-name>/<relative-path>` for a file and `&<root
 
 ### Environment variables in config
 
-Environment variables can be set in `.claude/settings.json` under an `env` key. These are injected into tool executions:
+Environment variables can be set in `settings.json` under an `env` key. These are injected into tool executions:
 
 ```json
 {
@@ -702,13 +706,11 @@ Environment variables can be set in `.claude/settings.json` under an `env` key. 
 }
 ```
 
-The `CwdChanged` hook can also write environment exports to `$CLAUDE_ENV_FILE` to propagate dynamic values into subsequent Bash commands within the same session.
-
 ---
 
 ## LSP integration
 
-The `LspTool` provides code intelligence by communicating with a Language Server Protocol server for the current file.
+The `LSP` tool provides code intelligence by communicating with a Language Server Protocol server for the current file.
 
 ### Operations
 

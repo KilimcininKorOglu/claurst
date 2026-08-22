@@ -28,16 +28,21 @@ This document is the complete reference for every tool available to the MikMik a
 
 ## Tool System Overview
 
-Every tool in MikMik implements a common `Tool` interface. This interface defines:
+Every tool in MikMik implements the `Tool` trait. It defines:
 
-- **Identity** — name, aliases, MCP info
-- **Input schema** — a Zod schema validating the input the model must provide
-- **Capability flags** — `isReadOnly`, `isDestructive`, `isConcurrencySafe`
-- **Permission check** — `checkPermissions()` called before execution
-- **Execution** — `call()` performs the actual operation
-- **UI rendering** — React/Ink components for TUI display
+| Member               | Purpose                                                                   |
+|----------------------|---------------------------------------------------------------------------|
+| `name()`             | The name the model calls                                                  |
+| `description()`      | The one-line description the model reads                                  |
+| `permission_level()` | The level the tool needs; see the table below                             |
+| `input_schema()`     | A JSON Schema describing the parameters                                   |
+| `execute()`          | Performs the operation and returns a `ToolResult`                         |
+| `self_gates()`       | `true` when the tool prompts for permission itself, so the central gate does not prompt twice |
+| `advanced()`         | Marks a rarely used tool as a candidate for on-demand disclosure          |
 
-Tools are loaded eagerly at session start. The model receives tool descriptions and schemas and selects tools to call. Each tool call goes through permission resolution before `call()` is invoked.
+A `ToolResult` carries the text sent back to the model, an error flag, and optional structured metadata the TUI uses to render diffs.
+
+Tools are loaded at session start. The model receives the names, descriptions and schemas, and chooses which to call. Every call goes through permission resolution first: a tool that forgets to check permission is still caught by the central backstop whenever its level is a gated one.
 
 ### Workspace-root paths
 
@@ -45,11 +50,7 @@ Every path-based tool accepts three forms: an absolute path, a path relative to 
 
 The working directory is always `&main`. Directories added with `--add-dir`, `additional_dirs` or `workspace_paths` take a name from their last path component (`&docs`, `&_ai-engine`, `&my-project-api`), with a counter appended when two of them share a name. Write `&<root-name>/<relative-path>` for a file under that root, or `&<root-name>` on its own for the root directory. A root name that does not exist is an error listing the known roots, not a path.
 
-`GlobTool` and `GrepTool` search the working directory when `path` is omitted; pass `path=&<root-name>` to search a different root. See [`--add-dir`](advanced.md#--add-dir) for how the names are derived.
-
-### Tool Concurrency
-
-Tools marked `isConcurrencySafe` may run in parallel with other tool calls. Most write tools are not concurrency-safe. Read-only tools are generally safe to parallelize.
+`Glob` and `Grep` search the working directory when `path` is omitted; pass `path=&<root-name>` to search a different root. See [`--add-dir`](advanced.md#--add-dir) for how the names are derived.
 
 ---
 
@@ -57,33 +58,29 @@ Tools marked `isConcurrencySafe` may run in parallel with other tool calls. Most
 
 ### Permission Levels
 
-Each tool is assigned a conceptual permission level based on what it can do:
+Each tool declares one permission level:
 
-| Level         | Description                            | Examples                                        |
-|---------------|----------------------------------------|-------------------------------------------------|
-| **None**      | No external effects; purely passive    | `SleepTool`                                     |
-| **ReadOnly**  | Reads data; no writes or execution     | `FileReadTool`, `GlobTool`, `WebFetchTool`      |
-| **Write**     | Creates or modifies data               | `FileWriteTool`, `FileEditTool`, `ConfigTool`   |
-| **Execute**   | Runs code or spawns processes          | `BashTool`, `TaskCreateTool`, `SendMessageTool` |
-| **Dangerous** | Broad system access; high blast radius | `ComputerUseTool`                               |
+| Level         | Description                            | Examples                            |
+|---------------|----------------------------------------|-------------------------------------|
+| **None**      | No external effects; purely passive    | `Sleep`                             |
+| **ReadOnly**  | Reads data; no writes or execution     | `Read`, `Glob`, `WebFetch`          |
+| **Write**     | Creates or modifies data               | `Write`, `Edit`, `Config`           |
+| **Execute**   | Runs code or spawns processes          | `Bash`, `TaskCreate`, `SendMessage` |
+| **Dangerous** | Broad system access; high blast radius | `computer`                          |
+| **Forbidden** | Never executed, in any mode            | A `Critical`-risk bash command      |
+
+`None` and `ReadOnly` are not gated at all: they never reach the permission manager, so no rule applies to them.
 
 ### Permission Modes
 
-The active permission mode controls how `checkPermissions()` behaves:
+| Mode                | Behavior                                                        |
+|---------------------|-----------------------------------------------------------------|
+| `default`           | Prompts the user for any tool that isn't pre-approved           |
+| `plan`              | All write/execute tools are blocked; read-only tools run freely |
+| `acceptEdits`       | File edits are auto-approved; shell execution still prompts     |
+| `bypassPermissions` | All tools run without prompting (headless/CI use)               |
 
-| Mode                | Behavior                                                              |
-|---------------------|-----------------------------------------------------------------------|
-| `default`           | Prompts the user for any tool that isn't pre-approved                 |
-| `plan`              | All write/execute tools are blocked; read-only tools run freely       |
-| `auto`              | Non-destructive tools run without prompting; destructive tools prompt |
-| `acceptEdits`       | File edits are auto-approved; shell execution still prompts           |
-| `bypassPermissions` | All tools run without prompting (headless/CI use)                     |
-
-### Interactive vs. Auto Mode
-
-**Interactive mode** (default REPL): MikMik presents a confirmation prompt for any tool that lacks a pre-existing approval rule. The user can approve once, approve always (adding a permanent rule), or deny.
-
-**Auto mode** (`--dangerously-skip-permissions` or `bypassPermissions`): No prompts are shown. All tool calls execute immediately. Use only in trusted, sandboxed environments.
+`--dangerously-skip-permissions` selects `bypassPermissions`. It opens a warning gate first, in the terminal and in the web client alike. Use it only in trusted, sandboxed environments.
 
 ### Permission Rules
 
@@ -95,15 +92,15 @@ Rules are stored per-project and per-user. A rule specifies:
 
 Rules are evaluated in order; the first match wins. Manage rules with `/permissions`.
 
-### Read-Before-Write Enforcement
+### Change recording
 
-File write tools check whether the file was read in the current session before allowing a write. This prevents overwriting files the model has not examined. The `readFileState` map in `ToolUseContext` tracks reads.
+Every write records the previous content before overwriting it, which is what `/undo` and `/rewind` replay. A configured formatter runs afterwards, and the `FileChanged` hook fires with the path and whether the file was created or overwritten.
 
 ---
 
 ## File Tools
 
-### FileReadTool
+### Read
 
 **Permission level:** ReadOnly
 
@@ -115,13 +112,11 @@ Read the contents of a file from the local filesystem. Returns file contents as 
 | `offset`    | integer | no       | First line to read (1-indexed)  |
 | `limit`     | integer | no       | Maximum number of lines to read |
 
-The tool tracks every read in `readFileState` with the file's modification time and content hash. Subsequent writes check this state.
-
 Supports reading: text files, images (PNG, JPG, GIF, WEBP — returned as base64), PDF files (text extraction), and Jupyter notebooks.
 
 ---
 
-### FileWriteTool
+### Write
 
 **Permission level:** Write
 
@@ -132,15 +127,15 @@ Write content to a file. Creates the file and any missing parent directories. Ov
 | `file_path` | string | yes      | Absolute, working-directory-relative, or `&root-name/relative` path |
 | `content`   | string | yes      | Full file content      |
 
-Requires the file to have been read first (or the file to not exist). The previous content is stored for `/undo` support.
+The previous content is stored, so `/undo` can put it back.
 
 ---
 
-### FileEditTool
+### Edit
 
 **Permission level:** Write
 
-Perform an exact string replacement within an existing file. Fails if `old_string` is not found or is not unique. Prefer this tool over `FileWriteTool` when making targeted edits, as it only transmits the diff rather than the entire file.
+Perform an exact string replacement within an existing file. Fails if `old_string` is not found or is not unique. Prefer this tool over `Write` when making targeted edits, as it only transmits the diff rather than the entire file.
 
 | Parameter     | Type    | Required | Description                              |
 |---------------|---------|----------|------------------------------------------|
@@ -153,11 +148,11 @@ Whitespace and indentation must match exactly.
 
 ---
 
-### BatchEditTool
+### BatchEdit
 
 **Permission level:** Write
 
-Apply multiple `FileEditTool`-style edits in a single tool call. More efficient than calling `FileEditTool` repeatedly when making many changes to the same file or across multiple files.
+Apply multiple `Edit`-style edits in a single tool call. More efficient than calling `Edit` repeatedly when making many changes to the same file or across multiple files.
 
 | Parameter | Type  | Required | Description                                                         |
 |-----------|-------|----------|---------------------------------------------------------------------|
@@ -167,7 +162,7 @@ Edits within the same file are applied in order. If any individual edit fails (s
 
 ---
 
-### ApplyPatchTool
+### ApplyPatch
 
 **Permission level:** Write
 
@@ -183,32 +178,32 @@ Useful when the model needs to express changes in diff format rather than as str
 
 ## Shell Execution Tools
 
-### BashTool
+### Bash
 
 **Permission level:** Execute
 
-Execute a shell command in a bash subprocess. The working directory persists between calls within a session. Shell state (variable assignments, `cd`, etc.) does not persist — each call starts from the configured working directory.
+Execute a shell command in a real terminal (PTY). One shell serves the whole session, so `cd` and `export` outlive the call and the working directory persists between commands. The PTY also lets interactive programs and terminal-aware tools (npm, cargo, git, pytest) behave as they would at a keyboard; colour codes are stripped for readability.
 
-| Parameter           | Type    | Required | Description                                           |
-|---------------------|---------|----------|-------------------------------------------------------|
-| `command`           | string  | yes      | Shell command to execute                              |
-| `description`       | string  | no       | Human-readable description shown in the TUI           |
-| `timeout`           | integer | no       | Timeout in milliseconds (max 600000)                  |
-| `run_in_background` | boolean | no       | Run asynchronously; result delivered via notification |
+| Parameter           | Type    | Required | Description                                              |
+|---------------------|---------|----------|----------------------------------------------------------|
+| `command`           | string  | yes      | Shell command to execute                                 |
+| `description`       | string  | no       | Description shown in the TUI and in the permission prompt|
+| `timeout`           | integer | no       | Timeout in milliseconds (default 120000, max 600000)     |
+| `run_in_background` | boolean | no       | Run asynchronously; result delivered via notification    |
 
-Output (stdout + stderr) is returned as a string. Commands that produce more than `maxResultSizeChars` of output are truncated.
+Output (stdout + stderr) is returned as a string, and long output is truncated.
 
-Always quote file paths containing spaces. Use Unix shell syntax regardless of host OS.
+A command the risk classifier rates `Critical` (`rm -rf /`, a fork bomb, `dd if=`) is `Forbidden`: no permission mode approves it.
 
-When `run_in_background` is `true`, the task ID is returned immediately. Use `MonitorTool` to check status, retrieve output, or cancel the task.
+When `run_in_background` is `true`, the task ID is returned immediately. Use `monitor` to check status, retrieve output, or cancel the task.
 
 ---
 
-### MonitorTool
+### monitor
 
 **Permission level:** ReadOnly
 
-Monitor background tasks started with `BashTool`'s `run_in_background=true`. Supports listing all tasks, checking the status or output of a specific task, and cancelling a running task.
+Monitor background tasks started with `Bash`'s `run_in_background=true`. Supports listing all tasks, checking the status or output of a specific task, and cancelling a running task.
 
 | Parameter | Type   | Required | Description                                                             |
 |-----------|--------|----------|-------------------------------------------------------------------------|
@@ -228,24 +223,11 @@ Task statuses: `running`, `completed`, `failed: <reason>`, `cancelled`.
 
 ---
 
-### PtyBashTool
+### PowerShell
 
 **Permission level:** Execute
 
-Execute a command in a full pseudo-terminal (PTY). Required for interactive programs (editors, pagers, prompts) that need terminal capabilities such as ANSI codes, raw input, or window size detection. Behaves like `BashTool` for non-interactive commands.
-
-| Parameter | Type    | Required | Description             |
-|-----------|---------|----------|-------------------------|
-| `command` | string  | yes      | Command to run in PTY   |
-| `timeout` | integer | no       | Timeout in milliseconds |
-
----
-
-### PowerShellTool
-
-**Permission level:** Execute
-
-Execute a PowerShell command on Windows hosts. Equivalent to `BashTool` but uses `pwsh` (PowerShell Core) or `powershell.exe` as the shell.
+Execute a PowerShell command on Windows hosts. Equivalent to `Bash` but uses `pwsh` (PowerShell Core) or `powershell.exe` as the shell.
 
 | Parameter | Type    | Required | Description                   |
 |-----------|---------|----------|-------------------------------|
@@ -256,7 +238,7 @@ Available only when running on Windows.
 
 ---
 
-### ReplTool
+### REPL
 
 **Permission level:** Execute
 
@@ -273,7 +255,7 @@ Useful for iterative data exploration or multi-step computations where re-runnin
 
 ## Search Tools
 
-### GlobTool
+### Glob
 
 **Permission level:** ReadOnly
 
@@ -286,7 +268,7 @@ Find files matching a glob pattern. Searches from a specified directory (default
 
 ---
 
-### GrepTool
+### Grep
 
 **Permission level:** ReadOnly
 
@@ -307,7 +289,7 @@ Search file contents using regular expressions, powered by ripgrep. Supports mul
 
 ---
 
-### ToolSearchTool
+### ToolSearch
 
 **Permission level:** ReadOnly
 
@@ -322,7 +304,7 @@ Search available tools by name or keyword to retrieve their full parameter schem
 
 ## Web Tools
 
-### WebFetchTool
+### WebFetch
 
 **Permission level:** ReadOnly
 
@@ -337,7 +319,7 @@ Network requests are subject to the host's firewall and proxy settings.
 
 ---
 
-### WebSearchTool
+### WebSearch
 
 **Permission level:** ReadOnly
 
@@ -379,13 +361,13 @@ with the name of the backend that took over.
 
 ## Task Management Tools
 
-The task system allows the model to create and track long-running background work. There are two generations of the task API; V2 is preferred.
+The task system allows the model to create and track long-running background work.
 
-### TaskCreateTool (V2)
+### TaskCreate
 
 **Permission level:** Execute
 
-Create a new background task. The task runs asynchronously; use `TaskGetTool` or `TaskOutputTool` to poll for completion.
+Create a new background task. The task runs asynchronously; use `TaskGet` or `TaskOutput` to poll for completion.
 
 | Parameter     | Type    | Required | Description                        |
 |---------------|---------|----------|------------------------------------|
@@ -397,7 +379,7 @@ Returns a `task_id` for use with other task tools.
 
 ---
 
-### TaskGetTool (V2)
+### TaskGet
 
 **Permission level:** ReadOnly
 
@@ -411,7 +393,7 @@ Returns status (`pending`, `running`, `completed`, `failed`), progress, and part
 
 ---
 
-### TaskListTool (V2)
+### TaskList
 
 **Permission level:** ReadOnly
 
@@ -423,7 +405,7 @@ List all tasks in the current session with their statuses.
 
 ---
 
-### TaskUpdateTool (V2)
+### TaskUpdate
 
 **Permission level:** Execute
 
@@ -436,7 +418,7 @@ Update the parameters of a running or pending task.
 
 ---
 
-### TaskStopTool (V2)
+### TaskStop
 
 **Permission level:** Execute
 
@@ -450,7 +432,7 @@ Sends SIGTERM to the task process. If it does not exit within a grace period, SI
 
 ---
 
-### TaskOutputTool (V2)
+### TaskOutput
 
 **Permission level:** ReadOnly
 
@@ -463,7 +445,7 @@ Retrieve the accumulated stdout/stderr output from a task.
 
 ---
 
-### TodoWriteTool
+### TodoWrite
 
 **Permission level:** Write
 
@@ -481,7 +463,7 @@ Status values: `pending`, `in_progress`, `completed`. Priority values: `low`, `m
 
 Model Context Protocol (MCP) tools bridge MikMik to external MCP servers.
 
-### ListMcpResourcesTool
+### ListMcpResources
 
 **Permission level:** ReadOnly
 
@@ -495,7 +477,7 @@ Returns a list of resource URIs with descriptions.
 
 ---
 
-### ReadMcpResourceTool
+### ReadMcpResource
 
 **Permission level:** ReadOnly
 
@@ -508,7 +490,7 @@ Read the content of a specific resource from an MCP server.
 
 ---
 
-### McpAuthTool
+### mcp__auth
 
 **Permission level:** Execute
 
@@ -524,34 +506,75 @@ Authenticate with an MCP server that requires credentials. Triggers the server's
 
 Agent tools enable multi-agent coordination: spawning sub-agents, forming teams, and passing messages between them.
 
-### SendMessageTool
+### Agent
+
+**Permission level:** Execute
+
+Run a sub-agent on a task of its own. The sub-agent gets a fresh context and reports back a single result, so a long search or a bounded piece of work does not fill the caller's context.
+
+| Parameter           | Type    | Required | Description                                                          |
+|---------------------|---------|----------|----------------------------------------------------------------------|
+| `description`       | string  | yes      | Three to five words naming the task                                  |
+| `prompt`            | string  | yes      | The complete task for the agent                                      |
+| `tools`             | array   | no       | Tool names the agent may use. Defaults to all of them                |
+| `system_prompt`     | string  | no       | Replaces the sub-agent's system prompt                               |
+| `max_turns`         | number  | no       | Turn limit for the sub-agent (default 10)                            |
+| `model`             | string  | no       | A different model for this agent                                     |
+| `isolation`         | string  | no       | `worktree` runs the agent in its own git worktree                    |
+| `run_in_background` | boolean | no       | Return an `agent_id` at once instead of waiting                      |
+
+An agent never receives the `Agent` tool, so it cannot spawn further agents. `isolation: worktree` is what keeps parallel agents from writing over each other. A background agent is polled through `monitor` with `action=status` or `action=output` and `task_id` set to the returned `agent_id`.
+
+---
+
+### Memory
+
+**Permission level:** ReadOnly
+
+Load the full text of memory files about a topic. The system prompt lists which memory files exist; this tool reads the ones that look relevant.
+
+| Parameter   | Type    | Required | Description                                    |
+|-------------|---------|----------|------------------------------------------------|
+| `query`     | string  | yes      | The topic to search for                        |
+| `max_files` | integer | no       | How many files to return                       |
+
+The query is scored against each file's name, description and filename, so search by topic rather than by exact wording.
+
+---
+
+### SendMessage
 
 **Permission level:** Execute
 
 Send a message to another agent (sub-agent or coordinator). Used for inter-agent communication in multi-agent workflows.
 
-| Parameter  | Type   | Required | Description             |
-|------------|--------|----------|-------------------------|
-| `agent_id` | string | yes      | Target agent identifier |
-| `message`  | string | yes      | Message content         |
+| Parameter | Type   | Required | Description                                       |
+|-----------|--------|----------|---------------------------------------------------|
+| `to`      | string | yes      | Target agent name, or `main` for the main session |
+| `message` | string | yes      | Message content                                   |
+| `summary` | string | no       | A short preview line shown in the UI              |
 
 ---
 
-### TeamCreateTool
+### TeamCreate
 
 **Permission level:** Execute
 
 Create a team of sub-agents to work in parallel on a set of tasks. Each agent in the team receives its own context and toolset.
 
-| Parameter               | Type   | Required | Description                              |
-|-------------------------|--------|----------|------------------------------------------|
-| `team_name`             | string | yes      | Identifier for the team                  |
-| `agents`                | array  | yes      | Agent configuration objects              |
-| `coordination_strategy` | string | no       | `parallel`, `sequential`, or `consensus` |
+| Parameter     | Type    | Required | Description                                                     |
+|---------------|---------|----------|-----------------------------------------------------------------|
+| `team_name`   | string  | yes      | Identifier for the team                                         |
+| `task`        | string  | yes      | The shared task every agent works on                            |
+| `agents`      | array   | no       | Agent specs: `{name, role, tools, task}`; `name` is required    |
+| `parallel`    | boolean | no       | Run the agents at the same time (default `true`)                |
+| `description` | string  | no       | Team description stored in the configuration                    |
+
+An agent's `tools` limits it to the named tools; omitting the field gives it all of them. Its `task` overrides the shared one.
 
 ---
 
-### TeamDeleteTool
+### TeamDelete
 
 **Permission level:** Execute
 
@@ -563,7 +586,7 @@ Dissolve a team and terminate all its member agents.
 
 ---
 
-### AcpAgentTool
+### AcpAgent
 
 **Permission level:** Execute
 
@@ -602,20 +625,21 @@ The turn is bounded: cancelling the session, or ten minutes elapsing, kills the 
 
 ---
 
-### RemoteTriggerTool
+### RemoteTrigger
 
 **Permission level:** Execute
 
-Trigger a remote agent or scheduled workflow by name. Used by the cron/schedule system to fire agents at configured intervals.
+Send an event to another session, so work finishing here can wake something waiting there.
 
-| Parameter      | Type   | Required | Description                         |
-|----------------|--------|----------|-------------------------------------|
-| `trigger_name` | string | yes      | Named trigger to fire               |
-| `payload`      | object | no       | Optional input data for the trigger |
+| Parameter    | Type   | Required | Description                                              |
+|--------------|--------|----------|----------------------------------------------------------|
+| `session_id` | string | yes      | The session to trigger                                   |
+| `event_name` | string | yes      | The event name, such as `task_complete` or `result_ready`|
+| `payload`    | object | no       | JSON delivered with the event                            |
 
 ---
 
-### SkillTool
+### Skill
 
 **Permission level:** Execute
 
@@ -628,7 +652,7 @@ Invoke a named skill (bundled prompt-command) programmatically from within a too
 
 ---
 
-### GoalCompleteTool
+### GoalComplete
 
 **Permission level:** None
 
@@ -645,7 +669,7 @@ See also: `/goal complete` command.
 
 ---
 
-### AdvisorTool
+### Advisor
 
 **Permission level:** None
 
@@ -668,25 +692,25 @@ Advisor tokens are added to the session cost. `CostTracker` prices every token a
 
 ## Notebook Tools
 
-### NotebookEditTool
+### NotebookEdit
 
 **Permission level:** Write
 
 Edit a Jupyter notebook (`.ipynb`) by modifying, inserting, or deleting cells. Operates on the notebook's JSON structure directly.
 
-| Parameter       | Type    | Required | Description                   |
-|-----------------|---------|----------|-------------------------------|
-| `notebook_path` | string  | yes      | Absolute, working-directory-relative, or `&root-name/relative` path |
-| `cell_index`    | integer | no       | Cell to edit (0-indexed)      |
-| `new_source`    | string  | no       | New cell source content       |
-| `cell_type`     | string  | no       | `code`, `markdown`, or `raw`  |
-| `operation`     | string  | yes      | `edit`, `insert`, or `delete` |
+| Parameter       | Type   | Required | Description                                                         |
+|-----------------|--------|----------|---------------------------------------------------------------------|
+| `notebook_path` | string | yes      | Absolute, working-directory-relative, or `&root-name/relative` path |
+| `cell_id`       | string | no       | Cell ID, a UUID or `cell-N`. Required for `replace` and `delete`    |
+| `new_source`    | string | no       | New cell content. Required for `replace` and `insert`               |
+| `cell_type`     | string | no       | `code` or `markdown`, for `insert` (default `code`)                 |
+| `edit_mode`     | string | no       | `replace` (default), `insert`, or `delete`                          |
 
 ---
 
 ## Planning Tools
 
-### EnterPlanModeTool
+### EnterPlanMode
 
 **Permission level:** None
 
@@ -702,11 +726,11 @@ When the model reaches for this tool is decided by the base system prompt, which
 
 Only the interactive TUI can switch modes. In headless runs (`--print`) and over ACP there is nowhere to apply the switch, so the tool returns an error saying the mode did not change.
 
-Exits when `/plan` is invoked again, when `Tab` switches back to build mode, or when `ExitPlanModeTool` is called and the plan is approved.
+Exits when `/plan` is invoked again, when `Tab` switches back to build mode, or when `ExitPlanMode` is called and the plan is approved.
 
 ---
 
-### ExitPlanModeTool
+### ExitPlanMode
 
 **Permission level:** None
 
@@ -726,32 +750,38 @@ Pass the whole plan as `summary`, not a one-line description. The file is what t
 
 Worktree tools manage git worktrees, enabling the agent to work on multiple branches simultaneously in isolated directories.
 
-### EnterWorktreeTool
+### EnterWorktree
 
 **Permission level:** Execute
 
-Create or attach to a git worktree for a given branch. Subsequent file operations run within the worktree's directory.
+Create a git worktree on a new branch and switch the agent's working directory to it.
 
-| Parameter | Type   | Required | Description                                            |
-|-----------|--------|----------|--------------------------------------------------------|
-| `branch`  | string | yes      | Branch name for the worktree                           |
-| `path`    | string | no       | Directory for the worktree (auto-generated if omitted) |
+| Parameter             | Type   | Required | Description                                                    |
+|-----------------------|--------|----------|----------------------------------------------------------------|
+| `branch`              | string | no       | Branch to create. Defaults to a timestamped name               |
+| `path`                | string | no       | Worktree directory. Defaults to `.worktrees/<branch>`          |
+| `post_create_command` | string | no       | Command to run inside the new worktree, such as `npm install`  |
 
 ---
 
-### ExitWorktreeTool
+### ExitWorktree
 
 **Permission level:** Execute
 
-Detach from the current worktree and return to the main working directory.
+Leave the worktree and return to the original working directory.
 
-No parameters.
+| Parameter         | Type    | Required | Description                                                       |
+|-------------------|---------|----------|-------------------------------------------------------------------|
+| `action`          | string  | yes      | `keep` leaves the worktree on disk; `remove` deletes it and its branch |
+| `discard_changes` | boolean | no       | Required `true` to remove a worktree holding uncommitted or unmerged work |
+
+Without `discard_changes`, `remove` refuses rather than discarding work.
 
 ---
 
 ## Utility Tools
 
-### AskUserQuestionTool
+### AskUserQuestion
 
 **Permission level:** Execute
 
@@ -760,37 +790,39 @@ Pause execution and ask the user a question via an interactive prompt in the TUI
 | Parameter  | Type   | Required | Description                                 |
 |------------|--------|----------|---------------------------------------------|
 | `question` | string | yes      | Question text to display                    |
-| `options`  | array  | no       | Multiple-choice options (renders as a menu) |
+| `options`  | array  | no       | Strings offered as choices. The user picks one or types their own answer |
 
 ---
 
-### BriefTool
+### Brief
 
 **Permission level:** ReadOnly
 
 Emit a short status message to the session output without triggering a full model response. Used in automated pipelines to surface progress updates.
 
-| Parameter | Type   | Required | Description            |
-|-----------|--------|----------|------------------------|
-| `message` | string | yes      | Status message to emit |
+| Parameter     | Type   | Required | Description                                                    |
+|---------------|--------|----------|----------------------------------------------------------------|
+| `message`     | string | yes      | The message, in Markdown                                       |
+| `status`      | string | yes      | `proactive` for an unsolicited update, `normal` for a reply    |
+| `attachments` | array  | no       | File paths to attach: images, diffs, logs                      |
 
 ---
 
-### SleepTool
+### Sleep
 
 **Permission level:** None
 
 Pause execution for a specified duration. Useful in polling loops or when waiting for external processes.
 
-| Parameter     | Type    | Required | Description           |
-|---------------|---------|----------|-----------------------|
-| `duration_ms` | integer | yes      | Milliseconds to sleep |
+| Parameter | Type    | Required | Description           |
+|-----------|---------|----------|-----------------------|
+| `ms`      | integer | yes      | Milliseconds to sleep |
 
-Maximum sleep duration is 60000 ms (60 seconds) per call.
+The maximum is 300000 ms (5 minutes) per call.
 
 ---
 
-### ConfigTool
+### Config
 
 **Permission level:** Write
 
@@ -821,34 +853,36 @@ Accepted keys:
 
 Cron tools manage scheduled agent triggers.
 
-### CronCreateTool
+### CronCreate
 
 **Permission level:** Write
 
 Create a new scheduled trigger. The trigger fires at the specified cron schedule and executes the configured agent or command.
 
-| Parameter  | Type    | Required | Description                           |
-|------------|---------|----------|---------------------------------------|
-| `name`     | string  | yes      | Trigger name (must be unique)         |
-| `schedule` | string  | yes      | Cron expression (e.g., `0 9 * * 1-5`) |
-| `prompt`   | string  | yes      | Agent prompt to run on schedule       |
-| `enabled`  | boolean | no       | Start enabled (default: true)         |
+| Parameter   | Type    | Required | Description                                                           |
+|-------------|---------|----------|-----------------------------------------------------------------------|
+| `cron`      | string  | yes      | Five-field cron expression: `M H DoM Mon DoW`                         |
+| `prompt`    | string  | yes      | The prompt to run at each scheduled time                              |
+| `recurring` | boolean | no       | `true` (default) repeats; `false` fires once, then deletes the task    |
+| `durable`   | boolean | no       | `true` persists to `.mikmik/scheduled_tasks.json`; `false` (default) lasts for the session |
+
+Times are read in the local timezone, so `0 9 * * 1-5` means 9am local on weekdays.
 
 ---
 
-### CronDeleteTool
+### CronDelete
 
 **Permission level:** Write
 
 Delete a scheduled trigger by name.
 
-| Parameter | Type   | Required | Description            |
-|-----------|--------|----------|------------------------|
-| `name`    | string | yes      | Trigger name to delete |
+| Parameter | Type   | Required | Description                    |
+|-----------|--------|----------|--------------------------------|
+| `id`      | string | yes      | The task ID `CronCreate` returned |
 
 ---
 
-### CronListTool
+### CronList
 
 **Permission level:** ReadOnly
 
@@ -862,9 +896,7 @@ No parameters.
 
 Code intelligence tools query language servers for semantic information about source code.
 
-### LspTool
-
-**Tool name:** `LSP`
+### LSP
 
 **Permission level:** ReadOnly
 
@@ -912,19 +944,23 @@ If no LSP server is configured for a file's language, the tool returns an inform
 
 ## Advanced Tools
 
-### ComputerUseTool
+### computer
 
 **Permission level:** Dangerous
 
 Control the desktop GUI — move the mouse, click, type, take screenshots, and interact with applications. Enables the agent to operate software that has no API or CLI interface.
 
-| Parameter    | Type    | Required | Description                                            |
-|--------------|---------|----------|--------------------------------------------------------|
-| `action`     | string  | yes      | `screenshot`, `click`, `type`, `key`, `move`, `scroll` |
-| `coordinate` | array   | no       | `[x, y]` for mouse actions                             |
-| `text`       | string  | no       | Text to type                                           |
-| `key`        | string  | no       | Key name for key events (e.g., `Return`, `ctrl+c`)     |
-| `duration`   | integer | no       | Hold duration in ms for mouse drags                    |
+| Parameter          | Type    | Required | Description                                                        |
+|--------------------|---------|----------|--------------------------------------------------------------------|
+| `action`           | string  | yes      | See the list below                                                 |
+| `coordinate`       | array   | no       | `[x, y]` pixel coordinate for mouse actions                        |
+| `start_coordinate` | array   | no       | Start `[x, y]` for `left_click_drag`                               |
+| `end_coordinate`   | array   | no       | End `[x, y]` for `left_click_drag`                                 |
+| `text`             | string  | no       | Text to type, or the key sequence to press, such as `ctrl+c`       |
+| `direction`        | string  | no       | Scroll direction: `up`, `down`, `left`, or `right`                 |
+| `amount`           | integer | no       | Number of scroll notches                                           |
+
+Actions: `screenshot`, `mouse_move`, `left_click`, `right_click`, `double_click`, `left_click_drag`, `type_text`, `key`, `scroll`, `get_cursor_position`.
 
 This tool has the highest blast radius of any tool in MikMik. It requires explicit permission and should only be enabled in controlled environments. All actions are logged in detail.
 
@@ -933,8 +969,6 @@ Requires a display server (X11, Wayland, or Windows Desktop). Not available in h
 ---
 
 ### StructuredOutput
-
-**Tool name:** `StructuredOutput` (SyntheticOutputTool)
 
 **Permission level:** None
 
@@ -968,38 +1002,33 @@ Calling this tool in an interactive session has no effect; the confirmation stri
 
 ## Tool Framework Internals
 
-### ToolUseContext
+### ToolContext
 
-Every tool receives a `ToolUseContext` at call time. Key fields:
+Every tool receives a `ToolContext` at call time. The fields that shape what a tool may do:
 
-| Field                   | Type            | Description                                                     |
-|-------------------------|-----------------|-----------------------------------------------------------------|
-| `options`               | object          | Session options: loaded tools, commands, model config           |
-| `abortController`       | AbortController | Abort signal; check `signal.aborted` in long-running operations |
-| `getAppState()`         | function        | Read current TUI app state                                      |
-| `setAppState()`         | function        | Update TUI app state                                            |
-| `readFileState`         | Map             | Tracks file reads (path -> mtime + content)                     |
-| `permissionContext`     | object          | Current permission mode and rules                               |
-| `setToolJSX`            | function        | Inject a React/Ink component into the TUI                       |
-| `onPermissionRequest()` | function        | Callback to request a permission decision                       |
-| `agentId`               | string          | Identifier of the calling agent (if sub-agent)                  |
-| `isSubagent`            | boolean         | True when running as a sub-agent                                |
+| Field                 | Description                                                                 |
+|-----------------------|-----------------------------------------------------------------------------|
+| `working_dir`         | The directory paths resolve against                                         |
+| `permission_mode`     | The mode captured when the turn started                                     |
+| `permission_handler`  | Where a permission question is asked                                        |
+| `permission_manager`  | The live rule set, shared with the TUI, so a mode change reaches this turn   |
+| `config`              | The session configuration                                                   |
+| `session_id`          | The session the call belongs to                                             |
+| `non_interactive`     | True in headless runs, where no dialog can be opened                        |
+| `cancel_token`        | Cancelled when the turn is interrupted; long operations must check it       |
+| `current_call`        | The tool call in flight, which is what streams live output                  |
+| `file_history`        | The record `/undo` and `/rewind` replay                                     |
+| `cost_tracker`        | Token and cost accounting for the session                                   |
+| `mcp_manager`         | The connected MCP servers, when any                                         |
+| `editor`              | The editor hosting the session, when one offered to host reads and writes   |
 
-### ToolPermissionContext
+Four side channels carry a tool's request back to the TUI without a round trip through the model:
 
-| Field          | Values                                                        | Description                        |
-|----------------|---------------------------------------------------------------|------------------------------------|
-| `mode`         | `default`, `plan`, `auto`, `acceptEdits`, `bypassPermissions` | Active permission mode             |
-| `allowedTools` | string[]                                                      | Explicitly pre-approved tool names |
-| `deniedTools`  | string[]                                                      | Explicitly blocked tool names      |
-| `rules`        | PermissionRule[]                                              | Path/tool pattern rules            |
+| Channel            | Carries                                                     |
+|--------------------|-------------------------------------------------------------|
+| `user_question_tx` | An `AskUserQuestion` prompt and its answer                   |
+| `plan_approval_tx` | An `ExitPlanMode` plan and the user's decision               |
+| `plan_mode_tx`     | An `EnterPlanMode` switch                                    |
+| `tool_output_tx`   | Live output chunks from a running command                    |
 
-### PermissionDecision
-
-The return value of `checkPermissions()`:
-
-| Field          | Type                   | Description                                          |
-|----------------|------------------------|------------------------------------------------------|
-| `behavior`     | `allow`, `deny`, `ask` | Resolved decision                                    |
-| `updatedInput` | object                 | Optionally-modified input (e.g., path normalization) |
-| `reason`       | string                 | Human-readable explanation for the decision          |
+Each is an `Option`. A session with no TUI leaves it `None`, and the tool says so rather than reporting a change it could not make.

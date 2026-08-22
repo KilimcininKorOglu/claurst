@@ -59,8 +59,8 @@ These bindings are active when focus is in the chat input field.
 | `Ctrl+J`                       | newline             | Newline (fallback for terminals without CSI-u protocol) |
 | `Up` / `Ctrl+O`                | historyPrev         | Navigate to the previous message in input history       |
 | `Down` / `Ctrl+I`              | historyNext         | Navigate to the next message in input history           |
-| `Tab`                          | indent              | Insert indentation (or cycle completions if open)       |
-| `Shift+Tab`                    | reverseIndent       | Remove one level of indentation                         |
+| `Tab`                          | indent              | Accept a completion if one is open; on an empty prompt, cycle the agent mode |
+| `Shift+Tab`                    | reverseIndent       | Remove one level of indentation; on an empty prompt, cycle the permission mode |
 | `Page Up`                      | scrollUp            | Scroll the conversation view up one page                |
 | `Page Down`                    | scrollDown          | Scroll the conversation view down one page              |
 | `Home` / `Cmd+Left` / `Ctrl+A` | goLineStart         | Move cursor to beginning of line                        |
@@ -83,6 +83,14 @@ These bindings are active when focus is in the chat input field.
 | `Ctrl+G`                       | goToLine            | Jump to a specific line                                 |
 | `Ctrl+.`                       | jumpToNextError     | Jump to next error / issue                              |
 | `Ctrl+Shift+.`                 | jumpToPreviousError | Jump to previous error / issue                          |
+
+`Tab` and `Shift+Tab` each do a second job when the prompt is empty and no
+turn is running. `Tab` cycles the agent mode between `build` and `plan`, which
+decides which tools are offered. `Shift+Tab` cycles the permission mode through
+`default` → `acceptEdits` → `bypassPermissions` → `default`, which decides what
+a tool may do without asking; from `plan` it returns to `default`. Switching
+into `bypassPermissions` raises the warning described in
+[Configuration](configuration.md#bypasspermissions).
 
 > `Ctrl+A` previously opened the model picker; it now moves the cursor to the line start (matching Emacs/readline). The model picker is now `Ctrl+Shift+A`. Old `keybindings.json` files are auto-migrated.
 
@@ -309,7 +317,7 @@ In vim insert mode, `Enter` also submits. Use `Shift+Enter` for newlines in vim 
 
 Pressing `Escape` while the model is streaming a response interrupts the stream. The partial response is preserved in the conversation history and the model stops generating. The input field regains focus and you can send a follow-up message.
 
-This is equivalent to pressing `Ctrl+C` during streaming, except that `Ctrl+C` also signals any tool calls in progress to abort (via `AbortController`), while `Escape` only stops the stream and allows running tools to finish.
+This is equivalent to pressing `Ctrl+C` during streaming, except that `Ctrl+C` also cancels any tool calls in progress through the turn's cancellation token, while `Escape` only stops the stream and allows running tools to finish.
 
 ---
 
@@ -404,7 +412,7 @@ If you want a binding that fires only when the `A` character is actually produce
 {
   "context": "chat",
   "action": "myAction",
-  "key": "ctrl+char:a"
+  "chord": "ctrl+char:a"
 }
 ```
 
