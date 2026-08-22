@@ -646,34 +646,34 @@ Skills work through a second set of directories, `.mikmik/skills/`, `.agents/ski
 
 ## Formatters
 
-Auto-formatters run automatically after file writes when configured. The typical setup uses a `PostToolUse` hook on `Write` or `Edit`:
+A formatter runs after every `Write` and `Edit`, without a hook. Declare them under `formatter` in `settings.json`, keyed by a name of your choosing:
 
 ```json
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'FILE=$(jq -r .tool_input.file_path); prettier --write \"$FILE\" 2>/dev/null || true'"
-          }
-        ]
-      }
-    ]
+  "formatter": {
+    "prettier": {
+      "command": ["prettier", "--write", "$FILE"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".json", ".css", ".md"]
+    },
+    "ruff": {
+      "command": ["ruff", "format", "$FILE"],
+      "extensions": [".py"]
+    },
+    "rustfmt": {
+      "command": ["rustfmt", "$FILE"],
+      "extensions": [".rs"]
+    }
   }
 }
 ```
 
-Common formatters:
-- **Prettier** (`prettier --write <file>`) — TypeScript, JavaScript, JSON, CSS, Markdown.
-- **Ruff** (`ruff format <file>`) — Python.
-- **rustfmt** (`rustfmt <file>`) — Rust.
-- **gofmt** (`gofmt -w <file>`) — Go.
-- **clang-format** (`clang-format -i <file>`) — C/C++.
+| Field        | Description                                                              |
+|--------------|--------------------------------------------------------------------------|
+| `command`    | The command and its arguments. `$FILE` or `{file}` is the file's path    |
+| `extensions` | The extensions this formatter handles, each with its leading dot         |
+| `disabled`   | `true` keeps the entry but stops it running                              |
 
-The hook exit code does not affect the tool call result; formatters should suppress non-zero exits for unknown file types (`|| true`).
+The file's path is appended when the command names neither `$FILE` nor `{file}`. Only the first formatter whose extensions match runs. It is given 30 seconds, and its failures are ignored: a file that did not get formatted is not worth interrupting a turn for.
 
 ---
 
