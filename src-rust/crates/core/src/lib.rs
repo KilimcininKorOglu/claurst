@@ -7319,7 +7319,6 @@ pub use oauth::OAuthTokens;
 //              system_prompt, memdir, oauth_config
 // ---------------------------------------------------------------------------
 pub mod accounts;
-pub mod analytics;
 pub mod bash_classifier;
 pub mod codex_oauth;
 pub mod context_collapse;
@@ -7338,7 +7337,6 @@ pub mod paths;
 pub mod prompt_history;
 pub mod ps_classifier;
 pub mod remote_settings;
-pub mod session_tracing;
 pub mod settings_sync;
 pub mod system_prompt;
 pub mod team_memory_sync;
