@@ -86,6 +86,14 @@
     </div>
   </div>
 
+  <!-- Running without permission prompts grants every later tool call at once,
+       so it is louder again than the MCP card and carries no third option. -->
+  <div id="bypass" class="permission bypass" hidden>
+    <p class="permission-tool">Run without asking permission?</p>
+    <p id="bypass-detail" class="permission-desc"></p>
+    <div class="permission-actions" id="bypass-actions"></div>
+  </div>
+
   <div id="question" class="permission question" hidden>
     <p id="question-text" class="permission-tool"></p>
     <div class="permission-actions" id="question-options"></div>

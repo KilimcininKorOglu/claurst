@@ -38,6 +38,9 @@ const el = {
   mcp: document.getElementById('mcp'),
   mcpTitle: document.getElementById('mcp-title'),
   mcpDetail: document.getElementById('mcp-detail'),
+  bypass: document.getElementById('bypass'),
+  bypassDetail: document.getElementById('bypass-detail'),
+  bypassActions: document.getElementById('bypass-actions'),
   question: document.getElementById('question'),
   questionText: document.getElementById('question-text'),
   questionOptions: document.getElementById('question-options'),
@@ -67,6 +70,7 @@ const live = {
   timeline: new Map(), // timeline row id -> <li> element, replaced on update
   permission: null,    // the request currently shown on the card
   mcp: null,           // the MCP trust prompt currently shown on the card
+  bypass: null,        // the bypass-permissions warning currently shown
   question: null,      // the AskUserQuestion currently shown on the card
   attachments: [],     // staged files, sent with the next prompt
   retryDelay: 0,       // grows while the stream cannot be reached
@@ -866,6 +870,10 @@ function render(event) {
       showMcpApproval(event);
       break;
 
+    case 'bypass_warning':
+      showBypassWarning(event);
+      break;
+
     case 'user_question':
       showQuestion(event);
       break;
@@ -1025,6 +1033,57 @@ for (const button of el.mcp.querySelectorAll('button[data-mcp]')) {
       reportFailure(error);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Bypass-permissions warning
+// ---------------------------------------------------------------------------
+
+function showBypassWarning(request) {
+  live.bypass = request;
+  el.bypassDetail.textContent = request.message || '';
+
+  // The answers come from the runner rather than being written here: the two
+  // sides must offer the same choice, and only the runner knows whether
+  // declining exits or goes back to asking.
+  el.bypassActions.replaceChildren();
+  const options = request.options && request.options.length
+    ? request.options
+    : ['Yes, I accept', 'No, keep asking'];
+  options.forEach((label, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    // Accept comes first, and it is the dangerous one.
+    if (index === 0) {
+      button.className = 'danger';
+    }
+    button.addEventListener('click', () => sendBypassAnswer(index === 0));
+    el.bypassActions.append(button);
+  });
+
+  el.bypass.hidden = false;
+}
+
+async function sendBypassAnswer(accept) {
+  const request = live.bypass;
+  if (!request) {
+    return;
+  }
+  // Hide first, for the same reason as the other cards: the session moves on
+  // with the first answer.
+  live.bypass = null;
+  el.bypass.hidden = true;
+
+  try {
+    await api(`/api/client/sessions/${encodeURIComponent(live.sessionId)}/bypass`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: request.request_id, accept }),
+    });
+  } catch (error) {
+    reportFailure(error);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -333,6 +333,13 @@ pub enum BridgeMessage {
         request_id: String,
         decision: McpApprovalDecision,
     },
+    /// The web UI answered the warning about running without permission
+    /// prompts.
+    BypassResponse {
+        request_id: String,
+        /// `true` keeps the session in bypass mode.
+        accept: bool,
+    },
     /// The web UI gave the session a new title.
     RenameSession { title: String },
     /// A client opened the event stream.
@@ -452,6 +459,17 @@ pub enum BridgeEvent {
         command: Option<String>,
         /// The endpoint it would talk to, when it is an HTTP server.
         url: Option<String>,
+    },
+    /// The session is about to run without asking permission for anything.
+    ///
+    /// Its own event for the same reason as `McpApprovalRequest`: what it
+    /// grants is wider than any single tool call, so a client has to be able
+    /// to present it as a warning rather than as one more prompt.
+    BypassWarning {
+        request_id: String,
+        message: String,
+        /// The two answers, accept first.
+        options: Vec<String>,
     },
     /// The model asked the user a question and the turn is waiting on it.
     UserQuestion {
@@ -1582,6 +1600,8 @@ pub enum TuiBridgeEvent {
         request_id: String,
         decision: McpApprovalDecision,
     },
+    /// The web UI answered the bypass-permissions warning.
+    BypassResponse { request_id: String, accept: bool },
     /// The web UI gave the session a new title.
     SessionRename { title: String },
     /// A client opened the event stream and needs the session as it stands.
@@ -1664,6 +1684,19 @@ pub enum BridgeOutbound {
         server_name: String,
         command: Option<String>,
         url: Option<String>,
+    },
+    /// The session is about to run without asking permission for anything.
+    ///
+    /// The TUI shows this as a full-screen warning and will not start a turn
+    /// until it is answered. A remote client that never saw it would watch a
+    /// session that looks idle, and the operator sitting at the terminal would
+    /// be the only one who could clear it.
+    BypassWarning {
+        request_id: String,
+        message: String,
+        /// The two answers, accept first, in the order a client should show
+        /// them.
+        options: Vec<String>,
     },
     /// Extended-thinking text, kept separate from the answer.
     ///
@@ -1907,6 +1940,11 @@ pub async fn run_bridge_loop(
                             })
                             .await;
                     }
+                    Some(BridgeMessage::BypassResponse { request_id, accept }) => {
+                        let _ = tui_tx
+                            .send(TuiBridgeEvent::BypassResponse { request_id, accept })
+                            .await;
+                    }
                     Some(BridgeMessage::RenameSession { title }) => {
                         let _ = tui_tx.send(TuiBridgeEvent::SessionRename { title }).await;
                     }
@@ -2083,6 +2121,19 @@ pub async fn run_bridge_loop(
                                 server_name,
                                 command,
                                 url,
+                            })
+                            .await;
+                    }
+                    Some(BridgeOutbound::BypassWarning {
+                        request_id,
+                        message,
+                        options,
+                    }) => {
+                        let _ = bridge_ev_tx
+                            .send(BridgeEvent::BypassWarning {
+                                request_id,
+                                message,
+                                options,
                             })
                             .await;
                     }

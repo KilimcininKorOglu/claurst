@@ -4377,7 +4377,7 @@ impl App {
     }
 
     /// The user accepted the warning: dismiss it and stop asking.
-    fn accept_bypass_permissions(&mut self) {
+    pub fn accept_bypass_permissions(&mut self) {
         self.bypass_permissions_dialog.dismiss();
         self.bypass_gate_cleared = true;
         let _ = Self::persist_bypass_permissions_accepted();
@@ -4388,7 +4388,7 @@ impl App {
     /// At startup that ends the session, because bypass was asked for on the
     /// command line and there is no earlier mode to fall back to. Mid-session
     /// the previous mode goes back instead, in the live config and on disk.
-    fn decline_bypass_permissions(&mut self) {
+    pub fn decline_bypass_permissions(&mut self) {
         if self.bypass_permissions_dialog.at_startup {
             self.should_exit = true;
             return;

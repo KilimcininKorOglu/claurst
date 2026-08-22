@@ -2670,6 +2670,19 @@ fn mcp_approval_request(
     }
 }
 
+/// Describe the bypass-permissions warning for a remote client.
+///
+/// The wording and the two answers come from the dialog module rather than
+/// being written here, so the terminal and the browser cannot end up warning
+/// about different things or offering differently worded answers.
+fn bypass_warning_request(request_id: &str, at_startup: bool) -> mikmik_bridge::BridgeOutbound {
+    mikmik_bridge::BridgeOutbound::BypassWarning {
+        request_id: request_id.to_string(),
+        message: mikmik_tui::bypass_permissions_dialog::bypass_warning_message(),
+        options: mikmik_tui::bypass_permissions_dialog::bypass_answer_labels(at_startup),
+    }
+}
+
 /// Everything a client needs to see the session as it stands.
 ///
 /// Both the runner's own connect and a client attaching later go through here,
@@ -2680,6 +2693,7 @@ fn session_snapshot(
     app: &mikmik_tui::App,
     question_id: Option<&str>,
     mcp_request_id: Option<&str>,
+    bypass_request_id: Option<&str>,
     messages: &[mikmik_core::types::Message],
 ) -> Vec<mikmik_bridge::BridgeOutbound> {
     let mut snapshot = Vec::new();
@@ -2733,6 +2747,18 @@ fn session_snapshot(
     if app.mcp_approval.visible {
         if let (Some(request_id), Some(server)) = (mcp_request_id, app.mcp_prompting.as_ref()) {
             snapshot.push(mcp_approval_request(request_id, server));
+        }
+    }
+
+    // Last, and unconditional on `is_streaming`: nothing runs while this is up,
+    // so a client that misses it watches a session that looks idle and will
+    // stay that way until someone answers at the terminal.
+    if app.bypass_permissions_dialog.visible {
+        if let Some(request_id) = bypass_request_id {
+            snapshot.push(bypass_warning_request(
+                request_id,
+                app.bypass_permissions_dialog.at_startup,
+            ));
         }
     }
 
@@ -3313,6 +3339,9 @@ async fn run_interactive(
     // Same correlation for the project-MCP trust prompt, which has its own
     // dialog and settle path rather than going through `PermissionManager`.
     let mut pending_mcp_approval_id: Option<String> = None;
+    // The bypass warning blocks everything while it is up, so a remote client
+    // gets to answer it too. Same shape as the MCP prompt above.
+    let mut pending_bypass_id: Option<String> = None;
     // Watched so a settings write reaches the ConfigChange hook exactly once.
     let mut settings_saves_seen = app.settings_screen.saves();
 
@@ -3495,6 +3524,25 @@ async fn run_interactive(
             BypassGate::RememberMode => app.mode_before_bypass = app.config.permission_mode,
             BypassGate::Warn => app.bypass_permissions_dialog.show(false),
             BypassGate::Nothing => {}
+        }
+
+        // Announce it once, however it was raised: the startup gate opens
+        // before the bridge exists, so keying off the dialog rather than off
+        // the gate covers both.
+        if app.bypass_permissions_dialog.visible && pending_bypass_id.is_none() {
+            let request_id = uuid::Uuid::new_v4().to_string();
+            if let Some(runtime) = bridge_runtime.as_ref() {
+                let _ = runtime.outbound_tx.try_send(bypass_warning_request(
+                    &request_id,
+                    app.bypass_permissions_dialog.at_startup,
+                ));
+            }
+            pending_bypass_id = Some(request_id);
+        }
+        // Answered at the terminal. Drop the id so a late remote answer cannot
+        // settle a warning already dealt with.
+        if pending_bypass_id.is_some() && !app.bypass_permissions_dialog.visible {
+            pending_bypass_id = None;
         }
 
         // Background loads the widgets ask for. Nothing else answers these
@@ -5233,6 +5281,7 @@ async fn run_interactive(
                             &app,
                             pending_question_id.as_deref(),
                             pending_mcp_approval_id.as_deref(),
+                            pending_bypass_id.as_deref(),
                             &messages,
                         ) {
                             let _ = runtime.outbound_tx.try_send(event);
@@ -5405,6 +5454,19 @@ async fn run_interactive(
                             pending_mcp_approval_id = None;
                         }
                     }
+                    Ok(TuiBridgeEvent::BypassResponse { request_id, accept }) => {
+                        // Through the same two methods the keyboard answer
+                        // uses, so a remote decline still restores the previous
+                        // mode and a remote decline at startup still exits.
+                        if pending_bypass_id.as_deref() == Some(request_id.as_str()) {
+                            if accept {
+                                app.accept_bypass_permissions();
+                            } else {
+                                app.decline_bypass_permissions();
+                            }
+                            pending_bypass_id = None;
+                        }
+                    }
                     Ok(TuiBridgeEvent::ClientAttached) => {
                         // Whatever the session is waiting on was announced
                         // once, when it happened. A client that was not there
@@ -5413,6 +5475,7 @@ async fn run_interactive(
                             &app,
                             pending_question_id.as_deref(),
                             pending_mcp_approval_id.as_deref(),
+                            pending_bypass_id.as_deref(),
                             &messages,
                         ) {
                             let _ = runtime.outbound_tx.try_send(event);
@@ -7888,7 +7951,7 @@ mod session_snapshot_tests {
             "rm -rf build".into(),
         ));
 
-        let snapshot = session_snapshot(&app, None, None, &[]);
+        let snapshot = session_snapshot(&app, None, None, None, &[]);
         match &snapshot[..] {
             [BridgeOutbound::PermissionRequest {
                 request_id,
@@ -7905,6 +7968,58 @@ mod session_snapshot_tests {
     }
 
     #[test]
+    fn a_waiting_bypass_warning_is_announced_again() {
+        // Nothing runs while this is up. A client that never saw it watches a
+        // session that looks idle and stays idle.
+        let mut app = app();
+        app.bypass_permissions_dialog.show(false);
+
+        let snapshot = session_snapshot(&app, None, None, Some("gate-1"), &[]);
+        match &snapshot[..] {
+            [BridgeOutbound::BypassWarning {
+                request_id,
+                message,
+                options,
+            }] => {
+                assert_eq!(request_id, "gate-1");
+                assert!(
+                    message.contains("NOT ask for your approval"),
+                    "the card says nothing about what is being granted: {message}"
+                );
+                assert_eq!(options.len(), 2, "a two-answer gate needs both answers");
+                assert_eq!(options[1], "No, keep asking");
+            }
+            other => panic!("expected one bypass warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_startup_gate_says_that_declining_exits() {
+        // The same warning means something different at startup, and answering
+        // it from a browser has to know which one it is looking at.
+        let mut app = app();
+        app.bypass_permissions_dialog.show(true);
+
+        let snapshot = session_snapshot(&app, None, None, Some("gate-1"), &[]);
+        match &snapshot[..] {
+            [BridgeOutbound::BypassWarning { options, .. }] => {
+                assert_eq!(options[1], "No, exit");
+            }
+            other => panic!("expected one bypass warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bypass_warning_with_no_id_is_not_announced() {
+        // Without a correlation id an answer could not be matched back, so a
+        // card would be drawn that nothing could settle.
+        let mut app = app();
+        app.bypass_permissions_dialog.show(false);
+
+        assert!(session_snapshot(&app, None, None, None, &[]).is_empty());
+    }
+
+    #[test]
     fn a_waiting_question_is_announced_again_with_its_id() {
         let mut app = app();
         let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
@@ -7914,7 +8029,7 @@ mod session_snapshot_tests {
             reply_tx,
         );
 
-        let snapshot = session_snapshot(&app, Some("q-1"), None, &[]);
+        let snapshot = session_snapshot(&app, Some("q-1"), None, None, &[]);
         match &snapshot[..] {
             [BridgeOutbound::UserQuestion {
                 question_id,
@@ -7938,7 +8053,7 @@ mod session_snapshot_tests {
         app.ask_user_dialog
             .open("Which branch?".into(), None, reply_tx);
 
-        assert!(session_snapshot(&app, None, None, &[]).is_empty());
+        assert!(session_snapshot(&app, None, None, None, &[]).is_empty());
     }
 
     #[test]
@@ -7950,10 +8065,10 @@ mod session_snapshot_tests {
         app.is_streaming = true;
 
         let messages = vec![Message::user("hello"), Message::assistant("hi")];
-        assert!(session_snapshot(&app, None, None, &messages).is_empty());
+        assert!(session_snapshot(&app, None, None, None, &messages).is_empty());
 
         app.is_streaming = false;
-        let idle = session_snapshot(&app, None, None, &messages);
+        let idle = session_snapshot(&app, None, None, None, &messages);
         assert!(matches!(idle[..], [BridgeOutbound::History { .. }]));
     }
 
@@ -7966,7 +8081,7 @@ mod session_snapshot_tests {
             "ls".into(),
         ));
 
-        let snapshot = session_snapshot(&app, None, None, &[Message::user("hello")]);
+        let snapshot = session_snapshot(&app, None, None, None, &[Message::user("hello")]);
         assert!(
             matches!(
                 snapshot[..],
@@ -7987,7 +8102,7 @@ mod session_snapshot_tests {
         app.timeline
             .add_running_tool("tool-2", "Editing", 20, "", "");
 
-        let snapshot = session_snapshot(&app, None, None, &[Message::user("hello")]);
+        let snapshot = session_snapshot(&app, None, None, None, &[Message::user("hello")]);
         assert!(
             matches!(
                 snapshot[..],
@@ -8009,7 +8124,7 @@ mod session_snapshot_tests {
                 .add_running_tool(format!("tool-{idx}"), "Reading", 10, "", "");
         }
 
-        let rows: Vec<_> = session_snapshot(&app, None, None, &[])
+        let rows: Vec<_> = session_snapshot(&app, None, None, None, &[])
             .into_iter()
             .filter_map(|event| match event {
                 BridgeOutbound::TimelineRow(row) => Some(row),

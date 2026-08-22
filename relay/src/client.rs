@@ -51,6 +51,10 @@ pub fn routes() -> Router<Arc<Relay>> {
             "/api/client/sessions/{session_id}/mcp-approval",
             post(mcp_approval),
         )
+        .route(
+            "/api/client/sessions/{session_id}/bypass",
+            post(bypass_response),
+        )
         .route("/api/client/sessions/{session_id}/rename", post(rename))
         .route("/api/client/sessions/{session_id}/cancel", post(cancel))
 }
@@ -322,6 +326,35 @@ async fn mcp_approval(
         BridgeMessage::McpApprovalResponse {
             request_id: body.request_id,
             decision: body.decision,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BypassBody {
+    pub request_id: String,
+    pub accept: bool,
+}
+
+/// Separate from `permission` as well: what this grants is every tool call for
+/// the rest of the session, not one of them.
+async fn bypass_response(
+    State(relay): State<Arc<Relay>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<BypassBody>,
+) -> Result<Json<Accepted>, StatusCode> {
+    info!(
+        session_id = %session_id,
+        accept = body.accept,
+        "client answered the bypass-permissions warning"
+    );
+    enqueue(
+        &relay,
+        &session_id,
+        BridgeMessage::BypassResponse {
+            request_id: body.request_id,
+            accept: body.accept,
         },
     )
     .await
@@ -673,6 +706,65 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         json!({ "request_id": "r1", "decision": "allow_always" }).to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(relay.take_inbound("s1").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_bypass_answer_reaches_the_runner_queue() {
+        // Both answers, because they are opposites: one grants every later tool
+        // call and the other takes the session back to asking.
+        for accept in [true, false] {
+            let relay = relay();
+            relay.register(&RegisterBody::new("s1")).await;
+
+            let response = app(relay.clone())
+                .oneshot(
+                    authed("POST", "/api/client/sessions/s1/bypass")
+                        .body(Body::from(
+                            json!({ "request_id": "r1", "accept": accept }).to_string(),
+                        ))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let queued = relay.take_inbound("s1").await;
+            match &queued[..] {
+                [BridgeMessage::BypassResponse {
+                    request_id,
+                    accept: queued_accept,
+                }] => {
+                    assert_eq!(request_id, "r1");
+                    assert_eq!(*queued_accept, accept);
+                }
+                other => panic!("expected one bypass answer, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bypass_answer_needs_a_token() {
+        // The loudest reason of all to check: this endpoint can turn every
+        // permission prompt off for the rest of the session.
+        let relay = relay();
+        relay.register(&RegisterBody::new("s1")).await;
+
+        let response = app(relay.clone())
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/client/sessions/s1/bypass")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "request_id": "r1", "accept": true }).to_string(),
                     ))
                     .expect("request"),
             )

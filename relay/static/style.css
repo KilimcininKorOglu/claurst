@@ -479,6 +479,13 @@ input, textarea {
   overflow-wrap: anywhere;
 }
 
+/* Louder still than the MCP card: this one answers for every tool call in the
+   session rather than for one server. */
+.bypass {
+  border-color: var(--danger);
+  border-width: 2px;
+}
+
 .permission-tool { margin: 0 0 4px; font-weight: 600; }
 .permission-desc {
   margin: 0 0 12px;

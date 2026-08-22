@@ -64,6 +64,11 @@ pub enum BridgeMessage {
         request_id: String,
         decision: McpApprovalDecision,
     },
+    /// A client answered the warning about running without permission prompts.
+    BypassResponse {
+        request_id: String,
+        accept: bool,
+    },
     RenameSession {
         title: String,
     },

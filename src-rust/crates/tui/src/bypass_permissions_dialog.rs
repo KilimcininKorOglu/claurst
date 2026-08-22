@@ -67,6 +67,39 @@ impl BypassPermissionsDialogState {
     }
 }
 
+/// The warning, as one block of text.
+///
+/// A remote client draws its own card and cannot read the lines below, so the
+/// wording lives here and both surfaces take it from the same place. Keeping
+/// two copies would let the terminal and the browser warn about different
+/// things.
+pub fn bypass_warning_message() -> String {
+    [
+        "In Bypass Permissions mode, MikMik will NOT ask for your approval \
+         before running potentially dangerous commands.",
+        "This mode should only be used in a sandboxed container or VM that has \
+         restricted internet access and can easily be restored if damaged.",
+        "By proceeding, you accept all responsibility for actions taken while \
+         running in Bypass Permissions mode.",
+    ]
+    .join("\n\n")
+}
+
+/// The two answers, accept first.
+///
+/// The refusal has to name what it actually does, or a mid-session decline
+/// reads as "this ends the session" and nobody picks it.
+pub fn bypass_answer_labels(at_startup: bool) -> Vec<String> {
+    vec![
+        "Yes, I accept".to_string(),
+        if at_startup {
+            "No, exit".to_string()
+        } else {
+            "No, keep asking".to_string()
+        },
+    ]
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -161,20 +194,18 @@ pub fn render_bypass_permissions_dialog(
         Style::default().fg(Color::Red)
     };
 
-    // The refusal has to name what it actually does, or a mid-session decline
-    // reads as "this ends the session" and nobody picks it.
-    let decline_label = if state.at_startup {
-        "No, exit"
-    } else {
-        "No, keep asking"
-    };
+    // From the same place the remote card reads, so the two surfaces cannot
+    // offer differently worded answers to the same question.
+    let labels = bypass_answer_labels(state.at_startup);
+    let accept_label = labels[0].clone();
+    let decline_label = labels[1].clone();
 
     lines.push(Line::from(vec![
         Span::styled("  [1] ", Style::default().fg(Color::DarkGray)),
         Span::styled(decline_label, opt_no_style),
         Span::raw("        "),
         Span::styled("  [2] ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Yes, I accept", opt_yes_style),
+        Span::styled(accept_label, opt_yes_style),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
