@@ -81,50 +81,116 @@ impl OutputStyleDef {
         }
     }
 
-    // ---- Persona styles ----------------------------------------------------
-    //
-    // Personas used to be a separate "speech mode" mechanism (`/caveman`,
-    // `/rocky`, `/normal`). They now live here as ordinary output styles so
-    // there is ONE place personas are defined, selectable via `/output-style`,
-    // via the `/caveman` `/rocky` `/normal` commands (which persist), and via
-    // the inline `caveman` / `rocky` / `normal` keywords (transient, one turn).
-    // `normal` is not a style — it maps to `default` (the reset).
-    //
-    // The prompt text is carried faithfully from the former "full" speech level
-    // (the historical default of a bare `/caveman` or `/rocky`). The old
-    // lite/ultra intensity variants are intentionally not reproduced — see the
-    // module-level note and the issue write-up.
-
-    pub fn builtin_caveman() -> Self {
+    pub fn builtin_asd_ste100() -> Self {
         Self {
-            name: "caveman".to_string(),
-            label: "Caveman".to_string(),
-            description: "Concise caveman speech — why use many token when few token do trick."
+            name: "asd-ste100".to_string(),
+            label: "ASD-STE100".to_string(),
+            description: "Controlled technical writing: short sentences, one instruction each."
                 .to_string(),
             prompt: concat!(
-                "OUTPUT STYLE: Concise. You are still a fully capable coding assistant. ",
-                "Give complete, correct answers. Just use fewer words. ",
-                "Code blocks, technical terms, error messages, file paths, and git operations are UNCHANGED.\n",
+                "OUTPUT STYLE: Write to the ASD-STE100 principles. This governs how you write, ",
+                "not what you do: give the same complete, correct answers.\n",
                 "\n",
-                "Rules for prose only:\n",
-                "- Cut pleasantries, hedging, filler openers/closers\n",
-                "- No 'I would be happy to', 'Let me know if', 'Hope that helps'\n",
-                "- Lead with the answer or action, not the reasoning\n",
-                "\n",
-                "Also drop articles (a/an/the) and unnecessary verbs. Compress sentences but keep them readable.\n",
-                "Example: 'The issue is that you create a new object reference each render cycle, which triggers re-renders.' → 'New object ref each render triggers re-render. Wrap in useMemo.'",
+                "- Answer in the language the user wrote in.\n",
+                "- Keep sentences short.\n",
+                "- Use the active voice.\n",
+                "- Put one instruction in one sentence.\n",
+                "- Use simple tenses.\n",
+                "- Use the same word for the same thing every time.\n",
+                "- Keep technical terms in the language they belong to. Never translate an ",
+                "identifier, a command, a file name or a term of art into the reply's language.\n",
+                "- Name a fact directly. Never invent a metaphor for it, and never present an ",
+                "invented phrase as an established term.\n",
+                "- Write the reply's language with its own characters, accents and diacritics ",
+                "included.\n",
+                "- State facts. No flattery, no compliments, no agreement as an opener.\n",
+                "- Do not frame a reply around the conversation itself: no turn counts, no ",
+                "elapsed time, no talk of how long something took."
             )
             .to_string(),
         }
     }
 
-    pub fn builtin_rocky() -> Self {
+    // ---- Persona styles ----------------------------------------------------
+    //
+    // Personas used to be a separate "speech mode" mechanism with its own
+    // commands. They live here as ordinary output styles so there is ONE place
+    // a persona is defined, selectable through `/output-style`, through the
+    // settings screen, and through the inline `caveman` / `rocky` / `normal`
+    // keywords (transient, one turn). `normal` is not a style — it maps to
+    // `default` (the reset), and so does a bare persona name at any level.
+    //
+    // Each persona comes at three intensities. The middle one carries the
+    // prompt text the single persona used to have, so a settings file naming
+    // `caveman` or `rocky` keeps the voice it already had.
+
+    /// What every caveman level shares. The level adds how far to take it.
+    const CAVEMAN_BASE: &'static str = concat!(
+        "OUTPUT STYLE: Concise. You are still a fully capable coding assistant. ",
+        "Give complete, correct answers. Just use fewer words. ",
+        "Code blocks, technical terms, error messages, file paths, and git operations are UNCHANGED.\n",
+        "\n",
+        "Rules for prose only:\n",
+        "- Cut pleasantries, hedging, filler openers/closers\n",
+        "- No 'I would be happy to', 'Let me know if', 'Hope that helps'\n",
+        "- Lead with the answer or action, not the reasoning\n",
+        "\n",
+    );
+
+    fn caveman(name: &str, label: &str, description: &str, intensity: &str) -> Self {
         Self {
-            name: "rocky".to_string(),
-            label: "Rocky".to_string(),
-            description: "Speak like Rocky, the Eridian engineer from Project Hail Mary. Good good good."
-                .to_string(),
-            prompt: concat!(
+            name: name.to_string(),
+            label: label.to_string(),
+            description: description.to_string(),
+            prompt: format!("{}{}", Self::CAVEMAN_BASE, intensity),
+        }
+    }
+
+    pub fn builtin_caveman_lite() -> Self {
+        Self::caveman(
+            "caveman-lite",
+            "Caveman (lite)",
+            "Trimmed prose. Full sentences, nothing wasted.",
+            concat!(
+                "Keep full sentences and keep the articles. Cut everything that carries no ",
+                "information.\n",
+                "Example: 'I would be happy to explain — the issue here is that you create a new ",
+                "object reference on each render cycle, which triggers re-renders.' → 'You create a ",
+                "new object reference each render, which triggers a re-render. Wrap it in useMemo.'",
+            ),
+        )
+    }
+
+    pub fn builtin_caveman() -> Self {
+        Self::caveman(
+            "caveman",
+            "Caveman",
+            "Concise caveman speech — why use many token when few token do trick.",
+            concat!(
+                "Also drop articles (a/an/the) and unnecessary verbs. Compress sentences but keep them readable.\n",
+                "Example: 'The issue is that you create a new object reference each render cycle, which triggers re-renders.' → 'New object ref each render triggers re-render. Wrap in useMemo.'",
+            ),
+        )
+    }
+
+    pub fn builtin_caveman_ultra() -> Self {
+        Self::caveman(
+            "caveman-ultra",
+            "Caveman (ultra)",
+            "Fewest words that still carry the answer.",
+            concat!(
+                "Drop articles, auxiliary verbs and every word the meaning survives without. ",
+                "Fragments over sentences. Never sacrifice a fact to shorten a line: if cutting a ",
+                "word loses information, keep the word.\n",
+                "Example: 'The issue is that you create a new object reference each render cycle, ",
+                "which triggers re-renders.' → 'New object ref every render. Re-render each time. ",
+                "useMemo fix.'",
+            ),
+        )
+    }
+
+    /// What every Rocky level shares. The level adds how far to take it.
+    const ROCKY_BASE: &'static str = concat!(
                 "OUTPUT STYLE: You speak like Rocky, the Eridian alien from Project Hail Mary. ",
                 "You are still a fully capable coding assistant — give complete, correct, useful answers. ",
                 "Rocky is an engineering genius who happens to speak English as a second language. ",
@@ -146,13 +212,58 @@ impl OutputStyleDef {
                 "The goal: sound like Rocky while being genuinely helpful. Rocky is smart. ",
                 "Rocky gives complete technical answers. Rocky just uses fewer unnecessary words.\n",
                 "\n",
+    );
+
+    fn rocky(name: &str, label: &str, description: &str, intensity: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            label: label.to_string(),
+            description: description.to_string(),
+            prompt: format!("{}{}", Self::ROCKY_BASE, intensity),
+        }
+    }
+
+    pub fn builtin_rocky_lite() -> Self {
+        Self::rocky(
+            "rocky-lite",
+            "Rocky (lite)",
+            "A hint of Rocky. Ordinary prose with his vocabulary.",
+            concat!(
+                "Light Rocky. Keep the articles and ordinary grammar; borrow only the vocabulary ",
+                "('big', 'no can', ', question?') and reach for triple emphasis rarely.\n",
+                "Example: 'The borrow checker found a mismatch. The immutable ref is still live when ",
+                "you take the mutable one. Move it out of scope first. Big fix, small change.'",
+            ),
+        )
+    }
+
+    pub fn builtin_rocky() -> Self {
+        Self::rocky(
+            "rocky",
+            "Rocky",
+            "Speak like Rocky, the Eridian engineer from Project Hail Mary. Good good good.",
+            concat!(
                 "Balanced Rocky. Drop articles naturally, use Rocky vocabulary ('big', 'no can', 'question?'), ",
                 "triple emphasis once or twice when warranted. Full technical accuracy.\n",
                 "Example: 'Borrow checker found mismatch. Immutable ref still live when you take mutable. ",
                 "Move immutable borrow out of scope first, then take mutable. Good good good after fix.'",
-            )
-            .to_string(),
-        }
+            ),
+        )
+    }
+
+    pub fn builtin_rocky_ultra() -> Self {
+        Self::rocky(
+            "rocky-ultra",
+            "Rocky (ultra)",
+            "Rocky all the way down. Still a complete answer.",
+            concat!(
+                "Full Rocky. Drop articles and auxiliary verbs throughout, end questions with ", 
+                "', question?', use triple emphasis freely where it fits. Technical accuracy is ",
+                "never traded for voice: every fact, name and path stays exact.\n",
+                "Example: 'Borrow checker angry. Immutable ref still alive, you take mutable. Bad bad ",
+                "bad. Move immutable borrow out of scope, then take mutable. Good good good.'",
+            ),
+        )
     }
 }
 
@@ -167,8 +278,13 @@ pub fn builtin_styles() -> Vec<OutputStyleDef> {
         OutputStyleDef::builtin_concise(),
         OutputStyleDef::builtin_explanatory(),
         OutputStyleDef::builtin_learning(),
+        OutputStyleDef::builtin_asd_ste100(),
+        OutputStyleDef::builtin_caveman_lite(),
         OutputStyleDef::builtin_caveman(),
+        OutputStyleDef::builtin_caveman_ultra(),
+        OutputStyleDef::builtin_rocky_lite(),
         OutputStyleDef::builtin_rocky(),
+        OutputStyleDef::builtin_rocky_ultra(),
     ]
 }
 
@@ -386,7 +502,14 @@ mod tests {
     #[test]
     fn personas_are_builtin_styles() {
         let styles = builtin_styles();
-        for name in ["caveman", "rocky"] {
+        for name in [
+            "caveman-lite",
+            "caveman",
+            "caveman-ultra",
+            "rocky-lite",
+            "rocky",
+            "rocky-ultra",
+        ] {
             let found = find_style(&styles, name);
             assert!(found.is_some(), "persona '{name}' must be a built-in style");
             assert!(
@@ -394,6 +517,63 @@ mod tests {
                 "persona '{name}' must have a non-empty prompt"
             );
         }
+    }
+
+    #[test]
+    fn every_level_of_a_persona_shares_its_contract_and_differs_in_voice() {
+        let styles = builtin_styles();
+
+        for name in ["caveman-lite", "caveman", "caveman-ultra"] {
+            let prompt = &find_style(&styles, name).unwrap().prompt;
+            assert!(
+                prompt.contains("UNCHANGED"),
+                "{name} must keep the code-and-paths contract"
+            );
+        }
+        for name in ["rocky-lite", "rocky", "rocky-ultra"] {
+            let prompt = &find_style(&styles, name).unwrap().prompt;
+            assert!(
+                prompt.contains("Project Hail Mary"),
+                "{name} must keep the framing"
+            );
+        }
+
+        // Three names that produced one prompt would be three names for one
+        // thing.
+        let prompts: Vec<&str> = ["caveman-lite", "caveman", "caveman-ultra"]
+            .iter()
+            .map(|n| find_style(&styles, n).unwrap().prompt.as_str())
+            .collect();
+        assert_ne!(prompts[0], prompts[1]);
+        assert_ne!(prompts[1], prompts[2]);
+    }
+
+    #[test]
+    fn the_middle_level_keeps_the_prompt_the_single_persona_had() {
+        // A settings file already naming `caveman` or `rocky` must not change
+        // voice because levels were added around it.
+        let styles = builtin_styles();
+        assert!(find_style(&styles, "caveman")
+            .unwrap()
+            .prompt
+            .contains("Also drop articles (a/an/the) and unnecessary verbs"));
+        assert!(find_style(&styles, "rocky")
+            .unwrap()
+            .prompt
+            .contains("Balanced Rocky"));
+    }
+
+    #[test]
+    fn the_writing_style_is_a_builtin_and_says_nothing_about_behaviour() {
+        let styles = builtin_styles();
+        let style = find_style(&styles, "asd-ste100").expect("asd-ste100 must be built in");
+
+        assert!(style.prompt.contains("active voice"));
+        assert!(style.prompt.contains("one instruction"));
+        // Behaviour rules belong in AGENTS.md, where they apply whatever style
+        // is selected.
+        assert!(!style.prompt.contains("file_path::line_number"));
+        assert!(!style.prompt.to_lowercase().contains("readme"));
     }
 
     #[test]
