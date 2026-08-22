@@ -618,6 +618,14 @@ execution are blocked. This matches the built-in `plan` agent's behaviour and
 is useful for code analysis sessions where you want to prevent accidental
 modifications.
 
+Entering plan mode is the model's decision as often as it is yours. `/plan` and
+`Tab` switch by hand; the model switches by calling `EnterPlanMode`, and the new
+mode reaches the turn that is already running. What makes it reach for that tool
+is the "Planning" section of the base system prompt, which lists the work that
+warrants a plan, the work that does not, and asks for `AskUserQuestion` on
+anything the request leaves open. Replacing the prompt with
+`customSystemPrompt` removes that guidance.
+
 Leaving plan mode is your decision, not the model's. When the model calls
 `ExitPlanMode`, the plan is shown in a dialog and the turn waits there. Four
 answers:

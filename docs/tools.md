@@ -696,7 +696,9 @@ Switch the agent into plan mode. In plan mode, all write and execute tools are b
 |-----------|--------|----------|--------------------------------|
 | `reason`  | string | no       | Why plan mode is being entered |
 
-The switch is real and takes effect immediately: the permission mode becomes `plan` and the tool list is rebuilt without the write and execute tools, exactly as `/plan` and `Tab` do. No approval is asked for, because the tool can only narrow what the agent may do. The mode in force beforehand is remembered, so leaving plan mode restores it.
+The switch is real and takes effect immediately: the permission mode becomes `plan` and the tool list is rebuilt without the write and execute tools, exactly as `/plan` and `Tab` do. The new mode reaches the turn that is already running, so a write attempted straight after the switch is refused rather than allowed until the next key press. No approval is asked for, because the tool can only narrow what the agent may do. The mode in force beforehand is remembered, so leaving plan mode restores it.
+
+When the model reaches for this tool is decided by the base system prompt, which lists what counts as significant work and what does not, and asks the model to use `AskUserQuestion` for anything the request leaves open. Replacing that prompt with `customSystemPrompt` removes the guidance; the tool description repeats the essentials, but the choice then rests entirely on it.
 
 Only the interactive TUI can switch modes. In headless runs (`--print`) and over ACP there is nowhere to apply the switch, so the tool returns an error saying the mode did not change.
 
@@ -715,6 +717,8 @@ Write the plan to the next numbered file under `<config dir>/plans/<session id>/
 | `summary` | string | no       | The plan, as written for the user |
 
 Headless (`--print`) has no dialog to ask through: there the tool writes the plan file, reports the plan and leaves plan mode without blocking.
+
+Pass the whole plan as `summary`, not a one-line description. The file is what the user reads and edits, and it is the only lasting record of the proposal once the transcript scrolls away. The base system prompt and the `plan` agent prompt both say so.
 
 ---
 
