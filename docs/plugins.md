@@ -6,7 +6,7 @@ MikMik's plugin system lets you extend the agent with additional slash commands,
 
 ## Plugin Discovery
 
-Plugins are loaded from the `~/.config/mikmik/plugins/` directory. Each subdirectory that carries a valid manifest is treated as a plugin. The manifest is looked for at three paths, in order:
+Plugins are loaded from two directories: `~/.config/mikmik/plugins/` for every project, and `<project>/.mikmik/plugins/` for one. Each subdirectory that carries a valid manifest is treated as a plugin. The manifest is looked for at three paths, in order:
 
 | Path                          | Notes                                                        |
 |-------------------------------|--------------------------------------------------------------|
@@ -293,9 +293,13 @@ Plugins can run shell commands in response to lifecycle events. Hooks receive a 
 
 ### Available Events
 
-`PreToolUse` and `PostToolUse` are the two events the session fires today. They run for every tool call, on every provider. A `PreToolUse` hook marked `blocking` stops the call when it exits non-zero, and the model is told the plugin blocked it.
+Every event below is raised by the running code, with one exception:
+`TeammateIdle` is accepted by the manifest parser and stored, but nothing raises
+it yet. Declaring it is harmless and does nothing.
 
-The rest of the table is accepted by the manifest parser and stored, but nothing fires it yet. Declaring one is harmless and does nothing.
+`PreToolUse` and `PostToolUse` run for every tool call, on every provider. A
+`PreToolUse` hook marked `blocking` stops the call when it exits non-zero, and
+the model is told the plugin blocked it.
 
 | Event                | When it fires                                    |
 |----------------------|--------------------------------------------------|
@@ -323,9 +327,9 @@ The rest of the table is accepted by the manifest parser and stored, but nothing
 | `ConfigChange`       | When configuration is modified                   |
 | `WorktreeCreate`     | When a git worktree is created                   |
 | `WorktreeRemove`     | When a git worktree is removed                   |
-| `InstructionsLoaded` | When CLAUDE.md / instructions are loaded         |
+| `InstructionsLoaded` | After the session's instruction files are loaded |
 | `CwdChanged`         | When the working directory changes               |
-| `FileChanged`        | When a watched file changes                      |
+| `FileChanged`        | When a tool writes a file                        |
 
 ### HookEntry Fields
 
@@ -333,9 +337,12 @@ Each hook entry in a hooks configuration:
 
 | Field      | Type   | Description                                                                                                                   |
 |------------|--------|-------------------------------------------------------------------------------------------------------------------------------|
-| `command`  | string | Shell command to run. Receives event JSON on stdin.                                                                           |
-| `matcher`  | string | Optional tool-name filter. Supports `*` wildcard (e.g. `"File*"`, `"*Tool"`). Only relevant for `PreToolUse` / `PostToolUse`. |
-| `blocking` | bool   | If `true`, a non-zero exit code blocks the operation. Non-blocking hooks (default) only log a warning on failure.             |
+| `command`    | string | Shell command to run. Receives event JSON on stdin.                                                                           |
+| `matcher`    | string | Optional tool-name filter. Supports the `*` wildcard (e.g. `"Write*"`). Only relevant for `PreToolUse` / `PostToolUse`.       |
+| `blocking`   | bool   | If `true`, a non-zero exit code blocks the operation. Non-blocking hooks (default) only log a warning on failure.             |
+| `timeout_ms` | number | How long the command may run before it is killed. Default 30000. `timeout` is accepted as an alias.                           |
+
+A blocking hook that reaches its time limit blocks the operation: a hook that never answered cannot be read as approval.
 
 ### Hooks Configuration Format
 
@@ -394,15 +401,16 @@ When a blocking hook exits non-zero, MikMik denies the operation and reports the
 
 **Environment variables available to hook processes:**
 
-| Variable             | Value                                               |
-|----------------------|-----------------------------------------------------|
-| `CLAUDE_PLUGIN_ROOT` | Absolute path to the plugin directory               |
-| `CLAUDE_PLUGIN_NAME` | Plugin name from the manifest                       |
-| `CLAUDE_TOOL_NAME`   | Tool name (PostToolUse hooks only)                  |
-| `CLAUDE_TOOL_INPUT`  | Tool input as JSON string (PostToolUse hooks only)  |
-| `CLAUDE_TOOL_RESULT` | Tool result as JSON string (PostToolUse hooks only) |
-| `CLAUDE_PLUGIN_CONFIG` | The plugin's `userConfig` values as JSON, when any are set |
-| `CLAUDE_PLUGIN_CONFIG_<OPTION>` | One `userConfig` value (see [user_config](#user_config)) |
+| Variable                        | Value                                                     |
+|---------------------------------|-----------------------------------------------------------|
+| `CLAUDE_PLUGIN_ROOT`            | Absolute path to the plugin directory                     |
+| `CLAUDE_PLUGIN_NAME`            | Plugin name from the manifest                             |
+| `CLAUDE_PLUGIN_CONFIG`          | The plugin's `userConfig` values as JSON, when any are set |
+| `CLAUDE_PLUGIN_CONFIG_<OPTION>` | One `userConfig` value (see [user_config](#user_config))  |
+
+The tool's name, input and result are not in the environment. Read them from the
+event JSON on stdin, which carries `tool_name`, `tool_input`, `tool_output` and
+`is_error`.
 
 ---
 
@@ -532,7 +540,7 @@ default     = false
         "matcher": "Edit",
         "hooks": [
           {
-            "command": "eslint --fix \"$CLAUDE_TOOL_INPUT\" 2>&1 || true",
+            "command": "jq -r .tool_input.file_path | xargs -r eslint --fix 2>&1 || true",
             "blocking": false
           }
         ]
@@ -541,7 +549,7 @@ default     = false
         "matcher": "Write",
         "hooks": [
           {
-            "command": "prettier --write \"$CLAUDE_TOOL_INPUT\" 2>&1 || true",
+            "command": "jq -r .tool_input.file_path | xargs -r prettier --write 2>&1 || true",
             "blocking": false
           }
         ]
