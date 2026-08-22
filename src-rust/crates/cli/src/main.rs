@@ -418,6 +418,31 @@ enum BypassGate {
     Warn,
 }
 
+/// Carry a permission mode the session changed onto the shared manager.
+///
+/// The running turn decides by `PermissionManager::mode`, which is shared, and
+/// by its own `ToolContext` copy, which is not. Syncing only after a key press
+/// leaves a mode the model set itself, through `EnterPlanMode`, unseen until
+/// the user types something: the turn keeps deciding by the mode it started in.
+///
+/// Returns whether the mode moved, so a caller can report the switch once.
+fn sync_permission_mode(
+    manager: Option<&Arc<std::sync::Mutex<PermissionManager>>>,
+    observed: &mut PermissionMode,
+    desired: PermissionMode,
+) -> bool {
+    if *observed == desired {
+        return false;
+    }
+    *observed = desired;
+    if let Some(manager) = manager {
+        if let Ok(mut manager) = manager.lock() {
+            manager.mode = desired;
+        }
+    }
+    true
+}
+
 /// Decide the gate from the mode alone.
 ///
 /// `shift+tab`, `/yolo on`, `/permissions set bypass-permissions` and the
@@ -4935,33 +4960,9 @@ async fn run_interactive(
                     if !app.model_name.is_empty() {
                         session.model = app.model_name.clone();
                     }
-                    // Handle agent mode change (Tab key cycles build→plan)
-                    if app.agent_mode_changed {
-                        app.agent_mode_changed = false;
-                        let mode = app.agent_mode.as_deref().unwrap_or("build");
-                        let mut all_agents = mikmik_core::default_agents();
-                        all_agents.extend(cmd_ctx.config.agents.clone());
-                        if let Some(def) = all_agents.get(mode) {
-                            base_query_config.agent_name = Some(mode.to_string());
-                            base_query_config.agent_definition = Some(def.clone());
-                            // A command that reports a limit has to know which
-                            // agent would override it.
-                            cmd_ctx.active_agent = Some(def.clone());
-                            // The agent's own `max_turns` is not copied onto
-                            // the query config: `effective_max_turns` in the
-                            // loop already prefers it, and the dispatch site
-                            // re-reads the session limit every turn, so an
-                            // assignment here would be overwritten and then
-                            // ignored.
-                            tools_arc = filter_tools_for_agent(all_tools_arc.clone(), &def.access);
-                        } else {
-                            // "build" with no explicit definition = full access, no agent
-                            base_query_config.agent_name = None;
-                            base_query_config.agent_definition = None;
-                            cmd_ctx.active_agent = None;
-                            tools_arc = all_tools_arc.clone();
-                        }
-                    }
+                    // The agent mode `Tab` just cycled is applied by the loop
+                    // body, which watches `agent_mode_changed` however it was
+                    // set.
                     if !app.is_streaming && app.messages.len() < messages.len() {
                         messages = app.messages.clone();
                         session.messages = messages.clone();
@@ -5868,6 +5869,46 @@ async fn run_interactive(
                     Some(reason) => format!("Plan mode: {}", reason),
                     None => "Plan mode.".to_string(),
                 });
+            }
+        }
+
+        // Carry a mode the model set itself onto the running turn. The key arm
+        // below syncs the whole config, but only after a key press, and a
+        // model-driven switch has none behind it.
+        if sync_permission_mode(
+            tool_ctx.permission_manager.as_ref(),
+            &mut tool_ctx.config.permission_mode,
+            app.config.permission_mode,
+        ) {
+            cmd_ctx.config.permission_mode = app.config.permission_mode;
+        }
+
+        // The tool roster the next turn is built from. Moved out of the key arm
+        // for the same reason: `EnterPlanMode` sets `agent_mode_changed` with
+        // no key press behind it, and a turn started before the rebuild would
+        // otherwise be offered plan mode's tools a turn late.
+        if app.agent_mode_changed {
+            app.agent_mode_changed = false;
+            let mode = app.agent_mode.as_deref().unwrap_or("build");
+            let mut all_agents = mikmik_core::default_agents();
+            all_agents.extend(cmd_ctx.config.agents.clone());
+            if let Some(def) = all_agents.get(mode) {
+                base_query_config.agent_name = Some(mode.to_string());
+                base_query_config.agent_definition = Some(def.clone());
+                // A command that reports a limit has to know which agent would
+                // override it.
+                cmd_ctx.active_agent = Some(def.clone());
+                // The agent's own `max_turns` is not copied onto the query
+                // config: `effective_max_turns` in the loop already prefers it,
+                // and the dispatch site re-reads the session limit every turn,
+                // so an assignment here would be overwritten and then ignored.
+                tools_arc = filter_tools_for_agent(all_tools_arc.clone(), &def.access);
+            } else {
+                // "build" with no explicit definition = full access, no agent
+                base_query_config.agent_name = None;
+                base_query_config.agent_definition = None;
+                cmd_ctx.active_agent = None;
+                tools_arc = all_tools_arc.clone();
             }
         }
 
@@ -8592,6 +8633,88 @@ mod bang_command_tests {
 #[cfg(test)]
 mod permission_mode_tests {
     use super::*;
+
+    /// The base prompt as a run would send it.
+    const BASE_SYSTEM_PROMPT: &str = include_str!("system_prompt.txt");
+
+    #[test]
+    fn the_base_prompt_says_when_to_plan_and_how_to_finish() {
+        // Nothing else tells the model when to plan. The tool description is
+        // read once the model is already reaching for the tool, which is too
+        // late to decide whether to reach for it.
+        for needle in [
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "AskUserQuestion",
+            "Do not plan when",
+        ] {
+            assert!(
+                BASE_SYSTEM_PROMPT.contains(needle),
+                "the base prompt never mentions {needle}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_plan_agent_is_told_to_submit_its_plan() {
+        // The plan agent prompt replaces the general guidance once plan mode is
+        // on, so a model that entered plan mode reads this and nothing else
+        // about how planning ends.
+        let agents = mikmik_core::default_agents();
+        let plan = agents.get("plan").expect("the plan agent is a default");
+        let prompt = plan.prompt.as_deref().unwrap_or_default();
+
+        assert!(
+            prompt.contains("ExitPlanMode"),
+            "nothing tells the plan agent to submit its plan: {prompt}"
+        );
+        assert!(
+            prompt.contains("AskUserQuestion"),
+            "nothing tells the plan agent to ask about what the request leaves open: {prompt}"
+        );
+    }
+
+    fn manager(mode: PermissionMode) -> Arc<std::sync::Mutex<PermissionManager>> {
+        Arc::new(std::sync::Mutex::new(PermissionManager::new(
+            mode,
+            &Settings::default(),
+        )))
+    }
+
+    #[test]
+    fn a_mode_the_model_set_reaches_the_running_turn() {
+        // The turn decides by the shared manager. `EnterPlanMode` has no key
+        // press behind it, so without this the turn kept allowing writes while
+        // the model believed it was planning.
+        let manager = manager(PermissionMode::BypassPermissions);
+        let mut observed = PermissionMode::BypassPermissions;
+
+        assert!(sync_permission_mode(
+            Some(&manager),
+            &mut observed,
+            PermissionMode::Plan
+        ));
+
+        assert_eq!(observed, PermissionMode::Plan);
+        assert_eq!(
+            manager.lock().expect("manager").mode,
+            PermissionMode::Plan,
+            "the running turn still decides by the mode it started in"
+        );
+    }
+
+    #[test]
+    fn an_unchanged_mode_touches_nothing() {
+        // Called every frame, so it has to be free when nothing moved.
+        let manager = manager(PermissionMode::Default);
+        let mut observed = PermissionMode::Default;
+
+        assert!(!sync_permission_mode(
+            Some(&manager),
+            &mut observed,
+            PermissionMode::Default
+        ));
+    }
 
     #[test]
     fn an_absent_flag_leaves_the_saved_mode_alone() {
