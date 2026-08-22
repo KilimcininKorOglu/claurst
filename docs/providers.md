@@ -734,6 +734,49 @@ Wafer-scale inference hardware.
 
 ---
 
+### The rest
+
+These speak the OpenAI wire format and need no configuration beyond a key. Each
+is registered under its id and reads one environment variable:
+
+| Provider id     | Name          | Key variable           | Base URL                                          |
+|-----------------|---------------|------------------------|---------------------------------------------------|
+| `baseten`       | Baseten       | `BASETEN_API_KEY`      | `https://inference.baseten.co/v1`                 |
+| `crof`          | crof          | `CROF_API_KEY`         | `https://api.crof.ai/v1`                          |
+| `fireworks`     | Fireworks AI  | `FIREWORKS_API_KEY`    | `https://api.fireworks.ai/inference/v1`           |
+| `friendli`      | Friendli      | `FRIENDLI_TOKEN`       | `https://api.friendli.ai/serverless/v1`           |
+| `huggingface`   | Hugging Face  | `HF_TOKEN`             | `https://router.huggingface.co/v1`                |
+| `moonshotai`    | Moonshot AI   | `MOONSHOT_API_KEY`     | `https://api.moonshot.ai/v1`                      |
+| `nebius`        | Nebius        | `NEBIUS_API_KEY`       | `https://api.tokenfactory.nebius.com/v1`          |
+| `neuralwatt`    | NeuralWatt    | `NEURALWATT_API_KEY`   | `https://api.neuralwatt.com/v1`                   |
+| `novita`        | Novita        | `NOVITA_API_KEY`       | `https://api.novita.ai/v3/openai`                 |
+| `nvidia`        | Nvidia NIM    | `NVIDIA_API_KEY`       | `https://integrate.api.nvidia.com/v1`             |
+| `opencode-go`   | OpenCode Go   | `OPENCODE_API_KEY`     | `https://opencode.ai/zen/go/v1`                   |
+| `opencode-zen`  | OpenCode Zen  | `OPENCODE_API_KEY`     | `https://opencode.ai/zen/v1`                      |
+| `ovhcloud`      | OVHcloud      | `OVHCLOUD_API_KEY`     | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`|
+| `routing`       | routing.run   | `ROUTING_API_KEY`      | `https://api.routing.run/v1`                      |
+| `sambanova`     | SambaNova     | `SAMBANOVA_API_KEY`    | `https://api.sambanova.ai/v1`                     |
+| `scaleway`      | Scaleway      | `SCALEWAY_API_KEY`     | `https://api.scaleway.ai/v1`                      |
+| `siliconflow`   | SiliconFlow   | `SILICONFLOW_API_KEY`  | `https://api.siliconflow.com/v1`                  |
+| `stepfun`       | stepfun       | `STEPFUN_API_KEY`      | `https://api.stepfun.com/v1`                      |
+| `synthetic`     | Synthetic.dev | `SYNTHETIC_API_KEY`    | `https://api.synthetic.new/openai/v1`             |
+| `upstage`       | Upstage       | `UPSTAGE_API_KEY`      | `https://api.upstage.ai/v1/solar`                 |
+| `vultr`         | Vultr         | `VULTR_API_KEY`        | `https://api.vultrinference.com/v1`               |
+| `zai`           | Z.AI          | `ZAI_API_KEY`          | `https://api.z.ai/api/coding/paas/v4`             |
+| `zhipuai`       | Zhipu AI      | `ZHIPU_API_KEY`        | `https://open.bigmodel.cn/api/paas/v4`            |
+
+`api_base` in the provider's `settings.json` entry overrides the base URL.
+
+Three more have their own handling: `codex` (OpenAI ChatGPT subscription, see
+[Authentication](auth)), `google-vertex`, and `free`.
+
+Four local providers accept their id with or without the hyphen, so
+`together-ai` and `togetherai`, `lm-studio` and `lmstudio`, `llama-cpp` and
+`llamacpp` (plus `llama-server`), and `mlx-lm` and `mlxlm` all resolve to the
+same provider.
+
+---
+
 ## Per-Provider Configuration in settings.json
 
 The `providers` map in `~/.config/mikmik/settings.json` accepts per-provider `ProviderConfig` objects:
