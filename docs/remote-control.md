@@ -123,6 +123,20 @@ The card offers three answers:
 
 A remote tap never writes a permanent rule into your settings file. Persistent allows are a keyboard-only decision.
 
+### The bypass warning
+
+Switching into `bypassPermissions` raises a warning that stops everything until it is answered: no turn starts, no tool runs, and no other prompt is shown. It is raised however the mode was reached, whether from `--dangerously-skip-permissions` at startup, `/yolo`, the settings screen, or a plugin.
+
+The remote client sees it as its own card, louder than a tool approval and with two answers rather than three, because what it grants is every later tool call rather than one of them. Either side may answer, and a remote answer takes the same path as a keyboard answer:
+
+| Button                            | Effect                                                                        |
+|-----------------------------------|-------------------------------------------------------------------------------|
+| Yes, I accept                     | The session runs without asking permission. The answer is remembered, so the warning is not raised again |
+| No, exit (at startup)             | The session ends                                                              |
+| No, keep asking (mid-session)     | The mode in force beforehand is put back, in the live session and on disk      |
+
+A client that connects while the warning is up is sent it as part of the session snapshot. Without that, a session that is waiting on it looks idle and stays that way until someone answers at the terminal.
+
 Two consequences worth stating plainly:
 
 - The remote client is a security boundary. Anyone holding your unlocked phone can approve a tool call on your machine.
@@ -140,6 +154,7 @@ Two consequences worth stating plainly:
 | Attach files | Images become something the model can look at; text is folded into the prompt. 5 MB per prompt |
 | Run a slash command | Takes the same route as one typed at the keyboard, so `/compact`, `/clear` and `/model <id>` behave identically. Commands that open a picker still render on the terminal |
 | Answer a permission request | Either side may answer |
+| Answer the bypass warning | Either side may answer. Accepting turns off every later permission prompt for the session |
 | Answer a question | Either side may answer |
 | Stop the current turn | Same as Ctrl+C at the keyboard |
 
@@ -194,6 +209,8 @@ The **client surface** is ours, and a native app should use it:
 | `GET`  | `/api/client/sessions/{id}/stream?since=<seq>` | SSE; resumes from the ring buffer           |
 | `POST` | `/api/client/sessions/{id}/prompt`             | `{"content", "attachments"}`; 5 MB total    |
 | `POST` | `/api/client/sessions/{id}/permission`         | `{"request_id", "tool_use_id", "decision"}` |
+| `POST` | `/api/client/sessions/{id}/mcp-approval`       | `{"request_id", "decision"}`                |
+| `POST` | `/api/client/sessions/{id}/bypass`             | `{"request_id", "accept"}`                  |
 | `POST` | `/api/client/sessions/{id}/answer`             | `{"question_id", "answer"}`                 |
 | `POST` | `/api/client/sessions/{id}/cancel`             | Body optional                               |
 
@@ -209,6 +226,6 @@ Authentication accepts a bearer token or the cookie. A native client should use 
 
 **The stream reconnects in a loop.** The session was swept for going quiet, or the relay restarted. Go back to the session list and reopen it.
 
-**A prompt is accepted but nothing happens.** The session is waiting on a permission request or a question. The card appears at the bottom of the session screen; answer it there or at the terminal.
+**A prompt is accepted but nothing happens.** The session is waiting on a permission request, a question, or the bypass warning. The card appears at the bottom of the session screen; answer it there or at the terminal.
 
 **Nothing loads over HTTPS.** The relay does not terminate TLS. The reverse proxy in front of it must, and should set `X-Forwarded-Proto: https` so the session cookie is marked `Secure`.

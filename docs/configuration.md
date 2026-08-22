@@ -362,9 +362,10 @@ the address and writes it to `searxngUrl`; turning it off clears the key.
 |-------------------|---------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `timelineEnabled` | boolean | false   | Record every tool call and finished turn, and offer the panel through `/timeline` and `Ctrl+Shift+L`. Off by default; while off nothing is collected at all. |
 | `mouseCapture`    | boolean | true    | Let MikMik handle the mouse: wheel scrolling, right-click menus and drag-select. Turn it off to give the mouse back to the terminal. Applies at next start. |
+| `liveToolOutput`  | boolean | false   | Show what a shell command prints while it is still running, under the tool block, instead of only its preview when it ends. Off by default: a command that prints steadily redraws the transcript on every frame. |
 
-Both are editable from `/settings`, as **Execution timeline** and **Mouse
-capture**. See [Commands](commands.md#timeline) for what the timeline panel
+All three are editable from `/settings`, as **Execution timeline**, **Mouse
+capture** and **Live tool output**. See [Commands](commands.md#timeline) for what the timeline panel
 shows.
 
 While MikMik captures the mouse, the terminal no longer sees it, so its own
@@ -375,6 +376,11 @@ instead. `Shift+Insert` works either way.
 
 Copying out needs nothing installed. When no clipboard tool answers, MikMik
 hands the text to the terminal emulator with OSC 52, which works over SSH.
+
+Live tool output is a terminal-only display. It never reaches a remote client:
+the last ten lines are redrawn in place as they arrive, which is a redraw the
+bridge has no way to express. A remote client still sees the finished result
+when the command ends.
 
 ### Status line
 
@@ -596,6 +602,10 @@ back, on disk as well when the settings file already named `bypassPermissions`.
 
 Accepting writes `skipDangerousModePermissionPrompt: true` and the warning is
 never shown again on that machine, at startup or mid-session.
+
+A remote client sees the same warning and may answer it, because nothing runs
+while it is up and a session waiting on it would otherwise look idle from the
+browser. See [Remote control](remote-control.md#the-bypass-warning).
 
 The model cannot set this mode itself. The `Config` tool can read
 `permission_mode` but refuses to write it, because a turn that switched the
