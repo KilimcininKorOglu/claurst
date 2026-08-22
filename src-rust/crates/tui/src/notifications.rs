@@ -15,6 +15,22 @@ pub enum NotificationKind {
     Success,
 }
 
+impl NotificationKind {
+    /// How loudly this kind asks to be the one on screen.
+    ///
+    /// Only one notification is drawn at a time, so a queue that showed the
+    /// most recent one let "Copied to clipboard" cover "Context window 96 %
+    /// full" for as long as the copy notice lived.
+    pub fn priority(&self) -> u8 {
+        match self {
+            Self::Error => 3,
+            Self::Warning => 2,
+            Self::Success => 1,
+            Self::Info => 0,
+        }
+    }
+}
+
 /// A single notification entry.
 #[derive(Debug, Clone)]
 pub struct Notification {
@@ -77,18 +93,30 @@ impl NotificationQueue {
             .retain(|n| n.expires_at.is_none_or(|exp| exp > now));
     }
 
-    /// Return the currently visible (most recent) notification, if any.
+    /// Return the notification on screen: the most urgent one, and the newest
+    /// among equals.
+    ///
+    /// Not simply the last one pushed. Thirteen callers push a notification
+    /// that never expires on its own, an error among them, and anything
+    /// pushed afterwards used to take the screen from it.
     pub fn current(&self) -> Option<&Notification> {
-        self.notifications.back()
+        self.notifications
+            .iter()
+            .max_by_key(|n| (n.kind.priority(), n.pushed_at))
     }
 
-    /// Dismiss the currently visible notification.
+    /// Dismiss the notification that is on screen.
     pub fn dismiss_current(&mut self) {
-        if let Some(n) = self.notifications.back().cloned() {
-            if n.dismissible {
-                self.notifications.pop_back();
-            }
-        }
+        // By id rather than by position, because the one on screen is no
+        // longer necessarily the one at the back.
+        let Some(id) = self
+            .current()
+            .filter(|n| n.dismissible)
+            .map(|n| n.id.clone())
+        else {
+            return;
+        };
+        self.notifications.retain(|n| n.id != id);
     }
 
     pub fn current_is_error(&self) -> bool {
@@ -344,6 +372,54 @@ pub fn render_notification_banner(
 mod tests {
     use super::*;
 
+    /// The one that matters: an error that never expires used to be covered by
+    /// whatever was pushed next, which is exactly when the user needs to read
+    /// it.
+    #[test]
+    fn an_error_stays_on_screen_under_a_later_notice() {
+        let mut queue = NotificationQueue::new();
+        queue.push(
+            NotificationKind::Error,
+            "Context window 96% full! Run /compact now.".to_string(),
+            None,
+        );
+        queue.push(
+            NotificationKind::Success,
+            "Copied to clipboard".to_string(),
+            Some(30),
+        );
+
+        assert_eq!(
+            queue.current().map(|n| n.message.as_str()),
+            Some("Context window 96% full! Run /compact now.")
+        );
+    }
+
+    /// Among equals the newest wins, so a run of ordinary notices still reads
+    /// as a running commentary rather than freezing on the first one.
+    #[test]
+    fn the_newest_of_two_equal_notices_is_the_one_shown() {
+        let mut queue = NotificationQueue::new();
+        queue.push(NotificationKind::Info, "first".to_string(), None);
+        queue.push(NotificationKind::Info, "second".to_string(), None);
+
+        assert_eq!(queue.current().map(|n| n.message.as_str()), Some("second"));
+    }
+
+    /// Dismissing has to take the one the user is looking at, which is no
+    /// longer the one at the back of the queue.
+    #[test]
+    fn dismissing_removes_the_notice_that_is_on_screen() {
+        let mut queue = NotificationQueue::new();
+        queue.push(NotificationKind::Error, "the error".to_string(), None);
+        queue.push(NotificationKind::Info, "chatter".to_string(), None);
+
+        queue.dismiss_current();
+
+        assert_eq!(queue.current().map(|n| n.message.as_str()), Some("chatter"));
+        assert_eq!(queue.notifications.len(), 1);
+    }
+
     #[test]
     fn push_and_current() {
         let mut q = NotificationQueue::new();
@@ -362,9 +438,11 @@ mod tests {
     }
 
     #[test]
-    fn current_prefers_latest_notification() {
+    fn dismissing_falls_back_to_the_notice_underneath() {
+        // Both the same kind, so recency decides which is on screen and the
+        // one under it is what dismissing reveals.
         let mut q = NotificationQueue::new();
-        q.push(NotificationKind::Warning, "older".to_string(), None);
+        q.push(NotificationKind::Info, "older".to_string(), None);
         q.push(NotificationKind::Info, "newer".to_string(), Some(3));
         assert_eq!(q.current().unwrap().message, "newer");
         q.dismiss_current();

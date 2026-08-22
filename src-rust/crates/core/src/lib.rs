@@ -40,7 +40,6 @@ pub mod format_utils;
 pub mod process_tree;
 pub mod project_trust;
 pub mod spinner;
-pub mod status_notices;
 pub mod timeline;
 pub mod truncate;
 pub mod workspace;
