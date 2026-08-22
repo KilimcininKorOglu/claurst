@@ -1244,7 +1244,7 @@ impl SlashCommand for HooksCommand {
                  Add hooks to ~/.config/mikmik/settings.json under the 'hooks' key.\n\
                  Example:\n\
                  \x20 \"hooks\": {\n\
-                 \x20   \"PreToolUse\": [{ \"matcher\": \"*\", \"hooks\": [{ \"type\": \"command\", \"command\": \"echo $STDIN\" }] }]\n\
+                 \x20   \"PreToolUse\": [{ \"command\": \"cat\", \"tool_filter\": \"Bash\", \"blocking\": true }]\n\
                  \x20 }"
                     .to_string(),
             );
@@ -1767,6 +1767,81 @@ mod tests {
     }
 
     // ---- Commands that would open a view ------------------------------------
+
+    /// The example `/hooks` prints is the only shape a first-time reader has.
+    ///
+    /// It used to print the plugin manifest's nested `matcher`/`hooks` form
+    /// with a `"type": "command"` field. `HookEntry` has neither: pasting it
+    /// into `settings.json` fails to deserialize, and a settings file that
+    /// fails to parse takes the model, the provider and every other setting
+    /// down with it. Parse the example rather than eyeballing it.
+    #[tokio::test]
+    async fn the_hooks_example_parses_as_a_hook_map() {
+        use mikmik_core::config::{HookEntry, HookEvent};
+        use std::collections::HashMap;
+
+        let mut ctx = make_ctx();
+        ctx.interactive = false;
+        let CommandResult::Message(text) = HooksCommand.execute("", &mut ctx).await else {
+            panic!("an empty hook map should print the example");
+        };
+
+        // Take the hook map the message embeds, braces included.
+        let start = text.find('{').expect("the example has an object");
+        let end = text.rfind('}').expect("the example closes it");
+        let object = &text[start..=end];
+
+        let parsed: HashMap<HookEvent, Vec<HookEntry>> = serde_json::from_str(object)
+            .unwrap_or_else(|e| panic!("the printed example does not parse ({e}):\n{object}"));
+
+        let entries = parsed
+            .get(&HookEvent::PreToolUse)
+            .expect("the example names PreToolUse");
+        assert_eq!(entries.len(), 1);
+        assert!(
+            !entries[0].command.is_empty(),
+            "a hook entry without a command runs nothing"
+        );
+    }
+
+    /// What `/config` offers has to be what `/config set` accepts.
+    ///
+    /// The usage line used to spell the style names out, and named two
+    /// (`formal`, `casual`) that no longer exist, so following the command's
+    /// own instructions produced "Unsupported output style".
+    #[tokio::test]
+    async fn the_config_usage_offers_only_styles_set_accepts() {
+        let mut ctx = make_ctx();
+        let CommandResult::Message(text) =
+            crate::config_cmd::ConfigCommand.execute("", &mut ctx).await
+        else {
+            panic!("an argument-less /config should print the configuration");
+        };
+
+        let line = text
+            .lines()
+            .find(|l| l.contains("/config set output-style"))
+            .expect("the usage names output-style");
+        let offered: Vec<&str> = line
+            .rsplit_once('<')
+            .and_then(|(_, rest)| rest.strip_suffix('>'))
+            .expect("the styles are listed between angle brackets")
+            .split('|')
+            .collect();
+
+        let accepted = available_output_style_names();
+        for name in &offered {
+            assert!(
+                accepted.iter().any(|a| a == name),
+                "/config offers '{name}', which /config set refuses. Offered: {offered:?}"
+            );
+        }
+        assert_eq!(
+            offered.len(),
+            accepted.len(),
+            "the usage line drops styles /config set would take"
+        );
+    }
 
     #[tokio::test]
     async fn rewind_lists_the_messages_for_a_caller_with_no_overlay() {

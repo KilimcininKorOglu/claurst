@@ -25,9 +25,12 @@ impl SlashCommand for ConfigCommand {
         let args = args.trim();
         if args.is_empty() || matches!(args, "show" | "get") {
             let json = serde_json::to_string_pretty(&ctx.config).unwrap_or_default();
+            // The style list comes from the same function `set` validates
+            // against. Spelling it out here let the two drift, and the usage
+            // named two styles (`formal`, `casual`) that `set` then refused.
+            let styles = available_output_style_names().join("|");
             return CommandResult::Message(format!(
-                "Current configuration:\n{}\n\nUsage:\n  /config\n  /config set theme <default|dark|light>\n  /config set output-style <default|concise|explanatory|learning|formal|casual>\n  /config set model <model>\n  /config set permission-mode <default|accept-edits|bypass-permissions|plan>\n  /config unset <model|output-style>",
-                json
+                "Current configuration:\n{json}\n\nUsage:\n  /config\n  /config set theme <default|dark|light|deuteranopia|solarized|nord|dracula|monokai>\n  /config set output-style <{styles}>\n  /config set model <model>\n  /config set permission-mode <default|accept-edits|bypass-permissions|plan>\n  /config unset <model|output-style>"
             ));
         }
 
