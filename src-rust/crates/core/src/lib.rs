@@ -36,7 +36,6 @@ pub use auth_store::{AuthStore, StoredCredential};
 pub mod device_code;
 
 // Utility modules ported from src/utils/
-pub mod crypto_utils;
 pub mod format_utils;
 pub mod process_tree;
 pub mod project_trust;

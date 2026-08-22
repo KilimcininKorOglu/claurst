@@ -20,8 +20,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 
@@ -219,17 +217,6 @@ fn projects_dir() -> PathBuf {
     mikmik_core::config::Settings::config_dir().join("projects")
 }
 
-fn encoded_dir_for_cwd(cwd: &Path) -> String {
-    URL_SAFE_NO_PAD.encode(cwd.to_string_lossy().as_bytes())
-}
-
-fn decode_project_dir(encoded: &str) -> Option<String> {
-    URL_SAFE_NO_PAD
-        .decode(encoded)
-        .ok()
-        .and_then(|b| String::from_utf8(b).ok())
-}
-
 /// Walk the project tree and return `(project_dir_decoded, jsonl_path)` tuples
 /// for every `.jsonl` file in scope.
 fn collect_jsonl_paths(cwd: &Path, all_projects: bool) -> Vec<(String, PathBuf)> {
@@ -249,13 +236,14 @@ fn collect_jsonl_paths(cwd: &Path, all_projects: bool) -> Vec<(String, PathBuf)>
                     .and_then(|s| s.to_str())
                     .unwrap_or_default()
                     .to_string();
-                let decoded = decode_project_dir(&encoded).unwrap_or(encoded);
+                let decoded =
+                    mikmik_core::session_storage::decode_project_dir(&encoded).unwrap_or(encoded);
                 dirs.push((decoded, p));
             }
         }
         dirs
     } else {
-        let encoded = encoded_dir_for_cwd(cwd);
+        let encoded = mikmik_core::session_storage::encode_project_dir(cwd);
         let dir = root.join(&encoded);
         let decoded = cwd.to_string_lossy().to_string();
         vec![(decoded, dir)]

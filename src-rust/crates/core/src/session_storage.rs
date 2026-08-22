@@ -248,11 +248,29 @@ pub fn projects_dir() -> PathBuf {
     crate::config::Settings::config_dir().join("projects")
 }
 
-/// Returns the per-project transcript directory.
+/// Encode a project root path as its directory name under `projects/`.
 ///
-/// The project root path is encoded using **URL-safe base64 without padding**
-/// to produce a stable, platform-safe directory name that is fully reversible
-/// (unlike the TS `sanitizePath` which just replaces chars with hyphens).
+/// URL-safe base64 without padding, so the name is platform-safe and fully
+/// reversible (unlike the TS `sanitizePath`, which replaces characters with
+/// hyphens and cannot be read back). Every writer and every reader of that
+/// directory goes through this pair, so a change to the scheme cannot leave
+/// one of them looking in the wrong place.
+pub fn encode_project_dir(project_root: &Path) -> String {
+    URL_SAFE_NO_PAD.encode(project_root.to_string_lossy().as_bytes())
+}
+
+/// Read a `projects/` directory name back as the path that produced it.
+///
+/// Returns `None` for a name this scheme did not write, which is what a
+/// directory left by another tool looks like.
+pub fn decode_project_dir(encoded: &str) -> Option<String> {
+    URL_SAFE_NO_PAD
+        .decode(encoded)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+/// Returns the per-project transcript directory.
 pub fn transcript_dir(project_root: &Path) -> PathBuf {
     transcript_dir_in(&crate::config::Settings::config_dir(), project_root)
 }
@@ -261,8 +279,9 @@ pub fn transcript_dir(project_root: &Path) -> PathBuf {
 /// of the detected `~/.config/mikmik`. Lets tests stage transcripts in a tempdir
 /// without writing under HOME (unwritable in sandboxed builds).
 pub fn transcript_dir_in(config_dir: &Path, project_root: &Path) -> PathBuf {
-    let encoded = URL_SAFE_NO_PAD.encode(project_root.to_string_lossy().as_bytes());
-    config_dir.join("projects").join(encoded)
+    config_dir
+        .join("projects")
+        .join(encode_project_dir(project_root))
 }
 
 /// Returns the full path to a session's JSONL transcript file.
@@ -1525,6 +1544,33 @@ mod tests {
             .unwrap();
         let decoded = URL_SAFE_NO_PAD.decode(encoded_dir).unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), root.to_str().unwrap());
+    }
+
+    #[test]
+    fn the_directory_a_transcript_is_written_to_is_the_one_a_reader_decodes() {
+        // The writer (`transcript_dir_in`) and the readers (`/stats`, the stats
+        // dialog) each carried their own copy of this scheme. They agree only
+        // as long as they go through the same pair.
+        let root = Path::new("/Users/alice/proje çalışması");
+        let dir = transcript_dir_in(Path::new("/cfg"), root);
+
+        let written = dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("the directory is named, not empty");
+        assert_eq!(written, encode_project_dir(root));
+        assert_eq!(
+            decode_project_dir(written).as_deref(),
+            root.to_str(),
+            "a reader cannot recover the path the transcript was filed under"
+        );
+    }
+
+    #[test]
+    fn a_directory_this_scheme_did_not_write_decodes_to_nothing() {
+        // What another tool's directory under `projects/` looks like. Reading
+        // it as a path would put a wrong name in front of the user.
+        assert_eq!(decode_project_dir("not base64!"), None);
     }
 
     #[test]
