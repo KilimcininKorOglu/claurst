@@ -30,7 +30,6 @@ agent_triggers_remote = []
 extract_memories = []
 verification_agent = []
 builtin_explore_plan_agents = []
-cached_microcompact = []
 compaction_reminders = []
 agent_memory_snapshot = []
 teammem = []
@@ -60,7 +59,7 @@ dev_full = [
     "hook_prompts", "kairos_brief", "kairos_channels", "lodestone",
     "agent_triggers", "agent_triggers_remote",
     "extract_memories", "verification_agent", "builtin_explore_plan_agents",
-    "cached_microcompact", "compaction_reminders", "agent_memory_snapshot",
+    "compaction_reminders", "agent_memory_snapshot",
     "teammem", "bash_classifier", "bridge_mode", "mcp_rich_output",
     "connector_text", "unattended_retry", "new_init",
     "powershell_auto_mode", "shot_stats", "tree_sitter_bash",

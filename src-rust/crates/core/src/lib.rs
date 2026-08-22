@@ -7321,7 +7321,6 @@ pub use oauth::OAuthTokens;
 pub mod accounts;
 pub mod bash_classifier;
 pub mod codex_oauth;
-pub mod context_collapse;
 pub mod effort;
 pub mod feature_gates;
 pub mod import_config;
